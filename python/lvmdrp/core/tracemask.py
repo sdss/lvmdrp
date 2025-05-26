@@ -231,16 +231,17 @@ class TraceMask(FiberRows):
             _, ax = plot.create_subplots(to_display=True, figsize=(15,5), layout="constrained")
             axs = {"mod": ax}
 
-        if "mod" in axs:
-            if ref_column is not None:
-                axs["mod"].axvline(ref_column, ls=":", lw=1, color="0.7")
-            if show_model:
-                axs["mod"].plot(pixels, block._data.T, "-", lw=1, label="model")
-            if samples is not None:
-                if show_samples:
-                    axs["mod"].plot(samples.columns, samples.T, ".", ms=5, mew=0, mfc="0.2", label="data")
-                if show_model_samples:
-                    axs["mod"].plot(samples.columns, block._data[:, samples.columns].T, "s", ms=5, mew=1, mec="0.2", mfc="none", label="model@data")
+        if ref_column is not None:
+            axs["mod"].axvline(ref_column, ls=":", lw=1, color="0.7")
+        if samples is not None:
+            if show_samples:
+                axs["mod"].plot(samples.columns, samples.T, ".", ms=5, mew=0, mfc="0.2", label="data")
+            if show_model_samples:
+                axs["mod"].plot(samples.columns, block._data[:, samples.columns].T, "s", ms=5, mew=1, mec="0.2", mfc="none", label="model@data")
+        ylims = axs["mod"].get_ylim()
+        if show_model:
+            axs["mod"].plot(pixels, block._data.T, "-", lw=1, label="model")
+        axs["mod"].set_ylim(*ylims)
 
         if "res" not in axs:
             axs["mod"].tick_params(labelbottom=False)
@@ -255,6 +256,8 @@ class TraceMask(FiberRows):
         axs["res"].axhline(-0.01, ls=":", lw=1, color="0.4")
         axs["res"].axhline(+0.01, ls=":", lw=1, color="0.4")
         axs["res"].plot(samples.columns, ((block._data[:, samples.columns] - samples)/samples).T, ".-", lw=0.2, ms=5, mew=0)
+        axs["res"].set_ylim(-0.05, +0.05)
+        plot.plt.gcf().tight_layout()
 
         return axs
 

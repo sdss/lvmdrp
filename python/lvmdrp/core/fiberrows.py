@@ -70,8 +70,12 @@ class FiberRows(Header, PositionTable):
         mask = numpy.ones(data_dim, dtype="bool")
         if samples_columns is not None:
             samples = Table(data=numpy.full((data_dim[0], len(samples_columns)), numpy.nan), names=samples_columns)
+        else:
+            samples = None
         if poly_deg is not None:
             coeffs = numpy.full((data_dim[0], poly_deg+1), numpy.nan, dtype=numpy.float32)
+        else:
+            coeffs = None
 
         new_fiberrows = cls(data=data, error=error, mask=mask, samples=samples, poly_kind=poly_kind, coeffs=coeffs, header=header, slitmap=slitmap)
         new_fiberrows.setFibers(fibers)
@@ -876,6 +880,29 @@ class FiberRows(Header, PositionTable):
         self.set_coeffs(coeffs, poly_kind=poly_kind)
 
         return numpy.asarray(pix_table), numpy.asarray(poly_table), numpy.asarray(poly_all_table)
+
+    def fit_spline2d(self, smoothing=None, use_weights=True):
+        iblocks = numpy.arange(LVM_NBLOCKS, dtype="int")
+
+        columns = numpy.asarray(self._samples.colnames).astype("int")
+        ifibers = numpy.arange(LVM_BLOCKSIZE)
+        X, Y = numpy.meshgrid(columns, ifibers, indexing="xy")
+        x, y = X.ravel(), Y.ravel()
+        x_pixels = numpy.arange(self._data.shape[1])
+
+        for iblock in tqdm(iblocks, desc="fitting 2D spline to fiber blocks", ascii=True, unit="block"):
+            block = self.get_block(iblock=iblock)
+
+            samples = block.get_samples(as_pandas=True)
+            z = samples.values.ravel()
+
+            mask = numpy.isfinite(z)
+            x_, y_, z_ = x[mask], y[mask], z[mask]
+
+            tck = interpolate.bisplrep(x_, y_, z_, s=smoothing, xb=0, xe=block._data.shape[1], yb=0, ye=block._fibers, eps=1e-8)
+            block_model = interpolate.bisplev(x_pixels, ifibers, tck).T
+
+            self.set_block(iblock=iblock, data=block_model)
 
     def smoothTraceDist(
         self, start_slice, poly_cross=[4, 1, 4], poly_disp=8, bound=[350, 2000]
