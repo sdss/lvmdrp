@@ -2593,37 +2593,31 @@ class Image(Header):
         return counts_trace, centroids_trace, fwhms_trace
 
     def trace_fibers_full(self, centroids_guess, fwhms_guess=2.5, centroids_range=[-5,5], fwhms_range=[1.0,3.5], counts_range=[1e3,numpy.inf],
-                          ref_column=2000, ncolumns=40, nblocks=18, iblocks=[], solver="trf"):
+                          columns=[], iblocks=[], solver="trf"):
 
         if self._header is None:
             raise ValueError("Invalid value of attribute `_header`: {self._header}. Expected FITS header object")
-        # unit = self._header["BUNIT"]
 
-        # select columns to fit for amplitudes, centroids_guess and FWHMs per fiber block
-        step = self._dim[1] // ncolumns
-        columns = numpy.concatenate((numpy.arange(ref_column, 0, -step), numpy.arange(ref_column+step, self._dim[1], step)))
-        log.info(f"tracing fibers in {len(columns)} columns within range [{min(columns)}, {max(columns)}]")
+        ncolumns = len(columns)
 
         fwhms_guess = self._get_fwhms_trace(fwhms=fwhms_guess)
 
         # initialize flux and FWHM traces
-        trace_cent = TraceMask()
-        trace_cent.createEmpty(data_dim=(centroids_guess._fibers, self._dim[1]), samples_columns=sorted(set(columns)))
-        trace_cent.setFibers(centroids_guess._fibers)
-        trace_cent._good_fibers = centroids_guess._good_fibers
-        trace_cent.setHeader(self._header.copy())
-        trace_cent.setSlitmap(self._slitmap)
-        trace_amp = copy(trace_cent)
-        trace_fwhm = copy(trace_cent)
-        trace_cent._header["IMAGETYP"] = "trace_centroid"
-        trace_amp._header["IMAGETYP"] = "trace_amplitude"
-        trace_fwhm._header["IMAGETYP"] = "trace_fwhm"
+        centroids_trace = TraceMask.create_empty(
+            data_dim=(centroids_guess._fibers, self._dim[1]), samples_columns=sorted(set(columns)), header=self._header.copy(), slitmap=self._slitmap)
+        centroids_trace.setFibers(centroids_guess._fibers)
+        centroids_trace._good_fibers = centroids_guess._good_fibers
+        counts_trace = copy(centroids_trace)
+        fwhms_trace = copy(centroids_trace)
+        centroids_trace._header["IMAGETYP"] = "fiber_centroids"
+        counts_trace._header["IMAGETYP"] = "fiber_counts"
+        fwhms_trace._header["IMAGETYP"] = "fiber_fwhms"
 
         # define fiber blocks
         if iblocks and isinstance(iblocks, (list, tuple, numpy.ndarray)):
             pass
         else:
-            iblocks = numpy.arange(nblocks, dtype="int")
+            iblocks = numpy.arange(LVM_NBLOCKS, dtype="int")
 
         # fit each block
         for iblock in iblocks:
@@ -2633,7 +2627,7 @@ class Image(Header):
             counts_samples = numpy.full((centroids_block._fibers, ncolumns), numpy.nan)
             centroids_samples = numpy.full((centroids_block._fibers, ncolumns), numpy.nan)
             fwhms_samples = numpy.full((centroids_block._fibers, ncolumns), numpy.nan)
-            iterator = tqdm(enumerate(columns), total=len(columns), desc=f"fitting fibers in block: {iblock+1}/{nblocks}", ascii=True, unit="column")
+            iterator = tqdm(enumerate(columns), total=len(columns), desc=f"fitting fibers in block: {iblock+1:>2d}/{LVM_NBLOCKS}", ascii=True, unit="column")
             for i, icolumn in iterator:
                 img_slice = self.getSlice(icolumn, axis="Y")
                 centroids_slice, _, _ = centroids_block.getSlice(icolumn, axis="Y")
@@ -2650,32 +2644,22 @@ class Image(Header):
                 centroids_samples[:, i] = centroids
                 fwhms_samples[:, i] = fwhms
 
-            # mask fibers with invalid values
-            # amp_off = (counts_samples <= counts_range[0])|(counts_samples >= counts_range[1])
-            # log.info(f"  masking {amp_off.sum()} Gaussians with counts out of range {counts_range} {unit}")
-
-            # cent_off = numpy.abs(1 - centroids_samples / centroids_block._data[:, columns]) > 0.01
-            # log.info(f"  masking {cent_off.sum()} Gaussians with centroids refined by > 1 %")
-
-            # fwhm_off = (fwhms_samples < fwhms_range[0]) | (fwhms_samples > fwhms_range[1])
-            # log.info(f"  masking {fwhm_off.sum()} Gaussians with FWHM outside {fwhms_range} pixels")
-
-            amp_mask = numpy.isnan(counts_samples)# | amp_off | cent_off | fwhm_off
-            cent_mask = numpy.isnan(centroids_samples)# | amp_off | cent_off | fwhm_off
-            fwhm_mask = numpy.isnan(fwhms_samples)# | amp_off | cent_off | fwhm_off
-            block_mask = numpy.tile(numpy.atleast_2d((amp_mask | cent_mask | fwhm_mask).all(axis=1)).T, self._dim[1])
+            counts_mask = numpy.isnan(counts_samples)
+            centroids_mask = numpy.isnan(centroids_samples)
+            fwhms_mask = numpy.isnan(fwhms_samples)
+            block_mask = numpy.tile(numpy.atleast_2d((counts_mask | centroids_mask | fwhms_mask).all(axis=1)).T, self._dim[1])
 
             # mask invalid samples in samples
-            counts_samples[amp_mask] = numpy.nan
-            centroids_samples[cent_mask] = numpy.nan
-            fwhms_samples[fwhm_mask] = numpy.nan
+            counts_samples[counts_mask] = numpy.nan
+            centroids_samples[centroids_mask] = numpy.nan
+            fwhms_samples[fwhms_mask] = numpy.nan
 
             # update tracemasks for this fiber block
-            trace_amp.set_block(iblock=iblock, samples=counts_samples, mask=block_mask)
-            trace_cent.set_block(iblock=iblock, samples=centroids_samples, mask=block_mask)
-            trace_fwhm.set_block(iblock=iblock, samples=fwhms_samples, mask=block_mask)
+            counts_trace.set_block(iblock=iblock, samples=counts_samples, mask=block_mask)
+            centroids_trace.set_block(iblock=iblock, samples=centroids_samples, mask=block_mask)
+            fwhms_trace.set_block(iblock=iblock, samples=fwhms_samples, mask=block_mask)
 
-        return trace_amp, trace_cent, trace_fwhm, columns
+        return counts_trace, centroids_trace, fwhms_trace, columns
 
     def traceFWHM(
         self, axis_select, TraceMask, blocks, init_fwhm, threshold_flux, max_pix=None
