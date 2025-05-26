@@ -804,7 +804,7 @@ class FiberRows(Header, PositionTable):
                 if not can_fit:
                     warnings.warn(f"fiber {i} does not meet criterium: {n_goodsam = } >= {deg + 1 = }")
                 elif not enough_samples:
-                    warnings.warn(f"fiber {i} does not meet criterium: {n_goodsam / nsamples = } > {min_samples_frac = }")
+                    warnings.warn(f"fiber {i} does not meet criterium: {n_goodsam / nsamples = :.3f} > {min_samples_frac = :.3f}")
                 self._mask[i, :] = True
 
         # TODO: port existing code to deal with tck objects as tables
@@ -870,7 +870,7 @@ class FiberRows(Header, PositionTable):
                 if not can_fit:
                     warnings.warn(f"fiber {i} does not meet criterium: {n_goodsam = } >= {deg + 1 = }")
                 elif not enough_samples:
-                    warnings.warn(f"fiber {i} does not meet criterium: {n_goodsam / nsamples = } > {min_samples_frac = }")
+                    warnings.warn(f"fiber {i} does not meet criterium: {n_goodsam / nsamples = :.3f} > {min_samples_frac = :.3f}")
                 self._mask[i, :] = True
 
         self.set_coeffs(coeffs, poly_kind=poly_kind)

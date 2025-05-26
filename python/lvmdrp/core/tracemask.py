@@ -3,6 +3,7 @@
 
 import os
 import numpy
+import bottleneck as bn
 from copy import deepcopy as copy
 from astropy.io import fits as pyfits
 from astropy.table import Table
@@ -106,6 +107,8 @@ class TraceMask(FiberRows):
         slitmap = self._filter_slitmap()
         blockid = self._validate_blockid(iblock, blockid, slitmap=slitmap)
         block_selection = slitmap["blockid"] == blockid
+        if block_selection.sum() == 0:
+            raise ValueError(f"Requested block: {iblock = }, {blockid = }, is not present in slitmap")
 
         new_trace = copy(self)
         new_trace._data = self._data[block_selection]
@@ -114,6 +117,7 @@ class TraceMask(FiberRows):
         new_trace._samples = self._samples[block_selection] if self._samples is not None else None
         new_trace.set_coeffs(self._coeffs[block_selection] if self._coeffs is not None else None, poly_kind=self._poly_kind)
         new_trace.setFibers(block_selection.sum())
+        new_trace.setSlitmap(slitmap[block_selection])
 
         return new_trace
 
@@ -154,15 +158,25 @@ class TraceMask(FiberRows):
         round = numpy.round(self._data).astype("int16")  # round the traces to integer
         return round
 
-    def getFiberDist(self, slice):
-        cut = self._data[:, slice]
-        dist = cut[1:] - cut[:-1]
-        if self._mask is not None:
-            slice_mask = self._mask[:, slice]
-            dist_mask = numpy.logical_and(slice_mask[1:], slice_mask[:-1])
-            return dist, dist_mask
+    def get_distances(self):
+        samples = self.get_samples(as_pandas=True)
+        if samples is not None:
+            sample_distances = numpy.gradient(samples, axis=0)
         else:
-            return dist, None
+            sample_distances = None
+        if self._data is not None:
+            model_distances = numpy.gradient(self._data, axis=0)
+        else:
+            model_distances = None
+        return sample_distances, model_distances
+
+    def get_outlying_samples(self, nsigma=2):
+        sample_distances, model_distances = self.get_distances()
+
+        mu = bn.nanmean(sample_distances, axis=0)
+        sigma = bn.nanstd(sample_distances, axis=0)
+        zscore = abs(sample_distances - mu[None]) / sigma[None]
+        return zscore > nsigma
 
     def getPixelCoor(self):
         x_cor = numpy.zeros((self._nfibers, self._data.shape[1]), dtype="int16")
@@ -204,36 +218,67 @@ class TraceMask(FiberRows):
         os.makedirs(os.path.dirname(out_trace), exist_ok=True)
         hdus.writeto(out_trace, output_verify="silentfix", overwrite=True)
 
-    def plot_block(self, iblock=None, blockid=None, ref_column=None, axs=None):
-        block = self.get_block(iblock=iblock, blockid=blockid)
+    def plot_block(self, iblock=None, blockid=None, ref_column=None, show_samples=True, show_model_samples=True, show_model=True, axs=None):
+        if iblock is None and blockid is None:
+            block = copy(self)
+        else:
+            block = self.get_block(iblock=iblock, blockid=blockid)
 
         pixels = numpy.arange(block._data.shape[1], dtype="int")
         samples = block.get_samples(as_pandas=True)
 
-        if axs is None:
+        if axs is None or "mod" not in axs:
             _, ax = plot.create_subplots(to_display=True, figsize=(15,5), layout="constrained")
-            ax.tick_params(labelbottom=False)
-
-            ax_divider = plot.make_axes_locatable(ax)
-            ax_res = ax_divider.append_axes("bottom", size="30%", pad="5%")
-            ax_res.sharex(ax)
-
-            axs = {"mod": ax, "res": ax_res}
+            axs = {"mod": ax}
 
         if "mod" in axs:
             if ref_column is not None:
                 axs["mod"].axvline(ref_column, ls=":", lw=1, color="0.7")
-            axs["mod"].plot(pixels, block._data.T, "-", lw=1, label="model")
+            if show_model:
+                axs["mod"].plot(pixels, block._data.T, "-", lw=1, label="model")
             if samples is not None:
-                axs["mod"].plot(samples.columns, samples.T, ".", ms=5, mew=0, mfc="0.2", label="data")
-                axs["mod"].plot(samples.columns, block._data[:, samples.columns].T, "s", ms=5, mew=1, mec="0.2", mfc="none", label="model@data")
-        if "res" in axs:
-            axs["res"].axhline(ls="--", lw=1, color="0.4")
-            axs["res"].axhline(-0.01, ls=":", lw=1, color="0.4")
-            axs["res"].axhline(+0.01, ls=":", lw=1, color="0.4")
-            axs["res"].plot(samples.columns, ((block._data[:, samples.columns] - samples)/samples).T, ".-", lw=0.2, ms=5, mew=0)
+                if show_samples:
+                    axs["mod"].plot(samples.columns, samples.T, ".", ms=5, mew=0, mfc="0.2", label="data")
+                if show_model_samples:
+                    axs["mod"].plot(samples.columns, block._data[:, samples.columns].T, "s", ms=5, mew=1, mec="0.2", mfc="none", label="model@data")
+
+        if "res" not in axs:
+            axs["mod"].tick_params(labelbottom=False)
+
+            ax_divider = plot.make_axes_locatable(axs["mod"])
+            ax_res = ax_divider.append_axes("bottom", size="30%", pad="5%")
+            ax_res.sharex(axs["mod"])
+
+            axs["res"] = ax_res
+
+        axs["res"].axhline(ls="--", lw=1, color="0.4")
+        axs["res"].axhline(-0.01, ls=":", lw=1, color="0.4")
+        axs["res"].axhline(+0.01, ls=":", lw=1, color="0.4")
+        axs["res"].plot(samples.columns, ((block._data[:, samples.columns] - samples)/samples).T, ".-", lw=0.2, ms=5, mew=0)
 
         return axs
+
+    def plot_block_distances(self, iblock=None, blockid=None, show_samples=True, show_model_samples=True, show_model=True, axs=None):
+        if iblock is None and blockid is None:
+            block = copy(self)
+        else:
+            block = self.get_block(iblock=iblock, blockid=blockid)
+
+        pixels = numpy.arange(block._data.shape[1], dtype="int")
+        samples = block.get_samples(as_pandas=True)
+
+        sample_distances, model_distances = block.get_distances()
+
+        if axs is None:
+            _, axs = plot.create_subplots(to_display=True, figsize=(15,5), layout="constrained")
+
+        if show_model:
+            axs.plot(pixels, model_distances.T, "-", lw=1, label="model")
+        if samples is not None:
+            if show_samples:
+                axs.plot(samples.columns, sample_distances.T, ".", ms=5, mew=0, mfc="0.2", label="data")
+            if show_model_samples:
+                axs.plot(samples.columns, model_distances[:, samples.columns].T, "s", ms=5, mew=1, mec="0.2", mfc="none", label="model@data")
 
     def plot_fiber(self, ifiber, show_samples=True, axs=None):
         fiber = self[ifiber]
