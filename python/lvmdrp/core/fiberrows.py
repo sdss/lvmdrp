@@ -881,7 +881,7 @@ class FiberRows(Header, PositionTable):
 
         return numpy.asarray(pix_table), numpy.asarray(poly_table), numpy.asarray(poly_all_table)
 
-    def fit_spline2d(self, smoothing=None, use_weights=True):
+    def fit_spline2d(self, deg_x=3, deg_y=3, smoothing=None, clip=None, use_weights=True, min_samples_frac=0.0, min_fibers_frac=0.0):
         iblocks = numpy.arange(LVM_NBLOCKS, dtype="int")
 
         columns = numpy.asarray(self._samples.colnames).astype("int")
@@ -890,16 +890,41 @@ class FiberRows(Header, PositionTable):
         x, y = X.ravel(), Y.ravel()
         x_pixels = numpy.arange(self._data.shape[1])
 
+        nsamples = columns.size
+        npixels = x_pixels.size
+        nfibers = LVM_BLOCKSIZE
+
         for iblock in tqdm(iblocks, desc="fitting 2D spline to fiber blocks", ascii=True, unit="block"):
             block = self.get_block(iblock=iblock)
 
-            samples = block.get_samples(as_pandas=True)
-            z = samples.values.ravel()
+            samples = block.get_samples(as_pandas=True).values
 
-            mask = numpy.isfinite(z)
-            x_, y_, z_ = x[mask], y[mask], z[mask]
+            good_sam = numpy.isfinite(samples)
+            n_goodsam_per_fiber = good_sam.sum(axis=1)
+            n_goodsam = n_goodsam_per_fiber.sum()
+            if n_goodsam == 0:
+                warnings.warn(f"skipping fiber block B{iblock+1}, no good samples found")
+                continue
 
-            tck = interpolate.bisplrep(x_, y_, z_, s=smoothing, xb=0, xe=block._data.shape[1], yb=0, ye=block._fibers, eps=1e-8)
+            good_fib = (n_goodsam_per_fiber / nsamples > min_samples_frac)
+            n_goodfib = good_fib.sum()
+            enough_fibers = n_goodfib / nfibers > min_fibers_frac
+            can_fit = n_goodsam >= (deg_x + 1) * (deg_y + 1)
+
+            if not can_fit:
+                warnings.warn(f"fiber block B{iblock+1} does not meet criterium: {n_goodsam = } >= {(deg_x + 1) * (deg_y + 1) = }")
+                continue
+            elif not enough_fibers:
+                warnings.warn(f"fiber block B{iblock+1} does not meet criterium: {n_goodfib / nfibers = :.3f} > {min_fibers_frac = :.3f}")
+                continue
+
+            good_sam[good_fib] = True
+            select = good_sam.ravel()
+
+            z = samples.ravel()
+            x_, y_, z_ = x[select], y[select], z[select]
+
+            tck = interpolate.bisplrep(x_, y_, z_, s=smoothing, xb=0, xe=npixels, yb=0, ye=nfibers, eps=1e-8)
             block_model = interpolate.bisplev(x_pixels, ifibers, tck).T
 
             self.set_block(iblock=iblock, data=block_model)
