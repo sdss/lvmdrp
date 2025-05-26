@@ -2378,7 +2378,7 @@ class Image(Header):
             raise TypeError(f"Invalid type for `fwhms_guess`: {type(fwhms)}. Expected either float/int or TraceMask")
         return fwhms
 
-    def _measure_block_fixed_counts(self, counts, centroids, fwhms_guess, iblock, columns, fwhms_range=[1.0,3.5], solver="trf", ax=None):
+    def _measure_block_fwhms(self, counts, centroids, fwhms_guess, iblock, columns, fwhms_range=[1.0,3.5], solver="trf", ax=None):
         counts_block = counts.get_block(iblock=iblock)
         centroids_block = centroids.get_block(iblock=iblock)
         fwhms_block = fwhms_guess.get_block(iblock=iblock)
@@ -2470,7 +2470,7 @@ class Image(Header):
 
         return counts_samples, centroids_samples, fwhms_samples
 
-    def _measure_block_fixed_width(self, counts_guess, centroids, fwhms, iblock, columns, counts_range=[1000,numpy.inf], solver="trf", ax=None):
+    def _measure_block_counts(self, counts_guess, centroids, fwhms, iblock, columns, counts_range=[1000,numpy.inf], solver="trf", ax=None):
         counts_block = counts_guess.get_block(iblock=iblock)
         centroids_block = centroids.get_block(iblock=iblock)
         fwhms_block = fwhms.get_block(iblock=iblock)
@@ -2562,70 +2562,32 @@ class Image(Header):
         while i < niter:
             log.info(f"   iteration {i+1:3d}/{niter}")
 
-            counts_samples, _, _ = self._measure_block_fixed_width(
+            counts_samples, _, _ = self._measure_block_counts(
                 counts_guess=counts_trace, centroids=centroids_trace, fwhms=fwhms_trace, counts_range=counts_range, iblock=iblock, columns=columns, solver=solver)
             counts_trace.set_block(iblock=iblock, samples=counts_samples)
-            counts_trace.fit_spline(smoothing=counts_smoothing)
+            # TODO: implement set block from a given tracemask object
+            # TODO: set boundary constraints at image edges to avoid overshoots
+            # TODO: plot measured fiber profile errors weighted by pixel uncertainties
+            # TODO: this is fitting the all blocks, instead set a parameter to fit only a given block
+            counts_trace.fit_spline(smoothing=counts_smoothing, min_samples_frac=0.7)
             counts_trace._coeffs = None
+            counts_trace.plot_block(iblock=iblock, show_model_samples=False, axs={"mod": axs_counts[i]})
+
+            _, _, fwhms_samples = self._measure_block_fwhms(
+                counts=counts_trace, centroids=centroids_trace, fwhms_guess=fwhms_trace, fwhms_range=fwhms_range, iblock=iblock, columns=columns, solver=solver)
+            fwhms_trace.set_block(iblock=iblock, samples=fwhms_samples)
+            fwhms_trace.fit_spline(smoothing=fwhms_smoothing, min_samples_frac=0.7)
+            fwhms_trace._coeffs = None
+            fwhms_trace.plot_block(iblock=iblock, show_model_samples=False, axs={"mod": axs_fwhms[i]})
 
             _, centroids_samples, _ = self._measure_block_centroids(
                 counts=counts_trace, centroids_guess=centroids_trace, fwhms=fwhms_trace, centroids_range=centroids_range, iblock=iblock, columns=columns, solver=solver)
             centroids_trace.set_block(iblock=iblock, samples=centroids_samples)
-            centroids_trace.fit_spline(smoothing=centroids_smoothing)
+            centroids_trace.fit_spline(smoothing=centroids_smoothing, min_samples_frac=0.7)
             centroids_trace._coeffs = None
+            centroids_trace.plot_block(iblock=iblock, show_model_samples=False, axs={"mod": axs_centroids[i]})
 
-            _, _, fwhms_samples = self._measure_block_fixed_counts(
-                counts=counts_trace, centroids=centroids_trace, fwhms_guess=fwhms_trace, fwhms_range=fwhms_range, iblock=iblock, columns=columns, solver=solver)
-            fwhms_trace.set_block(iblock=iblock, samples=fwhms_samples)
-            fwhms_trace.fit_spline(smoothing=fwhms_smoothing)
-            fwhms_trace._coeffs = None
-
-            # ----------------------------------------------------------------------------------------------------------------------------------------------------
-            counts_block = counts_trace.get_block(iblock=iblock)
-            axs_counts[i].plot(columns, counts_samples[0], ".-", lw=0.5, ms=5, mew=0, mfc="0.2")
-            axs_counts[i].plot(counts_block._data[0], "-", color="tab:blue", lw=1)
-            axs_counts[i].tick_params(labelbottom=False)
-
-            ax_divider = make_axes_locatable(axs_counts[i])
-            ax_res = ax_divider.append_axes("bottom", size="30%", pad="5%")
-            ax_res.sharex(axs_counts[i])
-            ax_res.tick_params(labelbottom=i == niter-1)
-            ax_res.axhline(ls="--", lw=1, color="0.2")
-            ax_res.axhline(-0.02, ls=":", lw=1, color="0.2")
-            ax_res.axhline(+0.02, ls=":", lw=1, color="0.2")
-            ax_res.plot(columns, (counts_block._data[0,columns] - counts_samples[0]) / counts_samples[0], ".-", lw=0.5, ms=5, mew=0, mfc="0.2")
-            ax_res.set_ylim(-0.03,+0.03)
-
-            centroids_block = centroids_trace.get_block(iblock=iblock)
-            axs_centroids[i].plot(columns, centroids_samples[0], ".-", lw=0.5, ms=5, mew=0, mfc="0.2")
-            axs_centroids[i].plot(centroids_block._data[0], "-", color="tab:blue", lw=1)
-            axs_centroids[i].tick_params(labelbottom=False)
-
-            ax_divider = make_axes_locatable(axs_centroids[i])
-            ax_res = ax_divider.append_axes("bottom", size="30%", pad="5%")
-            ax_res.sharex(axs_centroids[i])
-            ax_res.tick_params(labelbottom=i == niter-1)
-            ax_res.axhline(ls="--", lw=1, color="0.2")
-            ax_res.axhline(-0.02, ls=":", lw=1, color="0.2")
-            ax_res.axhline(+0.02, ls=":", lw=1, color="0.2")
-            ax_res.plot(columns, (centroids_block._data[0,columns] - centroids_samples[0]) / centroids_samples[0], ".-", lw=0.5, ms=5, mew=0, mfc="0.2")
-            ax_res.set_ylim(-0.03,+0.03)
-
-            fwhms_block = fwhms_trace.get_block(iblock=iblock)
-            axs_fwhms[i].plot(columns, fwhms_samples[0], ".-", lw=0.5, ms=5, mew=0, mfc="0.2")
-            axs_fwhms[i].plot(fwhms_block._data[0], "-", color="tab:blue", lw=1)
-            axs_fwhms[i].tick_params(labelbottom=False)
-
-            ax_divider = make_axes_locatable(axs_fwhms[i])
-            ax_res = ax_divider.append_axes("bottom", size="30%", pad="5%")
-            ax_res.sharex(axs_fwhms[i])
-            ax_res.tick_params(labelbottom=i == niter-1)
-            ax_res.axhline(ls="--", lw=1, color="0.2")
-            ax_res.axhline(-0.02, ls=":", lw=1, color="0.2")
-            ax_res.axhline(+0.02, ls=":", lw=1, color="0.2")
-            ax_res.plot(columns, (fwhms_block._data[0,columns] - fwhms_samples[0]) / fwhms_samples[0], ".-", lw=0.5, ms=5, mew=0, mfc="0.2")
-            ax_res.set_ylim(-0.03,+0.03)
-
+            # TODO: setup termination condition depending on the difference in measurements between two consecutive iterations
             i += 1
 
         return counts_trace, centroids_trace, fwhms_trace
