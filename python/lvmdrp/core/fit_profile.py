@@ -3,7 +3,7 @@ from copy import deepcopy as copy
 import warnings
 import itertools
 
-from lvmdrp.core.plot import plt, plot_gradient_fit, plot_radial_gradient_fit
+from lvmdrp.core.plot import plt, create_subplots, make_axes_locatable, plot_gradient_fit, plot_radial_gradient_fit
 import astropy.io.fits as pyfits
 import numpy
 import bottleneck as bn
@@ -356,16 +356,56 @@ class fit_profile1D(object):
         self._par[self._mask] = numpy.nan
         self._err[self._mask] = numpy.nan
 
-    def plot(self, x, y=None, mask=None, ax=None):
-        if ax is None:
-            fig, ax = plt.subplots(figsize=(15,5))
+    def plot_residuals(self, x, y=None, sigma=None, mask=None, axs=None):
+        residuals = None
+        if y is not None and sigma is not None:
+            residuals = (self(x) - y) / sigma
+        elif y is not None:
+            residuals = self(x) - y
+        if residuals is None:
+            return
 
-        mask_ = numpy.ones_like(mask)
-        mask_[mask] = numpy.nan
-        if y is not None:
-            ax.step(x, y*mask_, color="0.2", lw=1, where="mid")
-        ax.step(x, self(x)*mask_, color="tab:blue", lw=1, where="mid")
-        return ax
+        if isinstance(axs, dict) and "mod" in axs:
+            axs["mod"].tick_params(labelbottom=False)
+
+            ax_divider = make_axes_locatable(axs["mod"])
+            ax_res = ax_divider.append_axes("bottom", size="30%", pad="5%")
+            ax_res.sharex(axs["mod"])
+            axs["res"] = ax_res
+        elif axs is None:
+            _, axs = create_subplots(to_display=True, figsize=(15,5), layout="constrained")
+        if not isinstance(axs, dict) or "res" not in axs:
+            axs = {"res": axs}
+
+        axs["res"].axhline(ls="--", lw=1, color="0.2")
+        axs["res"].axhline(-0.01, ls=":", lw=1, color="0.2")
+        axs["res"].axhline(+0.01, ls=":", lw=1, color="0.2")
+        axs["res"].step(x, residuals, lw=1, color="tab:blue", where="mid")
+        axs["res"].vlines(x[mask], *axs["res"].get_ylim(), lw=1, color="0.7", alpha=0.5, zorder=-1)
+        return axs
+
+    def plot(self, x, y=None, sigma=None, mask=None, axs=None):
+        if axs is None:
+            _, axs = create_subplots(to_display=True, figsize=(15,7), layout="constrained")
+        if not isinstance(axs, dict) or "mod" not in axs:
+            axs = {"mod": axs}
+
+        model = self(x)
+
+        if y is not None and sigma is not None:
+            axs["mod"].errorbar(x, y, yerr=sigma, fmt=".-", ms=7, mew=0, lw=1, elinewidth=1, mfc="tab:red", color="0.2", ecolor="0.2")
+        elif y is not None:
+            axs["mod"].step(x, y, lw=1, color="0.2", where="mid")
+        ylims = axs["mod"].get_ylim()
+
+        if mask is not None:
+            axs["mod"].vlines(x[mask], *ylims, lw=1, color="0.7", alpha=0.5, zorder=-1)
+
+        axs["mod"].step(x, model, lw=1, color="tab:blue", where="mid")
+        axs["mod"].set_ylim(*ylims)
+
+        self.plot_residuals(x, y, sigma, mask, axs=axs)
+        return axs
 
 
 class fit_profile2D(object):

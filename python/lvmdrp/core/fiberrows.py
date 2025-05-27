@@ -1330,9 +1330,10 @@ class FiberRows(Header, PositionTable):
         pixels = numpy.arange(block._data.shape[1], dtype="int")
         samples = block.get_samples(as_pandas=True)
 
-        if axs is None or "mod" not in axs:
-            _, ax = plot.create_subplots(to_display=True, figsize=(15,5), layout="constrained")
-            axs = {"mod": ax}
+        if axs is None:
+            _, axs = plot.create_subplots(to_display=True, figsize=(15,5), layout="constrained")
+        if not isinstance(axs, dict) or "mod" not in axs:
+            axs = {"mod": axs}
 
         if ref_column is not None:
             axs["mod"].axvline(ref_column, ls=":", lw=1, color="0.7")
