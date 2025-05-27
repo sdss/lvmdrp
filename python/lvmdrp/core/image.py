@@ -2378,7 +2378,7 @@ class Image(Header):
             raise TypeError(f"Invalid type for `fwhms_guess`: {type(fwhms)}. Expected either float/int or TraceMask")
         return fwhms
 
-    def _measure_block_fwhms(self, counts, centroids, fwhms_guess, iblock, columns, fwhms_range=[1.0,3.5], solver="trf", axs=None):
+    def _measure_block_fwhms(self, counts, centroids, fwhms_guess, iblock, columns, fwhms_range=[1.0,3.5], nsigma=6, solver="trf", axs=None):
         counts_block = counts.get_block(iblock=iblock)
         centroids_block = centroids.get_block(iblock=iblock)
         fwhms_block = fwhms_guess.get_block(iblock=iblock)
@@ -2392,19 +2392,22 @@ class Image(Header):
         for i, icolumn in iterator:
             img_slice = self.getSlice(icolumn, axis="Y")
             counts_slice, _, _ = counts_block.getSlice(icolumn, axis="Y")
-            centroids_slice, _, _ = centroids_block.getSlice(icolumn, axis="Y")
+            centroids_slice, _, mask = centroids_block.getSlice(icolumn, axis="Y")
             fwhms_slice, _, _ = fwhms_block.getSlice(icolumn, axis="Y")
 
-            lower = (centroids_slice - 6*fwhms_slice).min()
-            upper = (centroids_slice + 6*fwhms_slice).max()
+            select = ~mask
+            lower = (centroids_slice[select] - nsigma/2.354*fwhms_slice[select]).min()
+            upper = (centroids_slice[select] + nsigma/2.354*fwhms_slice[select]).max()
             pixels_selection = (lower <= img_slice._pixels) & (img_slice._pixels <= upper)
 
-            model_block, par_block = img_slice.fitMultiGauss_fixed_counts(pixels_selection, counts_slice, centroids_slice, fwhms_slice, fwhms_range=fwhms_range, solver=solver)
+
+            model_block, par_block = img_slice.fitMultiGauss_fixed_counts(
+                pixels_selection, counts_slice[select], centroids_slice[select], fwhms_slice[select], fwhms_range=fwhms_range, solver=solver)
 
             counts, centroids, fwhms = numpy.split(par_block, 3)
-            counts_samples[:, i] = counts
-            centroids_samples[:, i] = centroids
-            fwhms_samples[:, i] = fwhms
+            counts_samples[select, i] = counts
+            centroids_samples[select, i] = centroids
+            fwhms_samples[select, i] = fwhms
 
             axs_ = axs.get(icolumn)
             if axs_ is not None:
@@ -2417,7 +2420,7 @@ class Image(Header):
 
         return counts_samples, centroids_samples, fwhms_samples
 
-    def _measure_block_centroids(self, counts, centroids_guess, fwhms, iblock, columns, centroids_range=[-5,+5], solver="trf", axs=None):
+    def _measure_block_centroids(self, counts, centroids_guess, fwhms, iblock, columns, centroids_range=[-5,+5], nsigma=6, solver="trf", axs=None):
         counts_block = counts.get_block(iblock=iblock)
         centroids_block = centroids_guess.get_block(iblock=iblock)
         fwhms_block = fwhms.get_block(iblock=iblock)
@@ -2431,19 +2434,21 @@ class Image(Header):
         for i, icolumn in iterator:
             img_slice = self.getSlice(icolumn, axis="Y")
             counts_slice, _, _ = counts_block.getSlice(icolumn, axis="Y")
-            centroids_slice, _, _ = centroids_block.getSlice(icolumn, axis="Y")
+            centroids_slice, _, mask = centroids_block.getSlice(icolumn, axis="Y")
             fwhms_slice, _, _ = fwhms_block.getSlice(icolumn, axis="Y")
 
-            lower = (centroids_slice - 6*fwhms_slice).min()
-            upper = (centroids_slice + 6*fwhms_slice).max()
+            select = ~mask
+            lower = (centroids_slice[select] - nsigma/2.354*fwhms_slice[select]).min()
+            upper = (centroids_slice[select] + nsigma/2.354*fwhms_slice[select]).max()
             pixels_selection = (lower <= img_slice._pixels) & (img_slice._pixels <= upper)
 
-            model_block, par_block = img_slice.fitMultiGauss_centroids(pixels_selection, counts_slice, centroids_slice, fwhms_slice, centroids_range=centroids_range, solver=solver)
+            model_block, par_block = img_slice.fitMultiGauss_centroids(
+                pixels_selection, counts_slice[select], centroids_slice[select], fwhms_slice[select], centroids_range=centroids_range, solver=solver)
 
             counts, centroids, fwhms = numpy.split(par_block, 3)
-            counts_samples[:, i] = counts
-            centroids_samples[:, i] = centroids
-            fwhms_samples[:, i] = fwhms
+            counts_samples[select, i] = counts
+            centroids_samples[select, i] = centroids
+            fwhms_samples[select, i] = fwhms
 
             axs_ = axs.get(icolumn)
             if axs_ is not None:
@@ -2456,7 +2461,7 @@ class Image(Header):
 
         return counts_samples, centroids_samples, fwhms_samples
 
-    def _measure_block_counts(self, counts_guess, centroids, fwhms, iblock, columns, counts_range=[1000,numpy.inf], solver="trf", axs=None):
+    def _measure_block_counts(self, counts_guess, centroids, fwhms, iblock, columns, counts_range=[1000,numpy.inf], nsigma=6, solver="trf", axs=None):
         counts_block = counts_guess.get_block(iblock=iblock)
         centroids_block = centroids.get_block(iblock=iblock)
         fwhms_block = fwhms.get_block(iblock=iblock)
@@ -2470,19 +2475,21 @@ class Image(Header):
         for i, icolumn in iterator:
             img_slice = self.getSlice(icolumn, axis="Y")
             counts_slice, _, _ = counts_block.getSlice(icolumn, axis="Y")
-            centroids_slice, _, _ = centroids_block.getSlice(icolumn, axis="Y")
+            centroids_slice, _, mask = centroids_block.getSlice(icolumn, axis="Y")
             fwhms_slice, _, _ = fwhms_block.getSlice(icolumn, axis="Y")
 
-            lower = (centroids_slice - 6*fwhms_slice).min()
-            upper = (centroids_slice + 6*fwhms_slice).max()
+            select = ~mask
+            lower = (centroids_slice[select] - nsigma/2.354*fwhms_slice[select]).min()
+            upper = (centroids_slice[select] + nsigma/2.354*fwhms_slice[select]).max()
             pixels_selection = (lower <= img_slice._pixels) & (img_slice._pixels <= upper)
 
-            model_block, par_block = img_slice.fitMultiGauss_fixed_width(pixels_selection, counts_slice, centroids_slice, fwhms_slice, counts_range=counts_range, solver=solver)
+            model_block, par_block = img_slice.fitMultiGauss_fixed_width(
+                pixels_selection, counts_slice[select], centroids_slice[select], fwhms_slice[select], counts_range=counts_range, solver=solver)
 
             counts, centroids, fwhms = numpy.split(par_block, 3)
-            counts_samples[:, i] = counts
-            centroids_samples[:, i] = centroids
-            fwhms_samples[:, i] = fwhms
+            counts_samples[select, i] = counts
+            centroids_samples[select, i] = centroids
+            fwhms_samples[select, i] = fwhms
 
             axs_ = axs.get(icolumn)
             if axs_ is not None:
@@ -2496,7 +2503,7 @@ class Image(Header):
         return counts_samples, centroids_samples, fwhms_samples
 
     def iterative_block_trace(self, counts_guess, centroids_guess, fwhms_guess, iblock, columns,
-                              counts_range=[1e3,numpy.inf], centroids_range=[-5,+5], fwhms_range=[1.0,3.5], solver="trf",
+                              counts_range=[1e3,numpy.inf], centroids_range=[-5,+5], fwhms_range=[1.0,3.5], nsigma=6, solver="trf",
                               counts_smoothing=1.0, centroids_smoothing=0.1, fwhms_smoothing=0.1, niter=10, axs=None):
         def _set_alphas(axs):
             if axs is None:
@@ -2548,33 +2555,35 @@ class Image(Header):
             counts_samples, _, _ = self._measure_block_counts(
                 counts_guess=counts_trace, centroids=centroids_trace, fwhms=fwhms_trace,
                 counts_range=counts_range, iblock=iblock, columns=columns, solver=solver,
-                axs=axs_ycounts)
-            _set_alphas(axs=axs_ycounts)
+                nsigma=nsigma, axs=axs_ycounts)
             counts_trace.set_block(iblock=iblock, samples=counts_samples)
             counts_trace.fit_spline(smoothing=counts_smoothing, min_samples_frac=0.7)
             counts_trace._coeffs = None
-            if len(axs_xcounts) != 0:
-                counts_trace.plot_block(iblock=iblock, show_model_samples=False, axs={"mod": axs_xcounts[i]})
 
             _, _, fwhms_samples = self._measure_block_fwhms(
                 counts=counts_trace, centroids=centroids_trace, fwhms_guess=fwhms_trace,
                 fwhms_range=fwhms_range, iblock=iblock, columns=columns, solver=solver,
-                axs=axs_yfwhms)
-            _set_alphas(axs=axs_yfwhms)
+                nsigma=nsigma, axs=axs_yfwhms)
             fwhms_trace.set_block(iblock=iblock, samples=fwhms_samples)
             fwhms_trace.fit_spline(smoothing=fwhms_smoothing, min_samples_frac=0.7)
             fwhms_trace._coeffs = None
-            if len(axs_xfwhms) != 0:
-                fwhms_trace.plot_block(iblock=iblock, show_model_samples=False, axs={"mod": axs_xfwhms[i]})
 
             _, centroids_samples, _ = self._measure_block_centroids(
                 counts=counts_trace, centroids_guess=centroids_trace, fwhms=fwhms_trace,
                 centroids_range=centroids_range, iblock=iblock, columns=columns, solver=solver,
-                axs=axs_ycentroids)
-            _set_alphas(axs=axs_ycentroids)
+                nsigma=nsigma, axs=axs_ycentroids)
             centroids_trace.set_block(iblock=iblock, samples=centroids_samples)
             centroids_trace.fit_spline(smoothing=centroids_smoothing, min_samples_frac=0.7)
             centroids_trace._coeffs = None
+
+            # update plots
+            _set_alphas(axs=axs_ycounts)
+            _set_alphas(axs=axs_yfwhms)
+            _set_alphas(axs=axs_ycentroids)
+            if len(axs_xcounts) != 0:
+                counts_trace.plot_block(iblock=iblock, show_model_samples=False, axs={"mod": axs_xcounts[i]})
+            if len(axs_xfwhms) != 0:
+                fwhms_trace.plot_block(iblock=iblock, show_model_samples=False, axs={"mod": axs_xfwhms[i]})
             if len(axs_xcentroids) != 0:
                 centroids_trace.plot_block(iblock=iblock, show_model_samples=False, axs={"mod": axs_xcentroids[i]})
 
