@@ -2379,7 +2379,7 @@ class Image(Header):
             raise TypeError(f"Invalid type for `fwhms_guess`: {type(fwhms)}. Expected either float/int or TraceMask")
         return fwhms
 
-    def _measure_block_fwhms(self, counts, centroids, fwhms_guess, iblock, columns, fwhms_range=[1.0,3.5], nsigma=6, solver="trf", axs=None):
+    def _measure_block_fwhms(self, counts, centroids, fwhms_guess, iblock, columns, fwhms_range=[1.0,3.5], nsigma=6, solver="trf", loss="linear", axs=None):
         counts_block = counts.get_block(iblock=iblock)
         centroids_block = centroids.get_block(iblock=iblock)
         fwhms_block = fwhms_guess.get_block(iblock=iblock)
@@ -2405,7 +2405,7 @@ class Image(Header):
 
 
             model_block, par_block = img_slice.fitMultiGauss_fixed_counts(
-                pixels_selection, counts_slice[select], centroids_slice[select], fwhms_slice[select], fwhms_range=fwhms_range, solver=solver)
+                pixels_selection, counts_slice[select], centroids_slice[select], fwhms_slice[select], fwhms_range=fwhms_range, solver=solver, loss=loss)
 
             counts, centroids, fwhms = numpy.split(par_block, 3)
             counts_samples[select, i] = counts
@@ -2424,7 +2424,7 @@ class Image(Header):
         fwhms = TraceMask.from_samples(data_dim=fwhms_block._data.shape, samples=fwhms_samples, samples_columns=columns)
         return fwhms
 
-    def _measure_block_centroids(self, counts, centroids_guess, fwhms, iblock, columns, centroids_range=[-5,+5], nsigma=6, solver="trf", axs=None):
+    def _measure_block_centroids(self, counts, centroids_guess, fwhms, iblock, columns, centroids_range=[-5,+5], nsigma=6, solver="trf", loss="linear", axs=None):
         counts_block = counts.get_block(iblock=iblock)
         centroids_block = centroids_guess.get_block(iblock=iblock)
         fwhms_block = fwhms.get_block(iblock=iblock)
@@ -2449,7 +2449,7 @@ class Image(Header):
             pixels_selection = (lower <= img_slice._pixels) & (img_slice._pixels <= upper)
 
             model_block, par_block = img_slice.fitMultiGauss_centroids(
-                pixels_selection, counts_slice[select], centroids_slice[select], fwhms_slice[select], centroids_range=centroids_range, solver=solver)
+                pixels_selection, counts_slice[select], centroids_slice[select], fwhms_slice[select], centroids_range=centroids_range, solver=solver, loss=loss)
 
             counts, centroids, fwhms = numpy.split(par_block, 3)
             counts_samples[select, i] = counts
@@ -2468,7 +2468,7 @@ class Image(Header):
         centroids = TraceMask.from_samples(data_dim=centroids_block._data.shape, samples=centroids_samples, samples_columns=columns)
         return centroids
 
-    def _measure_block_counts(self, counts_guess, centroids, fwhms, iblock, columns, counts_range=[1000,numpy.inf], nsigma=6, solver="trf", axs=None):
+    def _measure_block_counts(self, counts_guess, centroids, fwhms, iblock, columns, counts_range=[1000,numpy.inf], nsigma=6, solver="trf", loss="linear", axs=None):
         counts_block = counts_guess.get_block(iblock=iblock)
         centroids_block = centroids.get_block(iblock=iblock)
         fwhms_block = fwhms.get_block(iblock=iblock)
@@ -2493,7 +2493,7 @@ class Image(Header):
             pixels_selection = (lower <= img_slice._pixels) & (img_slice._pixels <= upper)
 
             model_block, par_block = img_slice.fitMultiGauss_fixed_width(
-                pixels_selection, counts_slice[select], centroids_slice[select], fwhms_slice[select], counts_range=counts_range, solver=solver)
+                pixels_selection, counts_slice[select], centroids_slice[select], fwhms_slice[select], counts_range=counts_range, solver=solver, loss=loss)
 
             counts, centroids, fwhms = numpy.split(par_block, 3)
             counts_samples[select, i] = counts
@@ -2513,7 +2513,7 @@ class Image(Header):
         return counts
 
     def iterative_block_trace(self, counts_guess, centroids_guess, fwhms_guess, iblock, columns,
-                              counts_range=[1e3,numpy.inf], centroids_range=[-5,+5], fwhms_range=[1.0,3.5], nsigma=6, solver="trf",
+                              counts_range=[1e3,numpy.inf], centroids_range=[-5,+5], fwhms_range=[1.0,3.5], nsigma=6, solver="trf", loss="linear",
                               counts_smoothing=1.0, centroids_smoothing=0.1, fwhms_smoothing=0.1, niter=10, axs=None):
         def _set_alphas(axs):
             if axs is None:
@@ -2562,7 +2562,7 @@ class Image(Header):
 
             counts_block = self._measure_block_counts(
                 counts_guess=counts_trace, centroids=centroids_trace, fwhms=fwhms_trace,
-                counts_range=counts_range, iblock=iblock, columns=columns, solver=solver,
+                counts_range=counts_range, iblock=iblock, columns=columns, solver=solver, loss=loss,
                 nsigma=nsigma, axs=axs_ycounts)
             counts_block.fit_spline(smoothing=counts_smoothing, min_samples_frac=0.7)
             counts_trace.set_block(iblock=iblock, from_instance=counts_block)
@@ -2570,7 +2570,7 @@ class Image(Header):
 
             fwhms_block = self._measure_block_fwhms(
                 counts=counts_trace, centroids=centroids_trace, fwhms_guess=fwhms_trace,
-                fwhms_range=fwhms_range, iblock=iblock, columns=columns, solver=solver,
+                fwhms_range=fwhms_range, iblock=iblock, columns=columns, solver=solver, loss=loss,
                 nsigma=nsigma, axs=axs_yfwhms)
             fwhms_block.fit_spline(smoothing=fwhms_smoothing, min_samples_frac=0.7)
             fwhms_trace.set_block(iblock=iblock, from_instance=fwhms_block)
@@ -2578,7 +2578,7 @@ class Image(Header):
 
             centroids_block = self._measure_block_centroids(
                 counts=counts_trace, centroids_guess=centroids_trace, fwhms=fwhms_trace,
-                centroids_range=centroids_range, iblock=iblock, columns=columns, solver=solver,
+                centroids_range=centroids_range, iblock=iblock, columns=columns, solver=solver, loss=loss,
                 nsigma=nsigma, axs=axs_ycentroids)
             centroids_block.fit_spline(smoothing=centroids_smoothing, min_samples_frac=0.7)
             centroids_trace.set_block(iblock=iblock, from_instance=centroids_block)

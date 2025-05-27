@@ -303,7 +303,8 @@ class fit_profile1D(object):
         ftol=1e-8,
         xtol=1e-8,
         maxfev=9999,
-        solver="trf"
+        solver="trf",
+        loss="linear"
     ):
         if numpy.isnan(sigma).any():
             raise ValueError(f"Errors have non-valid values: {sigma}")
@@ -321,7 +322,9 @@ class fit_profile1D(object):
             raise ValueError(f"Invalid values in lower bounds:\n  {bounds[1]}")
 
         try:
-            model = optimize.least_squares(self.res, x0=p0, bounds=bounds, args=(x, y, sigma), max_nfev=maxfev, ftol=ftol, xtol=xtol, method=solver)
+            model = optimize.least_squares(
+                self.res, x0=p0, bounds=bounds, args=(x, y, sigma), max_nfev=maxfev, ftol=ftol, xtol=xtol,
+                method=solver, loss=loss)
         except Exception as e:
             warnings.warn(f"{e}")
             warnings.warn("data points:")
