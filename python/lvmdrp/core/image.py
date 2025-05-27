@@ -2529,21 +2529,6 @@ class Image(Header):
                         alphas = numpy.linspace(0.1, 1.0, len(lines), endpoint=True) if nlines > 1 else [1.0]
                         [(lines[i].set_alpha(alpha)) for i, alpha in enumerate(alphas)]
 
-        counts_trace = copy(counts_guess)
-        counts_trace.setData(data=counts_guess._data, error=counts_guess._error, mask=counts_guess._mask)
-        counts_trace.set_samples(samples=numpy.full((counts_trace._fibers,columns.size), numpy.nan), columns=columns)
-        counts_trace._coeffs = None
-
-        centroids_trace = copy(centroids_guess)
-        centroids_trace.setData(data=centroids_guess._data, error=centroids_guess._error, mask=centroids_guess._mask)
-        centroids_trace.set_samples(samples=numpy.full((centroids_trace._fibers,columns.size), numpy.nan), columns=columns)
-        centroids_trace._coeffs = None
-
-        fwhms_trace = copy(fwhms_guess)
-        fwhms_trace.setData(data=fwhms_guess._data, error=fwhms_guess._error, mask=fwhms_guess._mask)
-        fwhms_trace.set_samples(samples=numpy.full((fwhms_trace._fibers,columns.size), numpy.nan), columns=columns)
-        fwhms_trace._coeffs = None
-
         axs_xmodels = axs.get("xmodels", {})
         axs_xcounts = axs_xmodels.get("counts", [])
         axs_xcentroids = axs_xmodels.get("centroids", [])
@@ -2558,47 +2543,46 @@ class Image(Header):
         while i < niter:
             log.info(f"   iteration {i+1:3d}/{niter}")
             # TODO: set boundary constraints at image edges to avoid overshoots
-            # TODO: plot measured fiber profile errors weighted by pixel uncertainties
 
             counts_block = self._measure_block_counts(
-                counts_guess=counts_trace, centroids=centroids_trace, fwhms=fwhms_trace,
+                counts_guess=counts_guess, centroids=centroids_guess, fwhms=fwhms_guess,
                 counts_range=counts_range, iblock=iblock, columns=columns, solver=solver, loss=loss,
                 nsigma=nsigma, axs=axs_ycounts)
             counts_block.fit_spline(smoothing=counts_smoothing, min_samples_frac=0.7)
-            counts_trace.set_block(iblock=iblock, from_instance=counts_block)
-            counts_trace._coeffs = None
+            counts_guess.set_block(iblock=iblock, from_instance=counts_block)
+            counts_guess._coeffs = None
 
             fwhms_block = self._measure_block_fwhms(
-                counts=counts_trace, centroids=centroids_trace, fwhms_guess=fwhms_trace,
+                counts=counts_guess, centroids=centroids_guess, fwhms_guess=fwhms_guess,
                 fwhms_range=fwhms_range, iblock=iblock, columns=columns, solver=solver, loss=loss,
                 nsigma=nsigma, axs=axs_yfwhms)
             fwhms_block.fit_spline(smoothing=fwhms_smoothing, min_samples_frac=0.7)
-            fwhms_trace.set_block(iblock=iblock, from_instance=fwhms_block)
-            fwhms_trace._coeffs = None
+            fwhms_guess.set_block(iblock=iblock, from_instance=fwhms_block)
+            fwhms_guess._coeffs = None
 
             centroids_block = self._measure_block_centroids(
-                counts=counts_trace, centroids_guess=centroids_trace, fwhms=fwhms_trace,
+                counts=counts_guess, centroids_guess=centroids_guess, fwhms=fwhms_guess,
                 centroids_range=centroids_range, iblock=iblock, columns=columns, solver=solver, loss=loss,
                 nsigma=nsigma, axs=axs_ycentroids)
             centroids_block.fit_spline(smoothing=centroids_smoothing, min_samples_frac=0.7)
-            centroids_trace.set_block(iblock=iblock, from_instance=centroids_block)
-            centroids_trace._coeffs = None
+            centroids_guess.set_block(iblock=iblock, from_instance=centroids_block)
+            centroids_guess._coeffs = None
 
             # update plots
             _set_alphas(axs=axs_ycounts)
             _set_alphas(axs=axs_yfwhms)
             _set_alphas(axs=axs_ycentroids)
             if len(axs_xcounts) != 0:
-                counts_trace.plot_block(iblock=iblock, show_model_samples=False, axs={"mod": axs_xcounts[i]})
+                counts_guess.plot_block(iblock=iblock, show_model_samples=False, axs={"mod": axs_xcounts[i]})
             if len(axs_xfwhms) != 0:
-                fwhms_trace.plot_block(iblock=iblock, show_model_samples=False, axs={"mod": axs_xfwhms[i]})
+                fwhms_guess.plot_block(iblock=iblock, show_model_samples=False, axs={"mod": axs_xfwhms[i]})
             if len(axs_xcentroids) != 0:
-                centroids_trace.plot_block(iblock=iblock, show_model_samples=False, axs={"mod": axs_xcentroids[i]})
+                centroids_guess.plot_block(iblock=iblock, show_model_samples=False, axs={"mod": axs_xcentroids[i]})
 
             # TODO: setup termination condition depending on the difference in measurements between two consecutive iterations
             i += 1
 
-        return counts_trace, centroids_trace, fwhms_trace
+        return counts_guess, centroids_guess, fwhms_guess
 
     def trace_fibers_full(self, centroids_guess, fwhms_guess=2.5, centroids_range=[-5,5], fwhms_range=[1.0,3.5], counts_range=[1e3,numpy.inf],
                           columns=[], iblocks=[], solver="trf"):
