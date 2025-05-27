@@ -6,6 +6,7 @@ from copy import deepcopy as copy
 import warnings
 
 import bottleneck as bn
+import pandas as pd
 from lvmdrp import log
 from astropy.table import Table
 
@@ -79,6 +80,12 @@ class FiberRows(Header, PositionTable):
 
         new_fiberrows = cls(data=data, error=error, mask=mask, samples=samples, poly_kind=poly_kind, coeffs=coeffs, header=header, slitmap=slitmap)
         new_fiberrows.setFibers(fibers)
+        return new_fiberrows
+
+    @classmethod
+    def from_samples(cls, data_dim, samples, samples_columns=None):
+        new_fiberrows = cls.create_empty(data_dim=data_dim, samples_columns=samples_columns)
+        new_fiberrows.set_samples(samples, columns=samples_columns)
         return new_fiberrows
 
     @classmethod
@@ -322,7 +329,16 @@ class FiberRows(Header, PositionTable):
 
         return new_trace
 
-    def set_block(self, data=None, iblock=None, blockid=None, error=None, mask=None, samples=None, coeffs=None, poly_kind=None):
+    def set_block(self, data=None, iblock=None, blockid=None, error=None, mask=None, samples=None, coeffs=None, poly_kind=None, from_instance=None):
+
+        if from_instance is not None:
+            samples_o = from_instance.get_samples(as_pandas=True)
+            samples_o = samples_o.values if samples_o is not None else None
+            self.set_block(
+                data=from_instance._data, iblock=iblock, blockid=blockid,
+                error=from_instance._error, mask=from_instance._mask,
+                samples=samples_o, coeffs=from_instance._coeffs, poly_kind=from_instance._poly_kind)
+
         slitmap = self._filter_slitmap()
         blockid = self._validate_blockid(iblock, blockid, slitmap=slitmap)
         block_selection = slitmap["blockid"] == blockid
@@ -330,15 +346,21 @@ class FiberRows(Header, PositionTable):
 
         if data is not None:
             if data.shape[0] != nfibers:
-                raise ValueError(f"Incompatible data shapes. Trying to set a block of {data.shape[0]} fibers to a selection of {nfibers}")
+                raise ValueError(f"Incompatible data shapes. Trying to set a block of {data.shape[0]} fibers to a selection of {nfibers} fibers")
             self._data[block_selection] = data
         if error is not None and self._error is not None:
             self._error[block_selection] = error
         if mask is not None and self._error is not None:
             self._mask[block_selection] = mask
         if samples is not None and self._samples is not None:
-            for i, column in enumerate(self._samples.colnames):
-                self._samples[column][block_selection] = samples[:, i]
+            samples_i = self._samples.to_pandas()
+            if samples.shape[1] != samples_i.shape[1]:
+                raise ValueError(f"Incompatible column sizes for samples. Trying to set samples with {samples.shape[1]} columns to {samples_i.columns.size} columns")
+            if samples.shape[0] != nfibers:
+                raise ValueError(f"Incompatible sample sizes. Trying to set samples with {samples.shape[0]} fibers to {nfibers} fibers")
+            for i, column in enumerate(samples_i.columns):
+                samples_i.loc[block_selection, column] = samples[:, i]
+            self.set_samples(samples_i)
         if coeffs is not None and poly_kind is not None and self._coeffs is not None:
             if self._poly_kind != poly_kind:
                 raise ValueError(f"Incompatible polynomial kinds. Trying to set {poly_kind} to a tracemask of {self._poly_kind}")
@@ -581,6 +603,9 @@ class FiberRows(Header, PositionTable):
     def set_samples(self, samples=None, columns=None):
         if isinstance(samples, Table):
             self._samples = samples
+        elif isinstance(samples, pd.DataFrame):
+            samples.columns = samples.columns.astype("str")
+            self._samples = Table.from_pandas(samples)
         elif isinstance(samples, numpy.ndarray) and columns is not None:
             self._samples = Table(data=samples, names=columns)
         elif columns is not None:
@@ -598,6 +623,16 @@ class FiberRows(Header, PositionTable):
             df.columns = df.columns.astype("int")
             return df
         return self._samples
+
+    def apply_pixelmask(self, mask=None):
+        if mask is None:
+            mask = self._mask
+        if mask is None:
+            return self
+
+        self._data[mask] = numpy.nan
+        self._error[mask] = numpy.nan
+        return self
 
     def split(self, fragments, axis="x"):
         list = []
