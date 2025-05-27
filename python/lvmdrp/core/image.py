@@ -2397,6 +2397,8 @@ class Image(Header):
             fwhms_slice, _, _ = fwhms_block.getSlice(icolumn, axis="Y")
 
             select = ~mask
+            if select.sum() == 0:
+                continue
             lower = (centroids_slice[select] - nsigma/2.354*fwhms_slice[select]).min()
             upper = (centroids_slice[select] + nsigma/2.354*fwhms_slice[select]).max()
             pixels_selection = (lower <= img_slice._pixels) & (img_slice._pixels <= upper)
@@ -2419,7 +2421,8 @@ class Image(Header):
                 # axs_["res"].vlines(centroids, *axs_["res"].get_ylim(), lw=1, color="0.7")
                 axs[icolumn] = axs_
 
-        return counts_samples, centroids_samples, fwhms_samples
+        fwhms = TraceMask.from_samples(data_dim=fwhms_block._data.shape, samples=fwhms_samples, samples_columns=columns)
+        return fwhms
 
     def _measure_block_centroids(self, counts, centroids_guess, fwhms, iblock, columns, centroids_range=[-5,+5], nsigma=6, solver="trf", axs=None):
         counts_block = counts.get_block(iblock=iblock)
@@ -2439,6 +2442,8 @@ class Image(Header):
             fwhms_slice, _, _ = fwhms_block.getSlice(icolumn, axis="Y")
 
             select = ~mask
+            if select.sum() == 0:
+                continue
             lower = (centroids_slice[select] - nsigma/2.354*fwhms_slice[select]).min()
             upper = (centroids_slice[select] + nsigma/2.354*fwhms_slice[select]).max()
             pixels_selection = (lower <= img_slice._pixels) & (img_slice._pixels <= upper)
@@ -2460,7 +2465,8 @@ class Image(Header):
                 # axs_["res"].vlines(centroids, *axs_["res"].get_ylim(), lw=1, color="0.7")
                 axs[icolumn] = axs_
 
-        return counts_samples, centroids_samples, fwhms_samples
+        centroids = TraceMask.from_samples(data_dim=centroids_block._data.shape, samples=centroids_samples, samples_columns=columns)
+        return centroids
 
     def _measure_block_counts(self, counts_guess, centroids, fwhms, iblock, columns, counts_range=[1000,numpy.inf], nsigma=6, solver="trf", axs=None):
         counts_block = counts_guess.get_block(iblock=iblock)
@@ -2480,6 +2486,8 @@ class Image(Header):
             fwhms_slice, _, _ = fwhms_block.getSlice(icolumn, axis="Y")
 
             select = ~mask
+            if select.sum() == 0:
+                continue
             lower = (centroids_slice[select] - nsigma/2.354*fwhms_slice[select]).min()
             upper = (centroids_slice[select] + nsigma/2.354*fwhms_slice[select]).max()
             pixels_selection = (lower <= img_slice._pixels) & (img_slice._pixels <= upper)
@@ -2501,7 +2509,8 @@ class Image(Header):
                 # axs_["res"].vlines(centroids, *axs_["res"].get_ylim(), lw=1, color="0.7")
                 axs[icolumn] = axs_
 
-        return counts_samples, centroids_samples, fwhms_samples
+        counts = TraceMask.from_samples(data_dim=counts_block._data.shape, samples=counts_samples, samples_columns=columns)
+        return counts
 
     def iterative_block_trace(self, counts_guess, centroids_guess, fwhms_guess, iblock, columns,
                               counts_range=[1e3,numpy.inf], centroids_range=[-5,+5], fwhms_range=[1.0,3.5], nsigma=6, solver="trf",
@@ -2548,33 +2557,31 @@ class Image(Header):
         log.info(f"iterating fiber measurements of counts and widths for block {iblock+1}:")
         while i < niter:
             log.info(f"   iteration {i+1:3d}/{niter}")
-            # TODO: implement set block from a given tracemask object
             # TODO: set boundary constraints at image edges to avoid overshoots
             # TODO: plot measured fiber profile errors weighted by pixel uncertainties
-            # TODO: this is fitting the all blocks, instead set a parameter to fit only a given block
 
-            counts_samples, _, _ = self._measure_block_counts(
+            counts_block = self._measure_block_counts(
                 counts_guess=counts_trace, centroids=centroids_trace, fwhms=fwhms_trace,
                 counts_range=counts_range, iblock=iblock, columns=columns, solver=solver,
                 nsigma=nsigma, axs=axs_ycounts)
-            counts_trace.set_block(iblock=iblock, samples=counts_samples)
-            counts_trace.fit_spline(smoothing=counts_smoothing, min_samples_frac=0.7)
+            counts_block.fit_spline(smoothing=counts_smoothing, min_samples_frac=0.7)
+            counts_trace.set_block(iblock=iblock, from_instance=counts_block)
             counts_trace._coeffs = None
 
-            _, _, fwhms_samples = self._measure_block_fwhms(
+            fwhms_block = self._measure_block_fwhms(
                 counts=counts_trace, centroids=centroids_trace, fwhms_guess=fwhms_trace,
                 fwhms_range=fwhms_range, iblock=iblock, columns=columns, solver=solver,
                 nsigma=nsigma, axs=axs_yfwhms)
-            fwhms_trace.set_block(iblock=iblock, samples=fwhms_samples)
-            fwhms_trace.fit_spline(smoothing=fwhms_smoothing, min_samples_frac=0.7)
+            fwhms_block.fit_spline(smoothing=fwhms_smoothing, min_samples_frac=0.7)
+            fwhms_trace.set_block(iblock=iblock, from_instance=fwhms_block)
             fwhms_trace._coeffs = None
 
-            _, centroids_samples, _ = self._measure_block_centroids(
+            centroids_block = self._measure_block_centroids(
                 counts=counts_trace, centroids_guess=centroids_trace, fwhms=fwhms_trace,
                 centroids_range=centroids_range, iblock=iblock, columns=columns, solver=solver,
                 nsigma=nsigma, axs=axs_ycentroids)
-            centroids_trace.set_block(iblock=iblock, samples=centroids_samples)
-            centroids_trace.fit_spline(smoothing=centroids_smoothing, min_samples_frac=0.7)
+            centroids_block.fit_spline(smoothing=centroids_smoothing, min_samples_frac=0.7)
+            centroids_trace.set_block(iblock=iblock, from_instance=centroids_block)
             centroids_trace._coeffs = None
 
             # update plots
