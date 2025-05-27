@@ -353,11 +353,12 @@ class FiberRows(Header, PositionTable):
         if mask is not None and self._error is not None:
             self._mask[block_selection] = mask
         if samples is not None and self._samples is not None:
-            samples_i = self._samples.to_pandas()
+            samples_i = self._samples.to_pandas().astype("float32")
             if samples.shape[1] != samples_i.shape[1]:
                 raise ValueError(f"Incompatible column sizes for samples. Trying to set samples with {samples.shape[1]} columns to {samples_i.columns.size} columns")
             if samples.shape[0] != nfibers:
                 raise ValueError(f"Incompatible sample sizes. Trying to set samples with {samples.shape[0]} fibers to {nfibers} fibers")
+            samples = samples.astype("float32")
             for i, column in enumerate(samples_i.columns):
                 samples_i.loc[block_selection, column] = samples[:, i]
             self.set_samples(samples_i)
@@ -613,6 +614,7 @@ class FiberRows(Header, PositionTable):
         else:
             self._samples = None
 
+        self._samples = Table({name: numpy.array(self._samples[name], dtype="float32") for name in self._samples.colnames})
         return self._samples
 
     def get_samples(self, as_pandas=False):
