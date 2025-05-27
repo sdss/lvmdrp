@@ -2414,8 +2414,8 @@ class Image(Header):
                 axs_ = model_block.plot(
                     x=img_slice._pixels[pixels_selection], y=img_slice._data[pixels_selection],
                     sigma=img_slice._error[pixels_selection], mask=img_slice._mask[pixels_selection], axs=axs_)
-                axs_["mod"].vlines(centroids, *axs_["mod"].get_ylim(), lw=1, color="0.7")
-                axs_["res"].vlines(centroids, *axs_["res"].get_ylim(), lw=1, color="0.7")
+                # axs_["mod"].vlines(centroids, *axs_["mod"].get_ylim(), lw=1, color="0.7")
+                # axs_["res"].vlines(centroids, *axs_["res"].get_ylim(), lw=1, color="0.7")
                 axs[icolumn] = axs_
 
         return counts_samples, centroids_samples, fwhms_samples
@@ -2455,8 +2455,8 @@ class Image(Header):
                 axs_ = model_block.plot(
                     x=img_slice._pixels[pixels_selection], y=img_slice._data[pixels_selection],
                     sigma=img_slice._error[pixels_selection], mask=img_slice._mask[pixels_selection], axs=axs_)
-                axs_["mod"].vlines(centroids, *axs_["mod"].get_ylim(), lw=1, color="0.7")
-                axs_["res"].vlines(centroids, *axs_["res"].get_ylim(), lw=1, color="0.7")
+                # axs_["mod"].vlines(centroids, *axs_["mod"].get_ylim(), lw=1, color="0.7")
+                # axs_["res"].vlines(centroids, *axs_["res"].get_ylim(), lw=1, color="0.7")
                 axs[icolumn] = axs_
 
         return counts_samples, centroids_samples, fwhms_samples
@@ -2496,8 +2496,8 @@ class Image(Header):
                 axs_ = model_block.plot(
                     x=img_slice._pixels[pixels_selection], y=img_slice._data[pixels_selection],
                     sigma=img_slice._error[pixels_selection], mask=img_slice._mask[pixels_selection], axs=axs_)
-                axs_["mod"].vlines(centroids, *axs_["mod"].get_ylim(), lw=1, color="0.7")
-                axs_["res"].vlines(centroids, *axs_["res"].get_ylim(), lw=1, color="0.7")
+                # axs_["mod"].vlines(centroids, *axs_["mod"].get_ylim(), lw=1, color="0.7")
+                # axs_["res"].vlines(centroids, *axs_["res"].get_ylim(), lw=1, color="0.7")
                 axs[icolumn] = axs_
 
         return counts_samples, centroids_samples, fwhms_samples

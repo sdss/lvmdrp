@@ -365,21 +365,24 @@ class fit_profile1D(object):
         if residuals is None:
             return
 
-        if isinstance(axs, dict) and "mod" in axs:
+        if axs is None:
+            _, ax = create_subplots(to_display=True, figsize=(15,5), layout="constrained")
+            axs = {"res": ax}
+        elif isinstance(axs, plt.Axes):
+            axs = {"res": axs}
+        elif isinstance(axs, dict) and "mod" in axs and "res" not in axs:
             axs["mod"].tick_params(labelbottom=False)
 
             ax_divider = make_axes_locatable(axs["mod"])
             ax_res = ax_divider.append_axes("bottom", size="30%", pad="5%")
             ax_res.sharex(axs["mod"])
             axs["res"] = ax_res
-        elif axs is None:
-            _, axs = create_subplots(to_display=True, figsize=(15,5), layout="constrained")
-        if not isinstance(axs, dict) or "res" not in axs:
-            axs = {"res": axs}
+        elif isinstance(axs, dict) and "res" in axs:
+            pass
 
         axs["res"].axhline(ls="--", lw=1, color="0.2")
-        axs["res"].axhline(-0.01, ls=":", lw=1, color="0.2")
-        axs["res"].axhline(+0.01, ls=":", lw=1, color="0.2")
+        axs["res"].axhline(-1.0, ls=":", lw=1, color="0.2")
+        axs["res"].axhline(+1.0, ls=":", lw=1, color="0.2")
         axs["res"].step(x, residuals, lw=1, color="tab:blue", where="mid")
         axs["res"].vlines(x[mask], *axs["res"].get_ylim(), lw=1, color="0.7", alpha=0.5, zorder=-1)
         return axs
