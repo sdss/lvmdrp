@@ -851,6 +851,7 @@ class FiberRows(Header, PositionTable):
             good_sam = numpy.isfinite(samples[i, :])
             n_goodsam = good_sam.sum()
             if n_goodsam == 0:
+                self._mask[i, :] = True
                 continue
 
             nsamples = good_sam.size
@@ -916,6 +917,7 @@ class FiberRows(Header, PositionTable):
             good_sam = numpy.isfinite(samples[i, :])
             n_goodsam = good_sam.sum()
             if n_goodsam == 0:
+                self._mask[i, :] = True
                 continue
 
             nsamples = good_sam.size
@@ -976,6 +978,7 @@ class FiberRows(Header, PositionTable):
             n_goodsam = n_goodsam_per_fiber.sum()
             if n_goodsam == 0:
                 warnings.warn(f"skipping fiber block B{iblock+1}, no good samples found")
+                block._mask[:] = True
                 continue
 
             good_fib = (n_goodsam_per_fiber / nsamples > min_samples_frac)
@@ -983,11 +986,15 @@ class FiberRows(Header, PositionTable):
             enough_fibers = n_goodfib / nfibers > min_fibers_frac
             can_fit = n_goodsam >= (deg_x + 1) * (deg_y + 1)
 
+            block._mask[~good_fib] = True
+
             if not can_fit:
                 warnings.warn(f"fiber block B{iblock+1} does not meet criterium: {n_goodsam = } >= {(deg_x + 1) * (deg_y + 1) = }")
+                block._mask[:] = True
                 continue
             elif not enough_fibers:
                 warnings.warn(f"fiber block B{iblock+1} does not meet criterium: {n_goodfib / nfibers = :.3f} > {min_fibers_frac = :.3f}")
+                block._mask[:] = True
                 continue
 
             good_sam[good_fib] = True

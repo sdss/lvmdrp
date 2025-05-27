@@ -2326,6 +2326,7 @@ class Image(Header):
         centroids.createEmpty(data_dim=(fibers, dim[1]), samples_columns=sorted(set(columns)))
         centroids.setFibers(fibers)
         centroids._good_fibers = good_fibers
+        centroids._mask[good_fibers, :] = False
         centroids.setHeader(self._header.copy())
         centroids.setSlitmap(self._slitmap)
         centroids._header["IMAGETYP"] = "trace_centroid"
