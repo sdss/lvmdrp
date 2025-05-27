@@ -289,7 +289,7 @@ class FiberRows(Header, PositionTable):
 
     def _get_iblocks(self):
         slitmap = self._filter_slitmap().to_pandas()
-        iblocks = slitmap["blockid"].str[1:].astype("int")
+        iblocks = slitmap["blockid"].str[1:].drop_duplicates().values.astype("int") - 1
         return iblocks
 
     def _validate_blockid(self, iblock, blockid, slitmap):
@@ -954,7 +954,7 @@ class FiberRows(Header, PositionTable):
         return numpy.asarray(pix_table), numpy.asarray(poly_table), numpy.asarray(poly_all_table)
 
     def fit_spline2d(self, deg_x=3, deg_y=3, smoothing=None, clip=None, use_weights=True, min_samples_frac=0.0, min_fibers_frac=0.0):
-        iblocks = numpy.arange(LVM_NBLOCKS, dtype="int")
+        iblocks = self._get_iblocks()
 
         columns = numpy.asarray(self._samples.colnames).astype("int")
         ifibers = numpy.arange(LVM_BLOCKSIZE)
