@@ -3520,9 +3520,6 @@ class Spectrum1D(Header):
         bounds = self._parse_gaussians_boundaries(
             ngaussians=counts_guess.size, centroids=centroids_guess,
             counts_range=counts_range, centroids_range=centroids_range, fwhms_range=fwhms_range, to_sigmas=True)
-        # print(numpy.split(guess, 3))
-        # print(numpy.split(bounds[0], 3))
-        # print(numpy.split(bounds[1], 3))
 
         gauss_multi = fit_profile.Gaussians(guess)
         gauss_multi.fit(
@@ -3580,6 +3577,23 @@ class Spectrum1D(Header):
 
         counts = gauss_multi.getPar()
         params = self._parse_gaussians_params(counts, centroids, fwhms, to_fwhms=False)
+        return gauss_multi, params
+
+    def fitMultiGauss_alphas(self, pixels_selection, counts, centroids, fwhms, alphas, alphas_range=[-1.0,+1.0], ftol=1e-3, xtol=1e-3, solver="trf", loss="linear"):
+        error = numpy.ones(self._dim, dtype=numpy.float32) if self._error is None else self._error
+
+        guess = alphas
+        _ = numpy.ones_like(alphas)
+        fixed = self._parse_gaussians_params(counts=counts, centroids=centroids, fwhms=fwhms, to_sigmas=True)
+        bounds = [_ * alphas_range[0], _ * alphas_range[1]]
+
+        gauss_multi = fit_profile.SkewedGaussians(guess, args=fixed)
+        gauss_multi.fit(
+            self._wave[pixels_selection], self._data[pixels_selection], sigma=error[pixels_selection],
+            bounds=bounds, ftol=ftol, xtol=xtol, solver=solver, loss=loss)
+
+        alphas = gauss_multi.getPar()
+        params = numpy.concatenate([counts, centroids, fwhms, alphas])
         return gauss_multi, params
 
     def fitParFile(

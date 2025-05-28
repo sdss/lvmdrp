@@ -12,6 +12,7 @@ from scipy import interpolate, optimize, special
 
 
 fact = numpy.sqrt(2.0 * numpy.pi)
+skew_factor = numpy.sqrt(2 / numpy.pi)
 
 def polyfit2d(x, y, z, order=3):
     """
@@ -967,6 +968,61 @@ class Gaussians_counts(fit_profile1D):
     def __init__(self, par, args):
         fit_profile1D.__init__(self, par, self._profile, args=args)
 
+class SkewedGaussians(fit_profile1D):
+
+    PARAMS = (
+        "counts",    # Integral of the gaussian
+        "centroids", # Mode
+        "sigmas",    # Standard deviation
+        "alphas"     # Shape parameter (not to be confused with skewness)
+    )
+
+    def _deltas(self, alphas):
+        return alphas / numpy.sqrt(1 + alphas**2)
+
+    def _m0(self, alphas, deltas):
+        return skew_factor * deltas - (1-numpy.pi*0.25)*(skew_factor*deltas)**3/(1-2/numpy.pi*deltas**2) - numpy.sign(alphas)*0.5*numpy.exp(-2*numpy.pi/numpy.abs(alphas))
+
+    def skewed_location_to_centroid(self, locations, scales, alphas, deltas):
+        m0 = self._m0(alphas, deltas)
+        return locations + m0*scales
+
+    def _centroid_to_location(self, centroids, scales, alphas, deltas):
+        m0 = self._m0(alphas, deltas)
+        return centroids - m0*scales
+
+    def _scale_to_sigma(self, scales, alphas):
+        deltas = alphas / numpy.sqrt(1 + alphas**2)
+        return scales * numpy.sqrt(1 - (2 * deltas**2) / numpy.pi)
+
+    def _sigma_to_scale(self, sigmas, alphas):
+        delta = alphas / numpy.sqrt(1 + alphas**2)
+        denom = numpy.sqrt(1 - (2 * delta**2) / numpy.pi)
+        return sigmas / denom
+
+    def skewed_gaussian_shapes(self, x, locations, scales, alphas):
+        z = (x[numpy.newaxis, :] - locations[:, numpy.newaxis]) / scales[:, numpy.newaxis]
+        return numpy.exp(-0.5 * z**2) * (1 + special.erf(alphas[:, numpy.newaxis] * z / numpy.sqrt(2)))
+
+    def unpack_params(self):
+        counts, centroids, sigmas = numpy.split(self._args, 3)
+        alphas = self._par
+        return counts, centroids, sigmas, alphas
+
+    def _profile(self, x):
+        counts, centroids, sigmas, alphas = self.unpack_params()
+
+        # convert to PDF parameters
+        deltas = self._deltas(alphas)
+        scales = self._sigma_to_scale(sigmas, alphas)
+        locations = self._centroid_to_location(centroids, scales, alphas, deltas)
+
+        shape = self.skewed_gaussian_shapes(x, locations, scales, alphas)
+        norms = numpy.trapz(shape, x, axis=1)
+        return bn.nansum(counts[:, numpy.newaxis] * shape / norms[:, numpy.newaxis], axis=0)
+
+    def __init__(self, par, args):
+        fit_profile1D.__init__(self, par, self._profile, args=args)
 
 class Gaussians_offset(fit_profile1D):
     def _profile(self, x):
