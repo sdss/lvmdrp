@@ -3601,9 +3601,9 @@ class Spectrum1D(Header):
 
         centroids = pars_guess.get("centroids", pars_fixed.get("centroids"))
         sigmas = pars_guess.get("sigmas", pars_fixed.get("sigmas"))
-        lower = (centroids - nsigmas*sigmas).min()
-        upper = (centroids + nsigmas*sigmas).max()
-        pixels_selection = (lower <= self._pixels) & (self._pixels <= upper)
+        lower = numpy.nanmin(centroids - nsigmas*sigmas)
+        upper = numpy.nanmax(centroids + nsigmas*sigmas)
+        pixels_selection = (lower <= self._wave) & (self._wave <= upper)
 
         skewed_gaussians = fit_profile.SkewedGaussians(pars=pars_guess, fixed=pars_fixed)
         skewed_gaussians.fit(
@@ -3614,7 +3614,7 @@ class Spectrum1D(Header):
 
         if axs is not None:
             axs = skewed_gaussians.plot(
-                x=self._pixels[pixels_selection], y=self._data[pixels_selection],
+                x=self._wave[pixels_selection], y=self._data[pixels_selection],
                 sigma=self._error[pixels_selection], mask=self._mask[pixels_selection], axs=axs)
 
         return skewed_gaussians, params, errors

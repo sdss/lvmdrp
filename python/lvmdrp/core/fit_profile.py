@@ -259,7 +259,6 @@ class SkewedGaussians:
 
     def __call__(self, x):
         counts, centroids, sigmas, alphas = self.unpack_params()
-        # print(self._pars)
         # convert to PDF parameters
         deltas = self._deltas(alphas)
         scales = self._sigma_to_scale(sigmas, deltas)
@@ -267,7 +266,6 @@ class SkewedGaussians:
 
         # evaluate PDF shape
         shape = self._skewed_gaussian_shapes(x, locations, scales, alphas)
-        # print(shape)
         # calculate normalization
         norms = numpy.trapz(shape, x, axis=1)
         return bn.nansum(counts[:, numpy.newaxis] * shape / norms[:, numpy.newaxis], axis=0)
