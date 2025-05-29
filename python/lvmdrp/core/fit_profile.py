@@ -352,12 +352,12 @@ class SkewedGaussians:
         if not guess_valid.all() and not self._ignore_nans:
             raise ValueError(f"Invalid values in guess parameters:\n  {guess}")
 
-        # fixed_list = self._to_list(self._fixed)
-        # fixed_valid = numpy.isfinite(numpy.concatenate(fixed_list)).reshape((-1, self._ngaussians))
-        # if not fixed_valid.all() and not self._ignore_nans:
-        #     raise ValueError(f"Invalid values in fixed parameters:\n  {self._fixed}")
+        fixed_list = self._to_list(self._fixed)
+        fixed_valid = numpy.isfinite(numpy.concatenate(fixed_list)).reshape((-1, self._ngaussians))
+        if not fixed_valid.all() and not self._ignore_nans:
+            raise ValueError(f"Invalid values in fixed parameters:\n  {self._fixed}")
 
-        valid_pars = guess_valid.all(0) & lower_valid.all(0) & upper_valid.all(0)# & fixed_valid.all(0)
+        valid_pars = guess_valid.all(0) & lower_valid.all(0) & upper_valid.all(0) & fixed_valid.all(0)
         return valid_pars
 
     def _parse_guess(self, guess):
