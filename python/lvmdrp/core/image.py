@@ -9,6 +9,7 @@ from tqdm import tqdm
 
 import os
 import numpy
+import itertools as it
 import bottleneck as bn
 import pandas as pd
 from astropy.table import Table
@@ -2569,14 +2570,26 @@ class Image(Header):
         errors = copy(samples)
 
         axs = axs if axs is not None else {}
-        iterator = tqdm(enumerate(columns), total=len(columns), desc=f"measuring fiber in block {iblock+1:>2d}/{LVM_NBLOCKS}", ascii=True, unit="column")
+        iterator = tqdm(enumerate(columns), total=len(columns), desc=f"measuring fiber block {iblock+1:>2d}/{LVM_NBLOCKS}", ascii=True, unit="column")
         for i, icolumn in iterator:
             guess = {name: guess_block[name].getSlice(icolumn, axis="Y")[0] for name in guess_block}
             fixed = {name: fixed_block[name].getSlice(icolumn, axis="Y")[0] for name in fixed_block}
             img_slice = self.getSlice(icolumn, axis="Y")
 
             model_column, fitted_pars, fitted_errs = img_slice.fit_skewed_gaussians(
-                pars_guess=guess, pars_fixed=fixed, bounds=bounds, nsigmas=nsigmas, ftol=ftol, xtol=xtol, solver=solver, loss=loss, axs=axs.get(icolumn))
+                pars_guess=guess, pars_fixed=fixed, bounds=bounds, nsigmas=nsigmas, ftol=ftol, xtol=xtol, solver=solver, loss=loss)
+
+            axs_column = axs.get(icolumn)
+            if axs_column is not None:
+                centroids = guess.get("centroids", fixed.get("centroids"))
+                sigmas = guess.get("sigmas", fixed.get("sigmas"))
+                lower = numpy.nanmin(centroids - nsigmas*sigmas)
+                upper = numpy.nanmax(centroids + nsigmas*sigmas)
+                pixels_selection = (lower <= img_slice._wave) & (img_slice._wave <= upper)
+                axs_column = model_column.plot(
+                    x=img_slice._pixels[pixels_selection], y=img_slice._data[pixels_selection],
+                    sigma=img_slice._error[pixels_selection], mask=img_slice._mask[pixels_selection], axs=axs_column)
+                axs[icolumn] = axs_column
 
             for name in fitted_pars:
                 models[name].append(model_column)
@@ -2588,11 +2601,8 @@ class Image(Header):
             traces[name] = TraceMask.from_samples(data_dim=block._data.shape, samples=samples[name], samples_columns=columns, header=guess_block[name]._header, slitmap=guess_block[name]._slitmap)
         return traces
 
-    def iterative_block_trace(self, counts_guess, centroids_guess, fwhms_guess, alphas_guess, iblock, columns,
-                              counts_range=[1e3,numpy.inf], centroids_range=[-5,+5], fwhms_range=[1.0,3.5], alphas_range=[-1.0,+1.0],
-                              nsigma=6, solver="trf", loss="linear", counts_smoothing=1.0, centroids_smoothing=0.1, fwhms_smoothing=0.1, alphas_smoothing=0.1,
-                              niter=10, axs=None):
-        def _set_alphas(axs):
+    def iterative_block_trace(self, guess_traces, bounds, smoothings, iblock, columns, niter=10, nsigmas=6, solver="trf", loss="linear", axs=None):
+        def _set_plot_alphas(axs):
             if axs is None:
                 return
             for _, axs_column in axs.items():
@@ -2605,75 +2615,39 @@ class Image(Header):
                     elif key == "res":
                         alphas = numpy.linspace(0.1, 1.0, len(lines), endpoint=True) if nlines > 1 else [1.0]
                         [(lines[i].set_alpha(alpha)) for i, alpha in enumerate(alphas)]
+        def _block_cycle(parnames, niter):
+            npars = len(parnames)
+            names_cycle = it.chain.from_iterable(it.repeat(parnames, niter))
+            return ((i//npars, free, [fixed for fixed in parnames if fixed != free]) for i, free in enumerate(names_cycle))
 
         axs = axs or {}
         axs_xmodels = axs.get("xmodels", {})
-        axs_xcounts = axs_xmodels.get("counts", [])
-        axs_xcentroids = axs_xmodels.get("centroids", [])
-        axs_xfwhms = axs_xmodels.get("fwhms", [])
-        axs_xalphas = axs_xmodels.get("alphas", [])
-
         axs_ymodels = axs.get("ymodels", {})
-        axs_ycounts = axs_ymodels.get("counts", {})
-        axs_ycentroids = axs_ymodels.get("centroids", {})
-        axs_yfwhms = axs_ymodels.get("fwhms", {})
-        axs_yalphas = axs_ymodels.get("alphas", {})
 
-        i = 0
         log.info(f"iterating fiber measurements of counts and widths for block {iblock+1}:")
-        while i < niter:
-            log.info(f"   iteration {i+1:3d}/{niter}")
+        for i, free_name, fixed_names in _block_cycle(guess_traces.keys(), niter=niter):
             # TODO: set boundary constraints at image edges to avoid overshoots
+            log.info(f"   iteration {i+1:3d}/{niter}: free parameter = {free_name}, fixed paramaters = {fixed_names}")
+            axs_xfree = axs_xmodels.get(free_name, [])
+            axs_yfree = axs_ymodels.get(free_name, {})
 
-            counts_block = self._measure_block_counts(
-                counts_guess=counts_guess, centroids=centroids_guess, fwhms=fwhms_guess,
-                counts_range=counts_range, iblock=iblock, columns=columns, solver=solver, loss=loss,
-                nsigma=nsigma, axs=axs_ycounts)
-            counts_block.fit_spline(smoothing=counts_smoothing, min_samples_frac=0.7)
-            counts_guess.set_block(iblock=iblock, from_instance=counts_block)
-            counts_guess._coeffs = None
+            free_trace = {free_name: guess_traces.get(free_name)}
+            free_bounds = {f"{free_name}_range": bounds.get(free_name)}
+            fixed_traces = {fixed_name: guess_traces.get(fixed_name) for fixed_name in fixed_names}
 
-            fwhms_block = self._measure_block_fwhms(
-                counts=counts_guess, centroids=centroids_guess, fwhms_guess=fwhms_guess,
-                fwhms_range=fwhms_range, iblock=iblock, columns=columns, solver=solver, loss=loss,
-                nsigma=nsigma, axs=axs_yfwhms)
-            fwhms_block.fit_spline(smoothing=fwhms_smoothing, min_samples_frac=0.7)
-            fwhms_guess.set_block(iblock=iblock, from_instance=fwhms_block)
-            fwhms_guess._coeffs = None
+            fitted_block = self.measure_fiber_block(
+                traces_guess=free_trace, traces_fixed=fixed_traces, iblock=iblock, columns=columns, bounds=free_bounds, nsigmas=nsigmas, solver=solver, loss=loss, axs=axs_yfree)
+            fitted_block[free_name].fit_spline(smoothing=smoothings.get(free_name), min_samples_frac=0.7)
+            free_trace[free_name].set_block(iblock=iblock, from_instance=fitted_block[free_name])
+            free_trace[free_name]._coeffs = None
 
-            centroids_block = self._measure_block_centroids(
-                counts=counts_guess, centroids_guess=centroids_guess, fwhms=fwhms_guess,
-                centroids_range=centroids_range, iblock=iblock, columns=columns, solver=solver, loss=loss,
-                nsigma=nsigma, axs=axs_ycentroids)
-            centroids_block.fit_spline(smoothing=centroids_smoothing, min_samples_frac=0.7)
-            centroids_guess.set_block(iblock=iblock, from_instance=centroids_block)
-            centroids_guess._coeffs = None
+            guess_traces.update(free_trace)
 
-            alphas_block = self._measure_block_alphas(
-                counts=counts_guess, centroids=centroids_guess, fwhms=fwhms_guess, alphas_guess=alphas_guess,
-                alphas_range=alphas_range, iblock=iblock, columns=columns, solver=solver, loss=loss,
-                nsigma=nsigma, axs=axs_yalphas)
-            alphas_block.fit_spline(smoothing=alphas_smoothing, min_samples_frac=0.7)
-            alphas_guess.set_block(iblock=iblock, from_instance=alphas_block)
-            alphas_guess._coeffs = None
+            _set_plot_alphas(axs=axs_yfree)
+            if len(axs_xfree) != 0:
+                free_trace[free_name].plot_block(iblock=iblock, show_model_samples=False, axs={"mod": axs_xfree[i]})
 
-            # update plots
-            _set_alphas(axs=axs_ycounts)
-            _set_alphas(axs=axs_yfwhms)
-            _set_alphas(axs=axs_ycentroids)
-            if len(axs_xcounts) != 0:
-                counts_guess.plot_block(iblock=iblock, show_model_samples=False, axs={"mod": axs_xcounts[i]})
-            if len(axs_xfwhms) != 0:
-                fwhms_guess.plot_block(iblock=iblock, show_model_samples=False, axs={"mod": axs_xfwhms[i]})
-            if len(axs_xcentroids) != 0:
-                centroids_guess.plot_block(iblock=iblock, show_model_samples=False, axs={"mod": axs_xcentroids[i]})
-            if len(axs_xalphas) != 0:
-                alphas_guess.plot_block(iblock=iblock, show_model_samples=False, axs={"mod": axs_xalphas[i]})
-
-            # TODO: setup termination condition depending on the difference in measurements between two consecutive iterations
-            i += 1
-
-        return counts_guess, centroids_guess, fwhms_guess, alphas_guess
+        return guess_traces
 
     def trace_fibers_full(self, centroids_guess, fwhms_guess=2.5, centroids_range=[-5,5], fwhms_range=[1.0,3.5], counts_range=[1e3,numpy.inf],
                           columns=[], iblocks=[], solver="trf"):
