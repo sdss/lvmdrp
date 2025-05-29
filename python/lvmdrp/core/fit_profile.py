@@ -248,21 +248,26 @@ class SkewedGaussians:
         "alphas"     # Shape parameter (not to be confused with skewness)
     )
 
-    def __init__(self, pars, fixed):
-        self._pars, self._ngaussians = self._validate_pars(pars)
-        self._fixed = self._validate_fixed(fixed)
+    def __init__(self, pars, fixed, ignore_nans=True):
+        self._pars = pars
+        self._fixed = fixed
+
+        self._ngaussians = self._check_sizes()
+        self._npars = len(self._pars)
+        self._nfixed = len(self._fixed)
+        self._ignore_nans = ignore_nans
 
     def __call__(self, x):
         counts, centroids, sigmas, alphas = self.unpack_params()
-        # print(counts.shape, centroids.shape, sigmas.shape, alphas.shape)
-
+        # print(self._pars)
         # convert to PDF parameters
         deltas = self._deltas(alphas)
-        scales = self._sigma_to_scale(sigmas, alphas)
+        scales = self._sigma_to_scale(sigmas, deltas)
         locations = self._centroid_to_location(centroids, scales, alphas, deltas)
 
         # evaluate PDF shape
         shape = self._skewed_gaussian_shapes(x, locations, scales, alphas)
+        # print(shape)
         # calculate normalization
         norms = numpy.trapz(shape, x, axis=1)
         return bn.nansum(counts[:, numpy.newaxis] * shape / norms[:, numpy.newaxis], axis=0)
@@ -281,13 +286,11 @@ class SkewedGaussians:
         m0 = self._m0(alphas, deltas)
         return centroids - m0*scales
 
-    def _scale_to_sigma(self, scales, alphas):
-        deltas = alphas / numpy.sqrt(1 + alphas**2)
+    def _scale_to_sigma(self, scales, deltas):
         return scales * numpy.sqrt(1 - (2 * deltas**2) / numpy.pi)
 
-    def _sigma_to_scale(self, sigmas, alphas):
-        delta = alphas / numpy.sqrt(1 + alphas**2)
-        denom = numpy.sqrt(1 - (2 * delta**2) / numpy.pi)
+    def _sigma_to_scale(self, sigmas, deltas):
+        denom = numpy.sqrt(1 - (2 * deltas**2) / numpy.pi)
         return sigmas / denom
 
     def _skewed_gaussian_shapes(self, x, locations, scales, alphas):
@@ -324,27 +327,49 @@ class SkewedGaussians:
 
         return numpy.concatenate(params)
 
-    def _validate_pars(self, pars):
-        ngaussians = numpy.mean([pars[name].size for name in self.PARNAMES if name in pars]).astype("int")
-        return pars, ngaussians
+    def _to_list(self, x):
+        return [x[name] for name in self.PARNAMES if name in x]
 
-    def _validate_fixed(self, fixed):
-        return fixed
+    def _check_sizes(self):
+        pars_list = self._to_list(self._pars)
+        fixed_list = self._to_list(self._fixed)
+        par_sizes = numpy.asarray([par.size for par in pars_list], dtype="int")
+        if (par_sizes[0] != par_sizes[1:]).any():
+            raise ValueError(f"Incompatible free parameter sizes: {par_sizes}")
+        fix_sizes = numpy.asarray([par.size for par in fixed_list], dtype="int")
+        if (fix_sizes[0] != fix_sizes[1:]).any():
+            raise ValueError(f"Incompatible fixed parameter sizes: {fix_sizes}")
+        return par_sizes[0]
 
-    def _validate_guess(self, guess, bounds):
-        pars = guess if guess is not None else self._pars
-        guess = numpy.concatenate([pars[name] for name in self.PARNAMES if name in pars])
+    def _check_valid(self, guess, bounds):
+        bounds_valid = ~numpy.isnan(bounds)
+        lower_valid = bounds_valid[0].reshape((-1, self._ngaussians))
+        upper_valid = bounds_valid[1].reshape((-1, self._ngaussians))
+        if not lower_valid.all() and not self._ignore_nans:
+            raise ValueError(f"Invalid values in lower bounds:\n  {bounds[0]}")
+        if not upper_valid.all() and not self._ignore_nans:
+            raise ValueError(f"Invalid values in upper bounds:\n  {bounds[1]}")
 
-        bounds = numpy.atleast_1d(bounds)
-        guess = numpy.clip(guess, *bounds)
-
-        if numpy.any(numpy.isnan(guess)):
+        guess_valid = numpy.isfinite(guess).reshape((-1, self._ngaussians))
+        if not guess_valid.all() and not self._ignore_nans:
             raise ValueError(f"Invalid values in guess parameters:\n  {guess}")
+
+        # fixed_list = self._to_list(self._fixed)
+        # fixed_valid = numpy.isfinite(numpy.concatenate(fixed_list)).reshape((-1, self._ngaussians))
+        # if not fixed_valid.all() and not self._ignore_nans:
+        #     raise ValueError(f"Invalid values in fixed parameters:\n  {self._fixed}")
+
+        valid_pars = guess_valid.all(0) & lower_valid.all(0) & upper_valid.all(0)# & fixed_valid.all(0)
+        return valid_pars
+
+    def _parse_guess(self, guess):
+
+        guess_list = self._to_list(guess)
+        guess = numpy.concatenate(guess_list)
 
         return guess
 
-    def _validate_boundaries(self, counts=None, centroids=None, sigmas=None, alphas=None,
-                                    counts_range=None, centroids_range=None, sigmas_range=None, alphas_range=None):
+    def _parse_boundaries(self, counts=None, centroids=None, sigmas=None, alphas=None, counts_range=None, centroids_range=None, sigmas_range=None, alphas_range=None):
 
         bounds_lower, bounds_upper = [], []
         _ = numpy.ones(self._ngaussians)
@@ -376,14 +401,12 @@ class SkewedGaussians:
         _set_boundaries(sigmas, sigmas_range, clip=(0.0,None))
         _set_boundaries(alphas, alphas_range)
 
+        bounds_lower = numpy.concatenate(bounds_lower)
+        bounds_upper = numpy.concatenate(bounds_upper)
         if len(bounds_lower) == 0 or len(bounds_upper) == 0:
-            return [-numpy.inf, +numpy.inf]
+            return numpy.asarray([_ * -numpy.inf, _ * +numpy.inf])
 
-        bounds = [numpy.concatenate(bounds_lower), numpy.concatenate(bounds_upper)]
-        if numpy.any(numpy.isnan(bounds[0])):
-            raise ValueError(f"Invalid values in lower bounds:\n  {bounds[0]}")
-        if numpy.any(numpy.isnan(bounds[1])):
-            raise ValueError(f"Invalid values in lower bounds:\n  {bounds[1]}")
+        bounds = numpy.asarray([bounds_lower, bounds_upper])
 
         return bounds
 
@@ -397,25 +420,29 @@ class SkewedGaussians:
         params = [self._pars.get(name, self._fixed.get(name, None)) for name in self.PARNAMES]
         return params
 
-    def pack_params(self, pars):
-        params = {name: pars[i*self._ngaussians:(i+1)*self._ngaussians] for i, name in enumerate(self._pars.keys())}
+    def pack_params(self, pars, valid_pars):
+        params = {name: numpy.full(self._ngaussians, numpy.nan) for name in self._pars}
+        for i, name in enumerate(self._pars.keys()):
+            params[name][valid_pars] = pars[i*self._nfitted:(i+1)*self._nfitted]
         return params
 
-    def residuals(self, pars, x, y, sigma=None):
-        self._pars = self.pack_params(pars)
+    def residuals(self, pars, valid_pars, x, y, sigma=None):
+        self._pars = self.pack_params(pars, valid_pars)
         return (self(x) - y) / (1.0 if sigma is None else sigma)
 
     def fit(self, x, y, sigma=None, guess=None, bounds=(-numpy.inf,+numpy.inf), ftol=1e-8, xtol=1e-8, maxfev=9999, solver="trf", loss="linear"):
 
         sigma_ = self._validate_uncertainties(sigma)
 
-        guess = self._pars if guess is None else guess
-        bounds_ = self._validate_boundaries(centroids=guess.get("centroids"), **bounds)
-        guess_ = self._validate_guess(guess, bounds_)
+        guess = guess if guess is not None else self._pars
+        bounds_ = self._parse_boundaries(centroids=guess.get("centroids"), **bounds)
+        guess_ = self._parse_guess(guess)
+        valid_pars = self._check_valid(guess_, bounds_)
+        self._nfitted = valid_pars.sum()
 
         try:
             model = optimize.least_squares(
-                self.residuals, x0=guess_, bounds=bounds_, args=(x, y, sigma_), max_nfev=maxfev, ftol=ftol, xtol=xtol,
+                self.residuals, x0=guess_[valid_pars], bounds=bounds_[:, valid_pars], args=(valid_pars, x, y, sigma_), max_nfev=maxfev, ftol=ftol, xtol=xtol,
                 method=solver, loss=loss)
         except Exception as e:
             warnings.warn(f"{e}")
@@ -428,10 +455,10 @@ class SkewedGaussians:
             warnings.warn(f"  guess       = {guess_}")
             warnings.warn(f"  lower bound = {bounds_[0]}")
             warnings.warn(f"  upper bound = {bounds_[1]}")
-            self._mask = self.pack_params(numpy.ones(self._ngaussians, dtype="bool"))
-            self._pars = self.pack_params(numpy.full(self._ngaussians, numpy.nan))
-            self._errs = self.pack_params(numpy.full(self._ngaussians, numpy.nan))
-            self._cov = numpy.full((self._ngaussians,self._ngaussians), numpy.nan)
+            self._mask = self.pack_params(numpy.ones(self._nfitted, dtype="bool"), valid_pars=valid_pars)
+            self._pars = self.pack_params(numpy.full(self._nfitted, numpy.nan), valid_pars=valid_pars)
+            self._errs = self.pack_params(numpy.full(self._nfitted, numpy.nan), valid_pars=valid_pars)
+            self._cov = numpy.full((self._nfitted,self._nfitted), numpy.nan)
             return
 
         try:
@@ -441,7 +468,7 @@ class SkewedGaussians:
                 self._cov = numpy.linalg.pinv(model.jac.T @ model.jac)
             except Exception as e:
                 warnings.warn(f"while calculating variance with numpy.linalg.pinv: {e}")
-                self._cov = numpy.full((self._ngaussians,self._ngaussians), numpy.nan)
+                self._cov = numpy.full((self._nfitted,self._nfitted), numpy.nan)
 
         pars = model.x
         mask = model.active_mask != 0
@@ -449,9 +476,9 @@ class SkewedGaussians:
         pars[mask] = numpy.nan
         errs[mask] = numpy.nan
 
-        self._mask = self.pack_params(mask)
-        self._pars = self.pack_params(pars)
-        self._errs = self.pack_params(errs)
+        self._mask = self.pack_params(mask, valid_pars=valid_pars)
+        self._pars = self.pack_params(pars, valid_pars=valid_pars)
+        self._errs = self.pack_params(errs, valid_pars=valid_pars)
 
     def plot_residuals(self, x, y=None, sigma=None, mask=None, axs=None):
         residuals = None
