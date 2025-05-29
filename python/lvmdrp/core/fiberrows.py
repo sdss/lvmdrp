@@ -83,8 +83,8 @@ class FiberRows(Header, PositionTable):
         return new_fiberrows
 
     @classmethod
-    def from_samples(cls, data_dim, samples, samples_columns=None):
-        new_fiberrows = cls.create_empty(data_dim=data_dim, samples_columns=samples_columns)
+    def from_samples(cls, data_dim, samples, samples_columns=None, header=None, slitmap=None):
+        new_fiberrows = cls.create_empty(data_dim=data_dim, samples_columns=samples_columns, header=header, slitmap=slitmap)
         new_fiberrows.set_samples(samples, columns=samples_columns)
         return new_fiberrows
 

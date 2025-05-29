@@ -3450,7 +3450,7 @@ class Spectrum1D(Header):
                 self._wave > centroids[i] - nsigma * sigmas[i],
                 self._wave < centroids[i] + nsigma * sigmas[i],
             )
-            integrals[i] = numpy.interp(centroids[i], self._pixels, self._data) * fact * sigmas[i]
+            integrals[i] = numpy.interp(centroids[i], self._wave, self._data) * fact * sigmas[i]
             select = numpy.logical_or(select, select_)
         if return_pixels_selection:
             return integrals, select
