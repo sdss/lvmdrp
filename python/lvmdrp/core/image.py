@@ -2512,7 +2512,7 @@ class Image(Header):
         counts = TraceMask.from_samples(data_dim=counts_block._data.shape, samples=counts_samples, samples_columns=columns)
         return counts
 
-    def _measure_block_alphas(self, counts ,centroids, fwhms, alphas_guess, iblock, columns, alphas_range=[-1.0,+1.0], nsigma=6, solver="trf", loss="linear", axs=None):
+    def _measure_block_alphas(self, counts, centroids, fwhms, alphas_guess, iblock, columns, alphas_range=[-1.0,+1.0], nsigma=6, solver="trf", loss="linear", axs=None):
         counts_block = counts.get_block(iblock=iblock)
         centroids_block = centroids.get_block(iblock=iblock)
         fwhms_block = fwhms.get_block(iblock=iblock)
@@ -2559,6 +2559,34 @@ class Image(Header):
 
         alphas = TraceMask.from_samples(data_dim=alphas_block._data.shape, samples=alphas_samples, samples_columns=columns)
         return alphas
+
+    def measure_fiber_block(self, traces_guess, traces_fixed, iblock, columns, bounds, nsigmas=6, ftol=1e-3, xtol=1e-3, solver="trf", loss="linear", axs=None):
+        guess_block = {name: traces_guess[name].get_block(iblock) for name in traces_guess}
+        fixed_block = {name: traces_fixed[name].get_block(iblock) for name in traces_fixed}
+
+        models = {name: [] for name in guess_block}
+        samples = {name: numpy.full((block._fibers,columns.size), numpy.nan) for name, block in guess_block.items()}
+        errors = copy(samples)
+
+        axs = axs if axs is not None else {}
+        iterator = tqdm(enumerate(columns), total=len(columns), desc=f"measuring fiber in block {iblock+1:>2d}/{LVM_NBLOCKS}", ascii=True, unit="column")
+        for i, icolumn in iterator:
+            guess = {name: guess_block[name].getSlice(icolumn, axis="Y")[0] for name in guess_block}
+            fixed = {name: fixed_block[name].getSlice(icolumn, axis="Y")[0] for name in fixed_block}
+            img_slice = self.getSlice(icolumn, axis="Y")
+
+            model_column, fitted_pars, fitted_errs = img_slice.fit_skewed_gaussians(
+                pars_guess=guess, pars_fixed=fixed, bounds=bounds, nsigmas=nsigmas, ftol=ftol, xtol=xtol, solver=solver, loss=loss, axs=axs.get(icolumn))
+
+            for name in fitted_pars:
+                models[name].append(model_column)
+                samples[name][:, i] = fitted_pars[name]
+                errors[name][:, i] = fitted_errs[name]
+
+        traces = {}
+        for name, block in guess_block.items():
+            traces[name] = TraceMask.from_samples(data_dim=block._data.shape, samples=samples[name], samples_columns=columns, header=guess_block[name]._header, slitmap=guess_block[name]._slitmap)
+        return traces
 
     def iterative_block_trace(self, counts_guess, centroids_guess, fwhms_guess, alphas_guess, iblock, columns,
                               counts_range=[1e3,numpy.inf], centroids_range=[-5,+5], fwhms_range=[1.0,3.5], alphas_range=[-1.0,+1.0],

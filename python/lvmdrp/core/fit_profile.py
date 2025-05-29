@@ -239,6 +239,280 @@ class IFURadialGradient:
         gradient_model = self(x, y)
         plot_radial_gradient_fit(slitmap, z, gradient_model=gradient_model, telescope="Sci", axs=axs)
 
+class SkewedGaussians:
+
+    PARNAMES = (
+        "counts",    # Integral of the gaussian
+        "centroids", # Mode
+        "sigmas",    # Standard deviation
+        "alphas"     # Shape parameter (not to be confused with skewness)
+    )
+
+    def __init__(self, pars, fixed):
+        self._pars, self._ngaussians = self._validate_pars(pars)
+        self._fixed = self._validate_fixed(fixed)
+
+    def __call__(self, x):
+        counts, centroids, sigmas, alphas = self.unpack_params()
+        # print(counts.shape, centroids.shape, sigmas.shape, alphas.shape)
+
+        # convert to PDF parameters
+        deltas = self._deltas(alphas)
+        scales = self._sigma_to_scale(sigmas, alphas)
+        locations = self._centroid_to_location(centroids, scales, alphas, deltas)
+
+        # evaluate PDF shape
+        shape = self._skewed_gaussian_shapes(x, locations, scales, alphas)
+        # calculate normalization
+        norms = numpy.trapz(shape, x, axis=1)
+        return bn.nansum(counts[:, numpy.newaxis] * shape / norms[:, numpy.newaxis], axis=0)
+
+    def _deltas(self, alphas):
+        return alphas / numpy.sqrt(1 + alphas**2)
+
+    def _m0(self, alphas, deltas):
+        return skew_factor * deltas - (1-numpy.pi*0.25)*(skew_factor*deltas)**3/(1-2/numpy.pi*deltas**2) - numpy.sign(alphas)*0.5*numpy.exp(-2*numpy.pi/numpy.abs(alphas))
+
+    def _location_to_centroid(self, locations, scales, alphas, deltas):
+        m0 = self._m0(alphas, deltas)
+        return locations + m0*scales
+
+    def _centroid_to_location(self, centroids, scales, alphas, deltas):
+        m0 = self._m0(alphas, deltas)
+        return centroids - m0*scales
+
+    def _scale_to_sigma(self, scales, alphas):
+        deltas = alphas / numpy.sqrt(1 + alphas**2)
+        return scales * numpy.sqrt(1 - (2 * deltas**2) / numpy.pi)
+
+    def _sigma_to_scale(self, sigmas, alphas):
+        delta = alphas / numpy.sqrt(1 + alphas**2)
+        denom = numpy.sqrt(1 - (2 * delta**2) / numpy.pi)
+        return sigmas / denom
+
+    def _skewed_gaussian_shapes(self, x, locations, scales, alphas):
+        z = (x[numpy.newaxis, :] - locations[:, numpy.newaxis]) / scales[:, numpy.newaxis]
+        return numpy.exp(-0.5 * z**2) * (1 + special.erf(alphas[:, numpy.newaxis] * z / numpy.sqrt(2)))
+
+    def _guess_gaussians_integral(self, pixels, centroids, fwhms, nsigma=6, return_pixels_selection=False):
+        fact = numpy.sqrt(2 * numpy.pi)
+        integrals = numpy.zeros(len(centroids), dtype=numpy.float32)
+        sigmas = fwhms / 2.354
+
+        select = numpy.zeros(self._dim, dtype="bool")
+        for i in range(len(centroids)):
+            select_ = numpy.logical_and(
+                pixels > centroids[i] - nsigma * sigmas[i],
+                pixels < centroids[i] + nsigma * sigmas[i],
+            )
+            integrals[i] = numpy.interp(centroids[i], pixels, self._data) * fact * sigmas[i]
+            select = numpy.logical_or(select, select_)
+        if return_pixels_selection:
+            return integrals, select
+        return integrals
+
+    def _parse_gaussians_params(self, counts=None, centroids=None, sigmas=None, alphas=None):
+        params = []
+        if counts is not None:
+            params.append(counts)
+        if centroids is not None:
+            params.append(centroids)
+        if sigmas is not None:
+            params.append(sigmas)
+        if alphas is not None:
+            params.append(alphas)
+
+        return numpy.concatenate(params)
+
+    def _validate_pars(self, pars):
+        ngaussians = numpy.mean([pars[name].size for name in self.PARNAMES if name in pars]).astype("int")
+        return pars, ngaussians
+
+    def _validate_fixed(self, fixed):
+        return fixed
+
+    def _validate_guess(self, guess, bounds):
+        pars = guess if guess is not None else self._pars
+        guess = numpy.concatenate([pars[name] for name in self.PARNAMES if name in pars])
+
+        bounds = numpy.atleast_1d(bounds)
+        guess = numpy.clip(guess, *bounds)
+
+        if numpy.any(numpy.isnan(guess)):
+            raise ValueError(f"Invalid values in guess parameters:\n  {guess}")
+
+        return guess
+
+    def _validate_boundaries(self, counts=None, centroids=None, sigmas=None, alphas=None,
+                                    counts_range=None, centroids_range=None, sigmas_range=None, alphas_range=None):
+
+        bounds_lower, bounds_upper = [], []
+        _ = numpy.ones(self._ngaussians)
+        def _set_boundaries(x, x_range, clip=None):
+            if x is not None and x_range is None:
+                raise ValueError(f"Invalid value for `x_range`: {x_range = }. Expected `x_range` when `x` is given")
+
+            if x is not None and x_range is not None:
+                lower = x + x_range[0]
+                upper = x + x_range[1]
+            elif x_range is not None:
+                lower = _ * x_range[0]
+                upper = _ * x_range[1]
+            else:
+                lower = numpy.array([])
+                upper = numpy.array([])
+
+            if clip is not None and isinstance(clip, (tuple,list)) and len(clip) == 2:
+                if clip[0] is not None:
+                    lower = numpy.clip(lower, a_min=clip[0], a_max=None)
+                if clip[1] is not None:
+                    upper = numpy.clip(upper, a_min=None, a_max=clip[1])
+
+            bounds_lower.append(lower)
+            bounds_upper.append(upper)
+
+        _set_boundaries(counts, counts_range, clip=(0.0,None))
+        _set_boundaries(centroids, centroids_range, clip=(3,4082))
+        _set_boundaries(sigmas, sigmas_range, clip=(0.0,None))
+        _set_boundaries(alphas, alphas_range)
+
+        if len(bounds_lower) == 0 or len(bounds_upper) == 0:
+            return [-numpy.inf, +numpy.inf]
+
+        bounds = [numpy.concatenate(bounds_lower), numpy.concatenate(bounds_upper)]
+        if numpy.any(numpy.isnan(bounds[0])):
+            raise ValueError(f"Invalid values in lower bounds:\n  {bounds[0]}")
+        if numpy.any(numpy.isnan(bounds[1])):
+            raise ValueError(f"Invalid values in lower bounds:\n  {bounds[1]}")
+
+        return bounds
+
+    def _validate_uncertainties(self, sigma):
+        sigma = sigma if sigma is not None else 1.0
+        if numpy.isnan(sigma).any():
+            raise ValueError(f"Errors have non-valid values: {sigma}")
+        return sigma
+
+    def unpack_params(self):
+        params = [self._pars.get(name, self._fixed.get(name, None)) for name in self.PARNAMES]
+        return params
+
+    def pack_params(self, pars):
+        params = {name: pars[i*self._ngaussians:(i+1)*self._ngaussians] for i, name in enumerate(self._pars.keys())}
+        return params
+
+    def residuals(self, pars, x, y, sigma=None):
+        self._pars = self.pack_params(pars)
+        return (self(x) - y) / (1.0 if sigma is None else sigma)
+
+    def fit(self, x, y, sigma=None, guess=None, bounds=(-numpy.inf,+numpy.inf), ftol=1e-8, xtol=1e-8, maxfev=9999, solver="trf", loss="linear"):
+
+        sigma_ = self._validate_uncertainties(sigma)
+
+        guess = self._pars if guess is None else guess
+        bounds_ = self._validate_boundaries(centroids=guess.get("centroids"), **bounds)
+        guess_ = self._validate_guess(guess, bounds_)
+
+        try:
+            model = optimize.least_squares(
+                self.residuals, x0=guess_, bounds=bounds_, args=(x, y, sigma_), max_nfev=maxfev, ftol=ftol, xtol=xtol,
+                method=solver, loss=loss)
+        except Exception as e:
+            warnings.warn(f"{e}")
+            warnings.warn("data points:")
+            warnings.warn(f"  {x       = }")
+            warnings.warn(f"  {y       = }")
+            warnings.warn(f"  {sigma_  = }")
+            warnings.warn(f"  {self(x) = }")
+            warnings.warn("current parameters:")
+            warnings.warn(f"  guess       = {guess_}")
+            warnings.warn(f"  lower bound = {bounds_[0]}")
+            warnings.warn(f"  upper bound = {bounds_[1]}")
+            self._mask = self.pack_params(numpy.ones(self._ngaussians, dtype="bool"))
+            self._pars = self.pack_params(numpy.full(self._ngaussians, numpy.nan))
+            self._errs = self.pack_params(numpy.full(self._ngaussians, numpy.nan))
+            self._cov = numpy.full((self._ngaussians,self._ngaussians), numpy.nan)
+            return
+
+        try:
+            self._cov = numpy.linalg.inv(model.jac.T @ model.jac)
+        except numpy.linalg.LinAlgError:
+            try:
+                self._cov = numpy.linalg.pinv(model.jac.T @ model.jac)
+            except Exception as e:
+                warnings.warn(f"while calculating variance with numpy.linalg.pinv: {e}")
+                self._cov = numpy.full((self._ngaussians,self._ngaussians), numpy.nan)
+
+        pars = model.x
+        mask = model.active_mask != 0
+        errs = numpy.sqrt(numpy.diag(self._cov))
+        pars[mask] = numpy.nan
+        errs[mask] = numpy.nan
+
+        self._mask = self.pack_params(mask)
+        self._pars = self.pack_params(pars)
+        self._errs = self.pack_params(errs)
+
+    def plot_residuals(self, x, y=None, sigma=None, mask=None, axs=None):
+        residuals = None
+        if y is not None and sigma is not None:
+            residuals = (self(x) - y) / sigma
+        elif y is not None:
+            residuals = self(x) - y
+        if residuals is None:
+            return
+
+        if axs is None:
+            _, ax = create_subplots(to_display=True, figsize=(15,5), layout="constrained")
+            axs = {"res": ax}
+        elif isinstance(axs, plt.Axes):
+            axs = {"res": axs}
+        elif isinstance(axs, dict) and "mod" in axs and "res" not in axs:
+            axs["mod"].tick_params(labelbottom=False)
+
+            ax_divider = make_axes_locatable(axs["mod"])
+            ax_res = ax_divider.append_axes("bottom", size="30%", pad="5%")
+            ax_res.sharex(axs["mod"])
+            axs["res"] = ax_res
+        elif isinstance(axs, dict) and "res" in axs:
+            pass
+
+        axs["res"].axhline(ls="--", lw=1, color="0.2")
+        axs["res"].axhline(-1.0, ls=":", lw=1, color="0.2")
+        axs["res"].axhline(+1.0, ls=":", lw=1, color="0.2")
+        axs["res"].step(x, residuals, lw=1, color="tab:blue", where="mid")
+        axs["res"].vlines(x[mask], *axs["res"].get_ylim(), lw=1, color="0.7", alpha=0.5, zorder=-1)
+        return axs
+
+    def plot(self, x, y=None, sigma=None, mask=None, axs=None):
+        if axs is None:
+            _, axs = create_subplots(to_display=True, figsize=(15,7), layout="constrained")
+        if not isinstance(axs, dict) or "mod" not in axs:
+            axs = {"mod": axs}
+
+        model = self(x)
+
+        if y is not None and sigma is not None:
+            axs["mod"].errorbar(x, y, yerr=sigma, fmt=".-", ms=7, mew=0, lw=1, elinewidth=1, mfc="tab:red", color="0.2", ecolor="0.2")
+        elif y is not None:
+            axs["mod"].step(x, y, lw=1, color="0.2", where="mid")
+
+        if any(axs["mod"].get_lines()):
+            ylims = axs["mod"].get_ylim()
+        else:
+            ylims = None
+
+        if mask is not None:
+            axs["mod"].vlines(x[mask], *ylims, lw=1, color="0.7", alpha=0.5, zorder=-1)
+
+        axs["mod"].step(x, model, lw=1, color="tab:blue", where="mid")
+
+        if ylims is not None:
+            axs["mod"].set_ylim(*ylims)
+
+        self.plot_residuals(x, y, sigma, mask, axs=axs)
+        return axs
+
 
 class SpectralResolution(object):
     def __init__(self, res=None):
@@ -313,7 +587,7 @@ class fit_profile1D(object):
             self._guess_par(x, y)
 
         p0 = self.fix_guess(bounds)
-        m, n = len(x), len(p0)
+        n = len(p0)
 
         if numpy.any(numpy.isnan(p0)):
             raise ValueError(f"Invalid values in guess parameters:\n  {p0}")
@@ -338,7 +612,7 @@ class fit_profile1D(object):
             warnings.warn(f"  lower bound = {bounds[0]}")
             warnings.warn(f"  upper bound = {bounds[1]}")
             self._par = numpy.full(n, numpy.nan)
-            self._cov = numpy.full((m,n), numpy.nan)
+            self._cov = numpy.full((n,n), numpy.nan)
             self._err = numpy.full(n, numpy.nan)
             self._mask = numpy.ones(self._par.size, dtype="bool")
             return
@@ -352,7 +626,7 @@ class fit_profile1D(object):
                 self._cov = numpy.linalg.pinv(model.jac.T @ model.jac)
             except Exception as e:
                 warnings.warn(f"while calculating variance with numpy.linalg.pinv: {e}")
-                self._cov = numpy.full((m,n), numpy.nan)
+                self._cov = numpy.full((n,n), numpy.nan)
 
         self._err = numpy.sqrt(numpy.diag(self._cov))
 
@@ -403,13 +677,18 @@ class fit_profile1D(object):
             axs["mod"].errorbar(x, y, yerr=sigma, fmt=".-", ms=7, mew=0, lw=1, elinewidth=1, mfc="tab:red", color="0.2", ecolor="0.2")
         elif y is not None:
             axs["mod"].step(x, y, lw=1, color="0.2", where="mid")
-        ylims = axs["mod"].get_ylim()
+
+        if any(axs["mod"].get_lines()):
+            ylims = axs["mod"].get_ylim()
+        else:
+            ylims = None
 
         if mask is not None:
             axs["mod"].vlines(x[mask], *ylims, lw=1, color="0.7", alpha=0.5, zorder=-1)
 
         axs["mod"].step(x, model, lw=1, color="tab:blue", where="mid")
-        axs["mod"].set_ylim(*ylims)
+        if ylims is not None:
+            axs["mod"].set_ylim(*ylims)
 
         self.plot_residuals(x, y, sigma, mask, axs=axs)
         return axs
@@ -968,61 +1247,6 @@ class Gaussians_counts(fit_profile1D):
     def __init__(self, par, args):
         fit_profile1D.__init__(self, par, self._profile, args=args)
 
-class SkewedGaussians(fit_profile1D):
-
-    PARAMS = (
-        "counts",    # Integral of the gaussian
-        "centroids", # Mode
-        "sigmas",    # Standard deviation
-        "alphas"     # Shape parameter (not to be confused with skewness)
-    )
-
-    def _deltas(self, alphas):
-        return alphas / numpy.sqrt(1 + alphas**2)
-
-    def _m0(self, alphas, deltas):
-        return skew_factor * deltas - (1-numpy.pi*0.25)*(skew_factor*deltas)**3/(1-2/numpy.pi*deltas**2) - numpy.sign(alphas)*0.5*numpy.exp(-2*numpy.pi/numpy.abs(alphas))
-
-    def skewed_location_to_centroid(self, locations, scales, alphas, deltas):
-        m0 = self._m0(alphas, deltas)
-        return locations + m0*scales
-
-    def _centroid_to_location(self, centroids, scales, alphas, deltas):
-        m0 = self._m0(alphas, deltas)
-        return centroids - m0*scales
-
-    def _scale_to_sigma(self, scales, alphas):
-        deltas = alphas / numpy.sqrt(1 + alphas**2)
-        return scales * numpy.sqrt(1 - (2 * deltas**2) / numpy.pi)
-
-    def _sigma_to_scale(self, sigmas, alphas):
-        delta = alphas / numpy.sqrt(1 + alphas**2)
-        denom = numpy.sqrt(1 - (2 * delta**2) / numpy.pi)
-        return sigmas / denom
-
-    def skewed_gaussian_shapes(self, x, locations, scales, alphas):
-        z = (x[numpy.newaxis, :] - locations[:, numpy.newaxis]) / scales[:, numpy.newaxis]
-        return numpy.exp(-0.5 * z**2) * (1 + special.erf(alphas[:, numpy.newaxis] * z / numpy.sqrt(2)))
-
-    def unpack_params(self):
-        counts, centroids, sigmas = numpy.split(self._args, 3)
-        alphas = self._par
-        return counts, centroids, sigmas, alphas
-
-    def _profile(self, x):
-        counts, centroids, sigmas, alphas = self.unpack_params()
-
-        # convert to PDF parameters
-        deltas = self._deltas(alphas)
-        scales = self._sigma_to_scale(sigmas, alphas)
-        locations = self._centroid_to_location(centroids, scales, alphas, deltas)
-
-        shape = self.skewed_gaussian_shapes(x, locations, scales, alphas)
-        norms = numpy.trapz(shape, x, axis=1)
-        return bn.nansum(counts[:, numpy.newaxis] * shape / norms[:, numpy.newaxis], axis=0)
-
-    def __init__(self, par, args):
-        fit_profile1D.__init__(self, par, self._profile, args=args)
 
 class Gaussians_offset(fit_profile1D):
     def _profile(self, x):
