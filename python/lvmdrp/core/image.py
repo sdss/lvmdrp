@@ -2564,13 +2564,15 @@ class Image(Header):
     def measure_fiber_block(self, traces_guess, traces_fixed, iblock, columns, bounds, nsigmas=6, ftol=1e-3, xtol=1e-3, solver="trf", loss="linear", axs=None):
         guess_block = {name: traces_guess[name].get_block(iblock) for name in traces_guess}
         fixed_block = {name: traces_fixed[name].get_block(iblock) for name in traces_fixed}
+        free_names = list(traces_guess.keys())
+        fixed_names = list(traces_fixed.keys())
 
         models = {name: [] for name in guess_block}
         samples = {name: numpy.full((block._fibers,columns.size), numpy.nan) for name, block in guess_block.items()}
         errors = copy(samples)
 
         axs = axs if axs is not None else {}
-        iterator = tqdm(enumerate(columns), total=len(columns), desc=f"measuring fiber block {iblock+1:>2d}/{LVM_NBLOCKS}", ascii=True, unit="column")
+        iterator = tqdm(enumerate(columns), total=len(columns), desc=f"measuring {free_names} with fixed {fixed_names} @ block {iblock+1:>2d}/{LVM_NBLOCKS}", ascii=True, unit="column")
         for i, icolumn in iterator:
             guess = {name: guess_block[name].getSlice(icolumn, axis="Y")[0] for name in guess_block}
             fixed = {name: fixed_block[name].getSlice(icolumn, axis="Y")[0] for name in fixed_block}
@@ -2625,10 +2627,12 @@ class Image(Header):
         axs_xmodels = axs.get("xmodels", {})
         axs_ymodels = axs.get("ymodels", {})
 
-        log.info(f"iterating fiber measurements of counts and widths for block {iblock+1}:")
+        # TODO: implement burn-in iterations to refine guess traces using Gaussian fitting
+
+        log.info(f"initiating iterative fiber tracing with parameters: {list(guess_traces.keys())}")
         for i, free_name, fixed_names in _block_cycle(guess_traces.keys(), niter=niter):
             # TODO: set boundary constraints at image edges to avoid overshoots
-            log.info(f"   iteration {i+1:3d}/{niter}: free parameter = {free_name}, fixed paramaters = {fixed_names}")
+            log.info(f"   iteration {i+1:3d}/{niter}:")
             axs_xfree = axs_xmodels.get(free_name, [])
             axs_yfree = axs_ymodels.get(free_name, {})
 
