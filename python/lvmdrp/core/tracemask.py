@@ -31,6 +31,7 @@ class TraceMask(FiberRows):
         data, error, mask = None, None, None
         coeffs, poly_kind, poly_deg = None, None, None
         samples = None
+        samples_error = None
         slitmap = None
         with pyfits.open(in_tracemask, uint=True, do_not_scale_image_data=True, memmap=False) as hdus:
             header = hdus["PRIMARY"].header
@@ -42,7 +43,9 @@ class TraceMask(FiberRows):
                 if hdu.name == "BADPIX":
                     mask = hdu.data.astype("bool")
                 if hdu.name == "SAMPLES":
-                    samples = Table(hdu.data)
+                    samples = Table.read(hdu)
+                if hdu.name == "SAMPLES_ERROR":
+                    samples_error = Table.read(hdu)
                 if hdu.name == "COEFFS":
                     coeffs = hdu.data.astype("float32")
                     poly_kind = header.get("POLYKIND")
@@ -50,7 +53,7 @@ class TraceMask(FiberRows):
                 if hdu.name == "SLITMAP":
                     slitmap = hdu
 
-            trace = cls(data=data, error=error, mask=mask, slitmap=slitmap, samples=samples, coeffs=coeffs, poly_kind=poly_kind, poly_deg=poly_deg, header=header)
+            trace = cls(data=data, error=error, mask=mask, slitmap=slitmap, samples=samples, samples_error=samples_error, coeffs=coeffs, poly_kind=poly_kind, poly_deg=poly_deg, header=header)
 
         return trace
 
@@ -62,6 +65,7 @@ class TraceMask(FiberRows):
         mask=None,
         slitmap=None,
         samples=None,
+        samples_error=None,
         shape=None,
         size=None,
         arc_position_x=None,
@@ -80,6 +84,7 @@ class TraceMask(FiberRows):
             mask,
             slitmap,
             samples,
+            samples_error,
             shape,
             size,
             arc_position_x,
@@ -140,6 +145,8 @@ class TraceMask(FiberRows):
             hdus.append(pyfits.ImageHDU(self._mask.astype("uint8"), name="BADPIX"))
         if self._samples is not None:
             hdus.append(pyfits.BinTableHDU(self._samples, name="SAMPLES"))
+        if self._samples_error is not None:
+            hdus.append(pyfits.BinTableHDU(self._samples_error, name="SAMPLES_ERROR"))
         if self._coeffs is not None:
             hdus.append(pyfits.ImageHDU(self._coeffs.astype("float32"), name="COEFFS"))
             hdus[0].header["POLYKIND"] = (self._poly_kind, "polynomial kind")

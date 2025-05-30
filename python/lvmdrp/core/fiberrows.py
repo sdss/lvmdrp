@@ -71,21 +71,24 @@ class FiberRows(Header, PositionTable):
         mask = numpy.ones(data_dim, dtype="bool")
         if samples_columns is not None:
             samples = Table(data=numpy.full((data_dim[0], len(samples_columns)), numpy.nan), names=samples_columns)
+            samples_error = Table(data=numpy.full((data_dim[0], len(samples_columns)), numpy.nan), names=samples_columns)
         else:
             samples = None
+            samples_error = None
         if poly_deg is not None:
             coeffs = numpy.full((data_dim[0], poly_deg+1), numpy.nan, dtype=numpy.float32)
         else:
             coeffs = None
 
-        new_fiberrows = cls(data=data, error=error, mask=mask, samples=samples, poly_kind=poly_kind, coeffs=coeffs, header=header, slitmap=slitmap)
+        new_fiberrows = cls(data=data, error=error, mask=mask, samples=samples, samples_error=samples_error, poly_kind=poly_kind, coeffs=coeffs, header=header, slitmap=slitmap)
         new_fiberrows.setFibers(fibers)
         return new_fiberrows
 
     @classmethod
-    def from_samples(cls, data_dim, samples, samples_columns=None, header=None, slitmap=None):
+    def from_samples(cls, data_dim, samples, samples_error=None, samples_columns=None, header=None, slitmap=None):
         new_fiberrows = cls.create_empty(data_dim=data_dim, samples_columns=samples_columns, header=header, slitmap=slitmap)
         new_fiberrows.set_samples(samples, columns=samples_columns)
+        new_fiberrows.set_samples_error(samples_error, columns=samples_columns)
         return new_fiberrows
 
     @classmethod
@@ -161,6 +164,8 @@ class FiberRows(Header, PositionTable):
         mask=None,
         slitmap=None,
         samples=None,
+        samples_error=None,
+        samples_columns=None,
         shape=None,
         size=None,
         arc_position_x=None,
@@ -168,8 +173,7 @@ class FiberRows(Header, PositionTable):
         good_fibers=None,
         fiber_type=None,
         coeffs=None,
-        poly_kind=None,
-        poly_deg=None
+        poly_kind=None
     ):
         Header.__init__(self, header=header)
         PositionTable.__init__(
@@ -182,7 +186,8 @@ class FiberRows(Header, PositionTable):
             fiber_type=fiber_type,
         )
         self.setData(data=data, error=error, mask=mask)
-        self.set_samples(samples)
+        self.set_samples(samples, samples_columns)
+        self.set_samples_error(samples_error, samples_columns)
         self.set_coeffs(coeffs=coeffs, poly_kind=poly_kind)
         if self._data is None and self._coeffs is not None:
             self.eval_coeffs()
@@ -310,6 +315,22 @@ class FiberRows(Header, PositionTable):
             raise ValueError(f"Given {blockid = } not found in slitmap column `blockid`")
 
         return blockid
+
+    def _validate_table(self, table, columns):
+        if table is None:
+            return
+        if isinstance(table, Table):
+            table_ = table
+        elif isinstance(table, pd.DataFrame):
+            table.columns = table.columns.astype("str")
+            table_ = Table.from_pandas(table)
+        elif isinstance(table, numpy.ndarray) and columns is not None:
+            table_ = Table(data=table, names=columns)
+        else:
+            raise ValueError(f"Invalid `table` type: {type(table)}. Expected {Table}, {pd.DataFrame} or {numpy.ndarray}")
+
+        table_ = Table({name: numpy.array(table_[name], dtype="float32") for name in table_.colnames})
+        return table_
 
     def get_block(self, iblock=None, blockid=None):
         slitmap = self._filter_slitmap()
@@ -602,19 +623,7 @@ class FiberRows(Header, PositionTable):
             raise TypeError(f"Invalid slitmap table type '{type(slitmap)}'")
 
     def set_samples(self, samples=None, columns=None):
-        if isinstance(samples, Table):
-            self._samples = samples
-        elif isinstance(samples, pd.DataFrame):
-            samples.columns = samples.columns.astype("str")
-            self._samples = Table.from_pandas(samples)
-        elif isinstance(samples, numpy.ndarray) and columns is not None:
-            self._samples = Table(data=samples, names=columns)
-        elif columns is not None:
-            self._samples = Table(data=numpy.full((self._fibers, len(columns)), numpy.nan), names=columns)
-        else:
-            self._samples = None
-
-        self._samples = Table({name: numpy.array(self._samples[name], dtype="float32") for name in self._samples.colnames})
+        self._samples = self._validate_table(table=samples, columns=columns)
         return self._samples
 
     def get_samples(self, as_pandas=False):
@@ -625,6 +634,19 @@ class FiberRows(Header, PositionTable):
             df.columns = df.columns.astype("int")
             return df
         return self._samples
+
+    def set_samples_error(self, samples_error=None, columns=None):
+        self._samples_error = self._validate_table(table=samples_error, columns=columns)
+        return self._samples_error
+
+    def get_samples_error(self, as_pandas=False):
+        if self._samples_error is None:
+            return None
+        if as_pandas:
+            df = self._samples_error.to_pandas()
+            df.columns = df.columns.astype("int")
+            return df
+        return self._samples_error
 
     def apply_pixelmask(self, mask=None):
         if mask is None:
