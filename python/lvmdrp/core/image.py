@@ -2598,7 +2598,8 @@ class Image(Header):
 
         traces = {}
         for name, block in guess_block.items():
-            traces[name] = TraceMask.from_samples(data_dim=block._data.shape, samples=samples[name], samples_columns=columns, header=guess_block[name]._header, slitmap=guess_block[name]._slitmap)
+            traces[name] = TraceMask.from_samples(
+                data_dim=block._data.shape, samples=samples[name], samples_error=errors[name], samples_columns=columns, header=guess_block[name]._header, slitmap=guess_block[name]._slitmap)
         return traces
 
     def iterative_block_trace(self, guess_traces, bounds, smoothings, iblock, columns, niter=10, nsigmas=6, solver="trf", loss="linear", axs=None):
