@@ -9,6 +9,7 @@ import bottleneck as bn
 import pandas as pd
 from lvmdrp import log
 from astropy.table import Table
+from astropy.stats import biweight_location, biweight_scale
 
 from lvmdrp.core.constants import LVM_NBLOCKS, LVM_BLOCKSIZE, LVM_NFIBERS
 from lvmdrp.core.header import Header, combineHdr
@@ -719,8 +720,8 @@ class FiberRows(Header, PositionTable):
         else:
             samples_ = self.get_samples(as_pandas=True).values
 
-        mu = bn.nanmean(samples_, axis=0)
-        sigma = bn.nanstd(samples_, axis=0)
+        mu = biweight_location(samples_, axis=0, ignore_nan=True)
+        sigma = biweight_scale(samples_, axis=0, ignore_nan=True)
         zscore = abs(samples_ - mu[None]) / sigma[None]
         return zscore > nsigmas, mu, sigma
 
