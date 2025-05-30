@@ -332,6 +332,17 @@ class FiberRows(Header, PositionTable):
         table_ = Table({name: numpy.array(table_[name], dtype="float32") for name in table_.colnames})
         return table_
 
+    def _merge_tables(self, table, array, nfibers, block_selection):
+        table = table.to_pandas().astype("float32")
+        if array.shape[1] != table.shape[1]:
+            raise ValueError(f"Incompatible column sizes for array. Trying to set array with {array.shape[1]} columns to {table.columns.size} columns")
+        if array.shape[0] != nfibers:
+            raise ValueError(f"Incompatible sample sizes. Trying to set array with {array.shape[0]} fibers to {nfibers} fibers")
+        array = array.astype("float32")
+        for i, column in enumerate(table.columns):
+            table.loc[block_selection, column] = array[:, i]
+        return table
+
     def get_block(self, iblock=None, blockid=None):
         slitmap = self._filter_slitmap()
         blockid = self._validate_blockid(iblock, blockid, slitmap=slitmap)
@@ -344,21 +355,24 @@ class FiberRows(Header, PositionTable):
         new_trace._error = self._error[block_selection] if self._error is not None else None
         new_trace._mask = self._mask[block_selection] if self._mask is not None else None
         new_trace._samples = self._samples[block_selection] if self._samples is not None else None
+        new_trace._samples_error = self._samples_error[block_selection] if self._samples_error is not None else None
         new_trace.set_coeffs(self._coeffs[block_selection] if self._coeffs is not None else None, poly_kind=self._poly_kind)
         new_trace.setFibers(block_selection.sum())
         new_trace.setSlitmap(slitmap[block_selection])
 
         return new_trace
 
-    def set_block(self, data=None, iblock=None, blockid=None, error=None, mask=None, samples=None, coeffs=None, poly_kind=None, from_instance=None):
+    def set_block(self, data=None, iblock=None, blockid=None, error=None, mask=None, samples=None, samples_error=None, coeffs=None, poly_kind=None, from_instance=None):
 
         if from_instance is not None:
             samples_o = from_instance.get_samples(as_pandas=True)
+            samples_error_o = from_instance.get_samples_error(as_pandas=True)
             samples_o = samples_o.values if samples_o is not None else None
+            samples_error_o = samples_error_o.values if samples_error_o is not None else None
             self.set_block(
                 data=from_instance._data, iblock=iblock, blockid=blockid,
                 error=from_instance._error, mask=from_instance._mask,
-                samples=samples_o, coeffs=from_instance._coeffs, poly_kind=from_instance._poly_kind)
+                samples=samples_o, samples_error=samples_error_o, coeffs=from_instance._coeffs, poly_kind=from_instance._poly_kind)
 
         slitmap = self._filter_slitmap()
         blockid = self._validate_blockid(iblock, blockid, slitmap=slitmap)
@@ -374,15 +388,11 @@ class FiberRows(Header, PositionTable):
         if mask is not None and self._error is not None:
             self._mask[block_selection] = mask
         if samples is not None and self._samples is not None:
-            samples_i = self._samples.to_pandas().astype("float32")
-            if samples.shape[1] != samples_i.shape[1]:
-                raise ValueError(f"Incompatible column sizes for samples. Trying to set samples with {samples.shape[1]} columns to {samples_i.columns.size} columns")
-            if samples.shape[0] != nfibers:
-                raise ValueError(f"Incompatible sample sizes. Trying to set samples with {samples.shape[0]} fibers to {nfibers} fibers")
-            samples = samples.astype("float32")
-            for i, column in enumerate(samples_i.columns):
-                samples_i.loc[block_selection, column] = samples[:, i]
+            samples_i = self._merge_tables(self._samples, samples, nfibers, block_selection)
             self.set_samples(samples_i)
+        if samples_error is not None and self._samples_error is not None:
+            samples_error_i = self._merge_tables(self._samples_error, samples_error, nfibers, block_selection)
+            self.set_samples_error(samples_error_i)
         if coeffs is not None and poly_kind is not None and self._coeffs is not None:
             if self._poly_kind != poly_kind:
                 raise ValueError(f"Incompatible polynomial kinds. Trying to set {poly_kind} to a tracemask of {self._poly_kind}")
@@ -868,7 +878,7 @@ class FiberRows(Header, PositionTable):
             combined_hdr = combineHdr([self, rows])
             self.setHeader(combined_hdr._header)
 
-    def fit_spline(self, deg=3, nknots=5, knots=None, smoothing=None, weights=None, clip=None, min_samples_frac=0.0):
+    def fit_spline(self, deg=3, nknots=5, knots=None, smoothing=None, clip=None, use_weights=True, min_samples_frac=0.0):
         """
         smooths the traces along the dispersion direction with a spline function for each individual fiber
 
@@ -898,10 +908,15 @@ class FiberRows(Header, PositionTable):
         else:
             knots = None
 
-        _ = self._samples.to_pandas()
-        columns = _.columns.astype("int")
-        samples = _.values
+        samples = self.get_samples(as_pandas=True)
+        samples_error = self.get_samples_error(as_pandas=True)
+        columns = samples.columns.astype("int")
+        samples = samples.values
         coeffs = numpy.full(self._data.shape[0], numpy.nan, dtype=object)
+        if use_weights and self._samples_error is not None:
+            weights = numpy.nan_to_num(1 / samples_error.values, nan=0.0, posinf=0.0, neginf=0.0)
+        else:
+            weights = numpy.ones_like(samples)
 
         pix_table = []
         poly_table = []
@@ -920,7 +935,7 @@ class FiberRows(Header, PositionTable):
 
                 # try to fit
                 try:
-                    tck = interpolate.splrep(columns[good_sam], samples[i, good_sam], s=smoothing)
+                    tck = interpolate.splrep(columns[good_sam], samples[i, good_sam], weights[i, good_sam], s=smoothing)
 
                     pix_table.extend(numpy.column_stack([columns[good_sam], samples[i, good_sam]]).tolist())
                     poly_table.extend(numpy.column_stack([pixels[columns], interpolate.splev(pixels[columns], tck)]).tolist())
@@ -1031,6 +1046,10 @@ class FiberRows(Header, PositionTable):
             block = self.get_block(iblock=iblock)
 
             samples = block.get_samples(as_pandas=True).values
+            if use_weights and self._samples_error is not None:
+                weights = numpy.nan_to_num(1 / block.get_samples_error(as_pandas=True).values, nan=0.0, posinf=0.0, neginf=0.0)
+            else:
+                weights = numpy.ones_like(samples)
 
             good_sam = numpy.isfinite(samples)
             n_goodsam_per_fiber = good_sam.sum(axis=1)
@@ -1060,9 +1079,10 @@ class FiberRows(Header, PositionTable):
             select = good_sam.ravel()
 
             z = samples.ravel()
-            x_, y_, z_ = x[select], y[select], z[select]
+            w = weights.ravel()
+            x_, y_, z_, w_ = x[select], y[select], z[select], w[select]
 
-            tck = interpolate.bisplrep(x_, y_, z_, s=smoothing, xb=0, xe=npixels, yb=0, ye=nfibers, eps=1e-8)
+            tck = interpolate.bisplrep(x_, y_, z_, w_, s=smoothing, xb=0, xe=npixels, yb=0, ye=nfibers, eps=1e-8)
             block_model = interpolate.bisplev(x_pixels, ifibers, tck).T
 
             self.set_block(iblock=iblock, data=block_model)
