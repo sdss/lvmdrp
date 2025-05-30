@@ -435,6 +435,7 @@ class SkewedGaussians:
         guess = guess if guess is not None else self._pars
         bounds_ = self._parse_boundaries(centroids=guess.get("centroids"), **bounds)
         guess_ = self._parse_guess(guess)
+        guess_ = numpy.clip(guess_, *bounds_)
         valid_pars = self._check_valid(guess_, bounds_)
         self._nfitted = valid_pars.sum()
 
