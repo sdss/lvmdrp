@@ -402,7 +402,7 @@ class FiberRows(Header, PositionTable):
             self.set_coeffs(coeffs, poly_kind=poly_kind)
 
     def get_distances(self):
-        samples = self.get_samples(as_pandas=True)
+        samples = self.get_samples(as_pandas=True).values
         if samples is not None:
             sample_distances = numpy.gradient(samples, axis=0)
         else:
@@ -713,6 +713,17 @@ class FiberRows(Header, PositionTable):
         if image_list[0]._header is not None:
             self._header = image_list[0]._header
 
+    def select_outliers(self, on_distances=False, nsigmas=2):
+        if on_distances:
+            samples_, _ = self.get_distances()
+        else:
+            samples_ = self.get_samples(as_pandas=True).values
+
+        mu = bn.nanmean(samples_, axis=0)
+        sigma = bn.nanstd(samples_, axis=0)
+        zscore = abs(samples_ - mu[None]) / sigma[None]
+        return zscore > nsigmas, mu, sigma
+
     def applyFibers(self, function, args):
         result = []
         for i in range(len(self)):
@@ -878,7 +889,7 @@ class FiberRows(Header, PositionTable):
             combined_hdr = combineHdr([self, rows])
             self.setHeader(combined_hdr._header)
 
-    def fit_spline(self, deg=3, nknots=5, knots=None, smoothing=None, clip=None, use_weights=True, min_samples_frac=0.0):
+    def fit_spline(self, deg=3, nknots=5, knots=None, smoothing=None, clip=None, use_weights=True, nsigmas=None, min_samples_frac=0.0):
         """
         smooths the traces along the dispersion direction with a spline function for each individual fiber
 
@@ -913,6 +924,11 @@ class FiberRows(Header, PositionTable):
         columns = samples.columns.astype("int")
         samples = samples.values
         coeffs = numpy.full(self._data.shape[0], numpy.nan, dtype=object)
+        if nsigmas is not None:
+            outliers, _, _ = self.select_outliers(nsigmas=nsigmas)
+            inliers = ~outliers
+        else:
+            inliers = numpy.ones_like(samples, dtype="bool")
         if use_weights and self._samples_error is not None:
             weights = numpy.nan_to_num(1 / samples_error.values, nan=0.0, posinf=0.0, neginf=0.0)
         else:
@@ -922,7 +938,7 @@ class FiberRows(Header, PositionTable):
         poly_table = []
         poly_all_table = []
         for i in range(self._fibers):
-            good_sam = numpy.isfinite(samples[i, :])
+            good_sam = numpy.isfinite(samples[i, :]) & inliers[i, :]
             n_goodsam = good_sam.sum()
             if n_goodsam == 0:
                 self._mask[i, :] = True
@@ -963,7 +979,7 @@ class FiberRows(Header, PositionTable):
 
         return numpy.asarray(pix_table), numpy.asarray(poly_table), numpy.asarray(poly_all_table)
 
-    def fit_polynomial(self, deg, poly_kind="poly", clip=None, min_samples_frac=0.0):
+    def fit_polynomial(self, deg, poly_kind="poly", clip=None, nsigmas=None, min_samples_frac=0.0):
         """
         smooths the traces along the dispersion direction with a polynomical function for each individual fiber
 
@@ -983,12 +999,17 @@ class FiberRows(Header, PositionTable):
         columns = _.columns.astype("int")
         samples = _.values
         coeffs = numpy.full((self._data.shape[0], numpy.abs(deg) + 1), numpy.nan)
+        if nsigmas is not None:
+            outliers, _, _ = self.select_outliers(nsigmas=nsigmas)
+            inliers = ~outliers
+        else:
+            inliers = numpy.ones_like(samples, dtype="bool")
         # iterate over each fiber
         pix_table = []
         poly_table = []
         poly_all_table = []
         for i in range(self._fibers):
-            good_sam = numpy.isfinite(samples[i, :])
+            good_sam = numpy.isfinite(samples[i, :]) & inliers[i, :]
             n_goodsam = good_sam.sum()
             if n_goodsam == 0:
                 self._mask[i, :] = True
@@ -1029,7 +1050,7 @@ class FiberRows(Header, PositionTable):
 
         return numpy.asarray(pix_table), numpy.asarray(poly_table), numpy.asarray(poly_all_table)
 
-    def fit_spline2d(self, deg_x=3, deg_y=3, smoothing=None, clip=None, use_weights=True, min_samples_frac=0.0, min_fibers_frac=0.0):
+    def fit_spline2d(self, deg_x=3, deg_y=3, smoothing=None, clip=None, use_weights=True, nsigmas=None, min_samples_frac=0.0, min_fibers_frac=0.0):
         iblocks = self._get_iblocks()
 
         columns = numpy.asarray(self._samples.colnames).astype("int")
@@ -1046,12 +1067,17 @@ class FiberRows(Header, PositionTable):
             block = self.get_block(iblock=iblock)
 
             samples = block.get_samples(as_pandas=True).values
+            if nsigmas is not None:
+                outliers, _, _ = self.select_outliers(nsigmas=nsigmas)
+                inliers = ~outliers
+            else:
+                inliers = numpy.ones_like(samples, dtype="bool")
             if use_weights and self._samples_error is not None:
                 weights = numpy.nan_to_num(1 / block.get_samples_error(as_pandas=True).values, nan=0.0, posinf=0.0, neginf=0.0)
             else:
                 weights = numpy.ones_like(samples)
 
-            good_sam = numpy.isfinite(samples)
+            good_sam = numpy.isfinite(samples) & inliers
             n_goodsam_per_fiber = good_sam.sum(axis=1)
             n_goodsam = n_goodsam_per_fiber.sum()
             if n_goodsam == 0:
@@ -1407,7 +1433,7 @@ class FiberRows(Header, PositionTable):
 
         return self
 
-    def plot_block(self, iblock=None, blockid=None, ref_column=None, show_samples=True, show_model_samples=True, show_model=True, axs=None):
+    def plot_block(self, iblock=None, blockid=None, ref_column=None, nsigmas=None, show_samples=True, show_model_samples=True, show_model=True, axs=None):
         if iblock is None and blockid is None:
             block = copy(self)
         else:
@@ -1415,23 +1441,40 @@ class FiberRows(Header, PositionTable):
 
         pixels = numpy.arange(block._data.shape[1], dtype="int")
         samples = block.get_samples(as_pandas=True)
+        # samples_error = block.get_samples_error(as_pandas=True)
 
         if axs is None:
-            _, axs = plot.create_subplots(to_display=True, figsize=(15,5), layout="constrained")
+            _, axs = plot.create_subplots(to_display=True, figsize=(15,5), layout="tight")
         if not isinstance(axs, dict) or "mod" not in axs:
             axs = {"mod": axs}
 
         if ref_column is not None:
             axs["mod"].axvline(ref_column, ls=":", lw=1, color="0.7")
+
+        ylims = None
+
         if samples is not None:
             if show_samples:
-                axs["mod"].plot(samples.columns, samples.T, ".", ms=5, mew=0, mfc="0.2", label="data")
+                # if samples_error is not None:
+                #     axs["mod"].errorbar(samples.columns, samples.T, yerr=samples_error.T, fmt="", ecolor="0.2", elinewidth=1, label="samples")
+                # else:
+                axs["mod"].plot(samples.columns, samples.T, ".", ms=5, mew=0, mfc="0.2", label="samples")
+                ylims = axs["mod"].get_ylim()
             if show_model_samples:
-                axs["mod"].plot(samples.columns, block._data[:, samples.columns].T, "s", ms=5, mew=1, mec="0.2", mfc="none", label="model@data")
-        ylims = axs["mod"].get_ylim()
+                axs["mod"].plot(samples.columns, block._data[:, samples.columns].T, "s", ms=5, mew=1, mec="0.2", mfc="none", label="model@samples")
+            if nsigmas is not None:
+                outliers, mu, sg = block.select_outliers(nsigmas=nsigmas)
+                samples_masked = samples.copy()
+                samples_masked[~outliers] = numpy.nan
+                axs["mod"].plot(samples.columns, mu, "-", lw=1, color="0.7", zorder=-10)
+                axs["mod"].plot(samples.columns, mu-nsigmas*sg, "--", lw=1, color="0.7", zorder=-10)
+                axs["mod"].plot(samples.columns, mu+nsigmas*sg, "--", lw=1, color="0.7", zorder=-10)
+                axs["mod"].plot(samples.columns, samples_masked.T, ".", ms=10, mew=1, mfc="none", color="tab:red", label="outliers")
+
         if show_model:
             axs["mod"].plot(pixels, block._data.T, "-", lw=1, label="model")
-        axs["mod"].set_ylim(*ylims)
+        if ylims is not None:
+            axs["mod"].set_ylim(*ylims)
 
         if "res" not in axs:
             axs["mod"].tick_params(labelbottom=False)

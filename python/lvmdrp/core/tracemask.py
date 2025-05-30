@@ -108,14 +108,6 @@ class TraceMask(FiberRows):
         round = numpy.round(self._data).astype("int16")  # round the traces to integer
         return round
 
-    def get_outlying_samples(self, nsigma=2):
-        sample_distances, model_distances = self.get_distances()
-
-        mu = bn.nanmean(sample_distances, axis=0)
-        sigma = bn.nanstd(sample_distances, axis=0)
-        zscore = abs(sample_distances - mu[None]) / sigma[None]
-        return zscore > nsigma
-
     def getPixelCoor(self):
         x_cor = numpy.zeros((self._nfibers, self._data.shape[1]), dtype="int16")
         x_cor = numpy.arange(self._data.shape[1])[numpy.newaxis, :]
