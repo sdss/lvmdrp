@@ -2604,7 +2604,7 @@ class Image(Header):
                 data_dim=block._data.shape, samples=samples[name], samples_error=errors[name], samples_columns=columns, header=guess_block[name]._header, slitmap=guess_block[name]._slitmap)
         return traces
 
-    def iterative_block_trace(self, guess_traces, bounds, smoothings, iblock, columns, niter=10, nsigmas=6, solver="trf", loss="linear", axs=None):
+    def iterative_block_trace(self, guess_traces, bounds, smoothings, use_weights, iblock, columns, niter=10, x_nsigmas=6, s_nsigmas=None, solver="trf", loss="linear", axs=None):
         def _set_plot_alphas(axs):
             if axs is None:
                 return
@@ -2641,8 +2641,8 @@ class Image(Header):
             fixed_traces = {fixed_name: guess_traces.get(fixed_name) for fixed_name in fixed_names}
 
             fitted_block = self.measure_fiber_block(
-                traces_guess=free_trace, traces_fixed=fixed_traces, iblock=iblock, columns=columns, bounds=free_bounds, nsigmas=nsigmas, solver=solver, loss=loss, axs=axs_yfree)
-            fitted_block[free_name].fit_spline(smoothing=smoothings.get(free_name), min_samples_frac=0.7)
+                traces_guess=free_trace, traces_fixed=fixed_traces, iblock=iblock, columns=columns, bounds=free_bounds, nsigmas=x_nsigmas, solver=solver, loss=loss, axs=axs_yfree)
+            fitted_block[free_name].fit_spline(smoothing=smoothings.get(free_name), use_weights=use_weights.get(free_name, False), nsigmas=s_nsigmas, min_samples_frac=0.7)
             free_trace[free_name].set_block(iblock=iblock, from_instance=fitted_block[free_name])
             free_trace[free_name]._coeffs = None
 
@@ -2650,7 +2650,7 @@ class Image(Header):
 
             _set_plot_alphas(axs=axs_yfree)
             if len(axs_xfree) != 0:
-                free_trace[free_name].plot_block(iblock=iblock, show_model_samples=False, axs={"mod": axs_xfree[i]})
+                free_trace[free_name].plot_block(iblock=iblock, nsigmas=s_nsigmas, show_model_samples=False, axs={"mod": axs_xfree[i]})
 
         return guess_traces
 
