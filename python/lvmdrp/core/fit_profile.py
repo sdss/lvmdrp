@@ -248,6 +248,11 @@ class SkewedGaussians:
         "alphas"     # Shape parameter (not to be confused with skewness)
     )
 
+    @classmethod
+    def eval(cls, x, pars):
+        instance = cls(pars, fixed={})
+        return instance(x)
+
     def __init__(self, pars, fixed, ignore_nans=True):
         self._pars = pars
         self._fixed = fixed
@@ -329,14 +334,14 @@ class SkewedGaussians:
         return [x[name] for name in self.PARNAMES if name in x]
 
     def _check_sizes(self):
-        pars_list = self._to_list(self._pars)
-        fixed_list = self._to_list(self._fixed)
+        pars_all = {}
+        pars_all.update(self._pars)
+        pars_all.update(self._fixed)
+
+        pars_list = self._to_list(pars_all)
         par_sizes = numpy.asarray([par.size for par in pars_list], dtype="int")
         if (par_sizes[0] != par_sizes[1:]).any():
             raise ValueError(f"Incompatible free parameter sizes: {par_sizes}")
-        fix_sizes = numpy.asarray([par.size for par in fixed_list], dtype="int")
-        if (fix_sizes[0] != fix_sizes[1:]).any():
-            raise ValueError(f"Incompatible fixed parameter sizes: {fix_sizes}")
         return par_sizes[0]
 
     def _check_valid(self, guess, bounds):
