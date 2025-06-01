@@ -2561,7 +2561,8 @@ class Image(Header):
         alphas = TraceMask.from_samples(data_dim=alphas_block._data.shape, samples=alphas_samples, samples_columns=columns)
         return alphas
 
-    def measure_fiber_block(self, traces_guess, traces_fixed, iblock, columns, bounds, nsigmas=6, ftol=1e-3, xtol=1e-3, solver="trf", loss="linear", axs=None):
+    def measure_fiber_block(self, traces_guess, traces_fixed, iblock, columns, bounds, nsigmas=6, profile="skewed", ftol=1e-3, xtol=1e-3, solver="trf", loss="linear", axs=None):
+
         guess_block = {name: traces_guess[name].get_block(iblock) for name in traces_guess}
         fixed_block = {name: traces_fixed[name].get_block(iblock) for name in traces_fixed}
         free_names = list(traces_guess.keys())
@@ -2578,8 +2579,8 @@ class Image(Header):
             fixed = {name: fixed_block[name].getSlice(icolumn, axis="Y")[0] for name in fixed_block}
             img_slice = self.getSlice(icolumn, axis="Y")
 
-            model_column, fitted_pars, fitted_errs = img_slice.fit_skewed_gaussians(
-                pars_guess=guess, pars_fixed=fixed, bounds=bounds, nsigmas=nsigmas, ftol=ftol, xtol=xtol, solver=solver, loss=loss)
+            model_column, fitted_pars, fitted_errs = img_slice.fit_gaussians(
+                pars_guess=guess, pars_fixed=fixed, bounds=bounds, profile=profile, nsigmas=nsigmas, ftol=ftol, xtol=xtol, solver=solver, loss=loss)
 
             axs_column = axs.get(icolumn)
             if axs_column is not None:
@@ -2637,7 +2638,7 @@ class Image(Header):
             axs_yfree = axs_ymodels.get(free_name, {})
 
             free_trace = {free_name: guess_traces.get(free_name)}
-            free_bounds = {f"{free_name}_range": bounds.get(free_name)}
+            free_bounds = {free_name: bounds.get(free_name)}
             fixed_traces = {fixed_name: guess_traces.get(fixed_name) for fixed_name in fixed_names}
 
             fitted_block = self.measure_fiber_block(

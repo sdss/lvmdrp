@@ -3596,7 +3596,11 @@ class Spectrum1D(Header):
         params = numpy.concatenate([counts, centroids, fwhms, alphas])
         return gauss_multi, params
 
-    def fit_skewed_gaussians(self, pars_guess, pars_fixed, bounds, nsigmas=6, ftol=1e-3, xtol=1e-3, solver="trf", loss="linear", axs=None):
+    def fit_gaussians(self, pars_guess, pars_fixed, bounds, profile="skewed", nsigmas=6, ftol=1e-3, xtol=1e-3, solver="trf", loss="linear", axs=None):
+        profile_class = fit_profile.PROFILES.get(profile)
+        if profile_class is None:
+            raise ValueError(f"Invalid value for `profile`: {profile}. Expected one of: {fit_profile.PROFILES}")
+
         error = numpy.ones(self._dim, dtype=numpy.float32) if self._error is None else self._error
 
         centroids = pars_guess.get("centroids", pars_fixed.get("centroids"))
@@ -3605,19 +3609,19 @@ class Spectrum1D(Header):
         upper = numpy.nanmax(centroids) + nsigmas*numpy.nanmax(sigmas)
         pixels_selection = (lower <= self._wave) & (self._wave <= upper)
 
-        skewed_gaussians = fit_profile.SkewedGaussians(pars=pars_guess, fixed=pars_fixed)
-        skewed_gaussians.fit(
-            self._wave[pixels_selection], self._data[pixels_selection], sigma=error[pixels_selection], bounds=bounds, ftol=ftol, xtol=xtol, solver=solver, loss=loss)
+        model = profile_class(pars=pars_guess, fixed=pars_fixed, bounds=bounds)
+        model.fit(
+            self._wave[pixels_selection], self._data[pixels_selection], sigma=error[pixels_selection], ftol=ftol, xtol=xtol, solver=solver, loss=loss)
 
-        params = skewed_gaussians._pars
-        errors = skewed_gaussians._errs
+        params = model._pars
+        errors = model._errs
 
         if axs is not None:
-            axs = skewed_gaussians.plot(
+            axs = model.plot(
                 x=self._wave[pixels_selection], y=self._data[pixels_selection],
                 sigma=self._error[pixels_selection], mask=self._mask[pixels_selection], axs=axs)
 
-        return skewed_gaussians, params, errors
+        return model, params, errors
 
     def fitParFile(
         self, par, err_sim=0, ftol=1e-8, xtol=1e-8, method="leastsq", parallel="auto"
