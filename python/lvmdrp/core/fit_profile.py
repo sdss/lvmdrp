@@ -328,14 +328,12 @@ class Profile1D:
 
         bounds_lower, bounds_upper = [], []
         _ = numpy.ones(self._nprofiles)
-        def _set_boundaries(x, x_range):
-            if x is not None and x_range is None:
-                raise ValueError(f"Invalid value for `x_range`: {x_range = }. Expected `x_range` when `x` is given")
-
-            if x is not None and x_range is not None:
+        def _set_boundaries(x, x_bound):
+            kind, x_range = x_bound.get("kind"), x_bound.get("range")
+            if kind == "relative":
                 lower = x + x_range[0]
                 upper = x + x_range[1]
-            elif x_range is not None:
+            elif kind == "absolute" or kind is None:
                 lower = _ * x_range[0]
                 upper = _ * x_range[1]
             else:
@@ -346,7 +344,7 @@ class Profile1D:
             bounds_upper.append(upper)
 
         for name in bounds:
-            _set_boundaries(pars.get(name), bounds.get(name))
+            _set_boundaries(pars.get(name), bounds.get(name, {}))
 
         bounds_lower = numpy.concatenate(bounds_lower)
         bounds_upper = numpy.concatenate(bounds_upper)
