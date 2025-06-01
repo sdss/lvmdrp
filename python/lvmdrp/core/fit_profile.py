@@ -42,6 +42,23 @@ def gaussians(pars, x):
     y = pars[0][:, None] * numpy.exp(-0.5 * ((x[None, :] - pars[1][:, None]) / pars[2][:, None]) ** 2) / (pars[2][:, None] * fact)
     return bn.nansum(y, axis=0)
 
+def guess_gaussians_integral(pixels, data, centroids, fwhms, nsigma=6, return_pixels_selection=False):
+    fact = numpy.sqrt(2 * numpy.pi)
+    integrals = numpy.zeros(len(centroids), dtype=numpy.float32)
+    sigmas = fwhms / 2.354
+
+    select = numpy.zeros(pixels.size, dtype="bool")
+    for i in range(len(centroids)):
+        select_ = numpy.logical_and(
+            pixels > centroids[i] - nsigma * sigmas[i],
+            pixels < centroids[i] + nsigma * sigmas[i],
+        )
+        integrals[i] = numpy.interp(centroids[i], pixels, data) * fact * sigmas[i]
+        select = numpy.logical_or(select, select_)
+    if return_pixels_selection:
+        return integrals, select
+    return integrals
+
 
 class IFUGradient(object):
 
@@ -239,96 +256,33 @@ class IFURadialGradient:
         gradient_model = self(x, y)
         plot_radial_gradient_fit(slitmap, z, gradient_model=gradient_model, telescope="Sci", axs=axs)
 
-class SkewedGaussians:
 
-    PARNAMES = (
-        "counts",    # Integral of the gaussian
-        "centroids", # Mode
-        "sigmas",    # Standard deviation
-        "alphas"     # Shape parameter (not to be confused with skewness)
-    )
+class Profile1D:
+    PARNAMES = ...
+
+    def __call__(self, x):
+        ...
 
     @classmethod
     def eval(cls, x, pars):
-        instance = cls(pars, fixed={})
+        instance = cls(pars, fixed={}, bounds={})
         return instance(x)
 
-    def __init__(self, pars, fixed, ignore_nans=True):
+    def __init__(self, pars, fixed, bounds, ignore_nans=True):
         self._pars = pars
         self._fixed = fixed
 
-        self._ngaussians = self._check_sizes()
+        self._nprofiles = self._check_sizes()
         self._npars = len(self._pars)
         self._nfixed = len(self._fixed)
         self._ignore_nans = ignore_nans
 
-    def __call__(self, x):
-        counts, centroids, sigmas, alphas = self.unpack_params()
-        # convert to PDF parameters
-        deltas = self._deltas(alphas)
-        scales = self._sigma_to_scale(sigmas, deltas)
-        locations = self._centroid_to_location(centroids, scales, alphas, deltas)
-
-        # evaluate PDF shape
-        shape = self._skewed_gaussian_shapes(x, locations, scales, alphas)
-        # calculate normalization
-        norms = numpy.trapz(shape, x, axis=1)
-        return bn.nansum(counts[:, numpy.newaxis] * shape / norms[:, numpy.newaxis], axis=0)
-
-    def _deltas(self, alphas):
-        return alphas / numpy.sqrt(1 + alphas**2)
-
-    def _m0(self, alphas, deltas):
-        return skew_factor * deltas - (1-numpy.pi*0.25)*(skew_factor*deltas)**3/(1-2/numpy.pi*deltas**2) - numpy.sign(alphas)*0.5*numpy.exp(-2*numpy.pi/numpy.abs(alphas))
-
-    def _location_to_centroid(self, locations, scales, alphas, deltas):
-        m0 = self._m0(alphas, deltas)
-        return locations + m0*scales
-
-    def _centroid_to_location(self, centroids, scales, alphas, deltas):
-        m0 = self._m0(alphas, deltas)
-        return centroids - m0*scales
-
-    def _scale_to_sigma(self, scales, deltas):
-        return scales * numpy.sqrt(1 - (2 * deltas**2) / numpy.pi)
-
-    def _sigma_to_scale(self, sigmas, deltas):
-        denom = numpy.sqrt(1 - (2 * deltas**2) / numpy.pi)
-        return sigmas / denom
-
-    def _skewed_gaussian_shapes(self, x, locations, scales, alphas):
-        z = (x[numpy.newaxis, :] - locations[:, numpy.newaxis]) / scales[:, numpy.newaxis]
-        return numpy.exp(-0.5 * z**2) * (1 + special.erf(alphas[:, numpy.newaxis] * z / numpy.sqrt(2)))
-
-    def _guess_gaussians_integral(self, pixels, centroids, fwhms, nsigma=6, return_pixels_selection=False):
-        fact = numpy.sqrt(2 * numpy.pi)
-        integrals = numpy.zeros(len(centroids), dtype=numpy.float32)
-        sigmas = fwhms / 2.354
-
-        select = numpy.zeros(self._dim, dtype="bool")
-        for i in range(len(centroids)):
-            select_ = numpy.logical_and(
-                pixels > centroids[i] - nsigma * sigmas[i],
-                pixels < centroids[i] + nsigma * sigmas[i],
-            )
-            integrals[i] = numpy.interp(centroids[i], pixels, self._data) * fact * sigmas[i]
-            select = numpy.logical_or(select, select_)
-        if return_pixels_selection:
-            return integrals, select
-        return integrals
-
-    def _parse_gaussians_params(self, counts=None, centroids=None, sigmas=None, alphas=None):
-        params = []
-        if counts is not None:
-            params.append(counts)
-        if centroids is not None:
-            params.append(centroids)
-        if sigmas is not None:
-            params.append(sigmas)
-        if alphas is not None:
-            params.append(alphas)
-
-        return numpy.concatenate(params)
+        # get guess and boundaries as requested by Scipy
+        self._bounds = self._parse_boundaries(self._pars, bounds)
+        self._guess = self._parse_guess(self._pars)
+        self._guess = numpy.clip(self._guess, *self._bounds)
+        self._valid_pars = self._check_valid(self._guess, self._bounds)
+        self._nfitted = self._valid_pars.sum()
 
     def _to_list(self, x):
         return [x[name] for name in self.PARNAMES if name in x]
@@ -346,19 +300,19 @@ class SkewedGaussians:
 
     def _check_valid(self, guess, bounds):
         bounds_valid = ~numpy.isnan(bounds)
-        lower_valid = bounds_valid[0].reshape((-1, self._ngaussians))
-        upper_valid = bounds_valid[1].reshape((-1, self._ngaussians))
+        lower_valid = bounds_valid[0].reshape((-1, self._nprofiles))
+        upper_valid = bounds_valid[1].reshape((-1, self._nprofiles))
         if not lower_valid.all() and not self._ignore_nans:
             raise ValueError(f"Invalid values in lower bounds:\n  {bounds[0]}")
         if not upper_valid.all() and not self._ignore_nans:
             raise ValueError(f"Invalid values in upper bounds:\n  {bounds[1]}")
 
-        guess_valid = numpy.isfinite(guess).reshape((-1, self._ngaussians))
+        guess_valid = numpy.isfinite(guess).reshape((-1, self._nprofiles))
         if not guess_valid.all() and not self._ignore_nans:
             raise ValueError(f"Invalid values in guess parameters:\n  {guess}")
 
         fixed_list = self._to_list(self._fixed)
-        fixed_valid = numpy.isfinite(numpy.concatenate(fixed_list)).reshape((-1, self._ngaussians))
+        fixed_valid = numpy.isfinite(numpy.concatenate(fixed_list)).reshape((-1, self._nprofiles))
         if not fixed_valid.all() and not self._ignore_nans:
             raise ValueError(f"Invalid values in fixed parameters:\n  {self._fixed}")
 
@@ -366,17 +320,15 @@ class SkewedGaussians:
         return valid_pars
 
     def _parse_guess(self, guess):
-
         guess_list = self._to_list(guess)
         guess = numpy.concatenate(guess_list)
-
         return guess
 
-    def _parse_boundaries(self, counts=None, centroids=None, sigmas=None, alphas=None, counts_range=None, centroids_range=None, sigmas_range=None, alphas_range=None):
+    def _parse_boundaries(self, pars, bounds):
 
         bounds_lower, bounds_upper = [], []
-        _ = numpy.ones(self._ngaussians)
-        def _set_boundaries(x, x_range, clip=None):
+        _ = numpy.ones(self._nprofiles)
+        def _set_boundaries(x, x_range):
             if x is not None and x_range is None:
                 raise ValueError(f"Invalid value for `x_range`: {x_range = }. Expected `x_range` when `x` is given")
 
@@ -387,30 +339,18 @@ class SkewedGaussians:
                 lower = _ * x_range[0]
                 upper = _ * x_range[1]
             else:
-                lower = numpy.array([])
-                upper = numpy.array([])
-
-            if clip is not None and isinstance(clip, (tuple,list)) and len(clip) == 2:
-                if clip[0] is not None:
-                    lower = numpy.clip(lower, a_min=clip[0], a_max=None)
-                if clip[1] is not None:
-                    upper = numpy.clip(upper, a_min=None, a_max=clip[1])
+                lower = _ * -numpy.inf
+                upper = _ * +numpy.inf
 
             bounds_lower.append(lower)
             bounds_upper.append(upper)
 
-        _set_boundaries(counts, counts_range, clip=(0.0,None))
-        _set_boundaries(centroids, centroids_range, clip=(3,4082))
-        _set_boundaries(sigmas, sigmas_range, clip=(0.0,None))
-        _set_boundaries(alphas, alphas_range)
+        for name in bounds:
+            _set_boundaries(pars.get(name), bounds.get(name))
 
         bounds_lower = numpy.concatenate(bounds_lower)
         bounds_upper = numpy.concatenate(bounds_upper)
-        if len(bounds_lower) == 0 or len(bounds_upper) == 0:
-            return numpy.asarray([_ * -numpy.inf, _ * +numpy.inf])
-
         bounds = numpy.asarray([bounds_lower, bounds_upper])
-
         return bounds
 
     def _validate_uncertainties(self, sigma):
@@ -424,7 +364,7 @@ class SkewedGaussians:
         return params
 
     def pack_params(self, pars, valid_pars):
-        params = {name: numpy.full(self._ngaussians, numpy.nan) for name in self._pars}
+        params = {name: numpy.full(self._nprofiles, numpy.nan) for name in self._pars}
         for i, name in enumerate(self._pars.keys()):
             params[name][valid_pars] = pars[i*self._nfitted:(i+1)*self._nfitted]
         return params
@@ -433,20 +373,13 @@ class SkewedGaussians:
         self._pars = self.pack_params(pars, valid_pars)
         return (self(x) - y) / (1.0 if sigma is None else sigma)
 
-    def fit(self, x, y, sigma=None, guess=None, bounds=(-numpy.inf,+numpy.inf), ftol=1e-8, xtol=1e-8, maxfev=9999, solver="trf", loss="linear"):
+    def fit(self, x, y, sigma=None, ftol=1e-8, xtol=1e-8, maxfev=9999, solver="trf", loss="linear"):
 
         sigma_ = self._validate_uncertainties(sigma)
 
-        guess = guess if guess is not None else self._pars
-        bounds_ = self._parse_boundaries(centroids=guess.get("centroids"), **bounds)
-        guess_ = self._parse_guess(guess)
-        guess_ = numpy.clip(guess_, *bounds_)
-        valid_pars = self._check_valid(guess_, bounds_)
-        self._nfitted = valid_pars.sum()
-
         try:
             model = optimize.least_squares(
-                self.residuals, x0=guess_[valid_pars], bounds=bounds_[:, valid_pars], args=(valid_pars, x, y, sigma_), max_nfev=maxfev, ftol=ftol, xtol=xtol,
+                self.residuals, x0=self._guess[self._valid_pars], bounds=self._bounds[:, self._valid_pars], args=(self._valid_pars, x, y, sigma_), max_nfev=maxfev, ftol=ftol, xtol=xtol,
                 method=solver, loss=loss)
         except Exception as e:
             warnings.warn(f"{e}")
@@ -456,12 +389,12 @@ class SkewedGaussians:
             warnings.warn(f"  {sigma_  = }")
             warnings.warn(f"  {self(x) = }")
             warnings.warn("current parameters:")
-            warnings.warn(f"  guess       = {guess_}")
-            warnings.warn(f"  lower bound = {bounds_[0]}")
-            warnings.warn(f"  upper bound = {bounds_[1]}")
-            self._mask = self.pack_params(numpy.ones(self._nfitted, dtype="bool"), valid_pars=valid_pars)
-            self._pars = self.pack_params(numpy.full(self._nfitted, numpy.nan), valid_pars=valid_pars)
-            self._errs = self.pack_params(numpy.full(self._nfitted, numpy.nan), valid_pars=valid_pars)
+            warnings.warn(f"  guess       = {self._guess}")
+            warnings.warn(f"  lower bound = {self._bounds[0]}")
+            warnings.warn(f"  upper bound = {self._bounds[1]}")
+            self._mask = self.pack_params(numpy.ones(self._nfitted, dtype="bool"), valid_pars=self._valid_pars)
+            self._pars = self.pack_params(numpy.full(self._nfitted, numpy.nan), valid_pars=self._valid_pars)
+            self._errs = self.pack_params(numpy.full(self._nfitted, numpy.nan), valid_pars=self._valid_pars)
             self._cov = numpy.full((self._nfitted,self._nfitted), numpy.nan)
             return
 
@@ -480,9 +413,9 @@ class SkewedGaussians:
         pars[mask] = numpy.nan
         errs[mask] = numpy.nan
 
-        self._mask = self.pack_params(mask, valid_pars=valid_pars)
-        self._pars = self.pack_params(pars, valid_pars=valid_pars)
-        self._errs = self.pack_params(errs, valid_pars=valid_pars)
+        self._mask = self.pack_params(mask, valid_pars=self._valid_pars)
+        self._pars = self.pack_params(pars, valid_pars=self._valid_pars)
+        self._errs = self.pack_params(errs, valid_pars=self._valid_pars)
 
     def plot_residuals(self, x, y=None, sigma=None, mask=None, axs=None):
         residuals = None
@@ -543,6 +476,60 @@ class SkewedGaussians:
 
         self.plot_residuals(x, y, sigma, mask, axs=axs)
         return axs
+
+
+class SkewedGaussians(Profile1D):
+
+    PARNAMES = (
+        "counts",    # Integral of the gaussian
+        "centroids", # Mode
+        "sigmas",    # Standard deviation
+        "alphas"     # Shape parameter (not to be confused with skewness)
+    )
+
+    def __init__(self, pars, fixed, bounds, ignore_nans=True):
+        super().__init__(pars, fixed, bounds, ignore_nans=ignore_nans)
+
+    def __call__(self, x):
+        counts, centroids, sigmas, alphas = self.unpack_params()
+        # convert to PDF parameters
+        deltas = self._deltas(alphas)
+        scales = self._sigma_to_scale(sigmas, deltas)
+        locations = self._centroid_to_location(centroids, scales, alphas, deltas)
+
+        # evaluate PDF shape
+        shape = self._skewed_gaussian_shapes(x, locations, scales, alphas)
+        # calculate normalization
+        norms = numpy.trapz(shape, x, axis=1)
+        return bn.nansum(counts[:, numpy.newaxis] * shape / norms[:, numpy.newaxis], axis=0)
+
+    def _deltas(self, alphas):
+        return alphas / numpy.sqrt(1 + alphas**2)
+
+    def _m0(self, alphas, deltas):
+        return skew_factor * deltas - (1-numpy.pi*0.25)*(skew_factor*deltas)**3/(1-2/numpy.pi*deltas**2) - numpy.sign(alphas)*0.5*numpy.exp(-2*numpy.pi/numpy.abs(alphas))
+
+    def _location_to_centroid(self, locations, scales, alphas, deltas):
+        m0 = self._m0(alphas, deltas)
+        return locations + m0*scales
+
+    def _centroid_to_location(self, centroids, scales, alphas, deltas):
+        m0 = self._m0(alphas, deltas)
+        return centroids - m0*scales
+
+    def _scale_to_sigma(self, scales, deltas):
+        return scales * numpy.sqrt(1 - (2 * deltas**2) / numpy.pi)
+
+    def _sigma_to_scale(self, sigmas, deltas):
+        denom = numpy.sqrt(1 - (2 * deltas**2) / numpy.pi)
+        return sigmas / denom
+
+    def _skewed_gaussian_shapes(self, x, locations, scales, alphas):
+        z = (x[numpy.newaxis, :] - locations[:, numpy.newaxis]) / scales[:, numpy.newaxis]
+        return numpy.exp(-0.5 * z**2) * (1 + special.erf(alphas[:, numpy.newaxis] * z / numpy.sqrt(2)))
+
+
+PROFILES = {"skewed": SkewedGaussians}
 
 
 class SpectralResolution(object):
