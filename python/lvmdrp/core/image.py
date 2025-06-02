@@ -2561,7 +2561,7 @@ class Image(Header):
         alphas = TraceMask.from_samples(data_dim=alphas_block._data.shape, samples=alphas_samples, samples_columns=columns)
         return alphas
 
-    def measure_fiber_block(self, traces_guess, traces_fixed, iblock, columns, bounds, nsigmas=6, profile="skewed", ftol=1e-3, xtol=1e-3, solver="trf", loss="linear", axs=None):
+    def measure_fiber_block(self, traces_guess, traces_fixed, iblock, columns, bounds, *args, nsigmas=6, profile="skewed", mode="lsq", axs=None, **kwargs):
 
         guess_block = {name: traces_guess[name].get_block(iblock) for name in traces_guess}
         fixed_block = {name: traces_fixed[name].get_block(iblock) for name in traces_fixed}
@@ -2579,8 +2579,7 @@ class Image(Header):
             fixed = {name: fixed_block[name].getSlice(icolumn, axis="Y")[0] for name in fixed_block}
             img_slice = self.getSlice(icolumn, axis="Y")
 
-            model_column, fitted_pars, fitted_errs = img_slice.fit_gaussians(
-                pars_guess=guess, pars_fixed=fixed, bounds=bounds, profile=profile, nsigmas=nsigmas, ftol=ftol, xtol=xtol, solver=solver, loss=loss)
+            model_column, fitted_pars, fitted_errs = img_slice.fit_gaussians(guess, fixed, bounds, *args, profile=profile, nsigmas=nsigmas, mode=mode, **kwargs)
 
             axs_column = axs.get(icolumn)
             if axs_column is not None:
@@ -2605,7 +2604,7 @@ class Image(Header):
                 data_dim=block._data.shape, samples=samples[name], samples_error=errors[name], samples_columns=columns, header=guess_block[name]._header, slitmap=guess_block[name]._slitmap)
         return traces
 
-    def iterative_block_trace(self, guess_traces, bounds, smoothings, use_weights, iblock, columns, niter=10, x_nsigmas=6, s_nsigmas=None, solver="trf", loss="linear", axs=None):
+    def iterative_block_trace(self, guess_traces, bounds, smoothings, use_weights, iblock, columns, *args, niter=10, x_nsigmas=6, s_nsigmas=None, profile="skewed", mode="lsq", axs=None, **kwargs):
         def _set_plot_alphas(axs):
             if axs is None:
                 return
@@ -2641,8 +2640,7 @@ class Image(Header):
             free_bounds = {free_name: bounds.get(free_name)}
             fixed_traces = {fixed_name: guess_traces.get(fixed_name) for fixed_name in fixed_names}
 
-            fitted_block = self.measure_fiber_block(
-                traces_guess=free_trace, traces_fixed=fixed_traces, iblock=iblock, columns=columns, bounds=free_bounds, nsigmas=x_nsigmas, solver=solver, loss=loss, axs=axs_yfree)
+            fitted_block = self.measure_fiber_block(free_trace, fixed_traces, iblock, columns, free_bounds, *args, nsigmas=x_nsigmas, profile=profile, mode=mode, axs=axs_yfree, **kwargs)
             fitted_block[free_name].fit_spline(smoothing=smoothings.get(free_name), use_weights=use_weights.get(free_name, False), nsigmas=s_nsigmas, min_samples_frac=0.7)
             free_trace[free_name].set_block(iblock=iblock, from_instance=fitted_block[free_name])
             free_trace[free_name]._coeffs = None
