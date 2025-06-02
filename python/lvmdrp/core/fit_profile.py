@@ -1,7 +1,9 @@
 # -*- coding: utf-8 -*-
 from copy import deepcopy as copy
 import warnings
+import inspect
 import itertools
+from functools import wraps
 
 from lvmdrp.core.plot import plt, create_subplots, make_axes_locatable, plot_gradient_fit, plot_radial_gradient_fit
 import astropy.io.fits as pyfits
@@ -58,6 +60,13 @@ def guess_gaussians_integral(pixels, data, centroids, fwhms, nsigma=6, return_pi
     if return_pixels_selection:
         return integrals, select
     return integrals
+
+def update_params(func):
+    @wraps(func)
+    def wrapper(self, *args, **kwargs):
+        self._pars = self.pack_params(args[0])
+        return func(self, *args, **kwargs)
+    return wrapper
 
 
 class IFUGradient(object):
@@ -357,28 +366,80 @@ class Profile1D:
             raise ValueError(f"Errors have non-valid values: {sigma}")
         return sigma
 
+    def _select_fitting_mode(self, mode, x, y, sigma, *args, **kwargs):
+        if mode == "lsq":
+            result = optimize.least_squares(self.residuals, x0=self._guess[self._valid_pars], bounds=self._bounds[:, self._valid_pars], args=(x, y, sigma), **kwargs)
+        elif mode == "custom_cost":
+            args_ = (x, y, sigma) + args
+            fun = getattr(self, "cost_function", None)
+            if fun is None:
+                raise ValueError(f"Invalid value for `fun`: {fun}. Expected a callable with signature '{inspect.signature(self.residuals)}'")
+            result = optimize.minimize(fun, x0=self._guess[self._valid_pars], bounds=self._bounds[:, self._valid_pars].T, args=args_, **kwargs)
+        return result
+
+    def _calc_covariance(self, result):
+
+        _ = numpy.full((self._nfitted,self._nfitted), numpy.nan)
+
+        # TODO: there are some cases where the Jacobian is a dense matrix object when mode="custom_cost"
+        J = result.jac
+        H_inv = getattr(result, "hess_inv", None)
+        if J.ndim == 1 and H_inv is None:
+            return _
+        elif J.ndim == 1:
+            cov = H_inv.todense()
+            return cov
+
+        try:
+            cov = numpy.linalg.inv(J.T @ J)
+        except numpy.linalg.LinAlgError:
+            try:
+                cov = numpy.linalg.pinv(J.T @ J)
+            except Exception as e:
+                warnings.warn(f"while calculating variance with numpy.linalg.pinv: {e}")
+                cov = numpy.full((self._nfitted,self._nfitted), numpy.nan)
+        return cov
+
+    def _parse_result(self, result=None):
+        if result is None:
+            mask = self.pack_params(numpy.ones(self._nfitted, dtype="bool"))
+            pars = self.pack_params(numpy.full(self._nfitted, numpy.nan))
+            errs = self.pack_params(numpy.full(self._nfitted, numpy.nan))
+            cov = numpy.full((self._nfitted,self._nfitted), numpy.nan)
+            return mask, pars, errs, cov
+
+        cov = self._calc_covariance(result)
+        pars = result.x
+        errs = numpy.sqrt(numpy.diag(cov))
+        mask = getattr(result, "active_mask", numpy.zeros_like(pars)) != 0
+        pars[mask] = numpy.nan
+        errs[mask] = numpy.nan
+
+        mask = self.pack_params(mask)
+        pars = self.pack_params(pars)
+        errs = self.pack_params(errs)
+        return mask, pars, errs, cov
+
     def unpack_params(self):
         params = [self._pars.get(name, self._fixed.get(name, None)) for name in self.PARNAMES]
         return params
 
-    def pack_params(self, pars, valid_pars):
+    def pack_params(self, pars):
         params = {name: numpy.full(self._nprofiles, numpy.nan) for name in self._pars}
         for i, name in enumerate(self._pars.keys()):
-            params[name][valid_pars] = pars[i*self._nfitted:(i+1)*self._nfitted]
+            params[name][self._valid_pars] = pars[i*self._nfitted:(i+1)*self._nfitted]
         return params
 
-    def residuals(self, pars, valid_pars, x, y, sigma=None):
-        self._pars = self.pack_params(pars, valid_pars)
-        return (self(x) - y) / (1.0 if sigma is None else sigma)
+    @update_params
+    def residuals(self, pars, x, y, sigma, *args, **kwargs):
+        return (self(x) - y) / sigma
 
-    def fit(self, x, y, sigma=None, ftol=1e-8, xtol=1e-8, maxfev=9999, solver="trf", loss="linear"):
+    def fit(self, x, y, sigma, *args, mode="lsq", **kwargs):
 
         sigma_ = self._validate_uncertainties(sigma)
 
         try:
-            model = optimize.least_squares(
-                self.residuals, x0=self._guess[self._valid_pars], bounds=self._bounds[:, self._valid_pars], args=(self._valid_pars, x, y, sigma_), max_nfev=maxfev, ftol=ftol, xtol=xtol,
-                method=solver, loss=loss)
+            result = self._select_fitting_mode(mode, x, y, sigma, *args, **kwargs)
         except Exception as e:
             warnings.warn(f"{e}")
             warnings.warn("data points:")
@@ -390,30 +451,10 @@ class Profile1D:
             warnings.warn(f"  guess       = {self._guess}")
             warnings.warn(f"  lower bound = {self._bounds[0]}")
             warnings.warn(f"  upper bound = {self._bounds[1]}")
-            self._mask = self.pack_params(numpy.ones(self._nfitted, dtype="bool"), valid_pars=self._valid_pars)
-            self._pars = self.pack_params(numpy.full(self._nfitted, numpy.nan), valid_pars=self._valid_pars)
-            self._errs = self.pack_params(numpy.full(self._nfitted, numpy.nan), valid_pars=self._valid_pars)
-            self._cov = numpy.full((self._nfitted,self._nfitted), numpy.nan)
+            self._mask, self._pars, self._errs, self._cov = self._parse_result(result=None)
             return
 
-        try:
-            self._cov = numpy.linalg.inv(model.jac.T @ model.jac)
-        except numpy.linalg.LinAlgError:
-            try:
-                self._cov = numpy.linalg.pinv(model.jac.T @ model.jac)
-            except Exception as e:
-                warnings.warn(f"while calculating variance with numpy.linalg.pinv: {e}")
-                self._cov = numpy.full((self._nfitted,self._nfitted), numpy.nan)
-
-        pars = model.x
-        mask = model.active_mask != 0
-        errs = numpy.sqrt(numpy.diag(self._cov))
-        pars[mask] = numpy.nan
-        errs[mask] = numpy.nan
-
-        self._mask = self.pack_params(mask, valid_pars=self._valid_pars)
-        self._pars = self.pack_params(pars, valid_pars=self._valid_pars)
-        self._errs = self.pack_params(errs, valid_pars=self._valid_pars)
+        self._mask, self._pars, self._errs, self._cov = self._parse_result(result)
 
     def plot_residuals(self, x, y=None, sigma=None, mask=None, axs=None):
         residuals = None
@@ -525,6 +566,15 @@ class SkewedGaussians(Profile1D):
     def _skewed_gaussian_shapes(self, x, locations, scales, alphas):
         z = (x[numpy.newaxis, :] - locations[:, numpy.newaxis]) / scales[:, numpy.newaxis]
         return numpy.exp(-0.5 * z**2) * (1 + special.erf(alphas[:, numpy.newaxis] * z / numpy.sqrt(2)))
+
+    @update_params
+    def cost_function(self, pars, x, y, sigma, readnoise, collapse=True):
+        model = self(x)
+        model = numpy.clip(model, 1e-12, None)
+        loglik = model - sigma**2 * numpy.log(model + readnoise**2)
+        if collapse:
+            return bn.nansum(loglik)
+        return loglik
 
 
 PROFILES = {"skewed": SkewedGaussians}
