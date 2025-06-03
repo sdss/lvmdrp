@@ -369,14 +369,15 @@ class Profile1D:
         return sigma
 
     def _select_fitting_mode(self, mode, x, y, sigma, *args, **kwargs):
+        selection = numpy.tile(self._valid_pars, self._npars)
         if mode == "lsq":
-            result = optimize.least_squares(self.residuals, x0=self._guess[self._valid_pars], bounds=self._bounds[:, self._valid_pars], args=(x, y, sigma), **kwargs)
+            result = optimize.least_squares(self.residuals, x0=self._guess[selection], bounds=self._bounds[:, selection], args=(x, y, sigma), **kwargs)
         elif mode == "custom_cost":
             args_ = (x, y, sigma) + args
             fun = getattr(self, "cost_function", None)
             if fun is None:
                 raise ValueError(f"Invalid value for `fun`: {fun}. Expected a callable with signature '{inspect.signature(self.residuals)}'")
-            result = optimize.minimize(fun, x0=self._guess[self._valid_pars], bounds=self._bounds[:, self._valid_pars].T, args=args_, **kwargs)
+            result = optimize.minimize(fun, x0=self._guess[selection], bounds=self._bounds[:, selection].T, args=args_, **kwargs)
         return result
 
     def _calc_covariance(self, result):
