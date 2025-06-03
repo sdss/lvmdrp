@@ -320,10 +320,12 @@ class Profile1D:
         if not guess_valid.all() and not self._ignore_nans:
             raise ValueError(f"Invalid values in guess parameters:\n  {guess}")
 
-        fixed_list = self._to_list(self._fixed)
-        fixed_valid = numpy.isfinite(numpy.concatenate(fixed_list)).reshape((-1, self._nprofiles))
-        if not fixed_valid.all() and not self._ignore_nans:
-            raise ValueError(f"Invalid values in fixed parameters:\n  {self._fixed}")
+        fixed_valid = numpy.ones_like(guess_valid, dtype="bool")
+        if len(self._fixed) != 0:
+            fixed_list = self._to_list(self._fixed)
+            fixed_valid = numpy.isfinite(numpy.concatenate(fixed_list)).reshape((-1, self._nprofiles))
+            if not fixed_valid.all() and not self._ignore_nans:
+                raise ValueError(f"Invalid values in fixed parameters:\n  {self._fixed}")
 
         valid_pars = guess_valid.all(0) & lower_valid.all(0) & upper_valid.all(0) & fixed_valid.all(0)
         return valid_pars
@@ -342,7 +344,7 @@ class Profile1D:
             if kind == "relative":
                 lower = x + x_range[0]
                 upper = x + x_range[1]
-            elif kind == "absolute" or kind is None:
+            elif kind == "absolute":
                 lower = _ * x_range[0]
                 upper = _ * x_range[1]
             else:
@@ -352,7 +354,7 @@ class Profile1D:
             bounds_lower.append(lower)
             bounds_upper.append(upper)
 
-        for name in bounds:
+        for name in pars:
             _set_boundaries(pars.get(name), bounds.get(name, {}))
 
         bounds_lower = numpy.concatenate(bounds_lower)
