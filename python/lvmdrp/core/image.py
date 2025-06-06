@@ -2604,7 +2604,7 @@ class Image(Header):
                 data_dim=block._data.shape, samples=samples[name], samples_error=errors[name], samples_columns=columns, header=guess_block[name]._header, slitmap=guess_block[name]._slitmap)
         return traces
 
-    def iterative_block_trace(self, guess_traces, bounds, smoothings, use_weights, iblock, columns, *args, niter=10, x_nsigmas=6, s_nsigmas=None, profile="skewed", mode="lsq", axs=None, **kwargs):
+    def iterative_block_trace(self, guess_traces, fixed_traces, bounds, smoothing_conf, iblock, columns, *args, niter=10, x_nsigmas=6, s_nsigmas=None, profile="skewed", mode="lsq", axs=None, **kwargs):
         def _set_plot_alphas(axs):
             if axs is None:
                 return
@@ -2638,10 +2638,24 @@ class Image(Header):
 
             free_trace = {free_name: guess_traces.get(free_name)}
             free_bounds = {free_name: bounds.get(free_name)}
-            fixed_traces = {fixed_name: guess_traces.get(fixed_name) for fixed_name in fixed_names}
+            smoothing_model, smoothing_pars = smoothing_conf.get(free_name)
 
-            fitted_block = self.measure_fiber_block(free_trace, fixed_traces, iblock, columns, free_bounds, *args, nsigmas=x_nsigmas, profile=profile, mode=mode, axs=axs_yfree, **kwargs)
-            fitted_block[free_name].fit_spline(smoothing=smoothings.get(free_name), use_weights=use_weights.get(free_name, False), nsigmas=s_nsigmas, min_samples_frac=0.7)
+            fixed_traces_ = {fixed_name: guess_traces.get(fixed_name) for fixed_name in fixed_names}
+            fixed_traces_.update(fixed_traces)
+
+
+            if free_name == "counts":
+                fitted_block = self.measure_fiber_block(
+                    free_trace, fixed_traces_, iblock, columns, free_bounds, 3,
+                    nsigmas=x_nsigmas, profile=profile, axs=axs_yfree,
+                    mode="custom_cost", options={"eps": 1e-12, "ftol": 1e-12, "gtol": 1e-12})
+            else:
+                fitted_block = self.measure_fiber_block(free_trace, fixed_traces_, iblock, columns, free_bounds, *args, nsigmas=x_nsigmas, profile=profile, mode=mode, axs=axs_yfree, **kwargs)
+
+            smoothing_method = getattr(fitted_block[free_name], f"fit_{smoothing_model}")
+            if smoothing_method is None:
+                raise ValueError(f"Invalid value for `smoothing_model`: {smoothing_model}. Expected either 'polynomial', 'spline' or 'spline2d'")
+            smoothing_method(**smoothing_pars)
             free_trace[free_name].set_block(iblock=iblock, from_instance=fitted_block[free_name])
             free_trace[free_name]._coeffs = None
 
