@@ -7,6 +7,7 @@ from functools import wraps
 
 from lvmdrp.core.plot import plt, create_subplots, make_axes_locatable, plot_gradient_fit, plot_radial_gradient_fit
 import astropy.io.fits as pyfits
+from astropy.modeling.functional_models import Voigt1D, Lorentz1D, Moffat1D
 import numpy
 import bottleneck as bn
 from scipy import interpolate, optimize, special
@@ -60,6 +61,12 @@ def guess_gaussians_integral(pixels, data, centroids, fwhms, nsigma=6, return_pi
     if return_pixels_selection:
         return integrals, select
     return integrals
+
+def moffats(pars, x):
+    counts, centroids, fwhms, betas = pars
+    r_d = fwhms[:,None] / (2.0 * numpy.sqrt(2 ** (1.0 / betas[:,None]) - 1.0))
+    sigma_0 = (betas[:,None] - 1.0) * counts[:,None] / (numpy.pi * (r_d**2))
+    return bn.nansum(sigma_0 * (1.0 + ((x[None,:] - centroids[:,None]) / r_d) ** 2) ** (-betas[:,None]), axis=0)
 
 def update_params(func):
     @wraps(func)
@@ -437,6 +444,23 @@ class Profile1D:
     def residuals(self, pars, x, y, sigma, *args, **kwargs):
         return (self(x) - y) / sigma
 
+    @update_params
+    def cost_function(self, pars, x, y, sigma, readnoise, collapse=True):
+        rn_sq = readnoise ** 2
+        model = self(x)
+        model = numpy.clip(model, 1e-12, None)
+        loglik = model - (y + rn_sq) * numpy.log(model + rn_sq)
+        if collapse:
+            return numpy.sum(loglik)
+        return loglik
+
+    def chi_sq(self, x, y, sigma, collapse=True):
+        dof = max(1, x.size - self._npars * self._nfitted)
+        chisq = (self(x) - y)**2 / sigma**2 / dof
+        if collapse:
+            return bn.nansum(chisq)
+        return chisq
+
     def fit(self, x, y, sigma, *args, mode="lsq", **kwargs):
 
         sigma_ = self._validate_uncertainties(sigma)
@@ -520,6 +544,22 @@ class Profile1D:
         return axs
 
 
+class NormalGaussians(Profile1D):
+
+    PARNAMES = (
+        "counts",
+        "centroids",
+        "sigmas"
+    )
+
+    def __init__(self, pars, fixed, bounds, ignore_nans=True):
+        super().__init__(pars, fixed, bounds, ignore_nans=ignore_nans)
+
+    def __call__(self, x):
+        pars = self.unpack_params()
+        return gaussians(pars, x)
+
+
 class SkewedGaussians(Profile1D):
 
     PARNAMES = (
@@ -570,17 +610,98 @@ class SkewedGaussians(Profile1D):
         z = (x[numpy.newaxis, :] - locations[:, numpy.newaxis]) / scales[:, numpy.newaxis]
         return numpy.exp(-0.5 * z**2) * (1 + special.erf(alphas[:, numpy.newaxis] * z / numpy.sqrt(2)))
 
-    @update_params
-    def cost_function(self, pars, x, y, sigma, readnoise, collapse=True):
-        model = self(x)
-        model = numpy.clip(model, 1e-12, None)
-        loglik = model - sigma**2 * numpy.log(model + readnoise**2)
-        if collapse:
-            return bn.nansum(loglik)
-        return loglik
+
+class PolyGaussians(Profile1D):
+
+    PARNAMES = (
+        "counts",
+        "centroids",
+        "sigmas",
+        "a",
+        "b",
+        "c",
+        "d"
+    )
+
+    def __init__(self, pars, fixed, bounds, ignore_nans=True):
+        super().__init__(pars, fixed, bounds, ignore_nans)
+
+    def __call__(self, x):
+        counts, centroids, sigmas, a, b, c, d = self.unpack_params()
+        gauss = gaussians((counts, centroids, sigmas), x)
+        poly = bn.nansum(a[:,None] + b[:,None]*x[None,:] + c[:,None]*x[None,:]**2 + d[:,None]*x[None,:]**3, axis=0)
+        return gauss + poly
+
+    def _polynomial(self, x):
+        counts, centroids, sigmas, a, b, c, d = self.unpack_params()
+        poly = bn.nansum(a[:,None] + b[:,None]*x[None,:] + c[:,None]*x[None,:]**2 + d[:,None]*x[None,:]**3, axis=0)
+        return poly
 
 
-PROFILES = {"skewed": SkewedGaussians}
+class Moffats(Profile1D):
+
+    PARNAMES = (
+        "counts",
+        "centroids",
+        "sigmas",
+        "betas"
+    )
+
+    def __init__(self, pars, fixed, bounds, ignore_nans=True):
+        super().__init__(pars, fixed, bounds, ignore_nans)
+
+    def __call__(self, x):
+        counts, centroids, sigmas, betas = self.unpack_params()
+
+        moffats_ = numpy.asarray([Moffat1D(1.0, centroid, sigma, beta)(x) for centroid, sigma, beta in zip(centroids, sigmas, betas)])
+        norms = numpy.trapz(moffats_, x, axis=1)
+
+        return bn.nansum(counts[:, None] * moffats_ / norms[:, None], axis=0)
+
+
+class Lorentzs(Profile1D):
+
+    PARNAMES = (
+        "counts",
+        "centroids",
+        "sigmas"
+    )
+
+    def __init__(self, pars, fixed, bounds, ignore_nans=True):
+        super().__init__(pars, fixed, bounds, ignore_nans=ignore_nans)
+
+    def __call__(self, x):
+        counts, centroids, sigmas = self.unpack_params()
+
+        fwhms = sigmas * 2.354
+
+        lorentzs = [count * Lorentz1D(2/(numpy.pi*fwhm), centroid, fwhm)(x) for count, centroid, fwhm in zip(counts, centroids, fwhms)]
+        return bn.nansum(lorentzs, axis=0)
+
+
+class Voigts(Profile1D):
+
+    PARNAMES = (
+        "counts",
+        "centroids",
+        "sigmas_l",
+        "sigmas_g"
+    )
+
+    def __init__(self, pars, fixed, bounds, ignore_nans=True):
+        super().__init__(pars, fixed, bounds, ignore_nans)
+
+    def __call__(self, x):
+        counts, centroids, sigmas_l, sigmas_g = self.unpack_params()
+
+        fwhms_l = sigmas_l * 2.354
+        fwhms_g = sigmas_g * 2.354
+
+        voigts = [count * Voigt1D(centroid, 2/(numpy.pi*fwhm_l), fwhm_l, fwhm_g, method="Scipy")(x) for count, centroid, fwhm_l, fwhm_g in zip(counts, centroids, fwhms_l, fwhms_g)]
+        return bn.nansum(voigts, axis=0)
+
+
+PROFILES = {"normal": NormalGaussians, "skewed": SkewedGaussians, "poly": PolyGaussians, "moffat": Moffats, "lorentz": Lorentzs, "voigt": Voigts}
 
 
 class SpectralResolution(object):
