@@ -2561,7 +2561,7 @@ class Image(Header):
         alphas = TraceMask.from_samples(data_dim=alphas_block._data.shape, samples=alphas_samples, samples_columns=columns)
         return alphas
 
-    def measure_fiber_block(self, traces_guess, traces_fixed, iblock, columns, bounds, *args, nsigmas=6, profile="skewed", mode="lsq", axs=None, **kwargs):
+    def measure_fiber_block(self, profile, traces_guess, traces_fixed, iblock, columns, bounds, measuring_conf, axs=None):
 
         guess_block = {name: traces_guess[name].get_block(iblock) for name in traces_guess}
         fixed_block = {name: traces_fixed[name].get_block(iblock) for name in traces_fixed}
@@ -2572,6 +2572,8 @@ class Image(Header):
         samples = {name: numpy.full((block._fibers,columns.size), numpy.nan) for name, block in guess_block.items()}
         errors = copy(samples)
 
+        # TODO: implement updating guess with previous fit
+
         axs = axs if axs is not None else {}
         iterator = tqdm(enumerate(columns), total=len(columns), desc=f"measuring {free_names} with fixed {fixed_names} @ block {iblock+1:>2d}/{LVM_NBLOCKS}", ascii=True, unit="column")
         for i, icolumn in iterator:
@@ -2579,14 +2581,14 @@ class Image(Header):
             fixed = {name: fixed_block[name].getSlice(icolumn, axis="Y")[0] for name in fixed_block}
             img_slice = self.getSlice(icolumn, axis="Y")
 
-            model_column, fitted_pars, fitted_errs = img_slice.fit_gaussians(guess, fixed, bounds, *args, profile=profile, nsigmas=nsigmas, mode=mode, **kwargs)
+            model_column, fitted_pars, fitted_errs = img_slice.fit_gaussians(guess, fixed, bounds, profile=profile, fitting_params=measuring_conf)
 
             axs_column = axs.get(icolumn)
             if axs_column is not None:
                 centroids = guess.get("centroids", fixed.get("centroids"))
                 sigmas = guess.get("sigmas", fixed.get("sigmas"))
-                lower = numpy.nanmin(centroids - nsigmas*sigmas)
-                upper = numpy.nanmax(centroids + nsigmas*sigmas)
+                lower = numpy.nanmin(centroids - 6*sigmas)
+                upper = numpy.nanmax(centroids + 6*sigmas)
                 pixels_selection = (lower <= img_slice._wave) & (img_slice._wave <= upper)
                 axs_column = model_column.plot(
                     x=img_slice._pixels[pixels_selection], y=img_slice._data[pixels_selection],
@@ -2604,7 +2606,7 @@ class Image(Header):
                 data_dim=block._data.shape, samples=samples[name], samples_error=errors[name], samples_columns=columns, header=guess_block[name]._header, slitmap=guess_block[name]._slitmap)
         return traces
 
-    def iterative_block_trace(self, guess_traces, fixed_traces, bounds, smoothing_conf, iblock, columns, *args, niter=10, x_nsigmas=6, s_nsigmas=None, profile="skewed", mode="lsq", axs=None, **kwargs):
+    def iterative_block_trace(self, profile, guess_traces, fixed_traces, iblock, columns, bounds, measuring_conf, smoothing_conf, niter=10, axs=None):
         def _set_plot_alphas(axs):
             if axs is None:
                 return
@@ -2638,24 +2640,16 @@ class Image(Header):
 
             free_trace = {free_name: guess_traces.get(free_name)}
             free_bounds = {free_name: bounds.get(free_name)}
-            smoothing_model, smoothing_pars = smoothing_conf.get(free_name)
+            measuring_conf_ = measuring_conf.get(free_name)
 
             fixed_traces_ = {fixed_name: guess_traces.get(fixed_name) for fixed_name in fixed_names}
             fixed_traces_.update(fixed_traces)
 
+            fitted_block = self.measure_fiber_block(profile, free_trace, fixed_traces_, iblock, columns, free_bounds, measuring_conf=measuring_conf_, axs=axs_yfree)
 
-            if free_name == "counts":
-                fitted_block = self.measure_fiber_block(
-                    free_trace, fixed_traces_, iblock, columns, free_bounds, 3,
-                    nsigmas=x_nsigmas, profile=profile, axs=axs_yfree,
-                    mode="custom_cost", options={"eps": 1e-12, "ftol": 1e-12, "gtol": 1e-12})
-            else:
-                fitted_block = self.measure_fiber_block(free_trace, fixed_traces_, iblock, columns, free_bounds, *args, nsigmas=x_nsigmas, profile=profile, mode=mode, axs=axs_yfree, **kwargs)
-
+            smoothing_model, smoothing_conf_ = smoothing_conf.get(free_name)
             smoothing_method = getattr(fitted_block[free_name], f"fit_{smoothing_model}")
-            if smoothing_method is None:
-                raise ValueError(f"Invalid value for `smoothing_model`: {smoothing_model}. Expected either 'polynomial', 'spline' or 'spline2d'")
-            smoothing_method(**smoothing_pars)
+            smoothing_method(**smoothing_conf_)
             free_trace[free_name].set_block(iblock=iblock, from_instance=fitted_block[free_name])
             free_trace[free_name]._coeffs = None
 
@@ -2663,7 +2657,7 @@ class Image(Header):
 
             _set_plot_alphas(axs=axs_yfree)
             if len(axs_xfree) != 0:
-                free_trace[free_name].plot_block(iblock=iblock, nsigmas=s_nsigmas, show_model_samples=False, axs={"mod": axs_xfree[i]})
+                free_trace[free_name].plot_block(iblock=iblock, show_model_samples=False, axs={"mod": axs_xfree[i]})
 
         return guess_traces
 

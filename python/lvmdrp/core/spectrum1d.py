@@ -3596,7 +3596,7 @@ class Spectrum1D(Header):
         params = numpy.concatenate([counts, centroids, fwhms, alphas])
         return gauss_multi, params
 
-    def fit_gaussians(self, pars_guess, pars_fixed, bounds, *args, profile="skewed", nsigmas=6, mode="lsq", axs=None, **kwargs):
+    def fit_gaussians(self, pars_guess, pars_fixed, bounds, fitting_params, profile="skewed", nsigmas=6, axs=None):
         profile_class = fit_profile.PROFILES.get(profile)
         if profile_class is None:
             raise ValueError(f"Invalid value for `profile`: {profile}. Expected one of: {fit_profile.PROFILES}")
@@ -3610,7 +3610,9 @@ class Spectrum1D(Header):
         pixels_selection = (lower <= self._wave) & (self._wave <= upper)
 
         model = profile_class(pars=pars_guess, fixed=pars_fixed, bounds=bounds)
-        model.fit(self._wave[pixels_selection], self._data[pixels_selection], error[pixels_selection], *args, mode=mode, **kwargs)
+        kwargs = fitting_params.copy()
+        args = kwargs.pop("args", ())
+        model.fit(self._wave[pixels_selection], self._data[pixels_selection], error[pixels_selection], *args, **kwargs)
 
         params = model._pars
         errors = model._errs
