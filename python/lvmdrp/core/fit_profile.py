@@ -422,6 +422,10 @@ class Profile1D:
         pars = result.x
         errs = numpy.sqrt(numpy.diag(cov))
         mask = getattr(result, "active_mask", numpy.zeros_like(pars)) != 0
+        selection = numpy.tile(self._valid_pars, self._npars)
+        mask |= pars <= self._bounds[0, selection]
+        mask |= pars >= self._bounds[1, selection]
+        # mask |= pars == self._guess[selection]
         pars[mask] = numpy.nan
         errs[mask] = numpy.nan
 
