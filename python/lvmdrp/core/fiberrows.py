@@ -1434,7 +1434,7 @@ class FiberRows(Header, PositionTable):
 
         return self
 
-    def plot_block(self, iblock=None, blockid=None, ref_column=None, nsigmas=None, show_samples=True, show_model_samples=True, show_model=True, axs=None):
+    def plot_block(self, iblock=None, blockid=None, ref_column=None, nsigmas=None, show_samples=True, show_model_samples=True, show_model=True, show_residuals=True, axs=None):
         if iblock is None and blockid is None:
             block = copy(self)
         else:
@@ -1477,21 +1477,22 @@ class FiberRows(Header, PositionTable):
         if ylims is not None:
             axs["mod"].set_ylim(*ylims)
 
-        if "res" not in axs:
-            axs["mod"].tick_params(labelbottom=False)
+        if show_residuals:
+            if "res" not in axs:
+                axs["mod"].tick_params(labelbottom=False)
 
-            ax_divider = plot.make_axes_locatable(axs["mod"])
-            ax_res = ax_divider.append_axes("bottom", size="30%", pad="5%")
-            ax_res.sharex(axs["mod"])
+                ax_divider = plot.make_axes_locatable(axs["mod"])
+                ax_res = ax_divider.append_axes("bottom", size="30%", pad="5%")
+                ax_res.sharex(axs["mod"])
 
-            axs["res"] = ax_res
+                axs["res"] = ax_res
 
-        axs["res"].axhline(ls="--", lw=1, color="0.4")
-        axs["res"].axhline(-0.01, ls=":", lw=1, color="0.4")
-        axs["res"].axhline(+0.01, ls=":", lw=1, color="0.4")
-        axs["res"].plot(samples.columns, ((block._data[:, samples.columns] - samples)/samples).T, ".-", lw=0.2, ms=5, mew=0)
-        axs["res"].set_ylim(-0.05, +0.05)
-        plot.plt.gcf().tight_layout()
+            axs["res"].axhline(ls="--", lw=1, color="0.4")
+            axs["res"].axhline(-0.01, ls=":", lw=1, color="0.4")
+            axs["res"].axhline(+0.01, ls=":", lw=1, color="0.4")
+            if samples is not None:
+                axs["res"].plot(samples.columns, ((block._data[:, samples.columns] - samples)/samples).T, ".-", lw=0.2, ms=5, mew=0)
+            axs["res"].set_ylim(-0.05, +0.05)
 
         return axs
 
