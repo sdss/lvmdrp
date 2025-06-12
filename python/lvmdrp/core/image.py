@@ -2561,7 +2561,7 @@ class Image(Header):
         alphas = TraceMask.from_samples(data_dim=alphas_block._data.shape, samples=alphas_samples, samples_columns=columns)
         return alphas
 
-    def measure_fiber_block(self, profile, traces_guess, traces_fixed, iblock, columns, bounds, measuring_conf, axs=None):
+    def measure_fiber_block(self, profile, traces_guess, traces_fixed, iblock, columns, bounds, measuring_conf, npixels=4, axs=None):
 
         guess_block = {name: traces_guess[name].get_block(iblock) for name in traces_guess}
         fixed_block = {name: traces_fixed[name].get_block(iblock) for name in traces_fixed}
@@ -2581,14 +2581,14 @@ class Image(Header):
             fixed = {name: fixed_block[name].getSlice(icolumn, axis="Y")[0] for name in fixed_block}
             img_slice = self.getSlice(icolumn, axis="Y")
 
-            model_column, fitted_pars, fitted_errs = img_slice.fit_gaussians(guess, fixed, bounds, profile=profile, fitting_params=measuring_conf)
+            model_column, fitted_pars, fitted_errs = img_slice.fit_gaussians(guess, fixed, bounds, profile=profile, fitting_params=measuring_conf, npixels=npixels)
 
             axs_column = axs.get(icolumn)
             if axs_column is not None:
                 centroids = guess.get("centroids", fixed.get("centroids"))
                 sigmas = guess.get("sigmas", fixed.get("sigmas"))
-                lower = numpy.nanmin(centroids - 6*sigmas)
-                upper = numpy.nanmax(centroids + 6*sigmas)
+                lower = numpy.nanmin(centroids - npixels)
+                upper = numpy.nanmax(centroids + npixels)
                 pixels_selection = (lower <= img_slice._wave) & (img_slice._wave <= upper)
                 axs_column = model_column.plot(
                     x=img_slice._pixels[pixels_selection], y=img_slice._data[pixels_selection],
@@ -2606,20 +2606,29 @@ class Image(Header):
                 data_dim=block._data.shape, samples=samples[name], samples_error=errors[name], samples_columns=columns, header=guess_block[name]._header, slitmap=guess_block[name]._slitmap)
         return traces
 
-    def iterative_block_trace(self, profile, guess_traces, fixed_traces, iblock, columns, bounds, measuring_conf, smoothing_conf, niter=10, axs=None):
-        def _set_plot_alphas(axs):
-            if axs is None:
+    def iterative_block_trace(self, profile, guess_traces, fixed_traces, iblock, columns, bounds, measuring_conf, smoothing_conf, npixels=4, niter=10, axs=None):
+        def _set_plot_alphas(axs, niter_done):
+            if axs is None or niter_done < 2:
                 return
+            alphas = numpy.linspace(0.1, 1.0, niter_done-1, endpoint=False)
             for _, axs_column in axs.items():
                 for key in axs_column:
-                    lines = axs_column[key].get_lines()
-                    nlines = len(lines)//2 if key == "mod" else len(lines)
+                    lines = numpy.asarray(axs_column[key].get_lines())
+                    lines = numpy.split(lines, niter_done)
                     if key == "mod":
-                        alphas = numpy.linspace(0.1, 1.0, nlines, endpoint=True) if nlines > 1 else [1.0]
-                        [(lines[i].set_alpha(alpha), lines[i+1].set_alpha(alpha)) for i, alpha in enumerate(alphas)]
+                        # modify only versions of the model (oversampled, pixelated, final)
+                        nlast = 3
                     elif key == "res":
-                        alphas = numpy.linspace(0.1, 1.0, len(lines), endpoint=True) if nlines > 1 else [1.0]
-                        [(lines[i].set_alpha(alpha)) for i, alpha in enumerate(alphas)]
+                        # modify only residuals lines (last one)
+                        nlast = 1
+
+                    lines_last = lines.pop()
+                    [[(line.set_alpha((line.get_alpha() or 1.0)*alpha), line.set_linewidth(1.0)) for line in lines[i][-nlast:]] for i, alpha in enumerate(alphas)]
+                    [line.set_linewidth(1.5) for line in lines_last[1:][-nlast:]]
+
+                    # [[line.set_visible(False) for line in lines[i][:nlast]] for i in range(alphas.size)]
+                    # [line.set_visible(False) for line in lines_last[1:][:nlast]]
+
         def _block_cycle(parnames, niter):
             npars = len(parnames)
             names_cycle = it.chain.from_iterable(it.repeat(parnames, niter))
@@ -2645,7 +2654,7 @@ class Image(Header):
             fixed_traces_ = {fixed_name: guess_traces.get(fixed_name) for fixed_name in fixed_names}
             fixed_traces_.update(fixed_traces)
 
-            fitted_block = self.measure_fiber_block(profile, free_trace, fixed_traces_, iblock, columns, free_bounds, measuring_conf=measuring_conf_, axs=axs_yfree)
+            fitted_block = self.measure_fiber_block(profile, free_trace, fixed_traces_, iblock, columns, free_bounds, measuring_conf=measuring_conf_, npixels=npixels, axs=axs_yfree)
 
             smoothing_model, smoothing_conf_ = smoothing_conf.get(free_name)
             smoothing_method = getattr(fitted_block[free_name], f"fit_{smoothing_model}")
@@ -2655,7 +2664,7 @@ class Image(Header):
 
             guess_traces.update(free_trace)
 
-            _set_plot_alphas(axs=axs_yfree)
+            _set_plot_alphas(axs=axs_yfree, niter_done=i+1)
             if len(axs_xfree) != 0:
                 free_trace[free_name].plot_block(iblock=iblock, show_model_samples=False, axs={"mod": axs_xfree[i]})
 
