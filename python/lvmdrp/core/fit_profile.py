@@ -3,15 +3,16 @@ from copy import deepcopy as copy
 import warnings
 import inspect
 import itertools
-from functools import wraps
-
-from lvmdrp.core.plot import plt, create_subplots, make_axes_locatable, plot_gradient_fit, plot_radial_gradient_fit
-import astropy.io.fits as pyfits
-from astropy.modeling.functional_models import Voigt1D, Lorentz1D, Moffat1D
 import numpy
 import bottleneck as bn
-from scipy import interpolate, optimize, special
+from functools import wraps
 
+import astropy.io.fits as pyfits
+from astropy.modeling.functional_models import Voigt1D, Lorentz1D, Moffat1D
+from scipy import interpolate, optimize, special
+from scipy.signal import fftconvolve
+
+from lvmdrp.core.plot import plt, create_subplots, make_axes_locatable, plot_gradient_fit, plot_radial_gradient_fit
 
 
 fact = numpy.sqrt(2.0 * numpy.pi)
@@ -284,7 +285,7 @@ class Profile1D:
         instance = cls(pars, fixed={}, bounds={})
         return instance(x)
 
-    def __init__(self, pars, fixed, bounds, ignore_nans=True):
+    def __init__(self, pars, fixed, bounds, ignore_nans=True, oversampling_factor=50):
         self._pars = pars
         self._fixed = fixed
 
@@ -292,6 +293,7 @@ class Profile1D:
         self._npars = len(self._pars)
         self._nfixed = len(self._fixed)
         self._ignore_nans = ignore_nans
+        self._oversampling_factor = oversampling_factor
 
         # get guess and boundaries as requested by Scipy
         self._bounds = self._parse_boundaries(self._pars, bounds)
@@ -299,6 +301,34 @@ class Profile1D:
         self._guess = numpy.clip(self._guess, *self._bounds)
         self._valid_pars = self._check_valid(self._guess, self._bounds)
         self._nfitted = self._valid_pars.sum()
+
+    def _oversample_x(self, x, oversampling_factor=None):
+        of = oversampling_factor or self._oversampling_factor
+        x = numpy.asarray(x)
+        offsets = (numpy.arange(of) + 0.5) / of - 0.5
+        oversampled = x[:, None] + offsets[None, :]
+        return oversampled.ravel()
+
+    def _pixelate(self, x, oversampling_factor=None, return_all=False):
+        of = oversampling_factor or self._oversampling_factor
+
+        x_os = self._oversample_x(x)
+        # dx_os = x_os[1]-x_os[0]
+
+        model_os = self(x_os)
+        model_os = numpy.clip(model_os, 1e-12, None)
+
+        width = int(of)
+        width += 1 - (width % 2)
+        tophat = numpy.ones(width) / width
+
+        pixelated_os = fftconvolve(model_os, tophat, mode="same")
+        # pixelated = numpy.trapz(pixelated_os.reshape(x.size, self._oversampling_factor), dx=x_os[1]-x_os[0], axis=1)
+        pixelated = interpolate.interp1d(x_os, pixelated_os, kind="cubic")(x)
+
+        if return_all:
+            return pixelated, pixelated_os, model_os, x_os
+        return pixelated
 
     def _to_list(self, x):
         return [x[name] for name in self.PARNAMES if name in x]
@@ -446,21 +476,27 @@ class Profile1D:
 
     @update_params
     def residuals(self, pars, x, y, sigma, *args, **kwargs):
-        return (self(x) - y) / sigma
+        model = self._pixelate(x)
+        return (model - y) / sigma
 
     @update_params
     def cost_function(self, pars, x, y, sigma, readnoise, collapse=True):
         rn_sq = readnoise ** 2
-        model = self(x)
-        model = numpy.clip(model, 1e-12, None)
-        loglik = model - (y + rn_sq) * numpy.log(model + rn_sq)
+        model = self._pixelate(x)
+        loglik = (y + rn_sq) * numpy.log(model + rn_sq) - model
         if collapse:
-            return numpy.sum(loglik)
+            # print(f"{readnoise = }")
+            # print(f"{y = }")
+            # print(f"{sigma = }")
+            # print(f"{model = }")
+            # print(f"{loglik = }")
+            return numpy.nansum(loglik)
         return loglik
 
     def chi_sq(self, x, y, sigma, collapse=True):
         dof = max(1, x.size - self._npars * self._nfitted)
-        chisq = (self(x) - y)**2 / sigma**2 / dof
+        model = self._pixelate(x)
+        chisq = (model - y)**2 / sigma**2 / dof
         if collapse:
             return bn.nansum(chisq)
         return chisq
@@ -477,7 +513,7 @@ class Profile1D:
             warnings.warn(f"  {x       = }")
             warnings.warn(f"  {y       = }")
             warnings.warn(f"  {sigma_  = }")
-            warnings.warn(f"  {self(x) = }")
+            warnings.warn(f"  {self._pixelate(x) = }")
             warnings.warn("current parameters:")
             warnings.warn(f"  guess       = {self._guess}")
             warnings.warn(f"  lower bound = {self._bounds[0]}")
@@ -489,10 +525,11 @@ class Profile1D:
 
     def plot_residuals(self, x, y=None, sigma=None, mask=None, axs=None):
         residuals = None
+        model = self._pixelate(x)
         if y is not None and sigma is not None:
-            residuals = (self(x) - y) / sigma
+            residuals = (model - y) / sigma
         elif y is not None:
-            residuals = self(x) - y
+            residuals = model - y
         if residuals is None:
             return
 
@@ -514,8 +551,9 @@ class Profile1D:
         axs["res"].axhline(ls="--", lw=1, color="0.2")
         axs["res"].axhline(-1.0, ls=":", lw=1, color="0.2")
         axs["res"].axhline(+1.0, ls=":", lw=1, color="0.2")
+        if mask is not None:
+            axs["res"].vlines(x[mask], *axs["res"].get_ylim(), lw=1, color="0.7", alpha=0.5, zorder=-1)
         axs["res"].step(x, residuals, lw=1, color="tab:blue", where="mid")
-        axs["res"].vlines(x[mask], *axs["res"].get_ylim(), lw=1, color="0.7", alpha=0.5, zorder=-1)
         return axs
 
     def plot(self, x, y=None, sigma=None, mask=None, axs=None):
@@ -524,7 +562,7 @@ class Profile1D:
         if not isinstance(axs, dict) or "mod" not in axs:
             axs = {"mod": axs}
 
-        model = self(x)
+        model, model_px, model_os, x_os = self._pixelate(x, return_all=True)
 
         if y is not None and sigma is not None:
             axs["mod"].errorbar(x, y, yerr=sigma, fmt=".-", ms=7, mew=0, lw=1, elinewidth=1, mfc="tab:red", color="0.2", ecolor="0.2")
@@ -540,6 +578,8 @@ class Profile1D:
             axs["mod"].vlines(x[mask], *ylims, lw=1, color="0.7", alpha=0.5, zorder=-1)
 
         axs["mod"].step(x, model, lw=1, color="tab:blue", where="mid")
+        axs["mod"].plot(x_os, model_os, "--", lw=1, color="tab:blue", alpha=0.5)
+        axs["mod"].plot(x_os, model_px, "-", lw=1, color="tab:blue", alpha=0.7)
 
         if ylims is not None:
             axs["mod"].set_ylim(*ylims)
@@ -556,8 +596,8 @@ class NormalGaussians(Profile1D):
         "sigmas"
     )
 
-    def __init__(self, pars, fixed, bounds, ignore_nans=True):
-        super().__init__(pars, fixed, bounds, ignore_nans=ignore_nans)
+    def __init__(self, pars, fixed, bounds, ignore_nans=True, oversampling_factor=10):
+        super().__init__(pars, fixed, bounds, ignore_nans=ignore_nans, oversampling_factor=oversampling_factor)
 
     def __call__(self, x):
         pars = self.unpack_params()
@@ -573,8 +613,8 @@ class SkewedGaussians(Profile1D):
         "alphas"     # Shape parameter (not to be confused with skewness)
     )
 
-    def __init__(self, pars, fixed, bounds, ignore_nans=True):
-        super().__init__(pars, fixed, bounds, ignore_nans=ignore_nans)
+    def __init__(self, pars, fixed, bounds, ignore_nans=True, oversampling_factor=10):
+        super().__init__(pars, fixed, bounds, ignore_nans=ignore_nans, oversampling_factor=oversampling_factor)
 
     def __call__(self, x):
         counts, centroids, sigmas, alphas = self.unpack_params()
@@ -627,8 +667,8 @@ class PolyGaussians(Profile1D):
         "d"
     )
 
-    def __init__(self, pars, fixed, bounds, ignore_nans=True):
-        super().__init__(pars, fixed, bounds, ignore_nans)
+    def __init__(self, pars, fixed, bounds, ignore_nans=True, oversampling_factor=10):
+        super().__init__(pars, fixed, bounds, ignore_nans, oversampling_factor=oversampling_factor)
 
     def __call__(self, x):
         counts, centroids, sigmas, a, b, c, d = self.unpack_params()
@@ -651,8 +691,8 @@ class Moffats(Profile1D):
         "betas"
     )
 
-    def __init__(self, pars, fixed, bounds, ignore_nans=True):
-        super().__init__(pars, fixed, bounds, ignore_nans)
+    def __init__(self, pars, fixed, bounds, ignore_nans=True, oversampling_factor=10):
+        super().__init__(pars, fixed, bounds, ignore_nans, oversampling_factor=oversampling_factor)
 
     def __call__(self, x):
         counts, centroids, sigmas, betas = self.unpack_params()
@@ -671,8 +711,8 @@ class Lorentzs(Profile1D):
         "sigmas"
     )
 
-    def __init__(self, pars, fixed, bounds, ignore_nans=True):
-        super().__init__(pars, fixed, bounds, ignore_nans=ignore_nans)
+    def __init__(self, pars, fixed, bounds, ignore_nans=True, oversampling_factor=10):
+        super().__init__(pars, fixed, bounds, ignore_nans=ignore_nans, oversampling_factor=oversampling_factor)
 
     def __call__(self, x):
         counts, centroids, sigmas = self.unpack_params()
@@ -692,8 +732,8 @@ class Voigts(Profile1D):
         "sigmas_g"
     )
 
-    def __init__(self, pars, fixed, bounds, ignore_nans=True):
-        super().__init__(pars, fixed, bounds, ignore_nans)
+    def __init__(self, pars, fixed, bounds, ignore_nans=True, oversampling_factor=10):
+        super().__init__(pars, fixed, bounds, ignore_nans, oversampling_factor=oversampling_factor)
 
     def __call__(self, x):
         counts, centroids, sigmas_l, sigmas_g = self.unpack_params()
