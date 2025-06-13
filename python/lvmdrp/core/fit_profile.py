@@ -9,8 +9,8 @@ from functools import wraps
 
 import astropy.io.fits as pyfits
 from astropy.modeling.functional_models import Voigt1D, Lorentz1D, Moffat1D
-from scipy import interpolate, optimize, special
-from scipy.signal import fftconvolve
+from scipy import interpolate, integrate, optimize, special
+from scipy.signal import fftconvolve, convolve
 
 from lvmdrp.core.plot import plt, create_subplots, make_axes_locatable, plot_gradient_fit, plot_radial_gradient_fit
 
@@ -283,7 +283,7 @@ class Profile1D:
     @classmethod
     def eval(cls, x, pars):
         instance = cls(pars, fixed={}, bounds={})
-        return instance(x)
+        return instance._pixelate(x)
 
     def __init__(self, pars, fixed, bounds, ignore_nans=True, oversampling_factor=50):
         self._pars = pars
@@ -319,11 +319,12 @@ class Profile1D:
         model_os = numpy.clip(model_os, 1e-12, None)
 
         width = int(of)
-        width += 1 - (width % 2)
+        # width += 1 - (width % 2)
         tophat = numpy.ones(width) / width
 
         pixelated_os = fftconvolve(model_os, tophat, mode="same")
-        # pixelated = numpy.trapz(pixelated_os.reshape(x.size, self._oversampling_factor), dx=x_os[1]-x_os[0], axis=1)
+        # print(pixelated_os.reshape(x.size, of).shape)
+        # pixelated = integrate.simpson(pixelated_os.reshape(x.size, of), dx=dx_os, axis=1)
         pixelated = interpolate.interp1d(x_os, pixelated_os, kind="cubic")(x)
 
         if return_all:
