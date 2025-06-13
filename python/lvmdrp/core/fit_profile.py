@@ -596,7 +596,7 @@ class NormalGaussians(Profile1D):
         "sigmas"
     )
 
-    def __init__(self, pars, fixed, bounds, ignore_nans=True, oversampling_factor=10):
+    def __init__(self, pars, fixed, bounds, ignore_nans=True, oversampling_factor=50):
         super().__init__(pars, fixed, bounds, ignore_nans=ignore_nans, oversampling_factor=oversampling_factor)
 
     def __call__(self, x):
@@ -613,7 +613,7 @@ class SkewedGaussians(Profile1D):
         "alphas"     # Shape parameter (not to be confused with skewness)
     )
 
-    def __init__(self, pars, fixed, bounds, ignore_nans=True, oversampling_factor=10):
+    def __init__(self, pars, fixed, bounds, ignore_nans=True, oversampling_factor=50):
         super().__init__(pars, fixed, bounds, ignore_nans=ignore_nans, oversampling_factor=oversampling_factor)
 
     def __call__(self, x):
@@ -667,7 +667,7 @@ class PolyGaussians(Profile1D):
         "d"
     )
 
-    def __init__(self, pars, fixed, bounds, ignore_nans=True, oversampling_factor=10):
+    def __init__(self, pars, fixed, bounds, ignore_nans=True, oversampling_factor=50):
         super().__init__(pars, fixed, bounds, ignore_nans, oversampling_factor=oversampling_factor)
 
     def __call__(self, x):
@@ -691,7 +691,7 @@ class Moffats(Profile1D):
         "betas"
     )
 
-    def __init__(self, pars, fixed, bounds, ignore_nans=True, oversampling_factor=10):
+    def __init__(self, pars, fixed, bounds, ignore_nans=True, oversampling_factor=50):
         super().__init__(pars, fixed, bounds, ignore_nans, oversampling_factor=oversampling_factor)
 
     def __call__(self, x):
@@ -711,7 +711,7 @@ class Lorentzs(Profile1D):
         "sigmas"
     )
 
-    def __init__(self, pars, fixed, bounds, ignore_nans=True, oversampling_factor=10):
+    def __init__(self, pars, fixed, bounds, ignore_nans=True, oversampling_factor=50):
         super().__init__(pars, fixed, bounds, ignore_nans=ignore_nans, oversampling_factor=oversampling_factor)
 
     def __call__(self, x):
@@ -732,7 +732,7 @@ class Voigts(Profile1D):
         "sigmas_g"
     )
 
-    def __init__(self, pars, fixed, bounds, ignore_nans=True, oversampling_factor=10):
+    def __init__(self, pars, fixed, bounds, ignore_nans=True, oversampling_factor=50):
         super().__init__(pars, fixed, bounds, ignore_nans, oversampling_factor=oversampling_factor)
 
     def __call__(self, x):

@@ -2561,7 +2561,7 @@ class Image(Header):
         alphas = TraceMask.from_samples(data_dim=alphas_block._data.shape, samples=alphas_samples, samples_columns=columns)
         return alphas
 
-    def measure_fiber_block(self, profile, traces_guess, traces_fixed, iblock, columns, bounds, measuring_conf, npixels=4, axs=None):
+    def measure_fiber_block(self, profile, traces_guess, traces_fixed, iblock, columns, bounds, measuring_conf, npixels=4, oversampling_factor=50, axs=None):
 
         guess_block = {name: traces_guess[name].get_block(iblock) for name in traces_guess}
         fixed_block = {name: traces_fixed[name].get_block(iblock) for name in traces_fixed}
@@ -2581,7 +2581,8 @@ class Image(Header):
             fixed = {name: fixed_block[name].getSlice(icolumn, axis="Y")[0] for name in fixed_block}
             img_slice = self.getSlice(icolumn, axis="Y")
 
-            model_column, fitted_pars, fitted_errs = img_slice.fit_gaussians(guess, fixed, bounds, profile=profile, fitting_params=measuring_conf, npixels=npixels)
+            model_column, fitted_pars, fitted_errs = img_slice.fit_gaussians(
+                guess, fixed, bounds, profile=profile, fitting_params=measuring_conf, npixels=npixels, oversampling_factor=oversampling_factor)
 
             axs_column = axs.get(icolumn)
             if axs_column is not None:
@@ -2606,7 +2607,7 @@ class Image(Header):
                 data_dim=block._data.shape, samples=samples[name], samples_error=errors[name], samples_columns=columns, header=guess_block[name]._header, slitmap=guess_block[name]._slitmap)
         return traces
 
-    def iterative_block_trace(self, profile, guess_traces, fixed_traces, iblock, columns, bounds, measuring_conf, smoothing_conf, npixels=4, niter=10, axs=None):
+    def iterative_block_trace(self, profile, guess_traces, fixed_traces, iblock, columns, bounds, measuring_conf, smoothing_conf, npixels=4, oversampling_factor=50, niter=10, axs=None):
         def _set_plot_alphas(axs, niter_done):
             if axs is None or niter_done < 2:
                 return
@@ -2628,7 +2629,6 @@ class Image(Header):
 
                     # [[line.set_visible(False) for line in lines[i][:nlast]] for i in range(alphas.size)]
                     # [line.set_visible(False) for line in lines_last[1:][:nlast]]
-
         def _block_cycle(parnames, niter):
             npars = len(parnames)
             names_cycle = it.chain.from_iterable(it.repeat(parnames, niter))
@@ -2654,7 +2654,9 @@ class Image(Header):
             fixed_traces_ = {fixed_name: guess_traces.get(fixed_name) for fixed_name in fixed_names}
             fixed_traces_.update(fixed_traces)
 
-            fitted_block = self.measure_fiber_block(profile, free_trace, fixed_traces_, iblock, columns, free_bounds, measuring_conf=measuring_conf_, npixels=npixels, axs=axs_yfree)
+            fitted_block = self.measure_fiber_block(
+                profile, free_trace, fixed_traces_, iblock, columns, free_bounds,
+                measuring_conf=measuring_conf_, npixels=npixels, oversampling_factor=oversampling_factor, axs=axs_yfree)
 
             smoothing_model, smoothing_conf_ = smoothing_conf.get(free_name)
             smoothing_method = getattr(fitted_block[free_name], f"fit_{smoothing_model}")
