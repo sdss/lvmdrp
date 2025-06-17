@@ -305,7 +305,8 @@ class Profile1D:
     def _oversample_x(self, x, oversampling_factor=None):
         of = oversampling_factor or self._oversampling_factor
         x = numpy.asarray(x)
-        offsets = (numpy.arange(of) + 0.5) / of - 0.5
+        dx = (x[1] - x[0]) / 2
+        offsets = (numpy.arange(of) + dx) / of - dx
         oversampled = x[:, None] + offsets[None, :]
         return oversampled.ravel()
 
@@ -313,8 +314,6 @@ class Profile1D:
         of = oversampling_factor or self._oversampling_factor
 
         x_os = self._oversample_x(x)
-        # dx_os = x_os[1]-x_os[0]
-
         model_os = self(x_os)
         model_os = numpy.clip(model_os, 1e-12, None)
 
@@ -323,8 +322,6 @@ class Profile1D:
         tophat = numpy.ones(width) / width
 
         pixelated_os = fftconvolve(model_os, tophat, mode="same")
-        # print(pixelated_os.reshape(x.size, of).shape)
-        # pixelated = integrate.simpson(pixelated_os.reshape(x.size, of), dx=dx_os, axis=1)
         pixelated = interpolate.interp1d(x_os, pixelated_os, kind="cubic")(x)
 
         if return_all:
