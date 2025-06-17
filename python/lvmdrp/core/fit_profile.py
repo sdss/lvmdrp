@@ -41,9 +41,11 @@ def polyval2d(x, y, m):
         z += a * x ** i * y ** j
     return z
 
-def gaussians(pars, x):
+def gaussians(pars, x, alpha=2.3, collapse=True):
     """Gaussian models for multiple components"""
-    y = pars[0][:, None] * numpy.exp(-0.5 * ((x[None, :] - pars[1][:, None]) / pars[2][:, None]) ** 2) / (pars[2][:, None] * fact)
+    y = pars[0][:, None] * numpy.exp(-0.5 * numpy.abs((x[None, :] - pars[1][:, None]) / pars[2][:, None]) ** alpha) / (pars[2][:, None] * fact)
+    if not collapse:
+        return y
     return bn.nansum(y, axis=0)
 
 def guess_gaussians_integral(pixels, data, centroids, fwhms, nsigma=6, return_pixels_selection=False):
@@ -586,6 +588,54 @@ class Profile1D:
         return axs
 
 
+class TopHatGaussians(Profile1D):
+
+    PARNAMES = (
+        "counts",
+        "centroids",
+        "sigmas"
+    )
+
+    def __init__(self, pars, fixed, bounds, ignore_nans=True, oversampling_factor=50, fiber_width=1.2):
+        super().__init__(pars, fixed, bounds, ignore_nans=ignore_nans, oversampling_factor=oversampling_factor)
+
+        self._fiber_width = fiber_width
+
+    def __call__(self, x):
+        counts, centroids, sigmas = self.unpack_params()
+
+        of = self._oversampling_factor
+        x_os = self._oversample_x(x, oversampling_factor=of)
+        # dx = x_os[1] - x_os[0]
+
+        width = int(self._fiber_width * of)
+        gaussians_ = gaussians((counts, centroids, sigmas), x_os, collapse=False)
+        tophats = numpy.ones((counts.size, width)) / width
+        gaussians_tophats = fftconvolve(gaussians_, tophats, mode="same", axes=1)
+        # plt.figure()
+        # plt.plot(x_os, gaussians_[0])
+        # plt.plot(x_os, gaussians_tophats[0])
+        model = bn.nansum(gaussians_tophats, axis=0)
+        model = interpolate.interp1d(x_os, model, kind="cubic")(x)
+        # plt.figure()
+        # plt.plot(x_os.reshape(x.size, of).T, model.reshape(x.size, of).T)
+        # model = integrate.simpson(model.reshape(x.size, of), dx=dx, axis=1)
+        return model
+
+    def _pixelate(self, x, oversampling_factor=None, return_all=False):
+        # counts, centroids, sigmas = self.unpack_params()
+
+        # z = x[None, :] - centroids[:, None]
+        # pixelated = special.erf((z+0.5)/sigmas[:, None]) - special.erf((z-0.5)/sigmas[:, None])
+        # pixelated *= counts[:, None] / (sigmas[:, None]*fact)
+        # pixelated = bn.nansum(pixelated, axis=0)
+
+        pixelated = self(x)
+        if return_all:
+            return pixelated, pixelated, pixelated, x
+        return pixelated
+
+
 class NormalGaussians(Profile1D):
 
     PARNAMES = (
@@ -594,12 +644,14 @@ class NormalGaussians(Profile1D):
         "sigmas"
     )
 
-    def __init__(self, pars, fixed, bounds, ignore_nans=True, oversampling_factor=50):
+    def __init__(self, pars, fixed, bounds, ignore_nans=True, oversampling_factor=50, alpha=2.4):
         super().__init__(pars, fixed, bounds, ignore_nans=ignore_nans, oversampling_factor=oversampling_factor)
+
+        self._alpha = alpha
 
     def __call__(self, x):
         pars = self.unpack_params()
-        return gaussians(pars, x)
+        return gaussians(pars, x, alpha=self._alpha)
 
 
 class SkewedGaussians(Profile1D):
@@ -696,7 +748,7 @@ class Moffats(Profile1D):
         counts, centroids, sigmas, betas = self.unpack_params()
 
         moffats_ = numpy.asarray([Moffat1D(1.0, centroid, sigma, beta)(x) for centroid, sigma, beta in zip(centroids, sigmas, betas)])
-        norms = numpy.trapz(moffats_, x, axis=1)
+        norms = integrate.simpson(moffats_, x, axis=1)
 
         return bn.nansum(counts[:, None] * moffats_ / norms[:, None], axis=0)
 
@@ -743,7 +795,7 @@ class Voigts(Profile1D):
         return bn.nansum(voigts, axis=0)
 
 
-PROFILES = {"normal": NormalGaussians, "skewed": SkewedGaussians, "poly": PolyGaussians, "moffat": Moffats, "lorentz": Lorentzs, "voigt": Voigts}
+PROFILES = {"tophat": TopHatGaussians, "normal": NormalGaussians, "skewed": SkewedGaussians, "poly": PolyGaussians, "moffat": Moffats, "lorentz": Lorentzs, "voigt": Voigts}
 
 
 class SpectralResolution(object):
