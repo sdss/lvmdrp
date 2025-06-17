@@ -71,6 +71,14 @@ def moffats(pars, x):
     sigma_0 = (betas[:,None] - 1.0) * counts[:,None] / (numpy.pi * (r_d**2))
     return bn.nansum(sigma_0 * (1.0 + ((x[None,:] - centroids[:,None]) / r_d) ** 2) ** (-betas[:,None]), axis=0)
 
+def mexhat(radius, x, normalize_area=True):
+    model = 2 * numpy.abs(numpy.sqrt(radius**2 - x**2))
+    model[~numpy.isfinite(model)] = 0.0
+    model
+    if normalize_area:
+        return model / integrate.simpson(model, x)
+    return model
+
 def update_params(func):
     @wraps(func)
     def wrapper(self, *args, **kwargs):
@@ -311,6 +319,11 @@ class Profile1D:
         offsets = (numpy.arange(of) + dx) / of - dx
         oversampled = x[:, None] + offsets[None, :]
         return oversampled.ravel()
+
+        # npix = len(x) * of
+        # npix = npix + (npix % 2 - 1)
+        # oversampled = numpy.linspace(x.min(), x.max(), npix, endpoint=True)
+        # return oversampled
 
     def _pixelate(self, x, oversampling_factor=None, return_all=False):
         of = oversampling_factor or self._oversampling_factor
@@ -588,6 +601,75 @@ class Profile1D:
         return axs
 
 
+class MexHatGaussians(Profile1D):
+
+    PARNAMES = (
+        "counts",
+        "centroids",
+        "sigmas",
+        "radii"
+    )
+
+    def __init__(self, pars, fixed, bounds, ignore_nans=True, oversampling_factor=50, fiber_width=3.4):
+        super().__init__(pars, fixed, bounds, ignore_nans=ignore_nans, oversampling_factor=oversampling_factor)
+
+        self._fiber_width = fiber_width
+
+    def __call__(self, x):
+        counts, centroids, sigmas, radii = self.unpack_params()
+
+        of = self._oversampling_factor
+        radii_ = radii
+        x_os = self._oversample_x(x, oversampling_factor=of)
+        # print(x)
+        # print(x_os, x_os.shape)
+        dx_os = x_os[1] - x_os[0]
+
+        # m = mexhat(radii_[0], x_os-centroids[0])
+        # print(m, m.shape)
+        # print(f"{radii_ = }")
+        mexhats = numpy.asarray([mexhat(radii_[i], x_os-centroids[i]) for i in range(radii_.size)])
+        # plt.figure()
+        # plt.plot(x_os, mexhats[0].T, label="mexhats")
+
+        gaussians_ = gaussians((numpy.ones_like(counts), numpy.zeros_like(centroids), sigmas), x_os-x_os[x_os.size//2], alpha=2, collapse=False)
+        # print(x_os-x_os.max()/2)
+        # print(gaussians_[0])
+        # print(mexhats.shape, gaussians_.shape)
+        # print(integrate.simpson(gaussians_, dx=dx_os, axis=1), integrate.simpson(mexhats, dx=dx_os, axis=1))
+        gaussians_mexhats = numpy.asarray([convolve(g, m, mode="same", method="direct") for g, m in zip(gaussians_, mexhats)])
+        # shift = x_os[numpy.argmax(mexhats[0])] - x_os[numpy.argmax(gaussians_mexhats[0])]
+        # print(gaussians_mexhats[0])
+        # gaussians_mexhats = numpy.asarray([interpolate.interp1d(x_os+shift, gm, kind="cubic", bounds_error=False, fill_value="extrapolate")(x_os) for gm in gaussians_mexhats])
+        # print(gaussians_mexhats[0])
+        # print(gaussians_mexhats.shape)
+        # print(x_os[numpy.argmax(gaussians_[0])], x_os[numpy.argmax(mexhats[0])], x_os[numpy.argmax(gaussians_mexhats[0])], centroids[0])
+        gaussians_mexhats /= integrate.simpson(gaussians_mexhats, dx=dx_os, axis=1)[:, None]
+        # plt.plot(x_os, gaussians_[0].T, label="gaussians")
+        # plt.plot(x_os, gaussians_mexhats[0].T, label="conv")
+        # plt.legend()
+
+        gaussians_mexhats = counts[:, None] * gaussians_mexhats
+
+        # reshape model into oversampled bins: (x, oversampling_factor)
+        model_binned = gaussians_mexhats.reshape(counts.size, x.size, of)
+        # plt.figure()
+        # plt.plot(x_os.reshape(x.size, of).T, model_binned[0].T)
+        # print(model_binned.shape)
+        # print(model_binned.shape)
+        model = integrate.simpson(model_binned, dx=dx_os, axis=2)
+        # print(model.shape, x.shape)
+        model = bn.nansum(model, axis=0)
+        # print(model.shape, x_os.shape, x.shape)
+        return model
+
+    def _pixelate(self, x, oversampling_factor=None, return_all=False):
+        model = self(x)
+        if return_all:
+            return model, model, model, x
+        return model
+
+
 class TopHatGaussians(Profile1D):
 
     PARNAMES = (
@@ -795,7 +877,15 @@ class Voigts(Profile1D):
         return bn.nansum(voigts, axis=0)
 
 
-PROFILES = {"tophat": TopHatGaussians, "normal": NormalGaussians, "skewed": SkewedGaussians, "poly": PolyGaussians, "moffat": Moffats, "lorentz": Lorentzs, "voigt": Voigts}
+PROFILES = {
+    "mexhat": MexHatGaussians,
+    "tophat": TopHatGaussians,
+    "normal": NormalGaussians,
+    "skewed": SkewedGaussians,
+    "poly": PolyGaussians,
+    "moffat": Moffats,
+    "lorentz": Lorentzs,
+    "voigt": Voigts}
 
 
 class SpectralResolution(object):
