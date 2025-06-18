@@ -1434,7 +1434,17 @@ class FiberRows(Header, PositionTable):
 
         return self
 
-    def plot_block(self, iblock=None, blockid=None, ref_column=None, nsigmas=None, show_samples=True, show_model_samples=True, show_model=True, show_residuals=True, axs=None):
+    def plot_block(self, iblock=None, blockid=None, ref_column=None, nsigmas=None, show_samples=True, show_model_samples=True, show_model=True, show_residuals=True, axs=None, **plot_kwargs):
+
+        plot_config = {
+            "samples": dict(marker=".", ls="", ms=5, mew=0, mfc="0.2"),
+            "model@samples": dict(marker="s", ls="", ms=5, mew=1, mec="0.2", mfc="none"),
+            "model": dict(ls="-", lw=1),
+            "residuals": dict(marker=".", ls="-", lw=0.2, ms=5, mew=0)
+        }
+        for n in plot_kwargs:
+            plot_config[n].update(plot_kwargs[n])
+
         if iblock is None and blockid is None:
             block = copy(self)
         else:
@@ -1459,10 +1469,10 @@ class FiberRows(Header, PositionTable):
                 # if samples_error is not None:
                 #     axs["mod"].errorbar(samples.columns, samples.T, yerr=samples_error.T, fmt="", ecolor="0.2", elinewidth=1, label="samples")
                 # else:
-                axs["mod"].plot(samples.columns, samples.T, ".", ms=5, mew=0, mfc="0.2", label="samples")
+                axs["mod"].plot(samples.columns, samples.T, label="samples", **plot_config["samples"])
                 ylims = axs["mod"].get_ylim()
             if show_model_samples:
-                axs["mod"].plot(samples.columns, block._data[:, samples.columns].T, "s", ms=5, mew=1, mec="0.2", mfc="none", label="model@samples")
+                axs["mod"].plot(samples.columns, block._data[:, samples.columns].T, label="model@samples", **plot_config["model@samples"])
             if nsigmas is not None:
                 outliers, mu, sg = block.select_outliers(nsigmas=nsigmas)
                 samples_masked = samples.copy()
@@ -1473,7 +1483,7 @@ class FiberRows(Header, PositionTable):
                 axs["mod"].plot(samples.columns, samples_masked.T, ".", ms=10, mew=1, mfc="none", color="tab:red", label="outliers")
 
         if show_model:
-            axs["mod"].plot(pixels, block._data.T, "-", lw=1, label="model")
+            axs["mod"].plot(pixels, block._data.T, label="model", **plot_config["model"])
         if ylims is not None:
             axs["mod"].set_ylim(*ylims)
 
@@ -1491,7 +1501,7 @@ class FiberRows(Header, PositionTable):
             axs["res"].axhline(-0.01, ls=":", lw=1, color="0.4")
             axs["res"].axhline(+0.01, ls=":", lw=1, color="0.4")
             if samples is not None:
-                axs["res"].plot(samples.columns, ((block._data[:, samples.columns] - samples)/samples).T, ".-", lw=0.2, ms=5, mew=0)
+                axs["res"].plot(samples.columns, ((block._data[:, samples.columns] - samples)/samples).T, **plot_config["residuals"])
             axs["res"].set_ylim(-0.05, +0.05)
 
         return axs
