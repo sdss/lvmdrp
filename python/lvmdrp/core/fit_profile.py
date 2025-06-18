@@ -637,7 +637,8 @@ class MexHatGaussians(Profile1D):
         # print(gaussians_[0])
         # print(mexhats.shape, gaussians_.shape)
         # print(integrate.simpson(gaussians_, dx=dx_os, axis=1), integrate.simpson(mexhats, dx=dx_os, axis=1))
-        gaussians_mexhats = numpy.asarray([convolve(g, m, mode="same", method="direct") for g, m in zip(gaussians_, mexhats)])
+        # gaussians_mexhats = numpy.asarray([convolve(g, m, mode="same", method="direct") for g, m in zip(gaussians_, mexhats)])
+        gaussians_mexhats = fftconvolve(gaussians_, mexhats, mode="same", axes=1)
         # shift = x_os[numpy.argmax(mexhats[0])] - x_os[numpy.argmax(gaussians_mexhats[0])]
         # print(gaussians_mexhats[0])
         # gaussians_mexhats = numpy.asarray([interpolate.interp1d(x_os+shift, gm, kind="cubic", bounds_error=False, fill_value="extrapolate")(x_os) for gm in gaussians_mexhats])
@@ -726,7 +727,7 @@ class NormalGaussians(Profile1D):
         "sigmas"
     )
 
-    def __init__(self, pars, fixed, bounds, ignore_nans=True, oversampling_factor=50, alpha=2.4):
+    def __init__(self, pars, fixed, bounds, ignore_nans=True, oversampling_factor=50, alpha=2.3):
         super().__init__(pars, fixed, bounds, ignore_nans=ignore_nans, oversampling_factor=oversampling_factor)
 
         self._alpha = alpha
