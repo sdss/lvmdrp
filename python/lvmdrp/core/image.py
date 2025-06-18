@@ -2639,24 +2639,29 @@ class Image(Header):
         axs_ymodels = axs.get("ymodels", {})
 
         # TODO: implement burn-in iterations to refine guess traces using Gaussian fitting
+        fitted_traces = copy(guess_traces)
 
-        log.info(f"initiating iterative fiber tracing with parameters: {list(guess_traces.keys())}")
-        for i, free_name, fixed_names in _block_cycle(guess_traces.keys(), niter=niter):
+
+        log.info(f"initiating iterative fiber tracing with parameters: {list(fitted_traces.keys())}")
+        for i, free_name, fixed_names in _block_cycle(fitted_traces.keys(), niter=niter):
             # TODO: set boundary constraints at image edges to avoid overshoots
             log.info(f"   iteration {i+1:3d}/{niter}:")
             axs_xfree = axs_xmodels.get(free_name, [])
             axs_yfree = axs_ymodels.get(free_name, {})
 
-            free_trace = {free_name: guess_traces.get(free_name)}
+            free_trace = {free_name: fitted_traces.get(free_name)}
             free_bounds = {free_name: bounds.get(free_name)}
             measuring_conf_ = measuring_conf.get(free_name)
 
-            fixed_traces_ = {fixed_name: guess_traces.get(fixed_name) for fixed_name in fixed_names}
+            fixed_traces_ = {fixed_name: fitted_traces.get(fixed_name) for fixed_name in fixed_names}
             fixed_traces_.update(fixed_traces)
 
             fitted_block = self.measure_fiber_block(
                 profile, free_trace, fixed_traces_, iblock, columns, free_bounds,
                 measuring_conf=measuring_conf_, npixels=npixels, oversampling_factor=oversampling_factor, axs=axs_yfree)
+
+            # print(free_trace[free_name].get_block(iblock)._samples[0])
+            # print(fitted_block[free_name]._samples[0])
 
             smoothing_model, smoothing_conf_ = smoothing_conf.get(free_name)
             smoothing_method = getattr(fitted_block[free_name], f"fit_{smoothing_model}")
@@ -2664,13 +2669,14 @@ class Image(Header):
             free_trace[free_name].set_block(iblock=iblock, from_instance=fitted_block[free_name])
             free_trace[free_name]._coeffs = None
 
-            guess_traces.update(free_trace)
+            fitted_traces.update(free_trace)
+            # print(fitted_traces[free_name].get_block(iblock)._samples[0])
 
             _set_plot_alphas(axs=axs_yfree, niter_done=i+1)
             if len(axs_xfree) != 0:
                 free_trace[free_name].plot_block(iblock=iblock, show_model_samples=False, axs={"mod": axs_xfree[i]})
 
-        return guess_traces
+        return fitted_traces
 
     def trace_fibers_full(self, centroids_guess, fwhms_guess=2.5, centroids_range=[-5,5], fwhms_range=[1.0,3.5], counts_range=[1e3,numpy.inf],
                           columns=[], iblocks=[], solver="trf"):
