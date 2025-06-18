@@ -418,10 +418,18 @@ class Profile1D:
             raise ValueError(f"Errors have non-valid values: {sigma}")
         return sigma
 
-    def _select_fitting_mode(self, mode, x, y, sigma, *args, **kwargs):
+    def _validate_pars_scales(self, scales):
+        if scales is not None and not numpy.isfinite(scales).all():
+            raise ValueError(f"Invalid values in `pars_scales`: {scales}. Expected finite values")
+        if scales is None:
+            scales = numpy.abs(numpy.concatenate([numpy.full_like(par, numpy.nanmean(par)) for _, par in self._pars.items()]))
+            scales[(scales==0)|~numpy.isfinite(scales)] = 1.0
+        return scales
+
+    def _select_fitting_mode(self, mode, x, y, sigma, pars_scales, *args, **kwargs):
         selection = numpy.tile(self._valid_pars, self._npars)
         if mode == "lsq":
-            result = optimize.least_squares(self.residuals, x0=self._guess[selection], bounds=self._bounds[:, selection], args=(x, y, sigma), **kwargs)
+            result = optimize.least_squares(self.residuals, x0=self._guess[selection], bounds=self._bounds[:, selection], x_scale=pars_scales[selection], args=(x, y, sigma), **kwargs)
         elif mode == "custom_cost":
             args_ = (x, y, sigma) + args
             fun = getattr(self, "cost_function", None)
@@ -514,12 +522,13 @@ class Profile1D:
             return bn.nansum(chisq)
         return chisq
 
-    def fit(self, x, y, sigma, *args, mode="lsq", **kwargs):
+    def fit(self, x, y, sigma, *args, pars_scales=None, mode="lsq", **kwargs):
 
         sigma_ = self._validate_uncertainties(sigma)
+        pars_scales_ = self._validate_pars_scales(pars_scales)
 
         try:
-            result = self._select_fitting_mode(mode, x, y, sigma, *args, **kwargs)
+            result = self._select_fitting_mode(mode, x, y, sigma_, pars_scales_, *args, **kwargs)
         except Exception as e:
             warnings.warn(f"{e}")
             warnings.warn("data points:")
