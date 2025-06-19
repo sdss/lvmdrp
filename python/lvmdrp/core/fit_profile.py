@@ -72,11 +72,15 @@ def moffats(pars, x):
     return bn.nansum(sigma_0 * (1.0 + ((x[None,:] - centroids[:,None]) / r_d) ** 2) ** (-betas[:,None]), axis=0)
 
 def mexhat(radius, x, normalize_area=True):
-    model = 2 * numpy.abs(numpy.sqrt(radius**2 - x**2))
-    model[~numpy.isfinite(model)] = 0.0
-    model
+    def _model(radius, x):
+        return 2 * numpy.abs(numpy.sqrt(radius**2 - x**2))
+    def _integral(radius, x):
+        return 0.5 * (x * _model(radius, x) + radius**2*numpy.arcsin(x/radius))
+
+    model = _model(radius, x)
+    model = numpy.nan_to_num(model, nan=0.0)
     if normalize_area:
-        return model / integrate.simpson(model, x)
+        return model / (_integral(radius, radius) - _integral(radius, -radius))
     return model
 
 def update_params(func):
