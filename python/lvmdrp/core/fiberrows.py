@@ -1434,13 +1434,18 @@ class FiberRows(Header, PositionTable):
 
         return self
 
-    def plot_block(self, iblock=None, blockid=None, ref_column=None, nsigmas=None, show_samples=True, show_model_samples=True, show_model=True, show_residuals=True, axs=None, **plot_kwargs):
+    def plot_block(self, iblock=None, blockid=None, ref_column=None, nsigmas=None,
+                   show_samples=True, show_model_samples=True, show_model=True, show_residuals=True, show_outliers=True,
+                   axs=None, **plot_kwargs):
 
         plot_config = {
             "samples": dict(marker=".", ls="", ms=5, mew=0, mfc="0.2"),
             "model@samples": dict(marker="s", ls="", ms=5, mew=1, mec="0.2", mfc="none"),
             "model": dict(ls="-", lw=1),
-            "residuals": dict(marker=".", ls="-", lw=0.2, ms=5, mew=0)
+            "residuals": dict(marker=".", ls="-", lw=0.2, ms=5, mew=0),
+            "outliers": dict(marker=".", ms=10, mew=1, mfc="none", color="tab:red"),
+            "mu": dict(ls="-", lw=1, color="0.7", zorder=-10),
+            "sigma": dict(ls="--", lw=1, color="0.7", zorder=-10)
         }
         for n in plot_kwargs:
             plot_config[n].update(plot_kwargs[n])
@@ -1477,10 +1482,11 @@ class FiberRows(Header, PositionTable):
                 outliers, mu, sg = block.select_outliers(nsigmas=nsigmas)
                 samples_masked = samples.copy()
                 samples_masked[~outliers] = numpy.nan
-                axs["mod"].plot(samples.columns, mu, "-", lw=1, color="0.7", zorder=-10)
-                axs["mod"].plot(samples.columns, mu-nsigmas*sg, "--", lw=1, color="0.7", zorder=-10)
-                axs["mod"].plot(samples.columns, mu+nsigmas*sg, "--", lw=1, color="0.7", zorder=-10)
-                axs["mod"].plot(samples.columns, samples_masked.T, ".", ms=10, mew=1, mfc="none", color="tab:red", label="outliers")
+                axs["mod"].plot(samples.columns, mu, **plot_config["mu"])
+                axs["mod"].plot(samples.columns, mu-nsigmas*sg, **plot_config["sigma"])
+                axs["mod"].plot(samples.columns, mu+nsigmas*sg, **plot_config["sigma"])
+                if show_outliers:
+                    axs["mod"].plot(samples.columns, samples_masked.T, label="outliers", **plot_config["outliers"])
 
         if show_model:
             axs["mod"].plot(pixels, block._data.T, label="model", **plot_config["model"])

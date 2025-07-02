@@ -3117,7 +3117,8 @@ class Spectrum1D(Header):
 
         return pixels, wave, data
 
-    def measure_centroids(self, centroids_guess, fwhm_guess=2.5, counts_range=[0,numpy.inf], centroids_range=[-5,5], fwhms_range=[1.0,3.5], ftol=1e-3, xtol=1e-3, solver="trf"):
+
+    def measure_centroids(self, centroids_guess, fwhm_guess=2.5, counts_range=[0,numpy.inf], centroids_range=[-5,5], fwhms_range=[1.0,3.5], npixels=5, ftol=1e-3, xtol=1e-3, solver="trf"):
         """Finds the subpixel centers for local maxima in a spectrum by fitting a Gaussian to each peak.
 
         Parameters
@@ -3129,6 +3130,8 @@ class Spectrum1D(Header):
         bounds : tuple of numpy.ndarray or float, optional
             Lower and upper bounds for the fit parameters (amplitude, center, sigma) for each peak.
             Should be a tuple (lower, upper), where each is an array of length 3*N or a scalar (default: (-inf, inf)).
+        npixels : int, optional
+            Number of pixels around the peak to use in the fitting, by default +/-5
         ftol : float, optional
             Relative tolerance for the fit optimization (default: 1e-3).
         xtol : float, optional
@@ -3166,8 +3169,8 @@ class Spectrum1D(Header):
                 continue
 
             pixels_selection = numpy.logical_and(
-                self._wave > centroids_guess[j] - 6 * sigma_guess,
-                self._wave < centroids_guess[j] + 6 * sigma_guess,
+                self._wave > centroids_guess[j] - npixels,
+                self._wave < centroids_guess[j] + npixels,
             )
             counts_guess = numpy.interp(centroids_guess[j], self._wave, self._data) * fact * sigma_guess
 
