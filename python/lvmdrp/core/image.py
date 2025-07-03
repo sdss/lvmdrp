@@ -2351,16 +2351,10 @@ class Image(Header):
             else:
                 cent_guess = centroids._samples[str(columns[i-1])].data
 
-
             # measure fiber positions
             counts_slice, centroids_slice, fwhms_slice, msk_slice = img_slice.measure_centroids(
                 centroids_guess=cent_guess, fwhm_guess=fwhm_guess,
                 counts_range=[counts_threshold,numpy.inf], centroids_range=[-max_diff,max_diff], fwhms_range=fwhms_range, solver=solver)
-
-            # print(f"{icolumn} ------------------------------------------------")
-            # print(counts_slice[-36:])
-            # print(centroids_slice[-36:])
-            # print(fwhms_slice[-36:])
 
             centroids._samples[str(icolumn)] = centroids_slice
 

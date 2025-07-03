@@ -6,6 +6,7 @@ import itertools
 import numpy
 import bottleneck as bn
 from functools import wraps
+from functools import lru_cache
 
 import astropy.io.fits as pyfits
 from astropy.modeling.functional_models import Voigt1D, Lorentz1D, Moffat1D
@@ -80,7 +81,7 @@ def mexhat(radius, x, normalize_area=True):
     model = _model(radius, x)
     model = numpy.nan_to_num(model, nan=0.0)
     if normalize_area:
-        return model / (_integral(radius, radius) - _integral(radius, -radius))
+        return model / (2*_integral(radius, radius))
     return model
 
 def update_params(func):
@@ -317,17 +318,18 @@ class Profile1D:
         self._nfitted = self._valid_pars.sum()
 
     def _oversample_x(self, x, oversampling_factor=None):
-        of = oversampling_factor or self._oversampling_factor
         x = numpy.asarray(x)
+        of = oversampling_factor or self._oversampling_factor
+        return self._cached_oversample(tuple(x), of)
+
+    @staticmethod
+    @lru_cache(maxsize=1)
+    def _cached_oversample(x_tuple, oversampling_factor):
+        x = numpy.array(x_tuple)
         dx = (x[1] - x[0]) / 2
-        offsets = (numpy.arange(of) + dx) / of - dx
+        offsets = (numpy.arange(oversampling_factor) + dx) / oversampling_factor - dx
         oversampled = x[:, None] + offsets[None, :]
         return oversampled.ravel()
-
-        # npix = len(x) * of
-        # npix = npix + (npix % 2 - 1)
-        # oversampled = numpy.linspace(x.min(), x.max(), npix, endpoint=True)
-        # return oversampled
 
     def _pixelate(self, x, oversampling_factor=None, return_all=False):
         of = oversampling_factor or self._oversampling_factor
@@ -632,49 +634,21 @@ class MexHatGaussians(Profile1D):
         counts, centroids, sigmas, radii = self.unpack_params()
 
         of = self._oversampling_factor
-        radii_ = radii
         x_os = self._oversample_x(x, oversampling_factor=of)
-        # print(x)
-        # print(x_os, x_os.shape)
         dx_os = x_os[1] - x_os[0]
 
-        # m = mexhat(radii_[0], x_os-centroids[0])
-        # print(m, m.shape)
-        # print(f"{radii_ = }")
-        mexhats = numpy.asarray([mexhat(radii_[i], x_os-centroids[i]) for i in range(radii_.size)])
-        # plt.figure()
-        # plt.plot(x_os, mexhats[0].T, label="mexhats")
+        mexhats = numpy.asarray([mexhat(radii[i], x_os-centroids[i]) for i in range(radii.size)])
 
         gaussians_ = gaussians((numpy.ones_like(counts), numpy.zeros_like(centroids), sigmas), x_os-x_os[x_os.size//2], alpha=2, collapse=False)
-        # print(x_os-x_os.max()/2)
-        # print(gaussians_[0])
-        # print(mexhats.shape, gaussians_.shape)
-        # print(integrate.simpson(gaussians_, dx=dx_os, axis=1), integrate.simpson(mexhats, dx=dx_os, axis=1))
-        # gaussians_mexhats = numpy.asarray([convolve(g, m, mode="same", method="direct") for g, m in zip(gaussians_, mexhats)])
         gaussians_mexhats = fftconvolve(gaussians_, mexhats, mode="same", axes=1)
-        # shift = x_os[numpy.argmax(mexhats[0])] - x_os[numpy.argmax(gaussians_mexhats[0])]
-        # print(gaussians_mexhats[0])
-        # gaussians_mexhats = numpy.asarray([interpolate.interp1d(x_os+shift, gm, kind="cubic", bounds_error=False, fill_value="extrapolate")(x_os) for gm in gaussians_mexhats])
-        # print(gaussians_mexhats[0])
-        # print(gaussians_mexhats.shape)
-        # print(x_os[numpy.argmax(gaussians_[0])], x_os[numpy.argmax(mexhats[0])], x_os[numpy.argmax(gaussians_mexhats[0])], centroids[0])
-        gaussians_mexhats /= integrate.simpson(gaussians_mexhats, dx=dx_os, axis=1)[:, None]
-        # plt.plot(x_os, gaussians_[0].T, label="gaussians")
-        # plt.plot(x_os, gaussians_mexhats[0].T, label="conv")
-        # plt.legend()
+        gaussians_mexhats /= integrate.trapezoid(gaussians_mexhats, dx=dx_os, axis=1)[:, None]
 
         gaussians_mexhats = counts[:, None] * gaussians_mexhats
 
         # reshape model into oversampled bins: (x, oversampling_factor)
         model_binned = gaussians_mexhats.reshape(counts.size, x.size, of)
-        # plt.figure()
-        # plt.plot(x_os.reshape(x.size, of).T, model_binned[0].T)
-        # print(model_binned.shape)
-        # print(model_binned.shape)
-        model = integrate.simpson(model_binned, dx=dx_os, axis=2)
-        # print(model.shape, x.shape)
+        model = integrate.trapezoid(model_binned, dx=dx_os, axis=2)
         model = bn.nansum(model, axis=0)
-        # print(model.shape, x_os.shape, x.shape)
         return model
 
     def _pixelate(self, x, oversampling_factor=None, return_all=False):
