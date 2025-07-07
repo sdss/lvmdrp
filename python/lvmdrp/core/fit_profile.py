@@ -951,8 +951,8 @@ class fit_profile1D(object):
         p0 = self.fix_guess(bounds)
         n = len(p0)
 
-        if numpy.any(numpy.isnan(p0)):
-            raise ValueError(f"Invalid values in guess parameters:\n  {p0}")
+        # if numpy.any(numpy.isnan(p0)):
+        #     raise ValueError(f"Invalid values in guess parameters:\n  {p0}")
         if numpy.any(numpy.isnan(bounds[0])):
             raise ValueError(f"Invalid values in lower bounds:\n  {bounds[0]}")
         if numpy.any(numpy.isnan(bounds[1])):

@@ -23,7 +23,7 @@ from scipy import interpolate
 from lvmdrp import log
 from lvmdrp.core.constants import CON_LAMPS, ARC_LAMPS, LVM_NBLOCKS, LVM_BLOCKSIZE
 from lvmdrp.core.plot import plt
-from lvmdrp.core.fit_profile import gaussians
+from lvmdrp.core.fit_profile import gaussians, PROFILES
 from lvmdrp.core.apertures import Apertures
 from lvmdrp.core.header import Header
 from lvmdrp.core.tracemask import TraceMask
@@ -2288,9 +2288,9 @@ class Image(Header):
             return ref_centroids, mhat, bhat
         return ref_centroids
 
-    def trace_fiber_centroids(self, ref_column=2000, ref_centroids=None, mask_fibstatus=1,
-                              ncolumns=140, fwhm_guess=2.5, fwhms_range=[1.0, 3.5],
-                              counts_threshold=5000, max_diff=5.0, solver="trf"):
+    def guess_fibers(self, ref_column=2000, ref_centroids=None, fwhms_guess=2.5,
+                     counts_range=[1e3, numpy.inf], centroids_range=[-1.0,+1.0], fwhms_range=[1.0, 3.5],
+                     ncolumns=140, mask_fibstatus=1, solver="dogbox"):
         if self._header is None:
             raise ValueError("No header available")
         if self._slitmap is None:
@@ -2323,20 +2323,30 @@ class Image(Header):
         # create empty traces mask for the image
         fibers = ref_centroids.size
         dim = self.getDim()
-        centroids = TraceMask()
-        centroids.createEmpty(data_dim=(fibers, dim[1]), samples_columns=sorted(set(columns)))
-        centroids.setFibers(fibers)
+        centroids = TraceMask.create_empty(data_dim=(fibers, dim[1]), samples_columns=sorted(set(columns)))
         centroids._good_fibers = good_fibers
         centroids._mask[good_fibers, :] = False
         centroids.setHeader(self._header.copy())
         centroids.setSlitmap(self._slitmap)
-        centroids._header["IMAGETYP"] = "trace_centroid"
+        centroids._header["IMAGETYP"] = "fiber_centroids"
+        counts = TraceMask.create_empty(data_dim=(fibers, dim[1]), samples_columns=sorted(set(columns)))
+        counts._good_fibers = good_fibers
+        counts._mask[good_fibers, :] = False
+        counts.setHeader(self._header.copy())
+        counts.setSlitmap(self._slitmap)
+        counts._header["IMAGETYP"] = "fiber_counts"
+        fwhms = TraceMask.create_empty(data_dim=(fibers, dim[1]), samples_columns=sorted(set(columns)))
+        fwhms._good_fibers = good_fibers
+        fwhms._mask[good_fibers, :] = False
+        fwhms.setHeader(self._header.copy())
+        fwhms.setSlitmap(self._slitmap)
+        fwhms._header["IMAGETYP"] = "fiber_fwhm"
 
         # set positions of fibers along reference column
         centroids._samples[str(ref_column)] = ref_centroids
 
         # trace centroids in each column
-        iterator = tqdm(enumerate(columns), total=len(columns), desc="tracing centroids", unit="column", ascii=True)
+        iterator = tqdm(enumerate(columns), total=len(columns), desc="measuring fibers", unit="column", ascii=True)
         for i, icolumn in iterator:
             # extract column profile
             img_slice = self.getSlice(icolumn, axis="y")
@@ -2352,13 +2362,15 @@ class Image(Header):
                 cent_guess = centroids._samples[str(columns[i-1])].data
 
             # measure fiber positions
-            counts_slice, centroids_slice, fwhms_slice, msk_slice = img_slice.measure_centroids(
-                centroids_guess=cent_guess, fwhm_guess=fwhm_guess,
-                counts_range=[counts_threshold,numpy.inf], centroids_range=[-max_diff,max_diff], fwhms_range=fwhms_range, solver=solver)
+            counts_slice, centroids_slice, fwhms_slice, msk_slice = img_slice.measure_fibers_profile(centroids_guess=cent_guess, fwhms_guess=fwhms_guess,
+                                                                                                     counts_range=counts_range, centroids_range=centroids_range,
+                                                                                                     fwhms_range=fwhms_range, solver=solver)
 
+            counts._samples[str(icolumn)] = counts_slice
             centroids._samples[str(icolumn)] = centroids_slice
+            fwhms._samples[str(icolumn)] = fwhms_slice
 
-        return centroids
+        return counts, centroids, fwhms
 
     def _get_fwhms_trace(self, fwhms):
         if isinstance(fwhms, (TraceMask, FiberRows)):
@@ -2654,9 +2666,6 @@ class Image(Header):
                 profile, free_trace, fixed_traces_, iblock, columns, free_bounds,
                 measuring_conf=measuring_conf_, npixels=npixels, oversampling_factor=oversampling_factor, axs=axs_yfree)
 
-            # print(free_trace[free_name].get_block(iblock)._samples[0])
-            # print(fitted_block[free_name]._samples[0])
-
             smoothing_model, smoothing_conf_ = smoothing_conf.get(free_name)
             smoothing_method = getattr(fitted_block[free_name], f"fit_{smoothing_model}")
             smoothing_method(**smoothing_conf_)
@@ -2664,7 +2673,6 @@ class Image(Header):
             free_trace[free_name]._coeffs = None
 
             fitted_traces.update(free_trace)
-            # print(fitted_traces[free_name].get_block(iblock)._samples[0])
 
             _set_plot_alphas(axs=axs_yfree, niter_done=i+1)
             if len(axs_xfree) != 0:
@@ -2740,6 +2748,51 @@ class Image(Header):
             fwhms_trace.set_block(iblock=iblock, samples=fwhms_samples, mask=block_mask)
 
         return counts_trace, centroids_trace, fwhms_trace, columns
+
+    def _get_block_pixels(self, centroids, iblock, npixels=5):
+        nrows, ncols = self._dim
+        x_pixels = numpy.arange(ncols, dtype="int")
+        y_pixels = numpy.arange(nrows, dtype="int")
+        X, Y = numpy.meshgrid(x_pixels, y_pixels, indexing="xy")
+
+        centroids_block = centroids
+        if iblock is not None:
+            centroids_block = centroids.get_block(iblock=iblock)
+
+        lower = numpy.nanmin(centroids_block._data, 0) - npixels
+        upper = numpy.nanmax(centroids_block._data, 0) + npixels
+        pixels_selection = (lower <= Y) & (Y <= upper)
+        return X, Y, pixels_selection
+
+    def evaluate_fiber_model(self, traces, profile="normal", iblock=None, blockid=None, oversampling_factor=10, columns=None, npixels=5, verbose=True):
+        nrows, ncols = self._dim
+        if columns is None:
+            columns = numpy.arange(ncols, dtype="int")
+
+        blocks = traces.copy()
+        if iblock is not None or blockid is not None:
+            blocks = {name: trace.get_block(iblock, blockid) for name, trace in traces.items()}
+
+        X, Y, pixels_selection = self._get_block_pixels(centroids=blocks["centroids"], iblock=iblock, npixels=npixels)
+
+        profile_model = PROFILES.get(profile)
+        if profile_model is None:
+            raise ValueError(f"Invalid value for `profile`: {profile}. Expected one of {PROFILES}")
+
+        model_array = numpy.full((nrows, ncols), numpy.nan)
+        if verbose:
+            iterator = tqdm(columns, desc=f"evaluating fiber profile '{profile}'", ascii=True, unit="column")
+        else:
+            iterator = columns
+        for icolumn in iterator:
+            selection = pixels_selection[:, icolumn]
+            pixels = Y[selection, icolumn]
+            pars_column = {name: block.getSlice(icolumn, axis="Y")[0] for name, block in blocks.items()}
+            model_array[selection, icolumn] = profile_model(pars_column, {}, {}, oversampling_factor=oversampling_factor)._pixelate(pixels)
+        model = Image(data=model_array, mask=numpy.isnan(model_array))
+
+        return model, X, Y, pixels_selection
+
 
     def traceFWHM(
         self, axis_select, TraceMask, blocks, init_fwhm, threshold_flux, max_pix=None

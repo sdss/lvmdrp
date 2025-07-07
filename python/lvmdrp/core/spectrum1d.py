@@ -3118,26 +3118,27 @@ class Spectrum1D(Header):
         return pixels, wave, data
 
 
-    def measure_centroids(self, centroids_guess, fwhm_guess=2.5, counts_range=[0,numpy.inf], centroids_range=[-5,5], fwhms_range=[1.0,3.5], npixels=5, ftol=1e-3, xtol=1e-3, solver="trf"):
+    def measure_fibers_profile(self, centroids_guess, fwhms_guess=2.5, counts_range=[0,numpy.inf], centroids_range=[-5,5], fwhms_range=[1.0,3.5],
+                               npixels=2, ftol=1e-3, xtol=1e-3, solver="dogbox"):
         """Finds the subpixel centers for local maxima in a spectrum by fitting a Gaussian to each peak.
 
         Parameters
         ----------
         centroids_guess : numpy.ndarray
             Initial guess for the peak centers (pixel positions).
-        fwhm_guess : float, optional
+        fwhms_guess : float, optional
             Initial guess for the Gaussian width (sigma) used for modeling each peak (default: 2.5).
         bounds : tuple of numpy.ndarray or float, optional
             Lower and upper bounds for the fit parameters (amplitude, center, sigma) for each peak.
             Should be a tuple (lower, upper), where each is an array of length 3*N or a scalar (default: (-inf, inf)).
         npixels : int, optional
-            Number of pixels around the peak to use in the fitting, by default +/-5
+            Number of pixels around the peak to use in the fitting, by default +/-2
         ftol : float, optional
             Relative tolerance for the fit optimization (default: 1e-3).
         xtol : float, optional
             Absolute tolerance for the fit optimization (default: 1e-3).
         solver : str, optional
-            Optimization algorithm to use (default: "trf").
+            Optimization algorithm to use (default: "dogbox").
 
         Returns
         -------
@@ -3152,7 +3153,7 @@ class Spectrum1D(Header):
         Peaks for which the fit fails or returns NaN are masked as invalid.
         """
         fact = numpy.sqrt(2 * numpy.pi)
-        sigma_guess = fwhm_guess / 2.354
+        sigmas_guess = fwhms_guess / 2.354
 
         counts = numpy.full(len(centroids_guess), numpy.nan, dtype="float32")
         centroids = numpy.full(len(centroids_guess), numpy.nan, dtype="float32")
@@ -3172,9 +3173,9 @@ class Spectrum1D(Header):
                 self._wave > centroids_guess[j] - npixels,
                 self._wave < centroids_guess[j] + npixels,
             )
-            counts_guess = numpy.interp(centroids_guess[j], self._wave, self._data) * fact * sigma_guess
+            counts_guess = numpy.interp(centroids_guess[j], self._wave, self._data) * fact * sigmas_guess
 
-            guess_par = [counts_guess, centroids_guess[j], sigma_guess]
+            guess_par = [counts_guess, centroids_guess[j], sigmas_guess]
             gauss = fit_profile.Gaussian(guess_par)
             gauss.fit(
                 self._wave[pixels_selection],
