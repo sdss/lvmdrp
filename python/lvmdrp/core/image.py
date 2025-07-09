@@ -2574,7 +2574,7 @@ class Image(Header):
         free_names = list(traces_guess.keys())
         fixed_names = list(traces_fixed.keys())
 
-        models = {name: [] for name in guess_block}
+        models = {icolumn: [] for icolumn in columns}
         samples = {name: numpy.full((block._fibers,columns.size), numpy.nan) for name, block in guess_block.items()}
         errors = copy(samples)
 
@@ -2589,11 +2589,11 @@ class Image(Header):
 
             model_column, fitted_pars, fitted_errs = img_slice.fit_gaussians(
                 guess, fixed, bounds, profile=profile, fitting_params=measuring_conf, npixels=npixels, oversampling_factor=oversampling_factor)
+            models[icolumn] = model_column
 
             axs_column = axs.get(icolumn)
             if axs_column is not None:
                 centroids = guess.get("centroids", fixed.get("centroids"))
-                sigmas = guess.get("sigmas", fixed.get("sigmas"))
                 lower = numpy.nanmin(centroids - npixels)
                 upper = numpy.nanmax(centroids + npixels)
                 pixels_selection = (lower <= img_slice._wave) & (img_slice._wave <= upper)
@@ -2603,7 +2603,6 @@ class Image(Header):
                 axs[icolumn] = axs_column
 
             for name in fitted_pars:
-                models[name].append(model_column)
                 samples[name][:, i] = fitted_pars[name]
                 errors[name][:, i] = fitted_errs[name]
 
