@@ -24,10 +24,10 @@ from scipy import interpolate
 from scipy import signal
 from tqdm import tqdm
 
-from typing import List, Tuple
+from typing import List, Tuple, Dict
 
 from lvmdrp import log, DRP_COMMIT, __version__ as DRPVER
-from lvmdrp.core.constants import CONFIG_PATH, SPEC_CHANNELS, ARC_LAMPS, LVM_REFERENCE_COLUMN, LVM_NBLOCKS, FIDUCIAL_PLATESCALE
+from lvmdrp.core.constants import CONFIG_PATH, SPEC_CHANNELS, ARC_LAMPS, LVM_REFERENCE_COLUMN, FIDUCIAL_PLATESCALE, LVM_NFIBERS, LVM_NBLOCKS
 from lvmdrp.utils.decorators import skip_on_missing_input_path, drop_missing_input_paths
 from lvmdrp.utils.bitmask import QualityFlag
 from lvmdrp.core.fiberrows import FiberRows, _read_fiber_ypix
@@ -42,7 +42,8 @@ from lvmdrp.core.image import (
     glueImages,
     loadImage,
 )
-from lvmdrp.core.plot import plt, create_subplots, plot_detrend, plot_error, plot_strips, plot_image_shift, plot_fiber_thermal_shift, save_fig
+from lvmdrp.core import fit_profile as fp
+from lvmdrp.core.plot import plt, create_subplots, plot_detrend, plot_error, plot_strips, plot_image_shift, plot_fiber_thermal_shift, plot_fiber_residuals, save_fig
 from lvmdrp.core.rss import RSS
 from lvmdrp.core.spectrum1d import Spectrum1D, _spec_from_lines, _cross_match
 from lvmdrp.core.tracemask import TraceMask
@@ -4364,21 +4365,18 @@ def create_pixelmask(in_short_dark, in_long_dark, out_pixmask, in_flat_a=None, i
     return pixmask, ratio_dark, ratio_flat
 
 
-def trace_centroids(in_image: str,
-        out_trace_cent: str,
-        correct_ref: bool = False,
-        median_box: tuple = (1, 10),
-        coadd: int = 5,
-        method: str = "gauss",
-        guess_fwhm: float = 2.5,
-        counts_threshold: float = 500,
-        max_diff: int = 5.0,
-        ncolumns: int | Tuple[int] = 140,
-        fit_poly: bool = False,
-        poly_deg: int | Tuple[int] = 6,
-        interpolate_missing: bool = True,
-        display_plots: bool = False
-    ) -> Tuple[TraceMask, TraceMask, TraceMask]:
+def guess_fibers_params(in_image: str,
+                        out_fiber_guess: str,
+                        correct_ref: bool = True,
+                        median_box: tuple = (1, 10),
+                        coadd: int = None,
+                        fwhms_guess: float = 2.5,
+                        counts_range: Tuple[float] = [5e3, numpy.inf],
+                        centroids_range: Tuple[float] = [-2.0, +2.0],
+                        fwhms_range: Tuple[float] = [2.0, 3.5],
+                        ncolumns: int | Tuple[int] = 140,
+                        poly_degs: Dict[str, int] = {"centroids": 5, "fwhms": 6},
+                        display_plots: bool = False) -> Tuple[Dict[str, TraceMask], Image]:
 
     # load continuum image  from file
     log.info(f"using flat image {os.path.basename(in_image)} for tracing")
@@ -4394,22 +4392,10 @@ def trace_centroids(in_image: str,
     bad_fibers = slitmap["fibstatus"] == 1
 
     # perform median filtering along the dispersion axis to clean cosmic rays
-    median_box = tuple(map(lambda x: max(x, 1), median_box))
-    if median_box != (1, 1):
-        log.info(f"performing median filtering with box {median_box} pixels")
-        img = img.replaceMaskMedian(*median_box, replace_error=None)
-        img._data = numpy.nan_to_num(img._data)
-        img = img.medianImg(median_box, propagate_error=True)
-
-    # coadd images along the dispersion axis to increase the S/N of the peaks
-    if coadd != 0:
-        log.info(f"coadding {coadd} pixels along the dispersion axis")
-        coadd_kernel = numpy.ones((1, coadd), dtype="uint8")
-        img = img.convolveImg(coadd_kernel)
-        counts_threshold = counts_threshold * coadd
-
-    # handle invalid error values
-    img._error[img._mask|(img._error<=0)] = numpy.inf
+    img = img.enhance(median_box=median_box, coadd=coadd, trust_errors=True, apply_mask=False)
+    # fix counts boundaries after coadding columns
+    if coadd is not None:
+        counts_range = [counts_range[0]*coadd, counts_range[1]*coadd]
 
     # calculate centroids for reference column
     if correct_ref:
@@ -4419,61 +4405,58 @@ def trace_centroids(in_image: str,
 
     # trace centroids in each column
     log.info(f"going to trace fiber centroids using {ncolumns} columns")
-    centroids = img.trace_fiber_centroids(ref_column=LVM_REFERENCE_COLUMN, ref_centroids=ref_cent, mask_fibstatus=1,
-                                          ncolumns=ncolumns, method=method, fwhm_guess=guess_fwhm,
-                                          counts_threshold=counts_threshold, max_diff=max_diff)
+    counts_guess, centroids_guess, fwhms_guess = img.guess_fibers(ref_column=LVM_REFERENCE_COLUMN, ref_centroids=ref_cent, fwhms_guess=fwhms_guess,
+                                                                  counts_range=counts_range, centroids_range=centroids_range, fwhms_range=fwhms_range,
+                                                                  ncolumns=ncolumns, solver="dogbox")
 
-    if fit_poly:
-        # smooth all trace by a polynomial
-        log.info(f"fitting centroid guess trace with {poly_deg}-deg polynomial")
-        table_data, table_poly, table_poly_all = centroids.fit_polynomial(poly_deg, poly_kind="poly", min_samples_frac=0.5)
-        _create_trace_regions(out_trace_cent, table_data, table_poly, table_poly_all, display_plots=display_plots)
+    # apply naive smoothing using a interpolant spline
+    log.info("interpolating counts along X")
+    counts_guess.fit_spline(smoothing=0.0, use_weights=False, min_samples_frac=0.7)
+    log.info("interpolating centroids along X")
+    centroids_guess.fit_polynomial(deg=poly_degs["centroids"], min_samples_frac=0.7)
+    log.info("interpolating FWHMs along X")
+    fwhms_guess.fit_polynomial(deg=poly_degs["fwhms"], min_samples_frac=0.7, clip=fwhms_range)
+    counts_guess._coeffs = None
+    centroids_guess._coeffs = None
+    fwhms_guess._coeffs = None
+    # counts_guess._samples_error = None
+    # centroids_guess._samples_error = None
+    # fwhms_guess._samples_error = None
 
-        # set bad fibers in trace mask
-        centroids._mask[bad_fibers] = True
-        # linearly interpolate coefficients at masked fibers
-        log.info(f"interpolating coefficients at {bad_fibers.sum()} masked fibers")
-        centroids.interpolate_coeffs()
-    else:
-        log.info("interpolating centroid guess trace")
-        centroids.interpolate_data(axis="X")
+    counts_guess.interpolate_data(axis="Y")
+    centroids_guess.interpolate_data(axis="Y")
+    fwhms_guess.interpolate_data(axis="Y")
 
-        # set bad fibers in trace mask
-        centroids._mask[bad_fibers] = True
-        log.info(f"interpolating data at {bad_fibers.sum()} masked fibers")
-        centroids.interpolate_data(axis="Y")
+    # convert to sigma
+    sigmas_guess = copy(fwhms_guess) / 2.354
 
-    # write centroid if requested
-    if out_trace_cent is not None:
-        log.info(f"writing centroid trace to '{os.path.basename(out_trace_cent)}'")
-        centroids.writeFitsData(out_trace_cent)
-    return centroids, img
+    guess_params = {
+        "counts": counts_guess,
+        "centroids": centroids_guess,
+        "fwhms": fwhms_guess,
+        "sigmas": sigmas_guess
+    }
+    for name, out_path in out_fiber_guess.items():
+        guess_params[name].writeFitsData(out_path)
+
+    return guess_params, img
 
 
-def trace_fibers(
+def fit_fibers_params(
     in_image: str,
-    out_trace_cent: str,
-    out_trace_amp: str,
-    out_trace_fwhm: str,
-    in_trace_cent_guess: str,
+    out_fiber_pars: dict,
+    in_fiber_guess: dict,
     out_model: str = None,
     out_ratio: str = None,
-    correct_ref: bool = False,
     median_box: tuple = (1, 10),
-    coadd: int = 5,
-    method: str = "gauss",
-    guess_fwhm: float = 2.5,
-    counts_threshold: float = 500,
-    max_diff: int = 5.0,
+    coadd: None | int = None,
     ncolumns: int | Tuple[int] = 40,
-    nblocks: int = 18,
-    iblocks: list = [],
-    fwhm_limits: Tuple[float] = (1.0, 3.5),
-    fit_poly: bool = False,
-    poly_deg: int | Tuple[int] = 6,
-    interpolate_missing: bool = True,
-    only_centroids: bool = False,
-    use_given_centroids: bool = False,
+    iblocks: List = range(LVM_NBLOCKS),
+    npixels: int = 5,
+    oversampling_factor: int = 10,
+    niter: int = 2,
+    measuring_conf: Dict = None,
+    smoothing_conf: Dict = None,
     display_plots: bool = False
 ) -> Tuple[TraceMask, TraceMask, TraceMask]:
     """Trace fibers in a given image
@@ -4571,174 +4554,77 @@ def trace_fibers(
     ValueError
         invalid number of columns
     """
-    # parse polynomial degrees
-    if isinstance(poly_deg, (list, tuple)) and len(poly_deg) == 3:
-            deg_amp, deg_cent, deg_fwhm = poly_deg
-    elif isinstance(poly_deg, int):
-        deg_amp = deg_cent = deg_fwhm = poly_deg
-    else:
-        raise ValueError(f"invalid polynomial degree: {poly_deg}")
+
+    if "centroids" not in in_fiber_guess:
+        raise ValueError(f"Missing fiber 'centroids' in fibers guess parameters: {in_fiber_guess.keys()}")
+
+    # define some LVM constants: profile shape and free parameters
+    PROFILE_NAME = "mexhat"
+    PROFILE = fp.PROFILES.get(PROFILE_NAME)
+    PROFILE_PARNAMES = PROFILE.PARNAMES
+    FREE_PARNAMES = ["counts", "centroids", "sigmas"]
+    # define naive guess values
+    GUESS = {
+        "counts": 100e3,
+        "sigmas": 0.5,
+        "radii": 1.4}
+    # define naive bounds
+    BOUNDS = {
+        "counts": {"kind": "absolute", "range": (5000, numpy.inf)},
+        "centroids": {"kind": "relative", "range": (-0.5, +0.5)},
+        "sigmas": {"kind": "absolute", "range": (0.1, 7.7)},
+        "radii": {"kind": "absolute", "range": (0.1, 5.0)}}
 
     # load continuum image  from file
     log.info(f"using flat image {os.path.basename(in_image)} for tracing")
     img = loadImage(in_image)
     img.setData(data=numpy.nan_to_num(img._data), error=numpy.nan_to_num(img._error))
+    # enhance image by interpolating bad pixels with local median & coadding columns for higher SNR
+    log.info(f"interpolating bad pixels with {median_box = } pixels and coadding {coadd} columns")
+    img = img.enhance(median_box=median_box, coadd=coadd, trust_errors=True, apply_mask=False)
 
-    # read slitmap extension
-    slitmap = img.getSlitmap()
-    slitmap = slitmap[slitmap["spectrographid"] == int(img._header["SPEC"][-1])]
-    bad_fibers = slitmap["fibstatus"] == 1
+    # get fiber guess parameters
+    columns = numpy.linspace(5, 4080, ncolumns, dtype="int")
+    guess_traces, fixed_traces = {}, {}
+    for name in PROFILE_PARNAMES:
+        if name == "centroids":
+            continue
 
-    # perform median filtering along the dispersion axis to clean cosmic rays
-    median_box = tuple(map(lambda x: max(x, 1), median_box))
-    if median_box != (1, 1):
-        log.info(f"performing median filtering with box {median_box} pixels")
-        img = img.replaceMaskMedian(*median_box, replace_error=None)
-        img._data = numpy.nan_to_num(img._data)
-        img = img.medianImg(median_box, propagate_error=True)
+        if name in FREE_PARNAMES:
+            guess_traces[name] = TraceMask.create_empty(data_dim=(LVM_NFIBERS,img._dim[1]), samples_columns=columns, header=img._header, slitmap=img._slitmap)
+            guess_traces[name].fill(data=GUESS[name], error=1.0, mask=False, samples=GUESS[name], samples_error=1.0)
+        else:
+            fixed_traces[name] = TraceMask.create_empty(data_dim=(LVM_NFIBERS,img._dim[1]), samples_columns=columns, header=img._header, slitmap=img._slitmap)
+            fixed_traces[name].fill(data=GUESS[name], error=1.0, mask=False, samples=GUESS[name], samples_error=1.0)
+    bounds = {name: BOUNDS.get(name) for name in FREE_PARNAMES}
 
-    # coadd images along the dispersion axis to increase the S/N of the peaks
-    if coadd != 0:
-        log.info(f"coadding {coadd} pixels along the dispersion axis")
-        coadd_kernel = numpy.ones((1, coadd), dtype="uint8")
-        img = img.convolveImg(coadd_kernel)
-        counts_threshold = counts_threshold * coadd
+    for name in FREE_PARNAMES:
+        log.info(f"loading guess fiber '{name}' from '{os.path.basename(in_fiber_guess[name])}'")
+        if os.path.isfile(in_fiber_guess[name]):
+            guess_traces.update({name: TraceMask.from_file(in_fiber_guess[name])})
+            guess_traces[name].set_samples(columns=columns, from_data=True)
+            guess_traces[name].set_samples_error(columns=columns, from_error=True)
 
-    # handle invalid error values
-    img._error[img._mask|(img._error<=0)] = numpy.inf
-
-    # trace centroids in each column
-    log.info(f"loading guess fiber centroids from '{os.path.basename(in_trace_cent_guess)}'")
-    centroids = TraceMask.from_file(in_trace_cent_guess)
-
-    # initialize flux and FWHM traces
-    trace_cent = copy(centroids)
-    trace_amp = copy(centroids)
-    trace_amp._header["IMAGETYP"] = "trace_amplitude"
-    trace_fwhm = copy(centroids)
-    trace_fwhm._header["IMAGETYP"] = "trace_fwhm"
-
-    trace_amp, trace_cent, trace_fwhm, columns, mod_columns, residuals = img.trace_fibers_full(centroids, ref_column=LVM_REFERENCE_COLUMN,
-                                                                                                ncolumns=ncolumns, nblocks=LVM_NBLOCKS, iblocks=iblocks,
-                                                                                                max_diff=max_diff,
-                                                                                                fwhms_guess=guess_fwhm, fwhms_range=fwhm_limits,
-                                                                                                counts_threshold=counts_threshold)
-
-    # smooth all trace by a polynomial
-    if fit_poly:
-
-        # plt.figure()
-        # data = copy(numpy.split(trace_amp._data, LVM_NBLOCKS, axis=0)[16][0])
-        # # data[data==0] = numpy.nan
-        # plt.plot(data, label="measured amp")
-
-        log.info(f"fitting peak trace with {deg_amp}-deg polynomial")
-        # constraints = [{'type': 'ineq', 'fun': lambda t, c: interpolate.splev(0, (t, c, deg_amp), der=1)},
-        #                {'type': 'ineq', 'fun': lambda t, c: -interpolate.splev(trace_amp._data.shape[1], (t, c, deg_amp), der=1)}]
-        table_data, table_poly, table_poly_all = trace_amp.fit_polynomial(deg_amp, poly_kind="poly", clip=(0.0,None), min_samples_frac=0.5)
-        # table_data, table_poly, table_poly_all = trace_amp.fit_spline(degree=deg_amp, smoothing=0, constraints=constraints)
-        _create_trace_regions(out_trace_amp, table_data, table_poly, table_poly_all, display_plots=display_plots)
-        # plt.plot(numpy.split(trace_amp._data, LVM_NBLOCKS, axis=0)[16][0], label="fitted amp")
-        # plt.show()
-
-        log.info(f"fitting centroid trace with {deg_cent}-deg polynomial")
-        table_data, table_poly, table_poly_all = trace_cent.fit_polynomial(deg_cent, poly_kind="poly", min_samples_frac=0.5)
-        _create_trace_regions(out_trace_cent, table_data, table_poly, table_poly_all, display_plots=display_plots)
-
-        log.info(f"fitting FWHM trace with {deg_fwhm}-deg polynomial")
-        table_data, table_poly, table_poly_all = trace_fwhm.fit_polynomial(deg_fwhm, poly_kind="poly", clip=fwhm_limits, min_samples_frac=0.5)
-        _create_trace_regions(out_trace_fwhm, table_data, table_poly, table_poly_all, display_plots=display_plots)
-
-        # set bad fibers in trace mask
-        trace_amp._mask[bad_fibers] = True
-        trace_cent._mask[bad_fibers] = True
-        trace_fwhm._mask[bad_fibers] = True
-
-        # linearly interpolate coefficients at masked fibers
-        if interpolate_missing:
-            log.info(f"interpolating coefficients at {bad_fibers.sum()} masked fibers")
-            trace_amp.interpolate_coeffs()
-            trace_cent.interpolate_coeffs()
-            trace_fwhm.interpolate_coeffs()
-    else:
-        # interpolate traces along X axis to fill in missing data
-        log.info("interpolating traces along X axis to fill in missing data")
-        trace_amp.interpolate_data(axis="X")
-        trace_cent.interpolate_data(axis="X")
-        trace_fwhm.interpolate_data(axis="X")
-        # set bad fibers in trace mask
-        trace_amp._mask[bad_fibers] = True
-        trace_cent._mask[bad_fibers] = True
-        trace_fwhm._mask[bad_fibers] = True
-
-        if interpolate_missing:
-            log.info(f"interpolating data at {bad_fibers.sum()} masked fibers")
-            trace_amp.interpolate_data(axis="Y")
-            trace_cent.interpolate_data(axis="Y")
-            trace_fwhm.interpolate_data(axis="Y")
+    fitted_traces = copy(guess_traces)
+    for iblock in iblocks:
+        fitted_traces = img.iterative_block_trace(
+                PROFILE_NAME, fitted_traces, fixed_traces, iblock, columns, bounds, measuring_conf, smoothing_conf,
+                npixels=npixels, oversampling_factor=oversampling_factor, niter=niter)
 
     # evaluate model image
     if out_model is not None and out_ratio is not None:
         log.info("evaluating model image")
-        model, mratio = img.eval_fiber_model(trace_cent, trace_fwhm, trace_amp)
+        model, _, _, _ = img.evaluate_fiber_model(traces=fitted_traces, profile=PROFILE_NAME)
+        mratio = model / img
+
         model.writeFitsData(out_model)
         mratio.writeFitsData(out_ratio)
     else:
         model, mratio = None, None
 
     # write output traces
-    log.info(f"writing amplitude trace to '{os.path.basename(out_trace_amp)}'")
-    trace_amp.writeFitsData(out_trace_amp)
-    log.info(f"writing centroid trace to '{os.path.basename(out_trace_cent)}'")
-    trace_cent.writeFitsData(out_trace_cent)
-    log.info(f"writing FWHM trace to '{os.path.basename(out_trace_fwhm)}'")
-    trace_fwhm.writeFitsData(out_trace_fwhm)
+    for name, out_fiber_par in out_fiber_pars.items():
+        log.info(f"writing '{name}' trace to '{out_fiber_par}'")
+        fitted_traces[name].writeFitsData(out_fiber_par)
 
-    # plot results
-    log.info("plotting results")
-    camera = img._header["CCD"]
-    # residuals
-    fig, ax = create_subplots(to_display=display_plots, nrows=1, ncols=1, figsize=(15,7))
-    fig.suptitle(f"Residuals of joint model for {camera = }")
-    ax.plot(columns, residuals, "o", color="tab:red", ms=10)
-    ax.axhline(0, color="0.2", ls="--", lw=1)
-    ax.grid(ls="--", color="0.9", lw=0.5, zorder=0)
-    ax.set_xlabel("X (pixel)")
-    ax.set_ylabel("residuals (%)")
-    save_fig(
-        fig,
-        product_path=out_trace_amp,
-        to_display=display_plots,
-        figure_path="qa",
-        label="residuals_int_columns"
-    )
-
-    # profile models vs data
-    fig, ax = create_subplots(to_display=display_plots, figsize=(15,7))
-    fig.suptitle(f"Profile fitting residuals for {camera = }")
-    fig.supylabel("residuals (%)")
-    fig.supxlabel("Y (pixel)")
-
-    colors = plt.cm.Spectral(numpy.linspace(0, 1, len(columns)))
-    idx = numpy.argsort(columns)
-    img_ = copy(img)
-    for i in idx:
-        icolumn = columns[i]
-
-        img_slice = img_.getSlice(icolumn, axis="y")
-        joint_mod = mod_columns[i](img_slice._pixels)
-        img_slice._data[(img_slice._mask)|(joint_mod<=0)] = numpy.nan
-
-        weights = img_slice._data / bn.nansum(img_slice._data) * 500
-        residuals = (joint_mod - img_slice._data) / img_slice._data * 100
-        ax.scatter(img_slice._pixels, residuals, s=weights, lw=0, color=colors[i])
-        ax.set_ylim(-50, 50)
-    save_fig(
-        fig,
-        product_path=out_trace_amp,
-        to_display=display_plots,
-        figure_path="qa",
-        label="residuals_columns"
-    )
-
-    return centroids, trace_cent, trace_amp, trace_fwhm, img, model, mratio
+    return fitted_traces, img, model, mratio

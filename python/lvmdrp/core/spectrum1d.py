@@ -3600,7 +3600,7 @@ class Spectrum1D(Header):
         params = numpy.concatenate([counts, centroids, fwhms, alphas])
         return gauss_multi, params
 
-    def fit_gaussians(self, pars_guess, pars_fixed, bounds, fitting_params, profile="skewed", npixels=4, oversampling_factor=50, axs=None):
+    def fit_gaussians(self, pars_guess, pars_fixed, bounds, fitting_params, profile="mexhat", npixels=4, oversampling_factor=10, axs=None):
         profile_class = fit_profile.PROFILES.get(profile)
         if profile_class is None:
             raise ValueError(f"Invalid value for `profile`: {profile}. Expected one of: {fit_profile.PROFILES}")
