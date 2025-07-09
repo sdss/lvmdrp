@@ -317,6 +317,28 @@ class Profile1D:
         self._valid_pars = self._check_valid(self._guess, self._bounds)
         self._nfitted = self._valid_pars.sum()
 
+    def _fwhms(self, x):
+        centroids = self._pars.get("centroids", self._fixed.get("centroids"))
+        half_max = self(centroids) / 2
+        if x is None:
+            fwhms = numpy.ones_like(centroids) * numpy.nan
+            errors = numpy.ones_like(centroids) * numpy.nan
+            masks = numpy.ones_like(centroids, dtype="bool")
+            return fwhms, errors, masks
+
+        x_os = self._oversample_x(x)
+        models = self(x_os, collapse=False)
+
+        indices = numpy.asarray([numpy.where(model >= half_max[i])[0][[0,-1]] if numpy.isfinite(model).all() else [0, 0] for i, model in enumerate(models)])
+        fwhms = numpy.diff(x_os[indices], axis=1)
+        errors = numpy.ones_like(fwhms) / self._oversampling_factor
+        masks = (fwhms == 0) | (~numpy.isfinite(fwhms))
+
+        fwhms[masks] = numpy.nan
+        errors[masks] = numpy.nan
+
+        return fwhms, errors, masks
+
     def _oversample_x(self, x, oversampling_factor=None):
         x = numpy.asarray(x)
         of = oversampling_factor or self._oversampling_factor
@@ -546,7 +568,7 @@ class Profile1D:
             warnings.warn(f"  guess       = {self._guess}")
             warnings.warn(f"  lower bound = {self._bounds[0]}")
             warnings.warn(f"  upper bound = {self._bounds[1]}")
-            self._mask, self._pars, self._errs, self._cov = self._parse_result(result=None)
+            self._mask, self._pars, self._errs, self._cov = self._parse_result()
             return
 
         self._mask, self._pars, self._errs, self._cov = self._parse_result(result)
@@ -630,7 +652,7 @@ class MexHatGaussians(Profile1D):
 
         self._fiber_width = fiber_width
 
-    def __call__(self, x):
+    def __call__(self, x, collapse=True):
         counts, centroids, sigmas, radii = self.unpack_params()
 
         of = self._oversampling_factor
@@ -647,9 +669,11 @@ class MexHatGaussians(Profile1D):
 
         # reshape model into oversampled bins: (x, oversampling_factor)
         model_binned = gaussians_mexhats.reshape(counts.size, x.size, of)
-        model = integrate.trapezoid(model_binned, dx=dx_os, axis=2)
-        model = bn.nansum(model, axis=0)
-        return model
+        models = integrate.trapezoid(model_binned, dx=dx_os, axis=2)
+        if collapse:
+            model = bn.nansum(models, axis=0)
+            return model
+        return models
 
     def _pixelate(self, x, oversampling_factor=None, return_all=False):
         model = self(x)
