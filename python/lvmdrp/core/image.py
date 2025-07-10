@@ -22,7 +22,7 @@ from scipy import interpolate
 
 from lvmdrp import log
 from lvmdrp.core.constants import CON_LAMPS, ARC_LAMPS, LVM_NBLOCKS, LVM_BLOCKSIZE
-from lvmdrp.core.plot import plt
+from lvmdrp.core.plot import plt, plot_fiber_residuals
 from lvmdrp.core.fit_profile import gaussians, PROFILES
 from lvmdrp.core.apertures import Apertures
 from lvmdrp.core.header import Header
@@ -2763,7 +2763,7 @@ class Image(Header):
         pixels_selection = (lower <= Y) & (Y <= upper)
         return X, Y, pixels_selection
 
-    def evaluate_fiber_model(self, traces, profile="normal", iblock=None, blockid=None, oversampling_factor=10, columns=None, npixels=5, verbose=True):
+    def evaluate_fiber_model(self, traces, profile="normal", iblock=None, blockid=None, oversampling_factor=10, columns=None, npixels=5, verbose=True, axs=None):
         nrows, ncols = self._dim
         if columns is None:
             columns = numpy.arange(ncols, dtype="int")
@@ -2789,6 +2789,8 @@ class Image(Header):
             pars_column = {name: block.getSlice(icolumn, axis="Y")[0] for name, block in blocks.items()}
             model_array[selection, icolumn] = profile_model(pars_column, {}, {}, oversampling_factor=oversampling_factor)._pixelate(pixels)
         model = Image(data=model_array, mask=numpy.isnan(model_array))
+
+        axs = plot_fiber_residuals(model, self, blocks["centroids"], iblock, X=X, Y=Y, axs=axs)
 
         return model, X, Y, pixels_selection
 

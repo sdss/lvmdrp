@@ -683,24 +683,31 @@ def plot_wavesol_lsf(xpix, lsf, lines_pixels, wave_poly, wave_coeffs, lsf_poly, 
     return ax
 
 
-def plot_fiber_residuals(model, img, centroids, iblock, nbins=5):
+def plot_fiber_residuals(model, img, centroids, iblock, X=None, Y=None, axs=None):
 
     centroids_block = centroids.get_block(iblock)
     camera = img._header["CCD"]
+    exposure = img._header["EXPOSURE"]
 
     data = img._data.copy()
     data[np.isnan(model._data)] = np.nan
     residuals = (model._data - img._data)
     residuals = residuals / np.nansum(data, axis=0)
-    x_pixels = np.arange(LVM_NCOLS, dtype="int")
-    y_pixels = np.arange(LVM_NROWS, dtype="int")
-    X, Y = np.meshgrid(x_pixels, y_pixels, indexing="xy")
+    if X is None or Y is None:
+        x_pixels = np.arange(LVM_NCOLS, dtype="int")
+        y_pixels = np.arange(LVM_NROWS, dtype="int")
+        X, Y = np.meshgrid(x_pixels, y_pixels, indexing="xy")
 
-    fig, axs = plt.subplots(nbins, 1, figsize=(15,7), sharey=True, sharex=True, layout="constrained")
-    fig.suptitle(f"Isolated fibers in exposure = {img._header['EXPOSURE']} | {camera = }", fontsize="xx-large")
-    fig.supxlabel("Delta Y (pixel)", fontsize="xx-large")
-    fig.supylabel("(model - data) / column counts", fontsize="xx-large")
-    plt.ylim(-0.07, 0.07)
+    if axs is None:
+        nbins = 5
+        fig, axs = plt.subplots(nbins, 1, figsize=(15,7), sharey=True, sharex=True, layout="constrained")
+        fig.suptitle(f"Isolated fibers in {exposure = } | {camera = } | {iblock = }", fontsize="xx-large")
+        fig.supxlabel("Delta Y (pixel)", fontsize="xx-large")
+        fig.supylabel("(model - data) / column counts", fontsize="xx-large")
+        plt.ylim(-0.07, 0.07)
+    else:
+        nbins = axs.size
+
     edges = np.histogram_bin_edges(X[0], nbins)
     bins = np.digitize(X[0], edges, right=False)
     ys = np.nansum(centroids_block._data, axis=0) - Y

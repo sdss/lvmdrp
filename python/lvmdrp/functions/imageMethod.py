@@ -4444,8 +4444,8 @@ def guess_fibers_params(in_image: str,
 
 def fit_fibers_params(
     in_image: str,
-    out_fiber_pars: dict,
     in_fiber_guess: dict,
+    out_fiber_pars: None | dict = None,
     out_model: str = None,
     out_ratio: str = None,
     median_box: tuple = (1, 10),
@@ -4578,6 +4578,8 @@ def fit_fibers_params(
     # load continuum image  from file
     log.info(f"using flat image {os.path.basename(in_image)} for tracing")
     img = loadImage(in_image)
+    camera = img._header["CCD"]
+    exposure = img._header["EXPOSURE"]
     img.setData(data=numpy.nan_to_num(img._data), error=numpy.nan_to_num(img._error))
     # enhance image by interpolating bad pixels with local median & coadding columns for higher SNR
     log.info(f"interpolating bad pixels with {median_box = } pixels and coadding {coadd} columns")
@@ -4585,25 +4587,18 @@ def fit_fibers_params(
 
     # get fiber guess parameters
     columns = numpy.linspace(5, 4080, ncolumns, dtype="int")
-    guess_traces, fixed_traces = {}, {}
+    fixed_traces = {}
     for name in PROFILE_PARNAMES:
-        if name == "centroids":
-            continue
-
-        if name in FREE_PARNAMES:
-            guess_traces[name] = TraceMask.create_empty(data_dim=(LVM_NFIBERS,img._dim[1]), samples_columns=columns, header=img._header, slitmap=img._slitmap)
-            guess_traces[name].fill(data=GUESS[name], error=1.0, mask=False, samples=GUESS[name], samples_error=1.0)
+        if os.path.isfile(in_fiber_guess.get(name, "")):
+            log.info(f"loading guess fiber '{name}' from '{os.path.basename(in_fiber_guess[name])}'")
+            fixed_traces[name] = TraceMask.from_file(in_fiber_guess[name])
+            fixed_traces[name].set_samples(columns=columns, from_data=True)
+            fixed_traces[name].set_samples_error(columns=columns, from_error=True)
         else:
             fixed_traces[name] = TraceMask.create_empty(data_dim=(LVM_NFIBERS,img._dim[1]), samples_columns=columns, header=img._header, slitmap=img._slitmap)
-            fixed_traces[name].fill(data=GUESS[name], error=1.0, mask=False, samples=GUESS[name], samples_error=1.0)
+            fixed_traces[name].fill(data=GUESS.get(name, numpy.nan), error=1.0, mask=False, samples=GUESS.get(name, numpy.nan), samples_error=1.0)
+    guess_traces = {name: fixed_traces.pop(name) for name in FREE_PARNAMES}
     bounds = {name: BOUNDS.get(name) for name in FREE_PARNAMES}
-
-    for name in FREE_PARNAMES:
-        log.info(f"loading guess fiber '{name}' from '{os.path.basename(in_fiber_guess[name])}'")
-        if os.path.isfile(in_fiber_guess[name]):
-            guess_traces.update({name: TraceMask.from_file(in_fiber_guess[name])})
-            guess_traces[name].set_samples(columns=columns, from_data=True)
-            guess_traces[name].set_samples_error(columns=columns, from_error=True)
 
     fitted_traces = copy(guess_traces)
     for iblock in iblocks:
@@ -4611,16 +4606,30 @@ def fit_fibers_params(
                 PROFILE_NAME, fitted_traces, fixed_traces, iblock, columns, bounds, measuring_conf, smoothing_conf,
                 npixels=npixels, oversampling_factor=oversampling_factor, niter=niter)
 
+    # define full set of fiber parameters
+    fiber_params = fitted_traces.copy()
+    fiber_params.update(fixed_traces)
+
     # evaluate model image
-    if out_model is not None and out_ratio is not None:
-        log.info("evaluating model image")
-        model, _, _, _ = img.evaluate_fiber_model(traces=fitted_traces, profile=PROFILE_NAME)
+    log.info("evaluating model image")
+    for iblock in iblocks:
+        fig, axs = create_subplots(to_display=display_plots, nrows=5, ncols=1, figsize=(15,7), sharey=True, sharex=True, layout="constrained")
+        fig.suptitle(f"Isolated fibers in {exposure = } | {camera = } | {iblock = }", fontsize="xx-large")
+        fig.supxlabel("Delta Y (pixel)", fontsize="xx-large")
+        fig.supylabel("(model - data) / column counts", fontsize="xx-large")
+        plt.ylim(-0.07, 0.07)
+        model, _, _, _ = img.evaluate_fiber_model(traces=fiber_params, profile=PROFILE_NAME, iblock=iblock, columns=columns, axs=axs)
         mratio = model / img
+        save_fig(fig, in_image, label=f"fiber_modeling_B{iblock+1}", figure_path="qa", to_display=display_plots)
+    if out_model is not None and out_ratio is not None:
 
         model.writeFitsData(out_model)
         mratio.writeFitsData(out_ratio)
     else:
         model, mratio = None, None
+
+    if out_fiber_pars is None:
+        return fitted_traces, img, model, mratio
 
     # write output traces
     for name, out_fiber_par in out_fiber_pars.items():
