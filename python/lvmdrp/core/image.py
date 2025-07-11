@@ -2883,7 +2883,7 @@ class Image(Header):
         mask |= bad_pix
         return data, error, mask
 
-    def extractSpecOptimal(self, cent_trace, trace_fwhm, plot_fig=False):
+    def extractSpecOptimal(self, cent_trace, trace_sigma, plot_fig=False):
         # initialize RSS arrays
         data = numpy.zeros((cent_trace._fibers, self._dim[1]), dtype=numpy.float32)
         if self._error is not None:
@@ -2894,9 +2894,6 @@ class Image(Header):
 
         self._data = numpy.nan_to_num(self._data)
         self._error = numpy.nan_to_num(self._error, nan=numpy.inf)
-
-        # convert FWHM trace to sigma
-        trace_sigma = trace_fwhm / 2.354
 
         for i in range(self._dim[1]):
             # get i-column from image and trace
@@ -2924,13 +2921,19 @@ class Image(Header):
             slice_img._data[select_nan] = 0
 
             # measure flux along the given columns
-            result = slice_img.obtainGaussFluxPeaks(cent[good_fiber], sigma[good_fiber], plot=plot_fig)
+            # result = slice_img.obtainGaussFluxPeaks(cent[good_fiber], sigma[good_fiber], plot=plot_fig)
+            result = slice_img.extract_flux(cent[good_fiber], sigma[good_fiber])
+            # try:
             data[good_fiber, i] = result[0]
             if self._error is not None:
                 error[good_fiber, i] = result[1]
             if self._mask is not None:
                 mask[good_fiber, i] = result[2]
             mask[bad_fiber, i] = True
+            # except Exception as e:
+            #     print(e)
+            #     print(i, result[0].shape, result[1].shape, result.shape[2])
+            #     print(error.shape, mask.shape)
         return data, error, mask
 
     def maskFiberTraces(self, TraceMask, aperture=3, parallel="auto"):

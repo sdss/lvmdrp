@@ -8,7 +8,7 @@ from astropy.io import fits as pyfits
 from astropy.stats import biweight_location
 from numpy import polynomial
 from scipy.linalg import norm
-from scipy import signal, interpolate, ndimage, sparse
+from scipy import signal, interpolate, integrate, ndimage, sparse
 from scipy.ndimage import zoom, median_filter
 from typing import List, Tuple
 
@@ -3774,6 +3774,93 @@ class Spectrum1D(Header):
                     flux[i] = cent[i] = fwhm[i] = bg[i] = numpy.nan
 
         return flux, cent, fwhm, bg
+
+    def extract_flux(self, centroids, sigmas, fiber_radius=1.4, npixels=20, replace_error=numpy.inf):
+
+        def _oversample(x, oversampling_factor):
+            dx = (x[1] - x[0]) / 2
+            offsets = (numpy.arange(oversampling_factor) + dx) / oversampling_factor - dx
+            oversampled = x[:, None] + offsets[None, :]
+            return oversampled.ravel()
+
+        def _gen_mexhat_basis(x, centroid, sigma, fiber_radius, oversampling_factor):
+            dx = x[1] - x[0]
+            x_os = _oversample(x, oversampling_factor)
+            dx_os = x_os[1] - x_os[0]
+
+            mexhat = fit_profile.mexhat(fiber_radius, x_os-centroid)
+            gaussian = numpy.exp(-0.5 * ((x_os-x_os[x_os.size//2]) / sigma) ** 2) / (fit_profile.fact * sigma)
+            mexhat_gaussian = signal.fftconvolve(gaussian, mexhat, mode="same")
+            mexhat_gaussian /= integrate.trapezoid(mexhat_gaussian, dx=dx_os)
+
+            # import matplotlib.pyplot as plt
+            # plt.plot(x_os, gaussian)
+            # plt.plot(x_os, mexhat)
+            # plt.plot(x_os, mexhat_gaussian)
+            # plt.show()
+            # exit()
+
+            # reshape model into oversampled bins: (x, oversampling_factor)
+            model_binned = mexhat_gaussian.reshape(x.size, oversampling_factor)
+            model = integrate.trapezoid(model_binned, dx=dx_os, axis=1)
+            model /= integrate.trapezoid(mexhat_gaussian, dx=dx)
+            return model
+
+        nfibers = centroids.size
+        # round up fiber locations
+        pixels = numpy.round(centroids[:, None] + numpy.arange(-npixels / 2.0, npixels / 2.0, 1.0)[None, :]).astype("int")
+        # defining bad pixels for each fiber if needed
+        if self._mask is not None:
+            # select: fibers in the boundary of the chip
+            mask = numpy.zeros(nfibers, dtype="bool")
+            select = bn.nansum(pixels >= self._mask.shape[0], 1)
+            nselect = numpy.logical_not(select)
+            mask[select] = True
+
+            # masking fibers if all pixels are bad within npixels
+            mask[nselect] = bn.nansum(self._mask[pixels[nselect, :]], 1) == npixels
+        else:
+            mask = None
+
+        # evaluate basis
+        # nfibers x kernel_size
+        xx = numpy.repeat(numpy.arange(nfibers, dtype="int"), 2*npixels+1)
+        # pixel ranges of fiber images
+        pos_t = numpy.trunc(centroids)
+        yyv = numpy.linspace(pos_t-npixels, pos_t+npixels, 2*npixels+1, endpoint=True)
+
+        v = numpy.asarray([_gen_mexhat_basis(yyv[:, j], centroids[j], sigmas[j], fiber_radius=fiber_radius, oversampling_factor=100) for j in range(yyv.shape[1])])
+        # v = numpy.exp(-0.5 * ((yyv-centroids) / sigmas) ** 2) / (fit_profile.fact * sigmas)
+
+        yyv = yyv.T.ravel()
+        v = v.ravel() / self._error[yyv.astype("int")]
+
+        B = sparse.csc_matrix((v, (yyv.T.ravel(), xx)), shape=(len(self._data), nfibers))
+
+
+        # import matplotlib.pyplot as plt
+        # fig, axs = plt.subplots(1, 2, figsize=(10,10), sharex=True, sharey=True)
+        # axs[0].imshow(B.toarray(), origin="lower", interpolation="none")
+
+        # v = numpy.exp(-0.5 * ((yyv-centroids) / sigmas) ** 2) / (fit_profile.fact * sigmas)
+        # yyv = yyv.T.ravel()
+        # v = v.T.ravel()# / self._error[yyv.astype(numpy.int32)]
+        # B = sparse.csc_matrix((v, (yyv, xx)), shape=(len(self._data), nfibers))
+        # axs[1].imshow(B.toarray(), origin="lower", interpolation="none")
+        # plt.show()
+
+        # invert the projection matrix and solve
+        ypixels = numpy.arange(self._data.size)
+        guess_flux = numpy.interp(centroids, ypixels, self._data) * fit_profile.fact * sigmas
+        out = sparse.linalg.lsmr(B, self._data / self._error, atol=1e-3, btol=1e-3, x0=guess_flux)
+        flux = out[0]
+
+        error = numpy.sqrt(1 / ((B.multiply(B)).sum(axis=0))).A
+        error = error[0,:]
+        if mask is not None and bn.nansum(mask) > 0:
+            error[mask] = replace_error
+
+        return flux, error, mask
 
     def obtainGaussFluxPeaks(self, pos, sigma, replace_error=1e10, plot=False):
         """returns Gaussian peaks parameters, flux error and mask

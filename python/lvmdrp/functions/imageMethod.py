@@ -401,8 +401,11 @@ def _fix_fiber_thermal_shifts(image, trace_cent, trace_width=None, trace_amp=Non
 
     # apply average shift to the zeroth order trace coefficients
     trace_cent_fixed = copy(trace_cent)
-    trace_cent_fixed._coeffs[:, 0] += median_shift
-    trace_cent_fixed.eval_coeffs()
+    if trace_cent_fixed._coeffs is not None:
+        trace_cent_fixed._coeffs[:, 0] += median_shift
+        trace_cent_fixed.eval_coeffs()
+    else:
+        trace_cent_fixed._data += median_shift
 
     return trace_cent_fixed, column_shifts, median_shift, std_shift, fiber_model
 
@@ -2540,7 +2543,7 @@ def extract_spectra(
     in_image: str,
     out_rss: str,
     in_trace: str,
-    in_fwhm: str = None,
+    in_sigma: str = None,
     in_model: str = None,
     in_acorr: str = None,
     assume_thermal_shift: float = None,
@@ -2654,12 +2657,12 @@ def extract_spectra(
 
     if method == "optimal":
         # check if fwhm trace is given and exists
-        if in_fwhm is None or not os.path.isfile(in_fwhm):
-            trace_fwhm = TraceMask()
-            trace_fwhm.setData(data=numpy.ones(trace_mask._data.shape) * float(fwhm))
-            trace_fwhm._coeffs = numpy.ones((trace_mask._data.shape[0], 1)) * float(fwhm)
+        if in_sigma is None or not os.path.isfile(in_sigma):
+            trace_sigma = TraceMask()
+            trace_sigma.setData(data=numpy.ones(trace_mask._data.shape) * float(fwhm))
+            trace_sigma._coeffs = numpy.ones((trace_mask._data.shape[0], 1)) * float(fwhm)
         else:
-            trace_fwhm = TraceMask.from_file(in_fwhm)
+            trace_sigma = TraceMask.from_file(in_sigma)
 
         # set up parallel run
         if parallel == "auto":
@@ -2671,7 +2674,7 @@ def extract_spectra(
         if fragments > 1:
             split_img = img.split(fragments)
             split_trace = trace_mask.split(fragments)
-            split_fwhm = trace_fwhm.split(fragments)
+            split_fwhm = trace_sigma.split(fragments)
             pool = Pool()
             threads = []
             data = []
@@ -2701,9 +2704,9 @@ def extract_spectra(
                 mask = None
         else:
             with Timer(name="extract optimal", logger=log.info):
-                (data, error, mask) = img.extractSpecOptimal(trace_mask, trace_fwhm, plot_fig=display_plots)
+                (data, error, mask) = img.extractSpecOptimal(trace_mask, trace_sigma, plot_fig=display_plots)
     elif method == "aperture":
-        trace_fwhm = None
+        trace_sigma = None
 
         (data, error, mask) = img.extractSpecAperture(trace_mask, aperture)
 
@@ -2743,7 +2746,7 @@ def extract_spectra(
         error=error,
         good_fibers=trace_mask._good_fibers,
         cent_trace=trace_mask,
-        width_trace=trace_fwhm,
+        width_trace=trace_sigma,
         header=img.getHeader(),
         slitmap=slitmap
     )
@@ -2755,13 +2758,13 @@ def extract_spectra(
     rss.setHdrValue(f"HIERARCH {camera.upper()} FIBER CENT_AVG", numpy.round(bn.nanmean(trace_mask._data),4), "avg. fiber centroid [pix]")
     rss.setHdrValue(f"HIERARCH {camera.upper()} FIBER CENT_STD", numpy.round(bn.nanstd(trace_mask._data),4), "stddev. fiber centroid [pix]")
     if method == "optimal":
-        rss.setHdrValue(f"HIERARCH {camera.upper()} FIBER WIDTH_MIN", numpy.round(bn.nanmin(trace_fwhm._data),4), "min. fiber width [pix]")
-        rss.setHdrValue(f"HIERARCH {camera.upper()} FIBER WIDTH_MAX", numpy.round(bn.nanmax(trace_fwhm._data),4), "max. fiber width [pix]")
-        rss.setHdrValue(f"HIERARCH {camera.upper()} FIBER WIDTH_AVG", numpy.round(bn.nanmean(trace_fwhm._data),4), "avg. fiber width [pix]")
-        rss.setHdrValue(f"HIERARCH {camera.upper()} FIBER WIDTH_STD", numpy.round(bn.nanstd(trace_fwhm._data),4), "stddev. fiber width [pix]")
+        rss.setHdrValue(f"HIERARCH {camera.upper()} FIBER WIDTH_MIN", numpy.round(bn.nanmin(trace_sigma._data),4), "min. fiber width [pix]")
+        rss.setHdrValue(f"HIERARCH {camera.upper()} FIBER WIDTH_MAX", numpy.round(bn.nanmax(trace_sigma._data),4), "max. fiber width [pix]")
+        rss.setHdrValue(f"HIERARCH {camera.upper()} FIBER WIDTH_AVG", numpy.round(bn.nanmean(trace_sigma._data),4), "avg. fiber width [pix]")
+        rss.setHdrValue(f"HIERARCH {camera.upper()} FIBER WIDTH_STD", numpy.round(bn.nanstd(trace_sigma._data),4), "stddev. fiber width [pix]")
 
     rss.add_header_comment(f"{in_trace}, fiber centroids used for {camera}")
-    rss.add_header_comment(f"{in_fwhm}, fiber width (FWHM) used for {camera}")
+    rss.add_header_comment(f"{in_sigma}, fiber width (FWHM) used for {camera}")
     rss.add_header_comment(f"{in_model}, fiber model used for {camera}")
     rss.add_header_comment(f"{in_acorr}, fiber aperture correction used for {camera}")
 
