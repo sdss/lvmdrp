@@ -381,7 +381,9 @@ def _fix_fiber_thermal_shifts(image, trace_cent, trace_width=None, trace_amp=Non
     """
     # generate the continuum model using the master traces only along the specific columns
     if fiber_model is None:
-        fiber_model, _ = image.eval_fiber_model(trace_cent, trace_width, trace_amp=trace_amp, columns=columns, column_width=column_width)
+        fiber_model, _, _, _ = image.evaluate_fiber_model(
+            traces={"centroids": trace_cent, "sigmas": trace_width}, profile="mexhat",
+            columns=columns, column_width=column_width)
 
     mjd = image._header["SMJD"]
     expnum = image._header["EXPOSURE"]
@@ -4374,7 +4376,7 @@ def guess_fibers_params(in_image: str,
                         median_box: tuple = (1, 10),
                         coadd: int = None,
                         fwhms_guess: float = 2.5,
-                        counts_range: Tuple[float] = [5e3, numpy.inf],
+                        counts_range: Tuple[float] = [0.0, numpy.inf],
                         centroids_range: Tuple[float] = [-2.0, +2.0],
                         fwhms_range: Tuple[float] = [2.0, 3.5],
                         ncolumns: int | Tuple[int] = 140,
@@ -4397,8 +4399,6 @@ def guess_fibers_params(in_image: str,
     # perform median filtering along the dispersion axis to clean cosmic rays
     img = img.enhance(median_box=median_box, coadd=coadd, trust_errors=True, apply_mask=False)
     # fix counts boundaries after coadding columns
-    if coadd is not None:
-        counts_range = [counts_range[0]*coadd, counts_range[1]*coadd]
 
     # calculate centroids for reference column
     if correct_ref:
@@ -4567,16 +4567,12 @@ def fit_fibers_params(
     PROFILE_PARNAMES = PROFILE.PARNAMES
     FREE_PARNAMES = ["counts", "centroids", "sigmas"]
     # define naive guess values
-    GUESS = {
-        "counts": 100e3,
-        "sigmas": 0.5,
-        "radii": 1.4}
+    GUESS = {"counts": 100e3, "sigmas": 0.5}
     # define naive bounds
     BOUNDS = {
-        "counts": {"kind": "absolute", "range": (5000, numpy.inf)},
+        "counts": {"kind": "absolute", "range": (0.0, 1e7)},
         "centroids": {"kind": "relative", "range": (-0.5, +0.5)},
-        "sigmas": {"kind": "absolute", "range": (0.1, 7.7)},
-        "radii": {"kind": "absolute", "range": (0.1, 5.0)}}
+        "sigmas": {"kind": "absolute", "range": (0.1, 1.5)}}
 
     # load continuum image  from file
     log.info(f"using flat image {os.path.basename(in_image)} for tracing")
@@ -4586,7 +4582,7 @@ def fit_fibers_params(
     img.setData(data=numpy.nan_to_num(img._data), error=numpy.nan_to_num(img._error))
     # enhance image by interpolating bad pixels with local median & coadding columns for higher SNR
     log.info(f"interpolating bad pixels with {median_box = } pixels and coadding {coadd} columns")
-    img = img.enhance(median_box=median_box, coadd=coadd, trust_errors=True, apply_mask=False)
+    img = img.enhance(median_box=median_box, coadd=coadd, trust_errors=True, apply_mask=True)
 
     # get fiber guess parameters
     columns = numpy.linspace(5, 4080, ncolumns, dtype="int")
@@ -4602,6 +4598,8 @@ def fit_fibers_params(
             fixed_traces[name].fill(data=GUESS.get(name, numpy.nan), error=1.0, mask=False, samples=GUESS.get(name, numpy.nan), samples_error=1.0)
     guess_traces = {name: fixed_traces.pop(name) for name in FREE_PARNAMES}
     bounds = {name: BOUNDS.get(name) for name in FREE_PARNAMES}
+    smoothing_conf["counts"][1]["clip"] = bounds["counts"]["range"]
+    smoothing_conf["sigmas"][1]["clip"] = bounds["sigmas"]["range"]
 
     fitted_traces = copy(guess_traces)
     for iblock in iblocks:
@@ -4615,28 +4613,29 @@ def fit_fibers_params(
 
     # evaluate model image
     log.info("evaluating model image")
+    models, ratios = [], []
     for iblock in iblocks:
         fig, axs = create_subplots(to_display=display_plots, nrows=5, ncols=1, figsize=(15,7), sharey=True, sharex=True, layout="constrained")
         fig.suptitle(f"Isolated fibers in {exposure = } | {camera = } | {iblock = }", fontsize="xx-large")
         fig.supxlabel("Delta Y (pixel)", fontsize="xx-large")
         fig.supylabel("(model - data) / column counts", fontsize="xx-large")
         plt.ylim(-0.07, 0.07)
-        model, _, _, _ = img.evaluate_fiber_model(traces=fiber_params, profile=PROFILE_NAME, iblock=iblock, columns=columns, axs=axs)
-        mratio = model / img
+        model, _, _, _ = img.evaluate_fiber_model(traces=fiber_params, profile=PROFILE_NAME, iblock=iblock, axs=axs)
+        models.append(model)
+        ratios.append(model/img)
         save_fig(fig, in_image, label=f"fiber_modeling_B{iblock+1}", figure_path="qa", to_display=display_plots)
+
+    model = combineImages(images=models, method="sum", normalize=False, background_subtract=False, replace_with_nan=False)
+    ratio = model / img
+
     if out_model is not None and out_ratio is not None:
-
         model.writeFitsData(out_model)
-        mratio.writeFitsData(out_ratio)
-    else:
-        model, mratio = None, None
-
-    if out_fiber_pars is None:
-        return fitted_traces, img, model, mratio
+        ratio.writeFitsData(out_ratio)
 
     # write output traces
-    for name, out_fiber_par in out_fiber_pars.items():
-        log.info(f"writing '{name}' trace to '{out_fiber_par}'")
-        fitted_traces[name].writeFitsData(out_fiber_par)
+    if out_fiber_pars is not None:
+        for name, out_fiber_par in out_fiber_pars.items():
+            log.info(f"writing '{name}' trace to '{out_fiber_par}'")
+            fitted_traces[name].writeFitsData(out_fiber_par)
 
-    return fitted_traces, img, model, mratio
+    return fitted_traces, img, model, ratio

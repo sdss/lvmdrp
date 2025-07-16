@@ -105,14 +105,14 @@ CALIBRATION_NEEDS = {
     "bias": ["pixmask"],
     "pixflat": ["pixmask", "bias", "dark"],
     "trace": ["pixmask", "pixflat", "bias"],
-    "wave": ["pixmask", "pixflat", "bias", "trace", "width", "model"],
-    "dome": ["pixmask", "pixflat", "bias", "trace", "width", "model", "wave", "lsf"],
-    "twilight": ["pixmask", "pixflat", "bias", "trace", "width", "model", "wave", "lsf"],
-    "object": ["pixmask", "pixflat", "bias", "trace", "width", "model", "wave", "lsf"],
+    "wave": ["pixmask", "pixflat", "bias", "centroids", "sigmas", "model"],
+    "dome": ["pixmask", "pixflat", "bias", "centroids", "sigmas", "model", "wave", "lsf"],
+    "twilight": ["pixmask", "pixflat", "bias", "centroids", "sigmas", "model", "wave", "lsf"],
+    "object": ["pixmask", "pixflat", "bias", "centroids", "sigmas", "model", "wave", "lsf"],
 }
-CALIBRATION_NAMES = {"pixmask", "pixflat", "bias", "trace_guess", "trace", "width", "amp", "model", "wave", "lsf", "fiberflat_dome", "fiberflat_twilight"}
+CALIBRATION_NAMES = {"pixmask", "pixflat", "bias", "trace_guess", "centroids", "sigmas", "counts", "model", "wave", "lsf", "fiberflat_dome", "fiberflat_twilight"}
 CALIBRATION_MATCH = {
-    "trace": ["trace", "width", "model"],
+    "trace": ["centroids", "sigmas", "model"],
     "wave": ["wave", "lsf"],
     "dome": ["fiberflat_dome"],
     "twilight": ["fiberflat_twilight"]}

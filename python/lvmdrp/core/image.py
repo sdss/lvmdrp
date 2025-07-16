@@ -1975,7 +1975,7 @@ class Image(Header):
 
         # coadd images along the dispersion axis to increase the S/N of the peaks
         if coadd is not None:
-            coadd_kernel = numpy.ones((1, coadd), dtype="uint8")
+            coadd_kernel = numpy.ones((1, coadd), dtype="uint8") / coadd
             img = img.convolveImg(coadd_kernel)
             # counts_threshold = counts_threshold * coadd
 
@@ -2763,10 +2763,12 @@ class Image(Header):
         pixels_selection = (lower <= Y) & (Y <= upper)
         return X, Y, pixels_selection
 
-    def evaluate_fiber_model(self, traces, profile="normal", iblock=None, blockid=None, oversampling_factor=10, columns=None, npixels=5, verbose=True, axs=None):
+    def evaluate_fiber_model(self, traces, profile="normal", iblock=None, blockid=None, oversampling_factor=10, columns=None, column_width=100, npixels=5, verbose=True, axs=None):
         nrows, ncols = self._dim
         if columns is None:
-            columns = numpy.arange(ncols, dtype="int")
+            columns = numpy.arange(ncols)
+        else:
+            columns = _fill_column_list(columns, column_width)
 
         blocks = traces.copy()
         if iblock is not None or blockid is not None:
@@ -2788,9 +2790,10 @@ class Image(Header):
             pixels = Y[selection, icolumn]
             pars_column = {name: block.getSlice(icolumn, axis="Y")[0] for name, block in blocks.items()}
             model_array[selection, icolumn] = profile_model(pars_column, {}, {}, oversampling_factor=oversampling_factor)(pixels)
-        model = Image(data=model_array, mask=numpy.isnan(model_array))
+        model = Image(data=model_array, mask=numpy.isnan(model_array), header=self._header.copy())
 
-        axs = plot_fiber_residuals(model, self, blocks["centroids"], iblock, X=X, Y=Y, axs=axs)
+        if axs is not None:
+            axs = plot_fiber_residuals(model, self, blocks["centroids"], iblock, X=X, Y=Y, axs=axs)
 
         return model, X, Y, pixels_selection
 

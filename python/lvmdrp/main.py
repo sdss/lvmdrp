@@ -1488,7 +1488,7 @@ def reduce_1d(mjd, calibrations, expnums=None, cameras=CAMERAS, replace_with_nan
         if skip_done and os.path.isfile(xframe_path):
             continue
         else:
-            extract_spectra(in_image=dframe_path, out_rss=xframe_path, in_trace=mtrace_path, in_fwhm=mwidth_path, in_model=mmodel_path, method="optimal", parallel=1)
+            extract_spectra(in_image=dframe_path, out_rss=xframe_path, in_trace=mtrace_path, in_sigma=mwidth_path, in_model=mmodel_path, method="optimal", parallel=1)
 
     frames = frames.drop_duplicates(subset=["expnum"])
     for _, sci in frames.iterrows():
@@ -1630,7 +1630,7 @@ def science_reduction(expnum: int,
 
             # extract 1d spectra
             with Timer(name='Extract '+xsci_path, logger=log.info):
-                extract_spectra(in_image=lsci_path, out_rss=xsci_path, in_trace=mtrace_path, in_fwhm=mwidth_path,
+                extract_spectra(in_image=lsci_path, out_rss=xsci_path, in_trace=mtrace_path, in_sigma=mwidth_path,
                                 in_model=mmodel_path, method=extraction_method, parallel=parallel_run)
 
     # per channel reduction
