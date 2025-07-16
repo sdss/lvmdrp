@@ -84,6 +84,48 @@ def mexhat(radius, x, normalize_area=True):
         return model / (2*_integral(radius, radius))
     return model
 
+def fiber_profile(centroids, radii, x):
+    c = numpy.atleast_2d(centroids).T
+    r = numpy.atleast_2d(radii).T
+    x_ = numpy.atleast_2d(x)
+    models = 2 * numpy.sqrt(r**2 - (x_ - c)**2)
+    models = numpy.nan_to_num(models, nan=0.0)
+
+    integrals = r**2*numpy.arcsin(1.0)
+    models = models / (2*integrals)
+    return models
+
+def oversample(x, oversampling_factor):
+    x = numpy.asarray(x)
+    is_1d = x.ndim == 1
+
+    if is_1d:
+        x = x[:, None]  # shape: (nsamples, 1)
+
+    nsamples, nfuncs = x.shape
+    dx = numpy.gradient(x, axis=0) / 2.0  # shape: (nsamples, nfuncs)
+
+    # Oversampling offsets
+    sub_idx = numpy.arange(oversampling_factor)  # shape: (os,)
+    offsets = (sub_idx + 0.5) / oversampling_factor - 0.5  # centered in each subinterval
+
+    # Broadcast for oversampled grid
+    x = x[:, :, None]  # shape: (nsamples, nfuncs, 1)
+    dx = dx[:, :, None]  # same shape
+    oversampled = x + offsets * dx * 2  # shape: (nsamples, nfuncs, os)
+
+    # Reshape: stack oversampling axis next to sample axis
+    oversampled = oversampled.transpose(0, 2, 1).reshape(-1, nfuncs)  # (nsamples * os, nfuncs)
+
+    if is_1d:
+        return oversampled.ravel()
+    return oversampled
+
+def pixelate(x, models, oversampling_factor):
+    models_bins = models.reshape((models.shape[0], models.shape[1]//oversampling_factor, oversampling_factor))
+    models_pixelated = integrate.trapezoid(models_bins, dx=x[1]-x[0], axis=2)
+    return models_pixelated
+
 def update_params(func):
     @wraps(func)
     def wrapper(self, *args, **kwargs):
@@ -340,36 +382,10 @@ class Profile1D:
         return fwhms, errors, masks
 
     def _oversample_x(self, x, oversampling_factor=None):
-        x = numpy.asarray(x)
-        of = oversampling_factor or self._oversampling_factor
-        return self._cached_oversample(tuple(x), of)
+        return oversample(x, oversampling_factor or self._oversampling_factor)
 
-    @staticmethod
-    @lru_cache(maxsize=1)
-    def _cached_oversample(x_tuple, oversampling_factor):
-        x = numpy.array(x_tuple)
-        dx = (x[1] - x[0]) / 2
-        offsets = (numpy.arange(oversampling_factor) + dx) / oversampling_factor - dx
-        oversampled = x[:, None] + offsets[None, :]
-        return oversampled.ravel()
-
-    def _pixelate(self, x, oversampling_factor=None, return_all=False):
-        of = oversampling_factor or self._oversampling_factor
-
-        x_os = self._oversample_x(x)
-        model_os = self(x_os)
-        model_os = numpy.clip(model_os, 1e-12, None)
-
-        width = int(of)
-        # width += 1 - (width % 2)
-        tophat = numpy.ones(width) / width
-
-        pixelated_os = fftconvolve(model_os, tophat, mode="same")
-        pixelated = interpolate.interp1d(x_os, pixelated_os, kind="cubic")(x)
-
-        if return_all:
-            return pixelated, pixelated_os, model_os, x_os
-        return pixelated
+    def _pixelate(self, x, models, oversampling_factor=None):
+        return pixelate(x, models, oversampling_factor or self._oversampling_factor)
 
     def _to_list(self, x):
         return [x[name] for name in self.PARNAMES if name in x]
@@ -525,13 +541,13 @@ class Profile1D:
 
     @update_params
     def residuals(self, pars, x, y, sigma, *args, **kwargs):
-        model = self._pixelate(x)
+        model = self(x)
         return (model - y) / sigma
 
     @update_params
     def cost_function(self, pars, x, y, sigma, readnoise, collapse=True):
         rn_sq = readnoise ** 2
-        model = self._pixelate(x)
+        model = self(x)
         loglik = (y + rn_sq) * numpy.log(model + rn_sq) - model
         if collapse:
             # print(f"{readnoise = }")
@@ -544,7 +560,7 @@ class Profile1D:
 
     def chi_sq(self, x, y, sigma, collapse=True):
         dof = max(1, x.size - self._npars * self._nfitted)
-        model = self._pixelate(x)
+        model = self(x)
         chisq = (model - y)**2 / sigma**2 / dof
         if collapse:
             return bn.nansum(chisq)
@@ -563,7 +579,7 @@ class Profile1D:
             warnings.warn(f"  {x       = }")
             warnings.warn(f"  {y       = }")
             warnings.warn(f"  {sigma_  = }")
-            warnings.warn(f"  {self._pixelate(x) = }")
+            warnings.warn(f"  {self(x) = }")
             warnings.warn("current parameters:")
             warnings.warn(f"  guess       = {self._guess}")
             warnings.warn(f"  lower bound = {self._bounds[0]}")
@@ -575,7 +591,7 @@ class Profile1D:
 
     def plot_residuals(self, x, y=None, sigma=None, mask=None, axs=None):
         residuals = None
-        model = self._pixelate(x)
+        model = self(x)
         if y is not None and sigma is not None:
             residuals = (model - y) / sigma
         elif y is not None:
@@ -612,7 +628,7 @@ class Profile1D:
         if not isinstance(axs, dict) or "mod" not in axs:
             axs = {"mod": axs}
 
-        model, model_px, model_os, x_os = self._pixelate(x, return_all=True)
+        model, model_os, x_os = self(x, return_all=True)
 
         if y is not None and sigma is not None:
             axs["mod"].errorbar(x, y, yerr=sigma, fmt=".-", ms=7, mew=0, lw=1, elinewidth=1, mfc="tab:red", color="0.2", ecolor="0.2")
@@ -629,7 +645,6 @@ class Profile1D:
 
         axs["mod"].step(x, model, lw=1, color="tab:blue", where="mid")
         axs["mod"].plot(x_os, model_os, "--", lw=1, color="tab:blue", alpha=0.5)
-        axs["mod"].plot(x_os, model_px, "-", lw=1, color="tab:blue", alpha=0.7)
 
         if ylims is not None:
             axs["mod"].set_ylim(*ylims)
@@ -644,42 +659,39 @@ class MexHatGaussians(Profile1D):
         "counts",
         "centroids",
         "sigmas",
-        "radii"
     )
 
-    def __init__(self, pars, fixed, bounds, ignore_nans=True, oversampling_factor=50, fiber_width=3.4):
+    def __init__(self, pars, fixed, bounds, ignore_nans=True, oversampling_factor=50, fiber_radius=1.4):
         super().__init__(pars, fixed, bounds, ignore_nans=ignore_nans, oversampling_factor=oversampling_factor)
 
-        self._fiber_width = fiber_width
+        self._fiber_radius = fiber_radius
 
-    def __call__(self, x, collapse=True):
-        counts, centroids, sigmas, radii = self.unpack_params()
+    def __call__(self, x, collapse=True, return_all=False):
+        counts, centroids, sigmas = self.unpack_params()
 
         of = self._oversampling_factor
         x_os = self._oversample_x(x, oversampling_factor=of)
         dx_os = x_os[1] - x_os[0]
 
-        mexhats = numpy.asarray([mexhat(radii[i], x_os-centroids[i]) for i in range(radii.size)])
+        # since the fiber profile has a fixed projected radius, I'm using this as the convolution kernel
+        x_kernel = numpy.arange(0, 2*self._fiber_radius + dx_os, dx_os)
+        kernel = fiber_profile(centroids=self._fiber_radius, radii=self._fiber_radius, x=x_kernel)
+        psfs = gaussians((counts, centroids, sigmas), x_os, alpha=2.0, collapse=False)
 
-        gaussians_ = gaussians((numpy.ones_like(counts), numpy.zeros_like(centroids), sigmas), x_os-x_os[x_os.size//2], alpha=2, collapse=False)
-        gaussians_mexhats = fftconvolve(gaussians_, mexhats, mode="same", axes=1)
-        gaussians_mexhats /= integrate.trapezoid(gaussians_mexhats, dx=dx_os, axis=1)[:, None]
+        profiles = fftconvolve(psfs, kernel, mode="same", axes=1)
+        profiles /= integrate.trapezoid(profiles, x_os, axis=1)[:, None]
+        profiles *= counts[:, None]
 
-        gaussians_mexhats = counts[:, None] * gaussians_mexhats
+        # pixelate models
+        models = self._pixelate(x_os, profiles)
 
-        # reshape model into oversampled bins: (x, oversampling_factor)
-        model_binned = gaussians_mexhats.reshape(counts.size, x.size, of)
-        models = integrate.trapezoid(model_binned, dx=dx_os, axis=2)
-        if collapse:
-            model = bn.nansum(models, axis=0)
-            return model
-        return models
-
-    def _pixelate(self, x, oversampling_factor=None, return_all=False):
-        model = self(x)
         if return_all:
-            return model, model, model, x
-        return model
+            if collapse:
+                return bn.nansum(models, 0), bn.nansum(profiles, 0), x_os
+            return models, profiles, x_os
+        if collapse:
+            return bn.nansum(models, 0)
+        return models
 
 
 class TopHatGaussians(Profile1D):
@@ -698,36 +710,17 @@ class TopHatGaussians(Profile1D):
     def __call__(self, x):
         counts, centroids, sigmas = self.unpack_params()
 
-        of = self._oversampling_factor
-        x_os = self._oversample_x(x, oversampling_factor=of)
-        # dx = x_os[1] - x_os[0]
+        x_os = self._oversample_x(x)
 
-        width = int(self._fiber_width * of)
+        width = int(self._fiber_width * self._oversampling_factor)
         gaussians_ = gaussians((counts, centroids, sigmas), x_os, collapse=False)
         tophats = numpy.ones((counts.size, width)) / width
         gaussians_tophats = fftconvolve(gaussians_, tophats, mode="same", axes=1)
-        # plt.figure()
-        # plt.plot(x_os, gaussians_[0])
-        # plt.plot(x_os, gaussians_tophats[0])
+
+        model = self._pixelate(x_os, gaussians_tophats)
         model = bn.nansum(gaussians_tophats, axis=0)
-        model = interpolate.interp1d(x_os, model, kind="cubic")(x)
-        # plt.figure()
-        # plt.plot(x_os.reshape(x.size, of).T, model.reshape(x.size, of).T)
-        # model = integrate.simpson(model.reshape(x.size, of), dx=dx, axis=1)
+
         return model
-
-    def _pixelate(self, x, oversampling_factor=None, return_all=False):
-        # counts, centroids, sigmas = self.unpack_params()
-
-        # z = x[None, :] - centroids[:, None]
-        # pixelated = special.erf((z+0.5)/sigmas[:, None]) - special.erf((z-0.5)/sigmas[:, None])
-        # pixelated *= counts[:, None] / (sigmas[:, None]*fact)
-        # pixelated = bn.nansum(pixelated, axis=0)
-
-        pixelated = self(x)
-        if return_all:
-            return pixelated, pixelated, pixelated, x
-        return pixelated
 
 
 class NormalGaussians(Profile1D):
@@ -745,7 +738,13 @@ class NormalGaussians(Profile1D):
 
     def __call__(self, x):
         pars = self.unpack_params()
-        return gaussians(pars, x, alpha=self._alpha)
+
+        x_os = self._oversample_x(x)
+        models = gaussians(pars, x_os, alpha=self._alpha, collapse=False)
+        models = self._pixelate(x_os, models)
+
+        model = bn.nansum(models, axis=0)
+        return model
 
 
 class SkewedGaussians(Profile1D):
@@ -768,10 +767,16 @@ class SkewedGaussians(Profile1D):
         locations = self._centroid_to_location(centroids, scales, alphas, deltas)
 
         # evaluate PDF shape
-        shape = self._skewed_gaussian_shapes(x, locations, scales, alphas)
+        x_os = self._oversample_x(x)
+        shape = self._skewed_gaussian_shapes(x_os, locations, scales, alphas)
         # calculate normalization
-        norms = numpy.trapz(shape, x, axis=1)
-        return bn.nansum(counts[:, numpy.newaxis] * shape / norms[:, numpy.newaxis], axis=0)
+        norms = numpy.trapz(shape, x_os, axis=1)
+
+        models = counts[:, numpy.newaxis] * shape / norms[:, numpy.newaxis]
+        models = self._pixelate(x_os, models)
+
+        model = bn.nansum(models, axis=0)
+        return model
 
     def _deltas(self, alphas):
         return alphas / numpy.sqrt(1 + alphas**2)
@@ -816,9 +821,15 @@ class PolyGaussians(Profile1D):
 
     def __call__(self, x):
         counts, centroids, sigmas, a, b, c, d = self.unpack_params()
-        gauss = gaussians((counts, centroids, sigmas), x)
-        poly = bn.nansum(a[:,None] + b[:,None]*x[None,:] + c[:,None]*x[None,:]**2 + d[:,None]*x[None,:]**3, axis=0)
-        return gauss + poly
+
+        x_os = self._oversample_x(x)
+        gauss = gaussians((counts, centroids, sigmas), x_os, collapse=False)
+        poly = a[:,None] + b[:,None]*x_os[None,:] + c[:,None]*x_os[None,:]**2 + d[:,None]*x_os[None,:]**3
+        models = gauss + poly
+        models = self._pixelate(x_os, models)
+
+        model = bn.nansum(models, axis=0)
+        return model
 
     def _polynomial(self, x):
         counts, centroids, sigmas, a, b, c, d = self.unpack_params()
@@ -841,11 +852,15 @@ class Moffats(Profile1D):
     def __call__(self, x):
         counts, centroids, sigmas, betas = self.unpack_params()
 
-        moffats_ = numpy.asarray([Moffat1D(1.0, centroid, sigma, beta)(x) for centroid, sigma, beta in zip(centroids, sigmas, betas)])
-        norms = integrate.simpson(moffats_, x, axis=1)
+        x_os = self._oversample_x(x)
+        moffats_ = numpy.asarray([Moffat1D(1.0, centroid, sigma, beta)(x_os) for centroid, sigma, beta in zip(centroids, sigmas, betas)])
+        norms = integrate.trapezoid(moffats_, x_os, axis=1)
 
-        return bn.nansum(counts[:, None] * moffats_ / norms[:, None], axis=0)
+        models = counts[:, None] * moffats_ / norms[:, None]
+        models = self._pixelate(x_os, models)
 
+        model = bn.nansum(models, axis=0)
+        return model
 
 class Lorentzs(Profile1D):
 
@@ -860,12 +875,14 @@ class Lorentzs(Profile1D):
 
     def __call__(self, x):
         counts, centroids, sigmas = self.unpack_params()
-
         fwhms = sigmas * 2.354
 
-        lorentzs = [count * Lorentz1D(2/(numpy.pi*fwhm), centroid, fwhm)(x) for count, centroid, fwhm in zip(counts, centroids, fwhms)]
-        return bn.nansum(lorentzs, axis=0)
+        x_os = self._oversample_x(x)
+        models = [count * Lorentz1D(2/(numpy.pi*fwhm), centroid, fwhm)(x_os) for count, centroid, fwhm in zip(counts, centroids, fwhms)]
+        models = self._pixelate(x_os, models)
 
+        model = bn.nansum(models, axis=0)
+        return model
 
 class Voigts(Profile1D):
 
@@ -881,12 +898,15 @@ class Voigts(Profile1D):
 
     def __call__(self, x):
         counts, centroids, sigmas_l, sigmas_g = self.unpack_params()
-
         fwhms_l = sigmas_l * 2.354
         fwhms_g = sigmas_g * 2.354
 
-        voigts = [count * Voigt1D(centroid, 2/(numpy.pi*fwhm_l), fwhm_l, fwhm_g, method="Scipy")(x) for count, centroid, fwhm_l, fwhm_g in zip(counts, centroids, fwhms_l, fwhms_g)]
-        return bn.nansum(voigts, axis=0)
+        x_os = self._oversample_x(x)
+        models = [count * Voigt1D(centroid, 2/(numpy.pi*fwhm_l), fwhm_l, fwhm_g, method="Scipy")(x) for count, centroid, fwhm_l, fwhm_g in zip(counts, centroids, fwhms_l, fwhms_g)]
+        models = self._pixelate(x_os, models)
+
+        model = bn.nansum(models, axis=0)
+        return model
 
 
 PROFILES = {

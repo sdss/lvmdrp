@@ -3777,34 +3777,22 @@ class Spectrum1D(Header):
 
     def extract_flux(self, centroids, sigmas, fiber_radius=1.4, npixels=20, replace_error=numpy.inf):
 
-        def _oversample(x, oversampling_factor):
-            dx = (x[1] - x[0]) / 2
-            offsets = (numpy.arange(oversampling_factor) + dx) / oversampling_factor - dx
-            oversampled = x[:, None] + offsets[None, :]
-            return oversampled.ravel()
+        def _gen_mexhat_basis(x, centroids, sigmas, fiber_radius, oversampling_factor):
+            dx = x[1, 0] - x[0, 0]
+            x_os = fit_profile.oversample(x, oversampling_factor)
+            dx_os = dx / oversampling_factor
 
-        def _gen_mexhat_basis(x, centroid, sigma, fiber_radius, oversampling_factor):
-            dx = x[1] - x[0]
-            x_os = _oversample(x, oversampling_factor)
-            dx_os = x_os[1] - x_os[0]
+            x_kernel = numpy.arange(0, 2*fiber_radius + dx_os, dx_os)
+            kernel = fit_profile.fiber_profile(centroids=fiber_radius, radii=fiber_radius, x=x_kernel)
+            psfs = fit_profile.gaussians((numpy.ones_like(centroids), centroids, sigmas), x_os.T, alpha=2, collapse=False)[0].T
 
-            mexhat = fit_profile.mexhat(fiber_radius, x_os-centroid)
-            gaussian = numpy.exp(-0.5 * ((x_os-x_os[x_os.size//2]) / sigma) ** 2) / (fit_profile.fact * sigma)
-            mexhat_gaussian = signal.fftconvolve(gaussian, mexhat, mode="same")
-            mexhat_gaussian /= integrate.trapezoid(mexhat_gaussian, dx=dx_os)
-
-            # import matplotlib.pyplot as plt
-            # plt.plot(x_os, gaussian)
-            # plt.plot(x_os, mexhat)
-            # plt.plot(x_os, mexhat_gaussian)
-            # plt.show()
-            # exit()
+            profiles = signal.fftconvolve(psfs, kernel.T, mode="same", axes=0)
+            profiles /= integrate.trapezoid(profiles, x_os, axis=0)[None, :]
 
             # reshape model into oversampled bins: (x, oversampling_factor)
-            model_binned = mexhat_gaussian.reshape(x.size, oversampling_factor)
-            model = integrate.trapezoid(model_binned, dx=dx_os, axis=1)
-            model /= integrate.trapezoid(mexhat_gaussian, dx=dx)
-            return model
+            profiles_binned = profiles.reshape((x.shape[0], oversampling_factor, x.shape[1]))
+            profiles = integrate.trapezoid(profiles_binned, dx=dx_os, axis=1)
+            return profiles
 
         nfibers = centroids.size
         # round up fiber locations
@@ -3823,31 +3811,17 @@ class Spectrum1D(Header):
             mask = None
 
         # evaluate basis
-        # nfibers x kernel_size
         xx = numpy.repeat(numpy.arange(nfibers, dtype="int"), 2*npixels+1)
         # pixel ranges of fiber images
         pos_t = numpy.trunc(centroids)
         yyv = numpy.linspace(pos_t-npixels, pos_t+npixels, 2*npixels+1, endpoint=True)
 
-        v = numpy.asarray([_gen_mexhat_basis(yyv[:, j], centroids[j], sigmas[j], fiber_radius=fiber_radius, oversampling_factor=100) for j in range(yyv.shape[1])])
-        # v = numpy.exp(-0.5 * ((yyv-centroids) / sigmas) ** 2) / (fit_profile.fact * sigmas)
+        v = _gen_mexhat_basis(yyv, centroids, sigmas, fiber_radius=fiber_radius, oversampling_factor=100)
 
         yyv = yyv.T.ravel()
-        v = v.ravel() / self._error[yyv.astype("int")]
+        v = v.T.ravel() / self._error[yyv.astype("int")]
 
-        B = sparse.csc_matrix((v, (yyv.T.ravel(), xx)), shape=(len(self._data), nfibers))
-
-
-        # import matplotlib.pyplot as plt
-        # fig, axs = plt.subplots(1, 2, figsize=(10,10), sharex=True, sharey=True)
-        # axs[0].imshow(B.toarray(), origin="lower", interpolation="none")
-
-        # v = numpy.exp(-0.5 * ((yyv-centroids) / sigmas) ** 2) / (fit_profile.fact * sigmas)
-        # yyv = yyv.T.ravel()
-        # v = v.T.ravel()# / self._error[yyv.astype(numpy.int32)]
-        # B = sparse.csc_matrix((v, (yyv, xx)), shape=(len(self._data), nfibers))
-        # axs[1].imshow(B.toarray(), origin="lower", interpolation="none")
-        # plt.show()
+        B = sparse.csc_matrix((v, (yyv, xx)), shape=(len(self._data), nfibers))
 
         # invert the projection matrix and solve
         ypixels = numpy.arange(self._data.size)

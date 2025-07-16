@@ -2787,7 +2787,7 @@ class Image(Header):
             selection = pixels_selection[:, icolumn]
             pixels = Y[selection, icolumn]
             pars_column = {name: block.getSlice(icolumn, axis="Y")[0] for name, block in blocks.items()}
-            model_array[selection, icolumn] = profile_model(pars_column, {}, {}, oversampling_factor=oversampling_factor)._pixelate(pixels)
+            model_array[selection, icolumn] = profile_model(pars_column, {}, {}, oversampling_factor=oversampling_factor)(pixels)
         model = Image(data=model_array, mask=numpy.isnan(model_array))
 
         axs = plot_fiber_residuals(model, self, blocks["centroids"], iblock, X=X, Y=Y, axs=axs)
