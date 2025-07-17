@@ -65,7 +65,7 @@ def _residual_spline(c, x, y, t, k, w=None):
 class FiberRows(Header, PositionTable):
 
     @classmethod
-    def create_empty(cls, data_dim, poly_kind=None, poly_deg=None, samples_columns=None, header=None, slitmap=None):
+    def create_empty(cls, data_dim, smoothing_kind=None, poly_deg=None, samples_columns=None, header=None, slitmap=None):
         data = numpy.full(data_dim, numpy.nan, dtype=numpy.float32)
         fibers = data.shape[0]
         error = numpy.full(data_dim, numpy.nan, dtype=numpy.float32)
@@ -81,7 +81,7 @@ class FiberRows(Header, PositionTable):
         else:
             coeffs = None
 
-        new_fiberrows = cls(data=data, error=error, mask=mask, samples=samples, samples_error=samples_error, poly_kind=poly_kind, coeffs=coeffs, header=header, slitmap=slitmap)
+        new_fiberrows = cls(data=data, error=error, mask=mask, samples=samples, samples_error=samples_error, smoothing_kind=smoothing_kind, coeffs=coeffs, header=header, slitmap=slitmap)
         new_fiberrows.setFibers(fibers)
         return new_fiberrows
 
@@ -106,7 +106,7 @@ class FiberRows(Header, PositionTable):
         data = numpy.zeros((nfibers, npixels), dtype=numpy.float32)
         coeffs = numpy.zeros((nfibers, coeff_table["COEFF"].shape[1]), dtype=numpy.float32)
         for ifiber in range(nfibers):
-            poly_cls = Spectrum1D.select_poly_class(poly_kind=coeff_table[ifiber]["FUNC"])
+            poly_cls = Spectrum1D.select_poly_class(coeff_table[ifiber]["FUNC"])
             data[ifiber] = poly_cls(coeff_table[ifiber]["COEFF"])(x_pixels)
             coeffs[ifiber] = coeff_table[ifiber]["COEFF"]
 
@@ -174,7 +174,7 @@ class FiberRows(Header, PositionTable):
         good_fibers=None,
         fiber_type=None,
         coeffs=None,
-        poly_kind=None
+        smoothing_kind=None
     ):
         Header.__init__(self, header=header)
         PositionTable.__init__(
@@ -189,7 +189,7 @@ class FiberRows(Header, PositionTable):
         self.setData(data=data, error=error, mask=mask)
         self.set_samples(samples, samples_columns)
         self.set_samples_error(samples_error, samples_columns)
-        self.set_coeffs(coeffs=coeffs, poly_kind=poly_kind)
+        self.set_coeffs(coeffs=coeffs, smoothing_kind=smoothing_kind)
         if self._data is None and self._coeffs is not None:
             self.eval_coeffs()
 
@@ -370,13 +370,13 @@ class FiberRows(Header, PositionTable):
         new_trace._mask = self._mask[block_selection] if self._mask is not None else None
         new_trace._samples = self._samples[block_selection] if self._samples is not None else None
         new_trace._samples_error = self._samples_error[block_selection] if self._samples_error is not None else None
-        new_trace.set_coeffs(self._coeffs[block_selection] if self._coeffs is not None else None, poly_kind=self._poly_kind)
+        new_trace.set_coeffs(self._coeffs[block_selection] if self._coeffs is not None else None, smoothing_kind=self._smoothing_kind)
         new_trace.setFibers(block_selection.sum())
         new_trace.setSlitmap(slitmap[block_selection])
 
         return new_trace
 
-    def set_block(self, data=None, iblock=None, blockid=None, error=None, mask=None, samples=None, samples_error=None, coeffs=None, poly_kind=None, from_instance=None):
+    def set_block(self, data=None, iblock=None, blockid=None, error=None, mask=None, samples=None, samples_error=None, coeffs=None, smoothing_kind=None, from_instance=None):
 
         if from_instance is not None:
             samples_o = from_instance.get_samples(as_pandas=True)
@@ -386,7 +386,7 @@ class FiberRows(Header, PositionTable):
             self.set_block(
                 data=from_instance._data, iblock=iblock, blockid=blockid,
                 error=from_instance._error, mask=from_instance._mask,
-                samples=samples_o, samples_error=samples_error_o, coeffs=from_instance._coeffs, poly_kind=from_instance._poly_kind)
+                samples=samples_o, samples_error=samples_error_o, coeffs=from_instance._coeffs, smoothing_kind=from_instance._smoothing_kind)
 
         slitmap = self._filter_slitmap()
         blockid = self._validate_blockid(iblock, blockid, slitmap=slitmap)
@@ -407,13 +407,10 @@ class FiberRows(Header, PositionTable):
         if samples_error is not None and self._samples_error is not None:
             samples_error_i = self._merge_tables(self._samples_error, samples_error, nfibers, block_selection)
             self.set_samples_error(samples_error_i)
-        if coeffs is not None and poly_kind is not None and self._coeffs is not None:
-            if self._poly_kind != poly_kind:
-                raise ValueError(f"Incompatible polynomial kinds. Trying to set {poly_kind} to a tracemask of {self._poly_kind}")
-            poly_deg = coeffs.shape[1] - 1
-            if self._poly_deg != poly_deg:
-                raise ValueError(f"Incompatible polynomial degree. Trying to set {poly_deg} to a tracemask of {self._poly_deg}")
-            self.set_coeffs(coeffs, poly_kind=poly_kind)
+        if coeffs is not None and smoothing_kind is not None and self._coeffs is not None:
+            if self._smoothing_kind != smoothing_kind:
+                raise ValueError(f"Incompatible smoothing kinds. Trying to set {smoothing_kind} to a tracemask of {self._smoothing_kind}")
+            self.set_coeffs(coeffs, smoothing_kind=smoothing_kind)
 
     def get_distances(self):
         samples = self.get_samples(as_pandas=True).values
@@ -1001,7 +998,7 @@ class FiberRows(Header, PositionTable):
 
         return numpy.asarray(pix_table), numpy.asarray(poly_table), numpy.asarray(poly_all_table)
 
-    def fit_polynomial(self, deg, poly_kind="poly", clip=None, nsigmas=None, min_samples_frac=0.0):
+    def fit_polynomial(self, deg, smoothing_kind="poly", clip=None, nsigmas=None, min_samples_frac=0.0):
         """
         smooths the traces along the dispersion direction with a polynomical function for each individual fiber
 
@@ -1009,7 +1006,7 @@ class FiberRows(Header, PositionTable):
         ----------
         deg: int
             degree of the polynomial function to describe the trace along diserpsion direction
-        poly_kind : string, optional with default 'poly'
+        smoothing_kind : string, optional with default 'poly'
             the kind of polynomial to use when smoothing the trace, valid options are: 'poly' (power series, default), 'legendre', 'chebyshev'
         clip : 2-tuple of int, optional with default None
             clip data around this values, defaults to no clipping
@@ -1042,7 +1039,7 @@ class FiberRows(Header, PositionTable):
             enough_samples = n_goodsam / nsamples > min_samples_frac
             if can_fit and enough_samples:
                 # select the polynomial class
-                poly_cls = Spectrum1D.select_poly_class(poly_kind)
+                poly_cls = Spectrum1D.select_poly_class(smoothing_kind)
 
                 # try to fit
                 try:
@@ -1068,7 +1065,7 @@ class FiberRows(Header, PositionTable):
                     warnings.warn(f"fiber {i} does not meet criterium: {n_goodsam / nsamples = :.3f} > {min_samples_frac = :.3f}")
                 self._mask[i, :] = True
 
-        self.set_coeffs(coeffs, poly_kind=poly_kind)
+        self.set_coeffs(coeffs, smoothing_kind=smoothing_kind)
 
         return numpy.asarray(pix_table), numpy.asarray(poly_table), numpy.asarray(poly_all_table)
 
@@ -1320,20 +1317,18 @@ class FiberRows(Header, PositionTable):
         """Returns the polynomial coefficients"""
         return self._coeffs
 
-    def set_coeffs(self, coeffs, poly_kind):
-        """Sets the polynomial coefficients"""
+    def set_coeffs(self, coeffs, smoothing_kind):
+        """Sets the smoothing parameters"""
         if coeffs is not None:
             self._coeffs = coeffs
-            self._poly_kind = poly_kind
-            self._poly_deg = coeffs.shape[1] - 1
+            self._smoothing_kind = smoothing_kind
         else:
             self._coeffs = None
-            self._poly_kind = None
-            self._poly_deg = None
+            self._smoothing_kind = None
 
     def eval_coeffs(self, pixels=None):
-        """Evaluates the polynomial coefficients to the corresponding data values"""
-        poly_cls = Spectrum1D.select_poly_class(self._poly_kind)
+        """Evaluates the smoothing coefficients to the corresponding data values"""
+        poly_cls = Spectrum1D.select_poly_class(self._smoothing_kind)
 
         if pixels is None:
             pixels = self._pixels

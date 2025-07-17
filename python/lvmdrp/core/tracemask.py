@@ -29,7 +29,7 @@ class TraceMask(FiberRows):
         """
         header = None
         data, error, mask = None, None, None
-        coeffs, poly_kind, poly_deg = None, None, None
+        coeffs, smoothing_kind = None, None
         samples = None
         samples_error = None
         slitmap = None
@@ -48,12 +48,21 @@ class TraceMask(FiberRows):
                     samples_error = Table.read(hdu)
                 if hdu.name == "COEFFS":
                     coeffs = hdu.data.astype("float32")
-                    poly_kind = header.get("POLYKIND")
-                    poly_deg = header.get("POLYDEG")
+                    smoothing_kind = header.get("SMOOKIND")
                 if hdu.name == "SLITMAP":
                     slitmap = hdu
 
-            trace = cls(data=data, error=error, mask=mask, slitmap=slitmap, samples=samples, samples_error=samples_error, coeffs=coeffs, poly_kind=poly_kind, poly_deg=poly_deg, header=header)
+            trace = cls(
+                data=data,
+                header=header,
+                error=error,
+                mask=mask,
+                slitmap=slitmap,
+                samples=samples,
+                samples_error=samples_error,
+                coeffs=coeffs,
+                smoothing_kind=smoothing_kind
+            )
 
         return trace
 
@@ -66,6 +75,7 @@ class TraceMask(FiberRows):
         slitmap=None,
         samples=None,
         samples_error=None,
+        samples_columns=None,
         shape=None,
         size=None,
         arc_position_x=None,
@@ -73,27 +83,26 @@ class TraceMask(FiberRows):
         good_fibers=None,
         fiber_type=None,
         coeffs=None,
-        poly_kind=None,
-        poly_deg=None
+        smoothing_kind=None
     ):
         FiberRows.__init__(
             self,
-            data,
-            header,
-            error,
-            mask,
-            slitmap,
-            samples,
-            samples_error,
-            shape,
-            size,
-            arc_position_x,
-            arc_position_y,
-            good_fibers,
-            fiber_type,
-            coeffs,
-            poly_kind,
-            poly_deg
+            data=data,
+            header=header,
+            error=error,
+            mask=mask,
+            slitmap=slitmap,
+            samples=samples,
+            samples_error=samples_error,
+            samples_columns=samples_columns,
+            shape=shape,
+            size=size,
+            arc_position_x=arc_position_x,
+            arc_position_y=arc_position_y,
+            good_fibers=good_fibers,
+            fiber_type=fiber_type,
+            coeffs=coeffs,
+            smoothing_kind=smoothing_kind
         )
 
     def getRound(self):
@@ -141,8 +150,7 @@ class TraceMask(FiberRows):
             hdus.append(pyfits.BinTableHDU(self._samples_error, name="SAMPLES_ERROR"))
         if self._coeffs is not None:
             hdus.append(pyfits.ImageHDU(self._coeffs.astype("float32"), name="COEFFS"))
-            hdus[0].header["POLYKIND"] = (self._poly_kind, "polynomial kind")
-            hdus[0].header["POLYDEG"] = (self._poly_deg, "polynomial degree")
+            hdus[0].header["SMOOKIND"] = (self._smoothing_kind, "smoothing kind")
             hdus[0].update_header()
         if self._slitmap is not None:
             hdus.append(pyfits.BinTableHDU(self._slitmap, name="SLITMAP"))

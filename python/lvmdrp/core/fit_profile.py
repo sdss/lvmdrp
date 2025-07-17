@@ -1058,7 +1058,7 @@ class fit_profile1D(object):
             axs["mod"].tick_params(labelbottom=False)
 
             ax_divider = make_axes_locatable(axs["mod"])
-            ax_res = ax_divider.append_axes("bottom", size="30%", pad="5%")
+            ax_res = ax_divider.append_axes("bottom", size="20%", pad="5%")
             ax_res.sharex(axs["mod"])
             axs["res"] = ax_res
         elif isinstance(axs, dict) and "res" in axs:

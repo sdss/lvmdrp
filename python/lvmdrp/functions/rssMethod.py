@@ -114,18 +114,18 @@ def _illumination_correction(fiberflat, apply_correction=True):
     return fiberflat, dict(zip(("Sci", "SkyW", "SkyE", "Std"), (sci_factor, skw_factor, ske_factor, std_factor)))
 
 
-def _make_arcline_axes(display_plots, pixel, ref_lines, ifiber, unit="e-", ncols=3, fig_shape=(5, 4)):
+def _make_arcline_axes(display_plots, pixel, ref_lines, ifiber, unit="e-", ncols=3, fig_shape=(5,6)):
     nlines = len(pixel)
     nrows = int(numpy.ceil(nlines / ncols))
     fig, axs = create_subplots(to_display=display_plots,
                                nrows=nrows, ncols=ncols,
                                figsize=(fig_shape[0]*ncols, fig_shape[1]*nrows),
-                               layout="constrained")
+                               layout="tight")
     fig.suptitle(f"Gaussian fitting for fiber {ifiber}")
-    fig.supylabel(f"Counts ({unit}/pixel)")
+    fig.supylabel(f"Counts ({unit}/pixel)", fontsize="x-large")
+    fig.supxlabel(f"X (pixel)", fontsize="x-large")
     for i, ax in zip(range(nlines), axs):
-        ax.set_title(f"line {ref_lines[i]:.2f} (Ang)")
-        ax.set_xlabel("X (pixel)")
+        ax.set_title(f"line {ref_lines[i]:.2f} (Ang)", fontsize="large")
 
     return fig, axs
 

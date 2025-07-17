@@ -3668,8 +3668,7 @@ class Spectrum1D(Header):
         ftol=1e-8,
         xtol=1e-8,
         axs=None,
-        fit_bg=True,
-        warning=False,
+        fit_bg=True
     ):
         # copy main arrays to avoid side effects
         data = self._data.copy()
@@ -3720,8 +3719,7 @@ class Spectrum1D(Header):
                 p0=guess,
                 bounds=(bound_lower, bound_upper),
                 ftol=ftol,
-                xtol=xtol,
-                warning=warning,
+                xtol=xtol
             )
 
             if fit_bg:
@@ -3734,8 +3732,8 @@ class Spectrum1D(Header):
                 select_2 = (self._wave>=cent[i]-3.5*fwhm[i]/2.354) & (self._wave<=cent[i]+3.5*fwhm[i]/2.354)
                 x = self._wave[select_2]
                 axs[i].plot(self._wave, (select)*numpy.nan+bn.nanmin(data), "ok")
-                axs[i] = gauss.plot(self._wave[select], self._data[select], mask=self._mask[select], ax=axs[i])
-                axs[i].errorbar(self._wave[select], self._data[select], yerr=self._error[select], fmt=",", color="k", ecolor="k", lw=1)
+                axs_ = gauss.plot(self._wave[select], self._data[select], mask=self._mask[select], axs={"mod": axs[i]})
+                axs[i] = axs_["mod"]
                 axs[i].axhline(bg[i], ls="--", color="tab:blue", lw=1)
                 axs[i].axvspan(x[0], x[-1], alpha=0.1, fc="0.5", label="reg. of masking")
                 axs[i].axvline(cent_guess[i], ls="--", lw=1, color="tab:red", label="cent. guess")
@@ -3746,22 +3744,6 @@ class Spectrum1D(Header):
                 axs[i].text(0.05, 0.7, f"fwhm = {fwhm[i]:.2f}", va="bottom", ha="left", transform=axs[i].transAxes, fontsize=11)
                 axs[i].text(0.05, 0.6, f"bg   = {bg[i]:.2f}", va="bottom", ha="left", transform=axs[i].transAxes, fontsize=11)
                 axs[i].legend(loc="upper right", frameon=False, fontsize=11)
-
-                zscore = (gauss(self._wave[select]) - self._data[select]) / self._error[select]
-                ax_divider = make_axes_locatable(axs[i])
-                ax_res = ax_divider.append_axes("bottom", size="20%", pad="3%")
-                ax_res.sharex(axs[i])
-                axs[i].tick_params(labelbottom=False)
-                ax_res.fill_between(self._wave[select], zscore, zscore*0, step="mid", alpha=0.5)
-                ax_res.axvspan(x[0], x[-1], alpha=0.1, fc="0.5")
-                ax_res.axhspan(-1.0, 1.0, alpha=0.4, fc="0.5")
-                ax_res.axvline(cent_guess[i], ls="--", lw=1, color="tab:red")
-                ax_res.axvline(cent[i], ls="--", lw=1, color="tab:blue")
-                ax_res.axhline(ls="--", color="0.2", lw=1)
-                axs[i].tick_params(labelsize="x-small", width=0.8)
-                ax_res.tick_params(labelsize="x-small", width=0.8)
-                ax_res.set_ylim(-2.5, 2.5)
-                ax_res.tick_params(labelleft=False)
 
             # mask line if >=2 pixels are masked within 3.5sigma
             model_badpix = data[select] == 0
