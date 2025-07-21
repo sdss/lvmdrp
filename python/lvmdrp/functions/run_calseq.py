@@ -1486,7 +1486,7 @@ def create_traces(mjd, cameras=CAMERAS, expnums_ldls=None, expnums_qrtz=None,
             untraced_fibers = np.isin(fibermap["orig_ifulabel"].value, unexposed_stds)
             fibers_param._mask[untraced_fibers] = True
             # interpolate master traces in missing fibers
-            fibers_param.interpolate_data(axis="Y", reset_mask=False)
+            fibers_param.interpolate_data(axis="Y", reset_mask=True)
 
             fibers_param.writeFitsData(path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, camera=camera, kind=f"m{name}"))
 
@@ -1757,7 +1757,7 @@ def create_fiberflats_corrections(cals_mjd: int, science_mjds: Union[int, List[i
 
     # 2D and 1D reduction of science exposures
     for sci_mjd in science_mjds:
-        reduce_2d(mjd=sci_mjd, calibrations=calibs, expnums=science_expnums, reject_cr=False, add_astro=True, sub_straylight=True, skip_done=skip_done)
+        reduce_2d(mjd=sci_mjd, calibrations=calibs, expnums=science_expnums, reject_cr=True, add_astro=True, sub_straylight=True, skip_done=skip_done)
         reduce_1d(mjd=sci_mjd, calibrations=calibs, expnums=science_expnums, sub_straylight=True, skip_done=skip_done)
 
     for channel in "brz":
@@ -1769,8 +1769,9 @@ def create_fiberflats_corrections(cals_mjd: int, science_mjds: Union[int, List[i
             in_sciences=wframe_paths,
             in_mflat=calibs["fiberflat_twilight"][channel],
             out_mflat=calibs["fiberflat_twilight"][channel],
-            groupby="spec",
-            sky_cwave=sky_cwaves[channel], cont_cwave=cont_cwaves[channel],
+            groupby=groupby,
+            guess_coeffs=[1,0,0,0], fixed_coeffs=[0,1,2,3],
+            sky_cwave=sky_cwaves[channel], cont_cwave=cont_cwaves[channel], dwave=20.0,
             quantiles=quantiles, sky_fibers_only=sky_fibers_only,
             nsigma=nsigma, comb_method=comb_method,
             force_correction=force_correction,

@@ -108,7 +108,7 @@ CALIBRATION_NEEDS = {
     "wave": ["pixmask", "pixflat", "bias", "centroids", "sigmas", "model"],
     "dome": ["pixmask", "pixflat", "bias", "centroids", "sigmas", "model", "wave", "lsf"],
     "twilight": ["pixmask", "pixflat", "bias", "centroids", "sigmas", "model", "wave", "lsf"],
-    "object": ["pixmask", "pixflat", "bias", "centroids", "sigmas", "model", "wave", "lsf"],
+    "object": ["pixmask", "pixflat", "bias", "centroids", "sigmas", "model", "wave", "lsf", "fiberflat_twilight"],
 }
 CALIBRATION_NAMES = {"pixmask", "pixflat", "bias", "trace_guess", "centroids", "sigmas", "counts", "model", "wave", "lsf", "fiberflat_dome", "fiberflat_twilight"}
 CALIBRATION_MATCH = {

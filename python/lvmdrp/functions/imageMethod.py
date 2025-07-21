@@ -382,7 +382,7 @@ def _fix_fiber_thermal_shifts(image, trace_cent, trace_width=None, trace_amp=Non
     # generate the continuum model using the master traces only along the specific columns
     if fiber_model is None:
         fiber_model, _, _, _ = image.evaluate_fiber_model(
-            traces={"centroids": trace_cent, "sigmas": trace_width}, profile="mexhat",
+            traces={"counts": trace_amp, "centroids": trace_cent, "sigmas": trace_width}, profile="normal",
             columns=columns, column_width=column_width)
 
     mjd = image._header["SMJD"]
@@ -2614,6 +2614,14 @@ def extract_spectra(
 
     trace_mask = TraceMask.from_file(in_trace)
 
+    # check if fwhm trace is given and exists
+    if in_sigma is None or not os.path.isfile(in_sigma):
+        trace_sigma = TraceMask()
+        trace_sigma.setData(data=numpy.ones(trace_mask._data.shape) * float(fwhm) / 2.354)
+        trace_sigma._coeffs = numpy.ones((trace_mask._data.shape[0], 1)) * float(fwhm) / 2.354
+    else:
+        trace_sigma = TraceMask.from_file(in_sigma)
+
     # load fiber model if given
     if in_model is not None and os.path.isfile(in_model):
         fiber_model = loadImage(in_model)
@@ -2647,25 +2655,17 @@ def extract_spectra(
         trace_mask._data += median_shift
     else:
         log.info(f"measuring fiber thermal shifts @ columns: {','.join(map(str, columns))}")
-        trace_mask, shifts, median_shift, std_shift, _ = _fix_fiber_thermal_shifts(img, trace_mask, 2.5,
-                                                                                fiber_model=fiber_model,
-                                                                                trace_amp=10000,
-                                                                                columns=columns,
-                                                                                column_width=column_width,
-                                                                                shift_range=shift_range, axs=[axs_cc, axs_fb])
+        trace_mask, shifts, median_shift, std_shift, _ = _fix_fiber_thermal_shifts(img, trace_mask, trace_sigma,
+                                                                                   fiber_model=fiber_model,
+                                                                                   trace_amp=10000,
+                                                                                   columns=columns,
+                                                                                   column_width=column_width,
+                                                                                   shift_range=shift_range, axs=[axs_cc, axs_fb])
         # save columns measured for thermal shifts
         plot_fiber_thermal_shift(columns, shifts, median_shift, std_shift, ax=ax_shift)
         save_fig(fig, product_path=out_rss, to_display=display_plots, figure_path="qa", label="fiber_thermal_shifts")
 
     if method == "optimal":
-        # check if fwhm trace is given and exists
-        if in_sigma is None or not os.path.isfile(in_sigma):
-            trace_sigma = TraceMask()
-            trace_sigma.setData(data=numpy.ones(trace_mask._data.shape) * float(fwhm))
-            trace_sigma._coeffs = numpy.ones((trace_mask._data.shape[0], 1)) * float(fwhm)
-        else:
-            trace_sigma = TraceMask.from_file(in_sigma)
-
         # set up parallel run
         if parallel == "auto":
             fragments = multiprocessing.cpu_count()

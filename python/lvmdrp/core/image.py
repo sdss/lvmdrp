@@ -2764,6 +2764,20 @@ class Image(Header):
         return X, Y, pixels_selection
 
     def evaluate_fiber_model(self, traces, profile="normal", iblock=None, blockid=None, oversampling_factor=10, columns=None, column_width=100, npixels=5, verbose=True, axs=None):
+        if isinstance(traces["sigmas"], (int, float, numpy.float32)):
+            traces["sigmas"] = TraceMask(data=numpy.ones_like(traces["centroids"]._data) * traces["sigmas"], mask=numpy.zeros_like(traces["centroids"]._data, dtype=bool))
+        elif isinstance(traces["sigmas"], TraceMask):
+                pass
+        else:
+            raise ValueError("trace_width must be a TraceMask instance or an int/float")
+
+        if isinstance(trace_amp, (int, float, numpy.float32)):
+            trace_amp = TraceMask(data=numpy.ones_like(traces["centroids"]._data) * trace_amp, mask=numpy.zeros_like(traces["centroids"]._data, dtype=bool))
+        elif isinstance(trace_amp, TraceMask):
+                pass
+        else:
+            raise ValueError("trace_amp must be a TraceMask instance or an int/float")
+
         nrows, ncols = self._dim
         if columns is None:
             columns = numpy.arange(ncols)
