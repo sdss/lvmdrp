@@ -551,24 +551,29 @@ class Image(Header):
         axs_cc, axs_fb = axs
 
         # calculate shift guess along central wide column
-        s1 = bn.nanmedian(ref_data[50:-50,2000-500:2000+500], axis=1)
-        s2 = bn.nanmedian(self._data[50:-50,2000-500:2000+500], axis=1)
+        guess_column = 2000
+        cents = trace_cent._data[:, guess_column]
+        cmin, cmax = int(cents.min()), int(cents.max())
+        s1 = bn.nanmedian(ref_data[cmin-10:cmax+10,guess_column-500:guess_column+500], axis=1)
+        s2 = bn.nanmedian(self._data[cmin-10:cmax+10,guess_column-500:guess_column+500], axis=1)
         # fig_guess, axs_guess = plt.subplots(nrows=2, ncols=1, layout="constrained")
         # fig_guess.suptitle("Fiber block cross-correlation match")
         guess_shift = _align_fiber_blocks(s1, s2, axs=None)
 
-        if numpy.abs(guess_shift) > 6:
+        if numpy.abs(guess_shift) >= 4:
             log.warning(f"measuring guess fiber thermal shift too large {guess_shift = } pixels, setting guess shift to zero")
             guess_shift = 0
         else:
             log.info(f"measured guess fiber thermal shift {guess_shift = } pixels")
 
         shifts = numpy.zeros(len(columns))
-        select_blocks = [9]
+        # select_blocks = [9]
         for j,c in enumerate(columns):
+            cents = trace_cent._data[:, c]
+            cmin, cmax = int(cents.min()), int(cents.max())
             # collapse columns
-            s1 = bn.nanmedian(ref_data[50:-50,c-column_width:c+column_width], axis=1)
-            s2 = bn.nanmedian(self._data[50:-50,c-column_width:c+column_width], axis=1)
+            s1 = bn.nanmedian(ref_data[cmin-10:cmax+10,c-column_width:c+column_width], axis=1)
+            s2 = bn.nanmedian(self._data[cmin-10:cmax+10,c-column_width:c+column_width], axis=1)
             # clean remaining NaNs from masked rows
             s2 = numpy.nan_to_num(s2)
             snr = numpy.sqrt(s2)
@@ -584,14 +589,15 @@ class Image(Header):
 
             _, shifts[j], _ = _fiber_cc_match(s1, s2, guess_shift, shift_range, gauss_window=[-3,3], min_peak_dist=5.0, ax=axs_cc[j])
 
-            blocks_pos = numpy.asarray(numpy.split(trace_cent._data[:, c], 18))[select_blocks]
-            blocks_bounds = [(int(bpos.min())-10, int(bpos.max())+10) for bpos in blocks_pos]
+            # blocks_pos = numpy.asarray(numpy.split(trace_cent._data[:, c], 18))[select_blocks]
+            blocks_bounds = [(int(bpos.min())-5, int(bpos.max())+5) for bpos in cents]
 
             for i, (bmin, bmax) in enumerate(blocks_bounds):
-                x = numpy.arange(bmax-bmin) + i*(bmax-bmin) + 10
-                y_model = bn.nanmedian(ref_data[bmin:bmax, c-column_width:c+column_width], axis=1)
-                y_data = bn.nanmedian(self._data[bmin:bmax, c-column_width:c+column_width], axis=1)
-                y_data, y_model, _, _, _, _ = _normalize_peaks(y_data, y_model, min_peak_dist=5.0)
+                # x = numpy.arange(bmax-bmin) + i*(bmax-bmin) + 5
+                # y_model = bn.nanmedian(ref_data[bmin:bmax, c-column_width:c+column_width], axis=1)
+                # y_data = bn.nanmedian(self._data[bmin:bmax, c-column_width:c+column_width], axis=1)
+                x = numpy.arange(s1.size)
+                y_data, y_model, _, _, _, _ = _normalize_peaks(s2, s1, min_peak_dist=5.0)
                 # y_data, _, _ = _normalize_peaks(y_data, min_peak_dist=5.0)
                 axs_fb[j].step(x, y_data, color="0.2", lw=1.5, label="data" if i == 0 else None)
                 axs_fb[j].step(x, y_model, color="tab:blue", lw=1, label="model" if i == 0 else None)

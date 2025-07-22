@@ -376,21 +376,24 @@ class FiberRows(Header, PositionTable):
 
         return new_trace
 
-    def set_block(self, data=None, iblock=None, blockid=None, error=None, mask=None, samples=None, samples_error=None, coeffs=None, smoothing_kind=None, from_instance=None):
+    def set_block(self, data=None, iblock=None, blockid=None, error=None, mask=None, samples=None, samples_error=None, coeffs=None, smoothing_kind=None, slitmap=None, from_instance=None):
 
         if from_instance is not None:
             samples_o = from_instance.get_samples(as_pandas=True)
             samples_error_o = from_instance.get_samples_error(as_pandas=True)
             samples_o = samples_o.values if samples_o is not None else None
             samples_error_o = samples_error_o.values if samples_error_o is not None else None
+
             self.set_block(
                 data=from_instance._data, iblock=iblock, blockid=blockid,
                 error=from_instance._error, mask=from_instance._mask,
-                samples=samples_o, samples_error=samples_error_o, coeffs=from_instance._coeffs, smoothing_kind=from_instance._smoothing_kind)
+                samples=samples_o, samples_error=samples_error_o, coeffs=from_instance._coeffs, smoothing_kind=from_instance._smoothing_kind,
+                slitmap=from_instance._slitmap)
+            return
 
-        slitmap = self._filter_slitmap()
-        blockid = self._validate_blockid(iblock, blockid, slitmap=slitmap)
-        block_selection = slitmap["blockid"] == blockid
+        slitmap_o = self._filter_slitmap()
+        blockid = self._validate_blockid(iblock, blockid, slitmap=slitmap_o)
+        block_selection = slitmap_o["blockid"] == blockid
         nfibers = block_selection.sum()
 
         if data is not None:
@@ -411,6 +414,12 @@ class FiberRows(Header, PositionTable):
             if self._smoothing_kind != smoothing_kind:
                 raise ValueError(f"Incompatible smoothing kinds. Trying to set {smoothing_kind} to a tracemask of {self._smoothing_kind}")
             self.set_coeffs(coeffs, smoothing_kind=smoothing_kind)
+        if slitmap is not None:
+            select_i = numpy.isin(self._slitmap["fiberid"], slitmap["fiberid"])
+            if select_i.size == 0:
+                raise ValueError(f"Incompatible slitmaps. Trying to set {select_i.size} fibers to {len(self._slitmap)}")
+            self._slitmap[select_i] = slitmap
+
 
     def get_distances(self):
         samples = self.get_samples(as_pandas=True).values

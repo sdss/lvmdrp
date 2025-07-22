@@ -3757,7 +3757,7 @@ class Spectrum1D(Header):
 
         return flux, cent, fwhm, bg
 
-    def extract_flux(self, centroids, sigmas, fiber_radius=1.4, npixels=20, replace_error=numpy.inf):
+    def extract_flux(self, centroids, sigmas, fiber_radius=1.4, npixels=20, replace_error=numpy.inf, return_basis=False):
 
         def _gen_mexhat_basis(x, centroids, sigmas, fiber_radius, oversampling_factor):
             dx = x[1, 0] - x[0, 0]
@@ -3801,9 +3801,10 @@ class Spectrum1D(Header):
         v = _gen_mexhat_basis(yyv, centroids, sigmas, fiber_radius=fiber_radius, oversampling_factor=100)
 
         yyv = yyv.T.ravel()
-        v = v.T.ravel() / self._error[yyv.astype("int")]
+        v = v.T.ravel()# / self._error[yyv.astype("int")]
 
         B = sparse.csc_matrix((v, (yyv, xx)), shape=(len(self._data), nfibers))
+        B = B.multiply(1/self._error[:, None])
 
         # invert the projection matrix and solve
         ypixels = numpy.arange(self._data.size)
@@ -3815,6 +3816,9 @@ class Spectrum1D(Header):
         error = error[0,:]
         if mask is not None and bn.nansum(mask) > 0:
             error[mask] = replace_error
+
+        if return_basis:
+            return flux, error, mask, B, out
 
         return flux, error, mask
 

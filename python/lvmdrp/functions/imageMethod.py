@@ -388,9 +388,11 @@ def _fix_fiber_thermal_shifts(image, trace_cent, trace_width=None, trace_amp=Non
     mjd = image._header["SMJD"]
     expnum = image._header["EXPOSURE"]
     camera = image._header["CCD"]
+    channel = camera[0]
+    specid = int(camera[1])
 
     # calculate thermal shifts
-    column_shifts = image.measure_fiber_shifts(fiber_model, trace_cent, columns=columns, column_width=column_width, shift_range=shift_range, axs=axs)
+    column_shifts = image.measure_fiber_shifts(fiber_model, trace_cent, columns=columns, column_width=column_width, shift_range=shift_range, axs=axs[:2])
     # shifts stats
     median_shift = numpy.nan_to_num(bn.nanmedian(column_shifts, axis=0))
     std_shift = numpy.nan_to_num(bn.nanstd(column_shifts, axis=0))
@@ -408,6 +410,13 @@ def _fix_fiber_thermal_shifts(image, trace_cent, trace_width=None, trace_amp=Non
         trace_cent_fixed.eval_coeffs()
     else:
         trace_cent_fixed._data += median_shift
+    if trace_cent_fixed._slitmap is not None:
+        trace_cent_fixed._slitmap[f"ypix_{camera[0]}"] = trace_cent_fixed._slitmap[f"ypix_{camera[0]}"].astype("float32")
+        select_spec = trace_cent_fixed._slitmap["spectrographid"] == specid
+        trace_cent_fixed._slitmap[f"ypix_{channel}"][select_spec] += numpy.nan_to_num(median_shift)
+
+    # save columns measured for thermal shifts
+    plot_fiber_thermal_shift(columns, column_shifts, median_shift, std_shift, ax=axs[2])
 
     return trace_cent_fixed, column_shifts, median_shift, std_shift, fiber_model
 
@@ -2650,19 +2659,23 @@ def extract_spectra(
     if assume_thermal_shift is not None:
         log.info(f"assuming fiber thermal shift {assume_thermal_shift:.4f}")
         median_shift = assume_thermal_shift
-        std_shift = 0
-        shifts = numpy.ones_like(columns) * median_shift
+        # std_shift = 0
+        # shifts = numpy.ones_like(columns) * median_shift
         trace_mask._data += median_shift
     else:
         log.info(f"measuring fiber thermal shifts @ columns: {','.join(map(str, columns))}")
-        trace_mask, shifts, median_shift, std_shift, _ = _fix_fiber_thermal_shifts(img, trace_mask, trace_sigma,
-                                                                                   fiber_model=fiber_model,
-                                                                                   trace_amp=10000,
-                                                                                   columns=columns,
-                                                                                   column_width=column_width,
-                                                                                   shift_range=shift_range, axs=[axs_cc, axs_fb])
-        # save columns measured for thermal shifts
-        plot_fiber_thermal_shift(columns, shifts, median_shift, std_shift, ax=ax_shift)
+        trace_mask._slitmap[f"ypix_{camera[0]}"] = trace_mask._slitmap[f"ypix_{camera[0]}"].astype("float32")
+        for iblock in range(LVM_NBLOCKS):
+            cent_block = trace_mask.get_block(iblock=iblock)
+            width_block = trace_sigma.get_block(iblock=iblock)
+            cent_block, _, median_shift, _, _ = _fix_fiber_thermal_shifts(img, cent_block, width_block,
+                                                                          fiber_model=fiber_model,
+                                                                          trace_amp=10000,
+                                                                          columns=columns,
+                                                                          column_width=column_width,
+                                                                          shift_range=shift_range, axs=[axs_cc, axs_fb, ax_shift])
+            trace_mask.set_block(iblock=iblock, from_instance=cent_block)
+
         save_fig(fig, product_path=out_rss, to_display=display_plots, figure_path="qa", label="fiber_thermal_shifts")
 
     if method == "optimal":
@@ -2736,9 +2749,9 @@ def extract_spectra(
         mask |= (slitmap_spec["fibstatus"] == 1)[:, None]
 
     # propagate thermal shift to slitmap
-    channel = img._header['CCD'][0]
-    slitmap[f"ypix_{channel}"] = slitmap[f"ypix_{channel}"].astype("float64")
-    slitmap[f"ypix_{channel}"][select_spec] += numpy.nan_to_num(bn.nanmedian(shifts, axis=0))
+    # channel = img._header['CCD'][0]
+    # slitmap[f"ypix_{channel}"] = slitmap[f"ypix_{channel}"].astype("float64")
+    # slitmap[f"ypix_{channel}"][select_spec] += numpy.nan_to_num(bn.nanmedian(shifts, axis=0))
 
     if error is not None:
         error[mask] = replace_error
@@ -2750,7 +2763,7 @@ def extract_spectra(
         cent_trace=trace_mask,
         width_trace=trace_sigma,
         header=img.getHeader(),
-        slitmap=slitmap
+        slitmap=trace_mask._slitmap
     )
     rss.setHdrValue("NAXIS2", data.shape[0])
     rss.setHdrValue("NAXIS1", data.shape[1])
