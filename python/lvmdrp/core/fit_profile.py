@@ -1541,12 +1541,11 @@ class parFile(fit_profile1D):
 
 class Gaussian(fit_profile1D):
     def _profile(self, x):
+        x_os = oversample(x, oversampling_factor=100)
         self._par[2] = abs(self._par[2])
-        return (
-            self._par[0]
-            * numpy.exp(-0.5 * ((x - self._par[1]) / abs(self._par[2])) ** 2)
-            / (fact * abs(self._par[2]))
-        )
+        model = numpy.exp(-0.5 * ((x_os - self._par[1]) / abs(self._par[2])) ** 2) / (fact * abs(self._par[2]))
+        model = pixelate(x_os, models=self._par[0] * model[None, :], oversampling_factor=100)[0]
+        return model
 
     def _guess_par(self, x, y):
         sel = numpy.isfinite(y)
@@ -1564,12 +1563,10 @@ class Gaussian(fit_profile1D):
 
 class Gaussian_const(fit_profile1D):
     def _profile(self, x):
-        return (
-            self._par[0]
-            * numpy.exp(-0.5 * ((x - self._par[1]) / self._par[2]) ** 2)
-            / (fact * self._par[2])
-            + self._par[3]
-        )
+        x_os = oversample(x, oversampling_factor=100)
+        model = numpy.exp(-0.5 * ((x_os - self._par[1]) / self._par[2]) ** 2) / (fact * self._par[2])
+        model = pixelate(x_os, models=self._par[0] * model[None, :] + self._par[3], oversampling_factor=100)[0]
+        return model
 
     def _guess_par(self, x, y):
         sel = numpy.isfinite(y)
