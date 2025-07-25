@@ -695,7 +695,7 @@ def fit_skyline_flatfield(in_sciences, in_mflat, out_mflat, sky_cwave, cont_cwav
     if groupby != groupby_hdr:
         log.warning(f"requested {groupby = } but header says {groupby_hdr}, assuming header value")
         groupby = groupby_hdr
-    fiber_groups = mflat._get_fiber_groups(by="spec")
+    fiber_groups = mflat._get_fiber_groups(by=groupby)
 
     # skip correction if already done and no force is required
     # undo correction if done and force is required

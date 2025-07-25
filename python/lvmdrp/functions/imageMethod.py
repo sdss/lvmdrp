@@ -2749,9 +2749,9 @@ def extract_spectra(
         mask |= (slitmap_spec["fibstatus"] == 1)[:, None]
 
     # propagate thermal shift to slitmap
-    # channel = img._header['CCD'][0]
-    # slitmap[f"ypix_{channel}"] = slitmap[f"ypix_{channel}"].astype("float64")
-    # slitmap[f"ypix_{channel}"][select_spec] += numpy.nan_to_num(bn.nanmedian(shifts, axis=0))
+    channel = camera[0]
+    slitmap[f"ypix_{channel}"] = slitmap[f"ypix_{channel}"].astype("float32")
+    slitmap[f"ypix_{channel}"][select_spec] = trace_mask._slitmap[f"ypix_{channel}"][select_spec]
 
     if error is not None:
         error[mask] = replace_error
@@ -2763,7 +2763,7 @@ def extract_spectra(
         cent_trace=trace_mask,
         width_trace=trace_sigma,
         header=img.getHeader(),
-        slitmap=trace_mask._slitmap
+        slitmap=slitmap
     )
     rss.setHdrValue("NAXIS2", data.shape[0])
     rss.setHdrValue("NAXIS1", data.shape[1])

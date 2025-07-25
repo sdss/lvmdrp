@@ -2777,12 +2777,12 @@ class Image(Header):
         else:
             raise ValueError("trace_width must be a TraceMask instance or an int/float")
 
-        if isinstance(trace_amp, (int, float, numpy.float32)):
-            trace_amp = TraceMask(data=numpy.ones_like(traces["centroids"]._data) * trace_amp, mask=numpy.zeros_like(traces["centroids"]._data, dtype=bool))
-        elif isinstance(trace_amp, TraceMask):
+        if isinstance(traces["counts"], (int, float, numpy.float32)):
+            traces["counts"] = TraceMask(data=numpy.ones_like(traces["centroids"]._data) * traces["counts"], mask=numpy.zeros_like(traces["centroids"]._data, dtype=bool))
+        elif isinstance(traces["counts"], TraceMask):
                 pass
         else:
-            raise ValueError("trace_amp must be a TraceMask instance or an int/float")
+            raise ValueError("traces['counts'] must be a TraceMask instance or an int/float")
 
         nrows, ncols = self._dim
         if columns is None:

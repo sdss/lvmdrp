@@ -3310,7 +3310,7 @@ class RSS(FiberRows):
         imagetyp = self._header["IMAGETYP"]
         log.info(f" processing {expnum = }")
 
-        fscience = self / mflat
+        fscience = copy(self) / mflat
         if quantiles is not None and isinstance(quantiles, tuple):
             rejects = fscience.reject_fibers(cwave=cont_cwave, quantiles=quantiles)
             fscience._data[rejects, :] = numpy.nan
@@ -3326,7 +3326,7 @@ class RSS(FiberRows):
 
         log.info(f"  fitting gradient and factors around sky line @ {sky_cwave:.2f} Angstroms for '{imagetyp}' exposure {expnum = }")
         x, y, z, coeffs, factor = fscience.fit_ifu_gradient(cwave=sky_cwave, dwave=dwave, groupby=groupby,
-                                                        guess_coeffs=guess_coeffs, fixed_coeffs=fixed_coeffs, coadd_method=coadd_method)
+                                                            guess_coeffs=guess_coeffs, fixed_coeffs=fixed_coeffs, coadd_method=coadd_method)
         gradient_model = IFUGradient.ifu_gradient(coeffs, x=x, y=y, normalize=True)
         log.info(f"  factors          = {numpy.round(factor, 4)}")
         log.info(f"  gradient across  = {bn.nanmax(gradient_model)/bn.nanmin(gradient_model):.4f}")
