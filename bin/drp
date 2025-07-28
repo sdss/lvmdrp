@@ -363,7 +363,7 @@ def nightly(mjd, mjd_list, mjd_range, reject_cr,
 @click.option('-s', '--skip-done', is_flag=True, default=False, help='flag to skip reduction steps that have already been done')
 @click.option("--dry-run", is_flag=True, default=False, help="Shows useful information about the current setup without actually running reductions")
 def fiberflat_corrections(mjd, science_mjds, science_expnums, force_correction, skip_done, dry_run):
-    create_fiberflats_corrections(mjd=mjd, science_mjds=science_mjds, science_expnums=science_expnums, force_correction=force_correction, skip_done=skip_done, dry_run=dry_run)
+    create_fiberflats_corrections(cals_mjd=mjd, science_mjds=science_mjds, science_expnums=science_expnums, force_correction=force_correction, skip_done=skip_done, dry_run=dry_run)
 
 
 @click.command('create-tag', short_help='Create a tag for long-term calibrations', context_settings=dict(show_default=True))

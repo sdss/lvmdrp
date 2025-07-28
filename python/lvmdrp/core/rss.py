@@ -644,7 +644,7 @@ class RSS(FiberRows):
         if isinstance(trace, TraceMask):
             coeffs = trace._coeffs if trace._coeffs is not None else numpy.zeros((self._fibers, default_poly_deg+1))
             columns = [
-                pyfits.Column(name="FUNC", format="A10", array=numpy.asarray([trace._poly_kind] * self._fibers)),
+                pyfits.Column(name="FUNC", format="A10", array=numpy.asarray([trace._smoothing_kind] * self._fibers)),
                 pyfits.Column(name="XMIN", format="I", unit="pix", array=numpy.asarray([0] * self._fibers)),
                 pyfits.Column(name="XMAX", format="I", unit="pix", array=numpy.asarray([trace._data.shape[1]-1] * self._fibers)),
                 pyfits.Column(name="COEFF", format=f"{coeffs.shape[1]}E", dim=f"({self._fibers},)", array=trace._coeffs)
@@ -3284,6 +3284,64 @@ class RSS(FiberRows):
         joint_model, _, _ = self.eval_ifu_gradient(coeffs, factors, groupby)
         rss_corr /= joint_model[:, None]
         return rss_corr
+
+    def reject_fibers(self, cwave, dwave=20, coadd_stat=bn.nanmedian, quantiles=(5,97), ax=None):
+        z_cont = self.coadd_flux(cwave=cwave, dwave=dwave, comb_stat=coadd_stat)
+
+        qth = numpy.nanpercentile(z_cont, q=quantiles)
+        rejects = (z_cont < qth[0]) | (z_cont > qth[1])
+
+        if ax is not None:
+            select = ~rejects
+            ax.set_title(f"Keeping {select.sum()} fibers (rejected {rejects.sum()})", loc="left")
+            ax.axvspan(cwave-dwave//2, cwave+dwave//2, lw=0, fc="0.8", alpha=0.5)
+            ax.step(self._wave[rejects].T, self._data[rejects].T, color="0.8", where="mid", lw=0.5)
+            ax.step(self._wave[select].T, self._data[select].T, where="mid", lw=1)
+            ax.set_xlabel("Wavelength (Angstroms)", fontsize="large")
+            ax.set_ylabel(f"Counts ({self._header['BUNIT']})", fontsize="large")
+
+        return rejects
+
+    def measure_skyline_flatfield(self, mflat,
+                                  sky_cwave, cont_cwave, dwave=8, quantiles=(5, 97),
+                                  guess_coeffs=[1,2,3,0], fixed_coeffs=[3], groupby="spec",
+                                  coadd_method="fit", axs=None, labels=False):
+        expnum = self._header["EXPOSURE"]
+        imagetyp = self._header["IMAGETYP"]
+        log.info(f" processing {expnum = }")
+
+        fscience = copy(self) / mflat
+        if quantiles is not None and isinstance(quantiles, tuple):
+            rejects = fscience.reject_fibers(cwave=cont_cwave, quantiles=quantiles)
+            fscience._data[rejects, :] = numpy.nan
+            fscience._error[rejects, :] = numpy.nan
+            fscience._mask[rejects, :] = True
+
+        _, offsets_model = fscience.measure_wave_shifts(cwaves=sky_cwave, dwave=dwave, smooth=True)
+        mean_offset, std_offset = bn.nanmean(offsets_model), bn.nanstd(offsets_model)
+        log.info(f"  measured wavelength offsets: {mean_offset:.4f} +/- {std_offset:.4f}")
+        fscience._wave_trace['COEFF'].data[:, 0] -= offsets_model
+        wave_trace = TraceMask.from_coeff_table(fscience._wave_trace)
+        fscience._wave = wave_trace.eval_coeffs()
+
+        log.info(f"  fitting gradient and factors around sky line @ {sky_cwave:.2f} Angstroms for '{imagetyp}' exposure {expnum = }")
+        x, y, z, coeffs, factor = fscience.fit_ifu_gradient(cwave=sky_cwave, dwave=dwave, groupby=groupby,
+                                                            guess_coeffs=guess_coeffs, fixed_coeffs=fixed_coeffs, coadd_method=coadd_method)
+        gradient_model = IFUGradient.ifu_gradient(coeffs, x=x, y=y, normalize=True)
+        log.info(f"  factors          = {numpy.round(factor, 4)}")
+        log.info(f"  gradient across  = {bn.nanmax(gradient_model)/bn.nanmin(gradient_model):.4f}")
+
+        science_g = fscience.remove_ifu_gradient(coeffs=coeffs, factors=None)
+
+        if axs is not None:
+            axs[0].set_ylabel(f"{expnum = }", fontsize="large")
+            gradient_model = IFUGradient.ifu_gradient(coeffs, x, y, normalize=True)
+
+            fiber_groups = mflat._get_fiber_groups(by="spec")
+            factors_model = IFUGradient.ifu_factors(factor, fiber_groups, normalize=True)
+            plot_gradient_fit(fscience._slitmap, z, gradient_model, factors_model, telescope="Sci", marker_size=15, axs=axs, labels=labels)
+
+        return x, y, z, coeffs, factor, science_g
 
     def writeFitsData(self, out_rss, replace_masked=True, include_wave=False):
         """Writes information from a RSS object into a FITS file.

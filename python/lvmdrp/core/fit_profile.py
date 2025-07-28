@@ -1,17 +1,23 @@
 # -*- coding: utf-8 -*-
 from copy import deepcopy as copy
-from multiprocessing import Pool, cpu_count
+import warnings
+import inspect
 import itertools
-
-from lvmdrp.core.plot import plt, plot_gradient_fit, plot_radial_gradient_fit
-import astropy.io.fits as pyfits
 import numpy
 import bottleneck as bn
-from scipy import interpolate, optimize, special
+from functools import wraps
+from functools import lru_cache
 
+import astropy.io.fits as pyfits
+from astropy.modeling.functional_models import Voigt1D, Lorentz1D, Moffat1D
+from scipy import interpolate, integrate, optimize, special
+from scipy.signal import fftconvolve, convolve
+
+from lvmdrp.core.plot import plt, create_subplots, make_axes_locatable, plot_gradient_fit, plot_radial_gradient_fit
 
 
 fact = numpy.sqrt(2.0 * numpy.pi)
+skew_factor = numpy.sqrt(2 / numpy.pi)
 
 def polyfit2d(x, y, z, order=3):
     """
@@ -36,10 +42,96 @@ def polyval2d(x, y, m):
         z += a * x ** i * y ** j
     return z
 
-def gaussians(pars, x):
+def gaussians(pars, x, alpha=2.3, collapse=True):
     """Gaussian models for multiple components"""
-    y = pars[0][:, None] * numpy.exp(-0.5 * ((x[None, :] - pars[1][:, None]) / pars[2][:, None]) ** 2) / (pars[2][:, None] * fact)
+    y = pars[0][:, None] * numpy.exp(-0.5 * numpy.abs((x[None, :] - pars[1][:, None]) / pars[2][:, None]) ** alpha) / (pars[2][:, None] * fact)
+    if not collapse:
+        return y
     return bn.nansum(y, axis=0)
+
+def guess_gaussians_integral(pixels, data, centroids, fwhms, nsigma=6, return_pixels_selection=False):
+    fact = numpy.sqrt(2 * numpy.pi)
+    integrals = numpy.zeros(len(centroids), dtype=numpy.float32)
+    sigmas = fwhms / 2.354
+
+    select = numpy.zeros(pixels.size, dtype="bool")
+    for i in range(len(centroids)):
+        select_ = numpy.logical_and(
+            pixels > centroids[i] - nsigma * sigmas[i],
+            pixels < centroids[i] + nsigma * sigmas[i],
+        )
+        integrals[i] = numpy.interp(centroids[i], pixels, data) * fact * sigmas[i]
+        select = numpy.logical_or(select, select_)
+    if return_pixels_selection:
+        return integrals, select
+    return integrals
+
+def moffats(pars, x):
+    counts, centroids, fwhms, betas = pars
+    r_d = fwhms[:,None] / (2.0 * numpy.sqrt(2 ** (1.0 / betas[:,None]) - 1.0))
+    sigma_0 = (betas[:,None] - 1.0) * counts[:,None] / (numpy.pi * (r_d**2))
+    return bn.nansum(sigma_0 * (1.0 + ((x[None,:] - centroids[:,None]) / r_d) ** 2) ** (-betas[:,None]), axis=0)
+
+def mexhat(radius, x, normalize_area=True):
+    def _model(radius, x):
+        return 2 * numpy.abs(numpy.sqrt(radius**2 - x**2))
+    def _integral(radius, x):
+        return 0.5 * (x * _model(radius, x) + radius**2*numpy.arcsin(x/radius))
+
+    model = _model(radius, x)
+    model = numpy.nan_to_num(model, nan=0.0)
+    if normalize_area:
+        return model / (2*_integral(radius, radius))
+    return model
+
+def fiber_profile(centroids, radii, x):
+    c = numpy.atleast_2d(centroids).T
+    r = numpy.atleast_2d(radii).T
+    x_ = numpy.atleast_2d(x)
+    models = 2 * numpy.sqrt(r**2 - (x_ - c)**2)
+    models = numpy.nan_to_num(models, nan=0.0)
+
+    integrals = r**2*numpy.arcsin(1.0)
+    models = models / (2*integrals)
+    return models
+
+def oversample(x, oversampling_factor):
+    x = numpy.asarray(x)
+    is_1d = x.ndim == 1
+
+    if is_1d:
+        x = x[:, None]  # shape: (nsamples, 1)
+
+    nsamples, nfuncs = x.shape
+    dx = numpy.gradient(x, axis=0) / 2.0  # shape: (nsamples, nfuncs)
+
+    # Oversampling offsets
+    sub_idx = numpy.arange(oversampling_factor)  # shape: (os,)
+    offsets = (sub_idx + 0.5) / oversampling_factor - 0.5  # centered in each subinterval
+
+    # Broadcast for oversampled grid
+    x = x[:, :, None]  # shape: (nsamples, nfuncs, 1)
+    dx = dx[:, :, None]  # same shape
+    oversampled = x + offsets * dx * 2  # shape: (nsamples, nfuncs, os)
+
+    # Reshape: stack oversampling axis next to sample axis
+    oversampled = oversampled.transpose(0, 2, 1).reshape(-1, nfuncs)  # (nsamples * os, nfuncs)
+
+    if is_1d:
+        return oversampled.ravel()
+    return oversampled
+
+def pixelate(x, models, oversampling_factor):
+    models_bins = models.reshape((models.shape[0], models.shape[1]//oversampling_factor, oversampling_factor))
+    models_pixelated = integrate.trapezoid(models_bins, dx=x[1]-x[0], axis=2)
+    return models_pixelated
+
+def update_params(func):
+    @wraps(func)
+    def wrapper(self, *args, **kwargs):
+        self._pars = self.pack_params(args[0])
+        return func(self, *args, **kwargs)
+    return wrapper
 
 
 class IFUGradient(object):
@@ -239,6 +331,595 @@ class IFURadialGradient:
         plot_radial_gradient_fit(slitmap, z, gradient_model=gradient_model, telescope="Sci", axs=axs)
 
 
+class Profile1D:
+    PARNAMES = ...
+
+    def __call__(self, x):
+        ...
+
+    @classmethod
+    def eval(cls, x, pars):
+        instance = cls(pars, fixed={}, bounds={})
+        return instance._pixelate(x)
+
+    def __init__(self, pars, fixed, bounds, ignore_nans=True, oversampling_factor=50):
+        self._pars = pars
+        self._fixed = fixed
+
+        self._nprofiles = self._check_sizes()
+        self._npars = len(self._pars)
+        self._nfixed = len(self._fixed)
+        self._ignore_nans = ignore_nans
+        self._oversampling_factor = oversampling_factor
+
+        # get guess and boundaries as requested by Scipy
+        self._bounds = self._parse_boundaries(self._pars, bounds)
+        self._guess = self._parse_guess(self._pars)
+        self._guess = numpy.clip(self._guess, *self._bounds)
+        self._valid_pars = self._check_valid(self._guess, self._bounds)
+        self._nfitted = self._valid_pars.sum()
+
+    def _fwhms(self, x):
+        centroids = self._pars.get("centroids", self._fixed.get("centroids"))
+        half_max = self(centroids) / 2
+        if x is None:
+            fwhms = numpy.ones_like(centroids) * numpy.nan
+            errors = numpy.ones_like(centroids) * numpy.nan
+            masks = numpy.ones_like(centroids, dtype="bool")
+            return fwhms, errors, masks
+
+        x_os = self._oversample_x(x)
+        models = self(x_os, collapse=False)
+
+        indices = numpy.asarray([numpy.where(model >= half_max[i])[0][[0,-1]] if numpy.isfinite(model).all() else [0, 0] for i, model in enumerate(models)])
+        fwhms = numpy.diff(x_os[indices], axis=1)
+        errors = numpy.ones_like(fwhms) / self._oversampling_factor
+        masks = (fwhms == 0) | (~numpy.isfinite(fwhms))
+
+        fwhms[masks] = numpy.nan
+        errors[masks] = numpy.nan
+
+        return fwhms, errors, masks
+
+    def _oversample_x(self, x, oversampling_factor=None):
+        return oversample(x, oversampling_factor or self._oversampling_factor)
+
+    def _pixelate(self, x, models, oversampling_factor=None):
+        return pixelate(x, models, oversampling_factor or self._oversampling_factor)
+
+    def _to_list(self, x):
+        return [x[name] for name in self.PARNAMES if name in x]
+
+    def _check_sizes(self):
+        pars_all = {}
+        pars_all.update(self._pars)
+        pars_all.update(self._fixed)
+
+        pars_list = self._to_list(pars_all)
+        par_sizes = numpy.asarray([par.size for par in pars_list], dtype="int")
+        if (par_sizes[0] != par_sizes[1:]).any():
+            raise ValueError(f"Incompatible free parameter sizes: {par_sizes}")
+        return par_sizes[0]
+
+    def _check_valid(self, guess, bounds):
+        bounds_valid = ~numpy.isnan(bounds)
+        lower_valid = bounds_valid[0].reshape((-1, self._nprofiles))
+        upper_valid = bounds_valid[1].reshape((-1, self._nprofiles))
+        if not lower_valid.all() and not self._ignore_nans:
+            raise ValueError(f"Invalid values in lower bounds:\n  {bounds[0]}")
+        if not upper_valid.all() and not self._ignore_nans:
+            raise ValueError(f"Invalid values in upper bounds:\n  {bounds[1]}")
+
+        guess_valid = numpy.isfinite(guess).reshape((-1, self._nprofiles))
+        if not guess_valid.all() and not self._ignore_nans:
+            raise ValueError(f"Invalid values in guess parameters:\n  {guess}")
+
+        fixed_valid = numpy.ones_like(guess_valid, dtype="bool")
+        if len(self._fixed) != 0:
+            fixed_list = self._to_list(self._fixed)
+            fixed_valid = numpy.isfinite(numpy.concatenate(fixed_list)).reshape((-1, self._nprofiles))
+            if not fixed_valid.all() and not self._ignore_nans:
+                raise ValueError(f"Invalid values in fixed parameters:\n  {self._fixed}")
+
+        valid_pars = guess_valid.all(0) & lower_valid.all(0) & upper_valid.all(0) & fixed_valid.all(0)
+        return valid_pars
+
+    def _parse_guess(self, guess):
+        guess_list = self._to_list(guess)
+        guess = numpy.concatenate(guess_list)
+        return guess
+
+    def _parse_boundaries(self, pars, bounds):
+
+        bounds_lower, bounds_upper = [], []
+        _ = numpy.ones(self._nprofiles)
+        def _set_boundaries(x, x_bound):
+            kind, x_range = x_bound.get("kind"), x_bound.get("range")
+            if kind == "relative":
+                lower = x + x_range[0]
+                upper = x + x_range[1]
+            elif kind == "absolute":
+                lower = _ * x_range[0]
+                upper = _ * x_range[1]
+            else:
+                lower = _ * -numpy.inf
+                upper = _ * +numpy.inf
+
+            bounds_lower.append(lower)
+            bounds_upper.append(upper)
+
+        for name in pars:
+            _set_boundaries(pars.get(name), bounds.get(name, {}))
+
+        bounds_lower = numpy.concatenate(bounds_lower)
+        bounds_upper = numpy.concatenate(bounds_upper)
+        bounds = numpy.asarray([bounds_lower, bounds_upper])
+        return bounds
+
+    def _validate_uncertainties(self, sigma):
+        sigma = sigma if sigma is not None else 1.0
+        if numpy.isnan(sigma).any():
+            raise ValueError(f"Errors have non-valid values: {sigma}")
+        return sigma
+
+    def _validate_pars_scales(self, scales):
+        if scales is not None and not numpy.isfinite(scales).all():
+            raise ValueError(f"Invalid values in `pars_scales`: {scales}. Expected finite values")
+        if scales is None:
+            scales = numpy.abs(numpy.concatenate([numpy.full_like(par, numpy.nanmean(par)) for _, par in self._pars.items()]))
+            scales[(scales==0)|~numpy.isfinite(scales)] = 1.0
+        return scales
+
+    def _select_fitting_mode(self, mode, x, y, sigma, pars_scales, *args, **kwargs):
+        selection = numpy.tile(self._valid_pars, self._npars)
+        if mode == "lsq":
+            result = optimize.least_squares(self.residuals, x0=self._guess[selection], bounds=self._bounds[:, selection], x_scale=pars_scales[selection], args=(x, y, sigma), **kwargs)
+        elif mode == "custom_cost":
+            args_ = (x, y, sigma) + args
+            fun = getattr(self, "cost_function", None)
+            if fun is None:
+                raise ValueError(f"Invalid value for `fun`: {fun}. Expected a callable with signature '{inspect.signature(self.residuals)}'")
+            result = optimize.minimize(fun, x0=self._guess[selection], bounds=self._bounds[:, selection].T, args=args_, **kwargs)
+        return result
+
+    def _calc_covariance(self, result):
+
+        _ = numpy.full((self._nfitted,self._nfitted), numpy.nan)
+
+        # TODO: there are some cases where the Jacobian is a dense matrix object when mode="custom_cost"
+        J = result.jac
+        H_inv = getattr(result, "hess_inv", None)
+        if J.ndim == 1 and H_inv is None:
+            return _
+        elif J.ndim == 1:
+            cov = H_inv.todense()
+            return cov
+
+        try:
+            cov = numpy.linalg.inv(J.T @ J)
+        except numpy.linalg.LinAlgError:
+            try:
+                cov = numpy.linalg.pinv(J.T @ J)
+            except Exception as e:
+                warnings.warn(f"while calculating variance with numpy.linalg.pinv: {e}")
+                cov = numpy.full((self._nfitted,self._nfitted), numpy.nan)
+        return cov
+
+    def _parse_result(self, result=None):
+        if result is None:
+            mask = self.pack_params(numpy.ones(self._nfitted, dtype="bool"))
+            pars = self.pack_params(numpy.full(self._nfitted, numpy.nan))
+            errs = self.pack_params(numpy.full(self._nfitted, numpy.nan))
+            cov = numpy.full((self._nfitted,self._nfitted), numpy.nan)
+            return mask, pars, errs, cov
+
+        cov = self._calc_covariance(result)
+        pars = result.x
+        errs = numpy.sqrt(numpy.diag(cov))
+        mask = getattr(result, "active_mask", numpy.zeros_like(pars)) != 0
+        selection = numpy.tile(self._valid_pars, self._npars)
+        mask |= pars <= self._bounds[0, selection]
+        mask |= pars >= self._bounds[1, selection]
+        # mask |= pars == self._guess[selection]
+        pars[mask] = numpy.nan
+        errs[mask] = numpy.nan
+
+        mask = self.pack_params(mask)
+        pars = self.pack_params(pars)
+        errs = self.pack_params(errs)
+        return mask, pars, errs, cov
+
+    def unpack_params(self):
+        params = [self._pars.get(name, self._fixed.get(name, None)) for name in self.PARNAMES]
+        return params
+
+    def pack_params(self, pars):
+        params = {name: numpy.full(self._nprofiles, numpy.nan) for name in self._pars}
+        for i, name in enumerate(self._pars.keys()):
+            params[name][self._valid_pars] = pars[i*self._nfitted:(i+1)*self._nfitted]
+        return params
+
+    @update_params
+    def residuals(self, pars, x, y, sigma, *args, **kwargs):
+        model = self(x)
+        return (model - y) / sigma
+
+    @update_params
+    def cost_function(self, pars, x, y, sigma, readnoise, collapse=True):
+        rn_sq = readnoise ** 2
+        model = self(x)
+        loglik = (y + rn_sq) * numpy.log(model + rn_sq) - model
+        if collapse:
+            # print(f"{readnoise = }")
+            # print(f"{y = }")
+            # print(f"{sigma = }")
+            # print(f"{model = }")
+            # print(f"{loglik = }")
+            return numpy.nansum(loglik)
+        return loglik
+
+    def chi_sq(self, x, y, sigma, collapse=True):
+        dof = max(1, x.size - self._npars * self._nfitted)
+        model = self(x)
+        chisq = (model - y)**2 / sigma**2 / dof
+        if collapse:
+            return bn.nansum(chisq)
+        return chisq
+
+    def fit(self, x, y, sigma, *args, pars_scales=None, mode="lsq", **kwargs):
+
+        sigma_ = self._validate_uncertainties(sigma)
+        pars_scales_ = self._validate_pars_scales(pars_scales)
+
+        try:
+            result = self._select_fitting_mode(mode, x, y, sigma_, pars_scales_, *args, **kwargs)
+        except Exception as e:
+            warnings.warn(f"{e}")
+            warnings.warn("data points:")
+            warnings.warn(f"  {x       = }")
+            warnings.warn(f"  {y       = }")
+            warnings.warn(f"  {sigma_  = }")
+            warnings.warn(f"  {self(x) = }")
+            warnings.warn("current parameters:")
+            warnings.warn(f"  guess       = {self._guess}")
+            warnings.warn(f"  lower bound = {self._bounds[0]}")
+            warnings.warn(f"  upper bound = {self._bounds[1]}")
+            self._mask, self._pars, self._errs, self._cov = self._parse_result()
+            return
+
+        self._mask, self._pars, self._errs, self._cov = self._parse_result(result)
+
+    def plot_residuals(self, x, y=None, sigma=None, mask=None, axs=None):
+        residuals = None
+        model = self(x)
+        if y is not None and sigma is not None:
+            residuals = (model - y) / sigma
+        elif y is not None:
+            residuals = model - y
+        if residuals is None:
+            return
+
+        if axs is None:
+            _, ax = create_subplots(to_display=True, figsize=(15,5), layout="constrained")
+            axs = {"res": ax}
+        elif isinstance(axs, plt.Axes):
+            axs = {"res": axs}
+        elif isinstance(axs, dict) and "mod" in axs and "res" not in axs:
+            axs["mod"].tick_params(labelbottom=False)
+
+            ax_divider = make_axes_locatable(axs["mod"])
+            ax_res = ax_divider.append_axes("bottom", size="30%", pad="5%")
+            ax_res.sharex(axs["mod"])
+            axs["res"] = ax_res
+        elif isinstance(axs, dict) and "res" in axs:
+            pass
+
+        axs["res"].axhline(ls="--", lw=1, color="0.2")
+        axs["res"].axhline(-1.0, ls=":", lw=1, color="0.2")
+        axs["res"].axhline(+1.0, ls=":", lw=1, color="0.2")
+        if mask is not None:
+            axs["res"].vlines(x[mask], *axs["res"].get_ylim(), lw=1, color="0.7", alpha=0.5, zorder=-1)
+        axs["res"].step(x, residuals, lw=1, color="tab:blue", where="mid")
+        return axs
+
+    def plot(self, x, y=None, sigma=None, mask=None, axs=None):
+        if axs is None:
+            _, axs = create_subplots(to_display=True, figsize=(15,7), layout="constrained")
+        if not isinstance(axs, dict) or "mod" not in axs:
+            axs = {"mod": axs}
+
+        model, model_os, x_os = self(x, return_all=True)
+
+        if y is not None and sigma is not None:
+            axs["mod"].errorbar(x, y, yerr=sigma, fmt=".-", ms=7, mew=0, lw=1, elinewidth=1, mfc="tab:red", color="0.2", ecolor="0.2")
+        elif y is not None:
+            axs["mod"].step(x, y, lw=1, color="0.2", where="mid")
+
+        if any(axs["mod"].get_lines()):
+            ylims = axs["mod"].get_ylim()
+        else:
+            ylims = None
+
+        if mask is not None:
+            axs["mod"].vlines(x[mask], *ylims, lw=1, color="0.7", alpha=0.5, zorder=-1)
+
+        axs["mod"].step(x, model, lw=1, color="tab:blue", where="mid")
+        axs["mod"].plot(x_os, model_os, "--", lw=1, color="tab:blue", alpha=0.5)
+
+        if ylims is not None:
+            axs["mod"].set_ylim(*ylims)
+
+        self.plot_residuals(x, y, sigma, mask, axs=axs)
+        return axs
+
+
+class MexHatGaussians(Profile1D):
+
+    PARNAMES = (
+        "counts",
+        "centroids",
+        "sigmas",
+    )
+
+    def __init__(self, pars, fixed, bounds, ignore_nans=True, oversampling_factor=50, fiber_radius=1.4):
+        super().__init__(pars, fixed, bounds, ignore_nans=ignore_nans, oversampling_factor=oversampling_factor)
+
+        self._fiber_radius = fiber_radius
+
+    def __call__(self, x, collapse=True, return_all=False):
+        counts, centroids, sigmas = self.unpack_params()
+
+        of = self._oversampling_factor
+        x_os = self._oversample_x(x, oversampling_factor=of)
+        dx_os = x_os[1] - x_os[0]
+
+        # since the fiber profile has a fixed projected radius, I'm using this as the convolution kernel
+        x_kernel = numpy.arange(0, 2*self._fiber_radius + dx_os, dx_os)
+        kernel = fiber_profile(centroids=self._fiber_radius, radii=self._fiber_radius, x=x_kernel)
+        psfs = gaussians((counts, centroids, sigmas), x_os, alpha=2.0, collapse=False)
+
+        profiles = fftconvolve(psfs, kernel, mode="same", axes=1)
+        profiles /= integrate.trapezoid(profiles, x_os, axis=1)[:, None]
+        profiles *= counts[:, None]
+
+        # pixelate models
+        models = self._pixelate(x_os, profiles)
+
+        if return_all:
+            if collapse:
+                return bn.nansum(models, 0), bn.nansum(profiles, 0), x_os
+            return models, profiles, x_os
+        if collapse:
+            return bn.nansum(models, 0)
+        return models
+
+
+class TopHatGaussians(Profile1D):
+
+    PARNAMES = (
+        "counts",
+        "centroids",
+        "sigmas"
+    )
+
+    def __init__(self, pars, fixed, bounds, ignore_nans=True, oversampling_factor=50, fiber_width=1.2):
+        super().__init__(pars, fixed, bounds, ignore_nans=ignore_nans, oversampling_factor=oversampling_factor)
+
+        self._fiber_width = fiber_width
+
+    def __call__(self, x):
+        counts, centroids, sigmas = self.unpack_params()
+
+        x_os = self._oversample_x(x)
+
+        width = int(self._fiber_width * self._oversampling_factor)
+        gaussians_ = gaussians((counts, centroids, sigmas), x_os, collapse=False)
+        tophats = numpy.ones((counts.size, width)) / width
+        gaussians_tophats = fftconvolve(gaussians_, tophats, mode="same", axes=1)
+
+        model = self._pixelate(x_os, gaussians_tophats)
+        model = bn.nansum(gaussians_tophats, axis=0)
+
+        return model
+
+
+class NormalGaussians(Profile1D):
+
+    PARNAMES = (
+        "counts",
+        "centroids",
+        "sigmas"
+    )
+
+    def __init__(self, pars, fixed, bounds, ignore_nans=True, oversampling_factor=50, alpha=2.3):
+        super().__init__(pars, fixed, bounds, ignore_nans=ignore_nans, oversampling_factor=oversampling_factor)
+
+        self._alpha = alpha
+
+    def __call__(self, x):
+        pars = self.unpack_params()
+
+        x_os = self._oversample_x(x)
+        models = gaussians(pars, x_os, alpha=self._alpha, collapse=False)
+        models = self._pixelate(x_os, models)
+
+        model = bn.nansum(models, axis=0)
+        return model
+
+
+class SkewedGaussians(Profile1D):
+
+    PARNAMES = (
+        "counts",    # Integral of the gaussian
+        "centroids", # Mode
+        "sigmas",    # Standard deviation
+        "alphas"     # Shape parameter (not to be confused with skewness)
+    )
+
+    def __init__(self, pars, fixed, bounds, ignore_nans=True, oversampling_factor=50):
+        super().__init__(pars, fixed, bounds, ignore_nans=ignore_nans, oversampling_factor=oversampling_factor)
+
+    def __call__(self, x):
+        counts, centroids, sigmas, alphas = self.unpack_params()
+        # convert to PDF parameters
+        deltas = self._deltas(alphas)
+        scales = self._sigma_to_scale(sigmas, deltas)
+        locations = self._centroid_to_location(centroids, scales, alphas, deltas)
+
+        # evaluate PDF shape
+        x_os = self._oversample_x(x)
+        shape = self._skewed_gaussian_shapes(x_os, locations, scales, alphas)
+        # calculate normalization
+        norms = numpy.trapz(shape, x_os, axis=1)
+
+        models = counts[:, numpy.newaxis] * shape / norms[:, numpy.newaxis]
+        models = self._pixelate(x_os, models)
+
+        model = bn.nansum(models, axis=0)
+        return model
+
+    def _deltas(self, alphas):
+        return alphas / numpy.sqrt(1 + alphas**2)
+
+    def _m0(self, alphas, deltas):
+        return skew_factor * deltas - (1-numpy.pi*0.25)*(skew_factor*deltas)**3/(1-2/numpy.pi*deltas**2) - numpy.sign(alphas)*0.5*numpy.exp(-2*numpy.pi/numpy.abs(alphas))
+
+    def _location_to_centroid(self, locations, scales, alphas, deltas):
+        m0 = self._m0(alphas, deltas)
+        return locations + m0*scales
+
+    def _centroid_to_location(self, centroids, scales, alphas, deltas):
+        m0 = self._m0(alphas, deltas)
+        return centroids - m0*scales
+
+    def _scale_to_sigma(self, scales, deltas):
+        return scales * numpy.sqrt(1 - (2 * deltas**2) / numpy.pi)
+
+    def _sigma_to_scale(self, sigmas, deltas):
+        denom = numpy.sqrt(1 - (2 * deltas**2) / numpy.pi)
+        return sigmas / denom
+
+    def _skewed_gaussian_shapes(self, x, locations, scales, alphas):
+        z = (x[numpy.newaxis, :] - locations[:, numpy.newaxis]) / scales[:, numpy.newaxis]
+        return numpy.exp(-0.5 * z**2) * (1 + special.erf(alphas[:, numpy.newaxis] * z / numpy.sqrt(2)))
+
+
+class PolyGaussians(Profile1D):
+
+    PARNAMES = (
+        "counts",
+        "centroids",
+        "sigmas",
+        "a",
+        "b",
+        "c",
+        "d"
+    )
+
+    def __init__(self, pars, fixed, bounds, ignore_nans=True, oversampling_factor=50):
+        super().__init__(pars, fixed, bounds, ignore_nans, oversampling_factor=oversampling_factor)
+
+    def __call__(self, x):
+        counts, centroids, sigmas, a, b, c, d = self.unpack_params()
+
+        x_os = self._oversample_x(x)
+        gauss = gaussians((counts, centroids, sigmas), x_os, collapse=False)
+        poly = a[:,None] + b[:,None]*x_os[None,:] + c[:,None]*x_os[None,:]**2 + d[:,None]*x_os[None,:]**3
+        models = gauss + poly
+        models = self._pixelate(x_os, models)
+
+        model = bn.nansum(models, axis=0)
+        return model
+
+    def _polynomial(self, x):
+        counts, centroids, sigmas, a, b, c, d = self.unpack_params()
+        poly = bn.nansum(a[:,None] + b[:,None]*x[None,:] + c[:,None]*x[None,:]**2 + d[:,None]*x[None,:]**3, axis=0)
+        return poly
+
+
+class Moffats(Profile1D):
+
+    PARNAMES = (
+        "counts",
+        "centroids",
+        "sigmas",
+        "betas"
+    )
+
+    def __init__(self, pars, fixed, bounds, ignore_nans=True, oversampling_factor=50):
+        super().__init__(pars, fixed, bounds, ignore_nans, oversampling_factor=oversampling_factor)
+
+    def __call__(self, x):
+        counts, centroids, sigmas, betas = self.unpack_params()
+
+        x_os = self._oversample_x(x)
+        moffats_ = numpy.asarray([Moffat1D(1.0, centroid, sigma, beta)(x_os) for centroid, sigma, beta in zip(centroids, sigmas, betas)])
+        norms = integrate.trapezoid(moffats_, x_os, axis=1)
+
+        models = counts[:, None] * moffats_ / norms[:, None]
+        models = self._pixelate(x_os, models)
+
+        model = bn.nansum(models, axis=0)
+        return model
+
+class Lorentzs(Profile1D):
+
+    PARNAMES = (
+        "counts",
+        "centroids",
+        "sigmas"
+    )
+
+    def __init__(self, pars, fixed, bounds, ignore_nans=True, oversampling_factor=50):
+        super().__init__(pars, fixed, bounds, ignore_nans=ignore_nans, oversampling_factor=oversampling_factor)
+
+    def __call__(self, x):
+        counts, centroids, sigmas = self.unpack_params()
+        fwhms = sigmas * 2.354
+
+        x_os = self._oversample_x(x)
+        models = [count * Lorentz1D(2/(numpy.pi*fwhm), centroid, fwhm)(x_os) for count, centroid, fwhm in zip(counts, centroids, fwhms)]
+        models = self._pixelate(x_os, models)
+
+        model = bn.nansum(models, axis=0)
+        return model
+
+class Voigts(Profile1D):
+
+    PARNAMES = (
+        "counts",
+        "centroids",
+        "sigmas_l",
+        "sigmas_g"
+    )
+
+    def __init__(self, pars, fixed, bounds, ignore_nans=True, oversampling_factor=50):
+        super().__init__(pars, fixed, bounds, ignore_nans, oversampling_factor=oversampling_factor)
+
+    def __call__(self, x):
+        counts, centroids, sigmas_l, sigmas_g = self.unpack_params()
+        fwhms_l = sigmas_l * 2.354
+        fwhms_g = sigmas_g * 2.354
+
+        x_os = self._oversample_x(x)
+        models = [count * Voigt1D(centroid, 2/(numpy.pi*fwhm_l), fwhm_l, fwhm_g, method="Scipy")(x) for count, centroid, fwhm_l, fwhm_g in zip(counts, centroids, fwhms_l, fwhms_g)]
+        models = self._pixelate(x_os, models)
+
+        model = bn.nansum(models, axis=0)
+        return model
+
+
+PROFILES = {
+    "mexhat": MexHatGaussians,
+    "tophat": TopHatGaussians,
+    "normal": NormalGaussians,
+    "skewed": SkewedGaussians,
+    "poly": PolyGaussians,
+    "moffat": Moffats,
+    "lorentz": Lorentzs,
+    "voigt": Voigts}
+
+
 class SpectralResolution(object):
     def __init__(self, res=None):
         self._res = res
@@ -303,171 +984,120 @@ class fit_profile1D(object):
         ftol=1e-8,
         xtol=1e-8,
         maxfev=9999,
-        err_sim=0,
-        warning=True,
-        method="leastsq",
-        parallel="auto",
+        solver="trf",
+        loss="linear"
     ):
         if numpy.isnan(sigma).any():
             raise ValueError(f"Errors have non-valid values: {sigma}")
         if p0 is None and p0 is not False and self._guess_par is not None:
             self._guess_par(x, y)
-        perr_init = copy(self)
+
         p0 = self.fix_guess(bounds)
-        if method == "leastsq":
+        n = len(p0)
+
+        # if numpy.any(numpy.isnan(p0)):
+        #     raise ValueError(f"Invalid values in guess parameters:\n  {p0}")
+        if numpy.any(numpy.isnan(bounds[0])):
+            raise ValueError(f"Invalid values in lower bounds:\n  {bounds[0]}")
+        if numpy.any(numpy.isnan(bounds[1])):
+            raise ValueError(f"Invalid values in lower bounds:\n  {bounds[1]}")
+
+        try:
             model = optimize.least_squares(
-                self.res, x0=p0, bounds=bounds, args=(x, y, sigma), max_nfev=maxfev, ftol=ftol, xtol=xtol, method="dogbox"
-            )
-            self._par = model.x
+                self.res, x0=p0, bounds=bounds, args=(x, y, sigma), max_nfev=maxfev, ftol=ftol, xtol=xtol,
+                method=solver, loss=loss)
+        except Exception as e:
+            warnings.warn(f"{e}")
+            warnings.warn("data points:")
+            warnings.warn(f"  {x       = }")
+            warnings.warn(f"  {y       = }")
+            warnings.warn(f"  {sigma   = }")
+            warnings.warn(f"  {self(x) = }")
+            warnings.warn("current parameters:")
+            warnings.warn(f"  guess       = {p0}")
+            warnings.warn(f"  lower bound = {bounds[0]}")
+            warnings.warn(f"  upper bound = {bounds[1]}")
+            self._par = numpy.full(n, numpy.nan)
+            self._cov = numpy.full((n,n), numpy.nan)
+            self._err = numpy.full(n, numpy.nan)
+            self._mask = numpy.ones(self._par.size, dtype="bool")
+            return
 
-            mask = model.active_mask!=0
-            # for i in range(self._par.size):
-            #     mask |= (self._par[i]<=bounds[0][i])|(self._par[i]>=bounds[1][i])
-            self._par[mask] = numpy.nan
-        if method == "simplex":
+        self._par = model.x
+        try:
+            self._cov = numpy.linalg.inv(model.jac.T @ model.jac)
+        except numpy.linalg.LinAlgError:# as e:
+            # warnings.warn(f"while calculating covariance matrix: {e}. Trying numpy.linalg.pinv")
             try:
-                model = optimize.fmin(
-                    self.residuum,
-                    p0,
-                    (x, y, sigma),
-                    ftol=ftol,
-                    xtol=xtol,
-                    disp=0,
-                    full_output=0,
-                    warning=warning,
-                )
-                # model = optimize.leastsq(self.res, p0, (x, y, sigma), None, 0, 0, ftol, xtol, 0.0, maxfev, 0.0, 100.0, None, warning)
-            except TypeError:
-                model = optimize.fmin(
-                    self.residuum,
-                    p0,
-                    (x, y, sigma),
-                    ftol=ftol,
-                    xtol=xtol,
-                    disp=0,
-                    full_output=0,
-                )
-            self._par = model
-            # model = optimize.leastsq(self.res, p0, (x, y, sigma),None, 0, 0, ftol, xtol, 0.0, maxfev, 0.0, 100.0, None)
+                self._cov = numpy.linalg.pinv(model.jac.T @ model.jac)
+            except Exception as e:
+                warnings.warn(f"while calculating variance with numpy.linalg.pinv: {e}")
+                self._cov = numpy.full((n,n), numpy.nan)
 
-        if err_sim != 0:
-            if parallel == "auto":
-                cpus = cpu_count()
-            else:
-                cpus = int(parallel)
-            self._par_err_models = numpy.zeros(
-                (err_sim, len(self._par)), dtype=numpy.float32
-            )
-            if cpus > 1:
-                pool = Pool(processes=cpus)
-                results = []
-                for i in range(err_sim):
-                    perr = copy(perr_init)
-                    if method == "leastsq":
-                        results.append(
-                            pool.apply_async(
-                                optimize.leastsq,
-                                args=(
-                                    perr.res,
-                                    perr._par,
-                                    (x, numpy.random.normal(y, sigma), sigma),
-                                    None,
-                                    0,
-                                    0,
-                                    ftol,
-                                    xtol,
-                                    0.0,
-                                    maxfev,
-                                    0.0,
-                                    100,
-                                    None,
-                                ),
-                            )
-                        )
-                    if method == "simplex":
-                        results.append(
-                            pool.apply_async(
-                                optimize.fmin,
-                                args=(
-                                    perr.residuum,
-                                    perr._par,
-                                    (x, numpy.random.normal(y, sigma), sigma),
-                                    xtol,
-                                    ftol,
-                                    maxfev,
-                                    None,
-                                    0,
-                                    0,
-                                    0,
-                                ),
-                            )
-                        )
-                pool.close()
-                pool.join()
-                for i in range(err_sim):
-                    if method == "leastsq":
-                        self._par_err_models[i, :] = results[i].get()[0]
-                    elif method == "simplex":
-                        self._par_err_models[i, :] = results[i].get()
-            else:
-                for i in range(err_sim):
-                    perr = copy(perr_init)
-                    if method == "leastsq":
-                        try:
-                            model_err = optimize.leastsq(
-                                perr.res,
-                                perr._par,
-                                (x, numpy.random.normal(y, sigma), sigma),
-                                maxfev=maxfev,
-                                ftol=ftol,
-                                xtol=xtol,
-                            )
-                        except TypeError:
-                            model_err = optimize.leastsq(
-                                perr.res,
-                                perr._par,
-                                (x, numpy.random.normal(y, sigma), sigma),
-                                maxfev=maxfev,
-                                ftol=ftol,
-                                xtol=xtol,
-                            )
-                        self._par_err_models[i, :] = model_err[0]
-                    if method == "simplex":
-                        try:
-                            model_err = optimize.fmin(
-                                perr.residuum,
-                                perr._par,
-                                (x, numpy.random.normal(y, sigma), sigma),
-                                disp=0,
-                                ftol=ftol,
-                                xtol=xtol,
-                                warning=warning,
-                            )
-                        except TypeError:
-                            model_err = optimize.fmin(
-                                perr.residuum,
-                                perr._par,
-                                (x, numpy.random.normal(y, sigma), sigma),
-                                disp=0,
-                                ftol=ftol,
-                                xtol=xtol,
-                            )
-                        self._par_err_models[i, :] = model_err
+        self._err = numpy.sqrt(numpy.diag(self._cov))
 
-                self._par_err = numpy.std(self._par_err_models, 0)
+        self._mask = model.active_mask!=0
+        self._par[self._mask] = numpy.nan
+        self._err[self._mask] = numpy.nan
+
+    def plot_residuals(self, x, y=None, sigma=None, mask=None, axs=None):
+        residuals = None
+        if y is not None and sigma is not None:
+            residuals = (self(x) - y) / sigma
+        elif y is not None:
+            residuals = self(x) - y
+        if residuals is None:
+            return
+
+        if axs is None:
+            _, ax = create_subplots(to_display=True, figsize=(15,5), layout="constrained")
+            axs = {"res": ax}
+        elif isinstance(axs, plt.Axes):
+            axs = {"res": axs}
+        elif isinstance(axs, dict) and "mod" in axs and "res" not in axs:
+            axs["mod"].tick_params(labelbottom=False)
+
+            ax_divider = make_axes_locatable(axs["mod"])
+            ax_res = ax_divider.append_axes("bottom", size="20%", pad="5%")
+            ax_res.sharex(axs["mod"])
+            axs["res"] = ax_res
+        elif isinstance(axs, dict) and "res" in axs:
+            pass
+
+        axs["res"].axhline(ls="--", lw=1, color="0.2")
+        axs["res"].axhline(-1.0, ls=":", lw=1, color="0.2")
+        axs["res"].axhline(+1.0, ls=":", lw=1, color="0.2")
+        axs["res"].step(x, residuals, lw=1, color="tab:blue", where="mid")
+        axs["res"].vlines(x[mask], *axs["res"].get_ylim(), lw=1, color="0.7", alpha=0.5, zorder=-1)
+        return axs
+
+    def plot(self, x, y=None, sigma=None, mask=None, axs=None):
+        if axs is None:
+            _, axs = create_subplots(to_display=True, figsize=(15,7), layout="constrained")
+        if not isinstance(axs, dict) or "mod" not in axs:
+            axs = {"mod": axs}
+
+        model = self(x)
+
+        if y is not None and sigma is not None:
+            axs["mod"].errorbar(x, y, yerr=sigma, fmt=".-", ms=7, mew=0, lw=1, elinewidth=1, mfc="tab:red", color="0.2", ecolor="0.2")
+        elif y is not None:
+            axs["mod"].step(x, y, lw=1, color="0.2", where="mid")
+
+        if any(axs["mod"].get_lines()):
+            ylims = axs["mod"].get_ylim()
         else:
-            self._par_err = None
+            ylims = None
 
-    def plot(self, x, y=None, mask=None, ax=None):
-        if ax is None:
-            fig, ax = plt.subplots(figsize=(15,5))
+        if mask is not None:
+            axs["mod"].vlines(x[mask], *ylims, lw=1, color="0.7", alpha=0.5, zorder=-1)
 
-        mask_ = numpy.ones_like(mask)
-        mask_[mask] = numpy.nan
-        if y is not None:
-            ax.step(x, y*mask_, color="0.2", lw=1, where="mid")
-        ax.step(x, self(x)*mask_, color="tab:blue", lw=1, where="mid")
-        return ax
+        axs["mod"].step(x, model, lw=1, color="tab:blue", where="mid")
+        if ylims is not None:
+            axs["mod"].set_ylim(*ylims)
+
+        self.plot_residuals(x, y, sigma, mask, axs=axs)
+        return axs
 
 
 class fit_profile2D(object):
@@ -911,12 +1541,11 @@ class parFile(fit_profile1D):
 
 class Gaussian(fit_profile1D):
     def _profile(self, x):
+        x_os = oversample(x, oversampling_factor=100)
         self._par[2] = abs(self._par[2])
-        return (
-            self._par[0]
-            * numpy.exp(-0.5 * ((x - self._par[1]) / abs(self._par[2])) ** 2)
-            / (fact * abs(self._par[2]))
-        )
+        model = numpy.exp(-0.5 * ((x_os - self._par[1]) / abs(self._par[2])) ** 2) / (fact * abs(self._par[2]))
+        model = pixelate(x_os, models=self._par[0] * model[None, :], oversampling_factor=100)[0]
+        return model
 
     def _guess_par(self, x, y):
         sel = numpy.isfinite(y)
@@ -934,12 +1563,10 @@ class Gaussian(fit_profile1D):
 
 class Gaussian_const(fit_profile1D):
     def _profile(self, x):
-        return (
-            self._par[0]
-            * numpy.exp(-0.5 * ((x - self._par[1]) / self._par[2]) ** 2)
-            / (fact * self._par[2])
-            + self._par[3]
-        )
+        x_os = oversample(x, oversampling_factor=100)
+        model = numpy.exp(-0.5 * ((x_os - self._par[1]) / self._par[2]) ** 2) / (fact * self._par[2])
+        model = pixelate(x_os, models=self._par[0] * model[None, :] + self._par[3], oversampling_factor=100)[0]
+        return model
 
     def _guess_par(self, x, y):
         sel = numpy.isfinite(y)
@@ -979,39 +1606,46 @@ class Gaussian_poly(fit_profile1D):
 
 class Gaussians(fit_profile1D):
     def _profile(self, x):
-        ncomp = len(self._par) // 3
-        y = numpy.zeros((ncomp, len(x)), dtype=numpy.float32)
-        for i in range(ncomp):
-            y[i] = self._par[i] * numpy.exp(-0.5 * ((x - self._par[i + ncomp]) / abs(self._par[i + 2 * ncomp])) ** 2) / (fact * abs(self._par[i + 2 * ncomp]))
-        return bn.nansum(y, axis=0)
+        pars = numpy.split(self._par, 3)
+        return gaussians(pars, x)
 
     def __init__(self, par):
         fit_profile1D.__init__(self, par, self._profile)
 
 
+class Gaussians_cent(fit_profile1D):
+    def _profile(self, x):
+        pars = numpy.split(self._par, 2)
+        pars = [pars[0], pars[1], self._args]
+        return gaussians(pars, x)
+
+    def __init__(self, par, args):
+        fit_profile1D.__init__(self, par, self._profile, args=args)
+
+class Gaussians_centroids(fit_profile1D):
+    def _profile(self, x):
+        args = numpy.split(self._args, 2)
+        pars = [args[0], self._par, args[1]]
+        return gaussians(pars, x)
+
+    def __init__(self, par, args):
+        fit_profile1D.__init__(self, par, self._profile, args=args)
+
 class Gaussians_width(fit_profile1D):
     def _profile(self, x):
-        y = numpy.zeros(len(x))
-        ncomp = len(self._args)
-        for i in range(ncomp):
-            y += self._par[i + ncomp] * numpy.exp(-0.5 * ((x - self._args[i]) / abs(self._par[i])) ** 2) / (fact * abs(self._par[i]))
-        return y
+        args = numpy.split(self._args, 2)
+        pars = [args[0], args[1], self._par]
+        return gaussians(pars, x)
 
     def __init__(self, par, args):
         fit_profile1D.__init__(self, par, self._profile, args=args)
 
 
-class Gaussians_flux(fit_profile1D):
+class Gaussians_counts(fit_profile1D):
     def _profile(self, x):
-        y = numpy.zeros(len(x))
-        ncomp = len(self._par)
-        for i in range(ncomp):
-            y += (
-                self._par[i]
-                * numpy.exp(-0.5 * ((x - self._args[0]) / self._args[1]) ** 2)
-                / (fact * self._args[1])
-            )
-        return y
+        args = numpy.split(self._args, 2)
+        pars = [self._par, args[0], args[1]]
+        return gaussians(pars, x)
 
     def __init__(self, par, args):
         fit_profile1D.__init__(self, par, self._profile, args=args)

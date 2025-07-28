@@ -46,6 +46,7 @@ from lvmdrp.utils import metadata as md
 from lvmdrp.utils.convert import tileid_grp
 from lvmdrp.utils.paths import get_master_mjd, get_calib_paths, group_calib_paths, get_frames_paths
 from lvmdrp.core.constants import CALIBRATION_NAMES, SKYLINES_FIBERFLAT, CONTINUUM_FIBERFLAT, CALIBRATION_NEEDS
+from lvmdrp.core.constants import LVM_NFIBERS, LVM_NCOLS
 from lvmdrp.core.plot import create_subplots, save_fig
 from lvmdrp.core import dataproducts as dp
 from lvmdrp.core.constants import (
@@ -75,6 +76,15 @@ MASK_BANDS = {
 }
 COUNTS_THRESHOLDS = {"ldls": 1000, "quartz": 1000}
 CAL_FLAVORS = {"bias", "trace", "wave", "dome", "twilight"}
+FIBER_MEASURING_CONFIG = {
+        "counts": {"mode": "lsq", "method": "dogbox", "loss": "linear", "xtol": 1e-3, "ftol": 1e-3},
+        "centroids": {"mode": "lsq", "method": "dogbox", "loss": "linear", "xtol": 1e-3, "ftol": 1e-3},
+        "sigmas": {"mode": "lsq", "method": "dogbox", "loss": "linear", "xtol": 1e-3, "ftol": 1e-3}}
+FIBER_SMOOTHING_CONFIG = {
+    "counts": ("spline", {"smoothing": None, "use_weights": True, "nsigmas": np.inf, "min_samples_frac": 0.7}),
+    "centroids": ("polynomial", {"deg": 5, "nsigmas": np.inf, "min_samples_frac": 0.7}),
+    "sigmas": ("polynomial", {"deg": 8, "nsigmas": np.inf, "min_samples_frac": 0.7})}
+
 
 CALIBRATION_EPOCHS_PATH = os.path.join(os.getenv("LVMCORE_DIR"), "etc", "calibration-epochs.yaml")
 
@@ -764,7 +774,7 @@ def _create_wavelengths_60177(use_longterm_cals=True, skip_done=True, dry_run=Fa
             else:
                 image_tasks.extract_spectra(in_image=carc_path, out_rss=xarc_path,
                                             in_trace=calibs["trace"][camera],
-                                            in_fwhm=calibs["width"][camera],
+                                            in_sigma=calibs["width"][camera],
                                             in_model=calibs["model"][camera])
 
     expnum_str = f"{frames.expnum.min():>08}_{frames.expnum.max():>08}"
@@ -1304,7 +1314,7 @@ def create_nightly_traces(mjd, use_longterm_cals=False, expnums_ldls=None, expnu
                     out_trace_amp=flux_path, out_trace_cent=cent_path, out_trace_fwhm=fwhm_path, out_model=model_path,
                     in_trace_cent_guess=cent_guess_path,
                     median_box=(1,10), coadd=20,
-                    counts_threshold=counts_threshold, max_diff=1.5, guess_fwhm=2.5,
+                    counts_threshold=counts_threshold, max_diff=1.5, fwhms_guess=2.5,
                     ncolumns=trace_full_ncolumns, fwhm_limits=(1.5, 4.5),
                     fit_poly=fit_poly, interpolate_missing=True,
                     poly_deg=(poly_deg_amp, poly_deg_cent, poly_deg_width)
@@ -1400,145 +1410,90 @@ def create_traces(mjd, cameras=CAMERAS, expnums_ldls=None, expnums_qrtz=None,
     # iterate through exposures with std fibers exposed
     for camera in cameras:
         # initialize fiber traces
-        mamps, mcents, mwidths = {}, {}, {}
-        mamps[camera] = TraceMask()
-        mamps[camera].createEmpty(data_dim=(648, 4086), poly_deg=poly_deg_amp)
-        mcents[camera] = TraceMask()
-        mcents[camera].createEmpty(data_dim=(648, 4086), poly_deg=poly_deg_cent)
-        mwidths[camera] = TraceMask()
-        mwidths[camera].createEmpty(data_dim=(648, 4086), poly_deg=poly_deg_width)
+        columns = np.linspace(5, 4080, trace_full_ncolumns, dtype="int")
+        fibers_params = {
+            "counts": TraceMask.create_empty(data_dim=(LVM_NFIBERS, LVM_NCOLS), slitmap=SLITMAP, samples_columns=columns),
+            "centroids": TraceMask.create_empty(data_dim=(LVM_NFIBERS, LVM_NCOLS), slitmap=SLITMAP, samples_columns=columns),
+            "sigmas": TraceMask.create_empty(data_dim=(LVM_NFIBERS, LVM_NCOLS), slitmap=SLITMAP, samples_columns=columns)
+        }
 
         expnums = expnums_qrtz if camera[0] == "z" else expnums_ldls
         select_lamp = MASTER_CON_LAMPS[camera[0]]
         counts_threshold = counts_thresholds[select_lamp]
 
+        # first fibers fitting (guess using pure Gaussian profiles) using first exposure in sequence
+        dflat_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="d", imagetype="flat", camera=camera, expnum=expnums[0])
+        counts_guess_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="d", imagetype="counts_guess", camera=camera, expnum=expnums[0])
+        centroids_guess_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="d", imagetype="centroids_guess", camera=camera, expnum=expnums[0])
+        sigmas_guess_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="d", imagetype="sigmas_guess", camera=camera, expnum=expnums[0])
+        guess_paths = {
+            "counts": counts_guess_path,
+            "centroids": centroids_guess_path,
+            "sigmas": sigmas_guess_path
+        }
+        guess_paths_exist = [os.path.isfile(guess_path) for guess_path in guess_paths.values()]
+        if skip_done and all(guess_paths_exist):
+            for guess_path in guess_paths.values():
+                log.info(f"skipping {guess_path}, file already exist")
+        else:
+            log.info(f"going to trace all fibers in {camera}")
+            image_tasks.guess_fibers_params(in_image=dflat_path, out_fiber_guess=guess_paths,
+                                            coadd=20, counts_range=[0.0, np.inf], centroids_range=[-2.0, +2.0], fwhms_range=[2.0, 3.5],
+                                            ncolumns=cent_guess_ncolumns)
+
         # select fibers in current spectrograph
         fibermap = SLITMAP[SLITMAP["spectrographid"] == int(camera[1])]
 
+        models = []
         exposed_stds, unexposed_stds = get_exposed_std_fiber(mjd=mjd, expnums=expnums, camera=camera)
-        for iexp, (expnum, (std_fiberid, block_idxs)) in enumerate(exposed_stds.items()):
+        for expnum, (std_fiberid, block_idxs) in exposed_stds.items():
             # define paths
             dflat_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="d", imagetype="flat", camera=camera, expnum=expnum)
             lflat_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="l", imagetype="flat", camera=camera, expnum=expnum)
-            flux_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="d", imagetype="flux", camera=camera, expnum=expnum)
-            cent_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="d", imagetype="cent", camera=camera, expnum=expnum)
-            cent_guess_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="d", imagetype="cent_guess", camera=camera, expnum=expnum)
             dstray_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="d", imagetype="stray", camera=camera, expnum=expnum)
-            fwhm_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="d", imagetype="fwhm", camera=camera, expnum=expnum)
-
-            # first centroids trace
-            if skip_done and os.path.isfile(cent_guess_path):
-                log.info(f"skipping {cent_guess_path}, file already exist")
-            else:
-                log.info(f"going to trace all fibers in {camera}")
-                centroids, img = image_tasks.trace_centroids(in_image=dflat_path, out_trace_cent=cent_guess_path,
-                                                            correct_ref=True, median_box=(1,10), coadd=20, counts_threshold=counts_threshold,
-                                                            max_diff=5.0, guess_fwhm=2.5, method="gauss", ncolumns=cent_guess_ncolumns,
-                                                            fit_poly=fit_poly, poly_deg=poly_deg_cent,
-                                                            interpolate_missing=True)
 
             # subtract stray light only if imagetyp is flat
             if skip_done and os.path.isfile(lflat_path):
                 log.info(f"skipping {lflat_path}, file already exist")
             else:
                 image_tasks.subtract_straylight(in_image=dflat_path, out_image=lflat_path, out_stray=dstray_path,
-                                                in_cent_trace=cent_guess_path, parallel=1, **STRAYLIGHT_PARS)
+                                                in_cent_trace=guess_paths["centroids"], parallel=1, **STRAYLIGHT_PARS)
 
-            if skip_done and os.path.isfile(cent_path) and os.path.isfile(flux_path) and os.path.isfile(fwhm_path):
-                log.info(f"skipping {cent_path}, {flux_path} and {fwhm_path}, file already exist")
-            else:
-                log.info(f"going to trace std fiber {std_fiberid} in {camera} within {block_idxs = }")
-                centroids, trace_cent_fit, trace_flux_fit, trace_fwhm_fit, img_stray, model, mratio = image_tasks.trace_fibers(
-                    in_image=lflat_path,
-                    out_trace_amp=flux_path, out_trace_cent=cent_path, out_trace_fwhm=fwhm_path,
-                    in_trace_cent_guess=cent_guess_path,
-                    median_box=(1,10), coadd=20,
-                    counts_threshold=counts_threshold, max_diff=5.0, guess_fwhm=2.5,
-                    ncolumns=trace_full_ncolumns, iblocks=block_idxs, fwhm_limits=(1.0, 3.5),
-                    fit_poly=fit_poly, interpolate_missing=False, poly_deg=(poly_deg_amp, poly_deg_cent, poly_deg_width)
-                )
+            log.info(f"going to trace std fiber {std_fiberid} in {camera} within {block_idxs = }")
+            fitted_params, img, model, _ = image_tasks.fit_fibers_params(in_image=lflat_path, in_fiber_guess=guess_paths, coadd=20,
+                                                                            ncolumns=trace_full_ncolumns, iblocks=block_idxs,
+                                                                            measuring_conf=FIBER_MEASURING_CONFIG, smoothing_conf=FIBER_SMOOTHING_CONFIG)
 
-                # update master traces
-                log.info(f"{camera = }, {expnum = }, {std_fiberid = }")
-                select_block = np.isin(fibermap["blockid"], [f"B{id+1}" for id in block_idxs])
-                if fit_poly:
-                    mamps[camera]._coeffs[select_block] = trace_flux_fit._coeffs[select_block]
-                    mcents[camera]._coeffs[select_block] = trace_cent_fit._coeffs[select_block]
-                    mwidths[camera]._coeffs[select_block] = trace_fwhm_fit._coeffs[select_block]
-                else:
-                    mamps[camera]._coeffs = None
-                    mcents[camera]._coeffs = None
-                    mwidths[camera]._coeffs = None
-                mamps[camera]._data[select_block] = trace_flux_fit._data[select_block]
-                mcents[camera]._data[select_block] = trace_cent_fit._data[select_block]
-                mwidths[camera]._data[select_block] = trace_fwhm_fit._data[select_block]
-                mamps[camera]._mask[select_block] = trace_flux_fit._mask[select_block]
-                mcents[camera]._mask[select_block] = trace_cent_fit._mask[select_block]
-                mwidths[camera]._mask[select_block] = trace_fwhm_fit._mask[select_block]
-                if iexp == 0:
-                    mamps[camera]._poly_kind = trace_flux_fit._poly_kind
-                    mamps[camera]._poly_deg = trace_flux_fit._poly_deg
-                    mamps[camera].setHeader(trace_flux_fit._header)
-                    mamps[camera].setSlitmap(trace_flux_fit._slitmap)
+            # update master traces
+            log.info(f"{camera = }, {expnum = }, {std_fiberid = }")
+            for name in fitted_params:
+                fibers_params[name].setHeader(img._header)
 
-                    mcents[camera]._poly_kind = trace_cent_fit._poly_kind
-                    mcents[camera]._poly_deg = trace_cent_fit._poly_deg
-                    mcents[camera].setHeader(trace_cent_fit._header)
-                    mcents[camera].setSlitmap(trace_cent_fit._slitmap)
+                fibers_param = fibers_params[name]
+                fitted_param = fitted_params[name]
+                for iblock in block_idxs:
+                    fibers_param.set_block(iblock=iblock, from_instance=fitted_param.get_block(iblock))
 
-                    mwidths[camera]._poly_kind = trace_fwhm_fit._poly_kind
-                    mwidths[camera]._poly_deg = trace_fwhm_fit._poly_deg
-                    mwidths[camera].setHeader(trace_fwhm_fit._header)
-                    mwidths[camera].setSlitmap(trace_fwhm_fit._slitmap)
+            # store blocks models
+            models.append(model)
 
-        mamp_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, camera=camera, kind="mamp")
-        mcent_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, camera=camera, kind="mtrace")
-        mwidth_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, camera=camera, kind="mwidth")
-        mmodel_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, camera=camera, kind="mmodel")
-        mratio_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, camera=camera, kind="mratio")
-        os.makedirs(os.path.dirname(mamp_path), exist_ok=True)
-        if skip_done and os.path.isfile(mcent_path) and os.path.isfile(mamp_path) and os.path.isfile(mwidth_path):
-            log.info(f"skipping {mcent_path}, {mamp_path} and {mwidth_path}, files already exist")
-        else:
+        for name, fibers_param in fibers_params.items():
+            fibers_param.setHeader(img._header)
             # masking bad fibers
             bad_fibers = fibermap["fibstatus"] == 1
-            mamps[camera]._mask[bad_fibers] = True
-            mcents[camera]._mask[bad_fibers] = True
-            mwidths[camera]._mask[bad_fibers] = True
+            fibers_param._mask[bad_fibers] = True
             # masking untraced standard fibers (two cases: 1. not set for tracing and 2. flagged during tracing)
             untraced_fibers = np.isin(fibermap["orig_ifulabel"].value, unexposed_stds)
-            mamps[camera]._mask[untraced_fibers] = True
-            mcents[camera]._mask[untraced_fibers] = True
-            mwidths[camera]._mask[untraced_fibers] = True
-            failed_fibers = (bn.nansum(mcents[camera]._data, axis=1) == 0)|(bn.nansum(mwidths[camera]._data, axis=1) == 0)
-            mamps[camera]._mask[failed_fibers] = True
-            mcents[camera]._mask[failed_fibers] = True
-            mwidths[camera]._mask[failed_fibers] = True
-
+            fibers_param._mask[untraced_fibers] = True
             # interpolate master traces in missing fibers
-            if fit_poly:
-                mamps[camera].interpolate_coeffs()
-                mcents[camera].interpolate_coeffs()
-                mwidths[camera].interpolate_coeffs()
-            else:
-                mamps[camera].interpolate_data(axis="Y")
-                mcents[camera].interpolate_data(axis="Y")
-                mwidths[camera].interpolate_data(axis="Y")
+            fibers_param.interpolate_data(axis="Y", reset_mask=True)
 
-            # reset mask to propagate broken fibers
-            mamps[camera]._mask[bad_fibers] = True
-            mcents[camera]._mask[bad_fibers] = True
-            mwidths[camera]._mask[bad_fibers] = True
+            fibers_param.writeFitsData(path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, camera=camera, kind=f"m{name}"))
 
-            # save master traces
-            mamps[camera].writeFitsData(mamp_path)
-            mcents[camera].writeFitsData(mcent_path)
-            mwidths[camera].writeFitsData(mwidth_path)
-
-            # eval model continuum and ratio
-            model, ratio = img_stray.eval_fiber_model(mcents[camera], mwidths[camera], mamps[camera])
-            model.writeFitsData(mmodel_path)
-            ratio.writeFitsData(mratio_path)
+        # store final model and ratio
+        model = image_tasks.combineImages(images=models, method="sum", normalize=False, background_subtract=False, replace_with_nan=False)
+        model.writeFitsData(path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, camera=camera, kind=f"mmodel"))
+        (model / img).writeFitsData(path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, camera=camera, kind=f"mratio"))
 
 
 def create_dome_fiberflats(mjd, expnums_ldls=None, expnums_qrtz=None, cals_mjd=None, use_longterm_cals=True, kind="longterm", skip_done=True, dry_run=False):
@@ -1604,8 +1559,8 @@ def create_dome_fiberflats(mjd, expnums_ldls=None, expnums_qrtz=None, cals_mjd=N
                 log.info(f"skipping {xflat_path}, file already exists")
             else:
                 image_tasks.extract_spectra(in_image=cflat_path, out_rss=xflat_path,
-                                            in_trace=calibs["trace"][camera],
-                                            in_fwhm=calibs["width"][camera],
+                                            in_trace=calibs["centroids"][camera],
+                                            in_sigma=calibs["sigmas"][camera],
                                             in_model=calibs["model"][camera])
             xflat_paths.append(xflat_path)
         xflat = RSS.from_spectrographs(*[RSS.from_file(xflat_path) for xflat_path in xflat_paths])
@@ -1616,12 +1571,12 @@ def create_dome_fiberflats(mjd, expnums_ldls=None, expnums_qrtz=None, cals_mjd=N
             mflat_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, kind="nfiberflat_dome", camera=channel)
 
         # group calibrations in channels to build lvmFlat products
-        for flavor in {"trace", "width", "wave", "lsf"}:
+        for flavor in {"centroids", "sigmas", "wave", "lsf"}:
             calibs_grp[flavor] = group_calib_paths(calibs[flavor])
 
         # read calibrations
-        mcent = TraceMask.from_spectrographs(*[TraceMask.from_file(mtrace_path) for mtrace_path in calibs_grp["trace"][channel]])
-        mwidth = TraceMask.from_spectrographs(*[TraceMask.from_file(mwidth_path) for mwidth_path in calibs_grp["width"][channel]])
+        mcent = TraceMask.from_spectrographs(*[TraceMask.from_file(mtrace_path) for mtrace_path in calibs_grp["centroids"][channel]])
+        mwidth = TraceMask.from_spectrographs(*[TraceMask.from_file(mwidth_path) for mwidth_path in calibs_grp["sigmas"][channel]])
         mwave = TraceMask.from_spectrographs(*[TraceMask.from_file(mwave_path) for mwave_path in calibs_grp["wave"][channel]])
         mlsf = TraceMask.from_spectrographs(*[TraceMask.from_file(mlsf_path) for mlsf_path in calibs_grp["lsf"][channel]])
         # normalize by median fiber
@@ -1705,7 +1660,7 @@ def create_twilight_fiberflats(mjd: int, expnums: List[int] = None, cals_mjd: in
         return
 
     # 2D reduction of twilight sequence
-    reduce_2d(mjd=mjd, calibrations=calibs, expnums=frames.expnum.unique(), reject_cr=False,
+    reduce_2d(mjd=mjd, calibrations=calibs, expnums=frames.expnum.unique(), reject_cr=True,
               add_astro=False, sub_straylight=True, skip_done=skip_done, **STRAYLIGHT_PARS)
 
     for flat in frames.to_dict("records"):
@@ -1719,12 +1674,12 @@ def create_twilight_fiberflats(mjd: int, expnums: List[int] = None, cals_mjd: in
             log.info(f"skipping {xflat_path}, file already exist")
         else:
             image_tasks.extract_spectra(in_image=lflat_path, out_rss=xflat_path,
-                                        in_trace=calibs["trace"][camera],
-                                        in_fwhm=calibs["width"][camera],
+                                        in_trace=calibs["centroids"][camera],
+                                        in_sigma=calibs["sigmas"][camera],
                                         in_model=calibs["model"][camera])
 
     # group calibs
-    for flavor in ["trace", "width", "wave", "lsf"]:
+    for flavor in ["centroids", "sigmas", "wave", "lsf"]:
         calibs[flavor] = group_calib_paths(calibs[flavor])
 
     # decompose twilight spectra into sun continuum and twilight components
@@ -1775,7 +1730,7 @@ def create_twilight_fiberflats(mjd: int, expnums: List[int] = None, cals_mjd: in
         combine_twilight_sequence(
             in_twilights=xtwi_paths,
             in_fflats=fflat_paths, out_mflat=mflat_path, out_lvmflats=lvmflat_paths,
-            in_cents=calibs["trace"][channel], in_widths=calibs["width"][channel],
+            in_cents=calibs["centroids"][channel], in_widths=calibs["sigmas"][channel],
             in_waves=calibs["wave"][channel], in_lsfs=calibs["lsf"][channel])
 
 
@@ -1802,7 +1757,7 @@ def create_fiberflats_corrections(cals_mjd: int, science_mjds: Union[int, List[i
 
     # 2D and 1D reduction of science exposures
     for sci_mjd in science_mjds:
-        reduce_2d(mjd=sci_mjd, calibrations=calibs, expnums=science_expnums, reject_cr=False, add_astro=True, sub_straylight=True, skip_done=skip_done)
+        reduce_2d(mjd=sci_mjd, calibrations=calibs, expnums=science_expnums, reject_cr=True, add_astro=True, sub_straylight=True, skip_done=skip_done)
         reduce_1d(mjd=sci_mjd, calibrations=calibs, expnums=science_expnums, sub_straylight=True, skip_done=skip_done)
 
     for channel in "brz":
@@ -1814,8 +1769,9 @@ def create_fiberflats_corrections(cals_mjd: int, science_mjds: Union[int, List[i
             in_sciences=wframe_paths,
             in_mflat=calibs["fiberflat_twilight"][channel],
             out_mflat=calibs["fiberflat_twilight"][channel],
-            groupby="spec",
-            sky_cwave=sky_cwaves[channel], cont_cwave=cont_cwaves[channel],
+            groupby=groupby,
+            guess_coeffs=[1,0,0,0], fixed_coeffs=[0,1,2,3],
+            sky_cwave=sky_cwaves[channel], cont_cwave=cont_cwaves[channel], dwave=20.0,
             quantiles=quantiles, sky_fibers_only=sky_fibers_only,
             nsigma=nsigma, comb_method=comb_method,
             force_correction=force_correction,
@@ -1930,8 +1886,8 @@ def create_wavelengths(mjd, expnums=None, cals_mjd=None, use_longterm_cals=True,
             log.info(f"skipping extracted arc {xarc_path}, file already exists")
         else:
             image_tasks.extract_spectra(in_image=carc_path, out_rss=xarc_path,
-                                        in_trace=calibs["trace"][camera],
-                                        in_fwhm=calibs["width"][camera],
+                                        in_trace=calibs["centroids"][camera],
+                                        in_sigma=calibs["sigmas"][camera],
                                         in_model=calibs["model"][camera])
 
         # fit wavelength solution

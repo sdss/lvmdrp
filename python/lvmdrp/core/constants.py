@@ -105,14 +105,14 @@ CALIBRATION_NEEDS = {
     "bias": ["pixmask"],
     "pixflat": ["pixmask", "bias", "dark"],
     "trace": ["pixmask", "pixflat", "bias"],
-    "wave": ["pixmask", "pixflat", "bias", "trace", "width", "model"],
-    "dome": ["pixmask", "pixflat", "bias", "trace", "width", "model", "wave", "lsf"],
-    "twilight": ["pixmask", "pixflat", "bias", "trace", "width", "model", "wave", "lsf"],
-    "object": ["pixmask", "pixflat", "bias", "trace", "width", "model", "wave", "lsf"],
+    "wave": ["pixmask", "pixflat", "bias", "centroids", "sigmas", "model"],
+    "dome": ["pixmask", "pixflat", "bias", "centroids", "sigmas", "model", "wave", "lsf"],
+    "twilight": ["pixmask", "pixflat", "bias", "centroids", "sigmas", "model", "wave", "lsf"],
+    "object": ["pixmask", "pixflat", "bias", "centroids", "sigmas", "model", "wave", "lsf", "fiberflat_twilight"],
 }
-CALIBRATION_NAMES = {"pixmask", "pixflat", "bias", "trace_guess", "trace", "width", "amp", "model", "wave", "lsf", "fiberflat_dome", "fiberflat_twilight"}
+CALIBRATION_NAMES = {"pixmask", "pixflat", "bias", "trace_guess", "centroids", "sigmas", "counts", "model", "wave", "lsf", "fiberflat_dome", "fiberflat_twilight"}
 CALIBRATION_MATCH = {
-    "trace": ["trace", "width", "model"],
+    "trace": ["centroids", "sigmas", "model"],
     "wave": ["wave", "lsf"],
     "dome": ["fiberflat_dome"],
     "twilight": ["fiberflat_twilight"]}
@@ -126,6 +126,12 @@ SPEC_CHANNELS = {"b": (3600, 5800), "r": (5775, 7570), "z": (7520, 9800)}
 
 ARC_LAMPS = ["NEON", "HGNE", "ARGON", "XENON"]
 CON_LAMPS = ["LDLS", "QUARTZ"]
+
+# 2D image constants
+LVM_NOVER = 17
+LVM_NPRE = 3
+LVM_NROWS = 4080
+LVM_NCOLS = 4086
 
 LVM_NBLOCKS = 18
 LVM_BLOCKSIZE = 36

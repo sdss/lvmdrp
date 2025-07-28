@@ -1459,7 +1459,7 @@ def reduce_2d(mjd, calibrations, expnums=None, exptime=None, cameras=CAMERAS,
                         nsigma=1.0, smoothing=40, median_box=None)
                     straylight_pars.update(cfg_straylight)
                     subtract_straylight(in_image=dframe_path, out_image=lframe_path, out_stray=lstr_path,
-                                        in_cent_trace=calibrations["trace"][camera], parallel=parallel_run, **straylight_pars)
+                                        in_cent_trace=calibrations["centroids"][camera], parallel=parallel_run, **straylight_pars)
 
 
 def reduce_1d(mjd, calibrations, expnums=None, cameras=CAMERAS, replace_with_nan=True, sub_straylight=True, skip_done=True, keep_ancillary=False):
@@ -1480,15 +1480,15 @@ def reduce_1d(mjd, calibrations, expnums=None, cameras=CAMERAS, replace_with_nan
         os.makedirs(os.path.dirname(xframe_path), exist_ok=True)
 
         # define calibration frames paths
-        mtrace_path = calibrations["trace"][sci.camera]
-        mwidth_path = calibrations["width"][sci.camera]
+        mtrace_path = calibrations["centroids"][sci.camera]
+        mwidth_path = calibrations["sigmas"][sci.camera]
         mmodel_path = calibrations["model"][sci.camera]
 
         # extract 1d spectra
         if skip_done and os.path.isfile(xframe_path):
             continue
         else:
-            extract_spectra(in_image=dframe_path, out_rss=xframe_path, in_trace=mtrace_path, in_fwhm=mwidth_path, in_model=mmodel_path, method="optimal", parallel=1)
+            extract_spectra(in_image=dframe_path, out_rss=xframe_path, in_trace=mtrace_path, in_sigma=mwidth_path, in_model=mmodel_path, method="optimal", parallel=1)
 
     frames = frames.drop_duplicates(subset=["expnum"])
     for _, sci in frames.iterrows():
@@ -1585,7 +1585,7 @@ def science_reduction(expnum: int,
         version=drpver,
         longterm_cals=use_longterm_cals,
         from_sanbox=from_sandbox,
-        flavors=["pixmask", "pixflat", "bias", "trace", "width", "model", "wave", "lsf", "fiberflat_twilight"],
+        flavors=["pixmask", "pixflat", "bias", "centroids", "sigmas", "model", "wave", "lsf", "fiberflat_twilight"],
         return_mjd=True)
 
     log.info(f"calibrations parameters: {cals_mjd = }, {use_longterm_cals = }, {from_sandbox = }")
@@ -1624,13 +1624,13 @@ def science_reduction(expnum: int,
             frame_path = path.full("lvm_frame", drpver=drpver, tileid=sci_tileid, mjd=sci_mjd, expnum=sci_expnum, kind=f"Frame-{sci_camera}")
 
             # define calibration frames paths
-            mtrace_path = calibs["trace"][sci_camera]
-            mwidth_path = calibs["width"][sci_camera]
+            mtrace_path = calibs["centroids"][sci_camera]
+            mwidth_path = calibs["sigmas"][sci_camera]
             mmodel_path = calibs["model"][sci_camera]
 
             # extract 1d spectra
             with Timer(name='Extract '+xsci_path, logger=log.info):
-                extract_spectra(in_image=lsci_path, out_rss=xsci_path, in_trace=mtrace_path, in_fwhm=mwidth_path,
+                extract_spectra(in_image=lsci_path, out_rss=xsci_path, in_trace=mtrace_path, in_sigma=mwidth_path,
                                 in_model=mmodel_path, method=extraction_method, parallel=parallel_run)
 
     # per channel reduction
