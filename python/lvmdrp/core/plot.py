@@ -13,8 +13,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 import bottleneck as bn
 from astropy.visualization import AsinhStretch, ImageNormalize, PercentileInterval, simple_norm
+from mpl_toolkits.axes_grid1.axes_divider import make_axes_locatable
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 import warnings
+
+from lvmdrp.core.constants import LVM_NCOLS, LVM_NROWS
 
 warnings.filterwarnings(
     action="ignore",
@@ -680,6 +683,44 @@ def plot_wavesol_lsf(xpix, lsf, lines_pixels, wave_poly, wave_coeffs, lsf_poly, 
     return ax
 
 
+def plot_fiber_residuals(model, img, centroids, iblock, X=None, Y=None, axs=None):
+
+    centroids_block = centroids.get_block(iblock)
+    camera = img._header["CCD"]
+    exposure = img._header["EXPOSURE"]
+
+    data = img._data.copy()
+    data[np.isnan(model._data)] = np.nan
+    residuals = (model._data - img._data)
+    residuals = residuals / np.nansum(data, axis=0)
+    if X is None or Y is None:
+        x_pixels = np.arange(LVM_NCOLS, dtype="int")
+        y_pixels = np.arange(LVM_NROWS, dtype="int")
+        X, Y = np.meshgrid(x_pixels, y_pixels, indexing="xy")
+
+    if axs is None:
+        nbins = 5
+        fig, axs = plt.subplots(nbins, 1, figsize=(15,7), sharey=True, sharex=True, layout="constrained")
+        fig.suptitle(f"Isolated fibers in {exposure = } | {camera = } | {iblock = }", fontsize="xx-large")
+        fig.supxlabel("Delta Y (pixel)", fontsize="xx-large")
+        fig.supylabel("(model - data) / column counts", fontsize="xx-large")
+        plt.ylim(-0.07, 0.07)
+    else:
+        nbins = axs.size
+
+    edges = np.histogram_bin_edges(X[0], nbins)
+    bins = np.digitize(X[0], edges, right=False)
+    ys = np.nansum(centroids_block._data, axis=0) - Y
+    for i in range(nbins):
+        axs[i].plot(ys[:, bins==i+1].ravel(), residuals[:, bins==i+1].ravel(), ".", ms=7, mew=0, color="tab:blue")
+        axs[i].set_title(f"X-bin: [{edges[i]}, {edges[i+1]})", fontsize="x-large", loc="left")
+        axs[i].axhline(ls="--", lw=1, color="0.2")
+        axs[i].axhline(-0.01, ls=":", lw=1, color="0.2")
+        axs[i].axhline(+0.01, ls=":", lw=1, color="0.2")
+
+    return axs
+
+
 def plot_fiber_thermal_shift(columns, column_shifts, median_shift, std_shift, ax=None, labels=False):
     """"Plots the thermal shifts measured in the fiber centroids"""
     if ax is None:
@@ -692,7 +733,8 @@ def plot_fiber_thermal_shift(columns, column_shifts, median_shift, std_shift, ax
     ax.set_title("Y shifts for each column")
     ax.set_xlabel("X (pixel)")
     ax.set_ylabel("Y shift (pixel)")
-    ax.set_ylim(median_shift-4*std_shift, median_shift+4*std_shift)
+    if std_shift == 0:
+        ax.set_ylim(median_shift-4*std_shift, median_shift+4*std_shift)
 
     if labels:
         ax.annotate(f"mean: {median_shift:.2f}", (0.9, 0.9), xycoords="axes fraction", ha="right", va="top", color="tab:red")

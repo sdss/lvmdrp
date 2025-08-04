@@ -3,9 +3,12 @@
 
 import os
 import numpy
+import bottleneck as bn
+from copy import deepcopy as copy
 from astropy.io import fits as pyfits
 from astropy.table import Table
 from lvmdrp.core.fiberrows import FiberRows
+from lvmdrp.core import plot
 
 
 class TraceMask(FiberRows):
@@ -26,8 +29,9 @@ class TraceMask(FiberRows):
         """
         header = None
         data, error, mask = None, None, None
-        coeffs, poly_kind, poly_deg = None, None, None
+        coeffs, smoothing_kind = None, None
         samples = None
+        samples_error = None
         slitmap = None
         with pyfits.open(in_tracemask, uint=True, do_not_scale_image_data=True, memmap=False) as hdus:
             header = hdus["PRIMARY"].header
@@ -39,15 +43,26 @@ class TraceMask(FiberRows):
                 if hdu.name == "BADPIX":
                     mask = hdu.data.astype("bool")
                 if hdu.name == "SAMPLES":
-                    samples = Table(hdu.data)
+                    samples = Table.read(hdu)
+                if hdu.name == "SAMPLES_ERROR":
+                    samples_error = Table.read(hdu)
                 if hdu.name == "COEFFS":
                     coeffs = hdu.data.astype("float32")
-                    poly_kind = header.get("POLYKIND")
-                    poly_deg = header.get("POLYDEG")
+                    smoothing_kind = header.get("SMOOKIND")
                 if hdu.name == "SLITMAP":
                     slitmap = hdu
 
-            trace = cls(data=data, error=error, mask=mask, slitmap=slitmap, samples=samples, coeffs=coeffs, poly_kind=poly_kind, poly_deg=poly_deg, header=header)
+            trace = cls(
+                data=data,
+                header=header,
+                error=error,
+                mask=mask,
+                slitmap=slitmap,
+                samples=samples,
+                samples_error=samples_error,
+                coeffs=coeffs,
+                smoothing_kind=smoothing_kind
+            )
 
         return trace
 
@@ -59,6 +74,8 @@ class TraceMask(FiberRows):
         mask=None,
         slitmap=None,
         samples=None,
+        samples_error=None,
+        samples_columns=None,
         shape=None,
         size=None,
         arc_position_x=None,
@@ -66,26 +83,26 @@ class TraceMask(FiberRows):
         good_fibers=None,
         fiber_type=None,
         coeffs=None,
-        poly_kind=None,
-        poly_deg=None
+        smoothing_kind=None
     ):
         FiberRows.__init__(
             self,
-            data,
-            header,
-            error,
-            mask,
-            slitmap,
-            samples,
-            shape,
-            size,
-            arc_position_x,
-            arc_position_y,
-            good_fibers,
-            fiber_type,
-            coeffs,
-            poly_kind,
-            poly_deg
+            data=data,
+            header=header,
+            error=error,
+            mask=mask,
+            slitmap=slitmap,
+            samples=samples,
+            samples_error=samples_error,
+            samples_columns=samples_columns,
+            shape=shape,
+            size=size,
+            arc_position_x=arc_position_x,
+            arc_position_y=arc_position_y,
+            good_fibers=good_fibers,
+            fiber_type=fiber_type,
+            coeffs=coeffs,
+            smoothing_kind=smoothing_kind
         )
 
     def getRound(self):
@@ -99,16 +116,6 @@ class TraceMask(FiberRows):
         """
         round = numpy.round(self._data).astype("int16")  # round the traces to integer
         return round
-
-    def getFiberDist(self, slice):
-        cut = self._data[:, slice]
-        dist = cut[1:] - cut[:-1]
-        if self._mask is not None:
-            slice_mask = self._mask[:, slice]
-            dist_mask = numpy.logical_and(slice_mask[1:], slice_mask[:-1])
-            return dist, dist_mask
-        else:
-            return dist, None
 
     def getPixelCoor(self):
         x_cor = numpy.zeros((self._nfibers, self._data.shape[1]), dtype="int16")
@@ -139,10 +146,11 @@ class TraceMask(FiberRows):
             hdus.append(pyfits.ImageHDU(self._mask.astype("uint8"), name="BADPIX"))
         if self._samples is not None:
             hdus.append(pyfits.BinTableHDU(self._samples, name="SAMPLES"))
+        if self._samples_error is not None:
+            hdus.append(pyfits.BinTableHDU(self._samples_error, name="SAMPLES_ERROR"))
         if self._coeffs is not None:
             hdus.append(pyfits.ImageHDU(self._coeffs.astype("float32"), name="COEFFS"))
-            hdus[0].header["POLYKIND"] = (self._poly_kind, "polynomial kind")
-            hdus[0].header["POLYDEG"] = (self._poly_deg, "polynomial degree")
+            hdus[0].header["SMOOKIND"] = (self._smoothing_kind, "smoothing kind")
             hdus[0].update_header()
         if self._slitmap is not None:
             hdus.append(pyfits.BinTableHDU(self._slitmap, name="SLITMAP"))
