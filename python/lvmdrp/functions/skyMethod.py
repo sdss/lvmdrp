@@ -1971,7 +1971,7 @@ def create_skysub_spectrum(hdu: fits.HDUList, tel: str,
         rmax = 1.5
 
         minimum = ksl_bisection(
-            fit_func, rmin, rmax, tol=0.001, maxiter=8, args=(lsci, uselsky)
+            fit_func, rmin, rmax, tol=0.001, maxiter=8, args=(np.nan_to_num(lsci), np.nan_to_num(uselsky))
         )
         log.info(f"Results {minimum} with wmin {wmin} and wmax {wmax}.")
 
