@@ -404,6 +404,12 @@ class RSS(FiberRows):
         mask_r = ((new_wave >= rss_r._wave[0]) & (new_wave <= rss_r._wave[-1])) & (~mask_overlap_br) & (~mask_overlap_rz)
         mask_z = ((new_wave >= rss_z._wave[0]) & (new_wave <= rss_z._wave[-1])) & (~mask_overlap_rz)
 
+        # propagate pixel mask
+        new_mask = numpy.logical_or.reduce(masks, axis=0)
+        masked_fibers = new_mask.all(axis=1)
+        new_mask[:, mask_overlap_br|mask_overlap_rz] = numpy.logical_and.reduce(masks[:, :, mask_overlap_br|mask_overlap_rz], axis=0)
+        new_mask[masked_fibers] = True
+
         # define weights for channel combination
         vars = errors ** 2
         log.info("combining channel data")
@@ -422,7 +428,6 @@ class RSS(FiberRows):
             new_data = bn.nansum(fluxes * weights, axis=0)
             new_lsf = bn.nansum(lsfs * weights, axis=0)
             new_error = numpy.sqrt(bn.nansum(vars, axis=0))
-            new_mask = (bn.nansum(masks, axis=0)>0)
             if rss._sky is not None:
                 new_sky = bn.nansum(skies * weights, axis=0)
             else:
@@ -452,7 +457,6 @@ class RSS(FiberRows):
             new_data = bn.nanmean(fluxes, axis=0)
             new_lsf = bn.nanmean(lsfs, axis=0)
             new_error = numpy.sqrt(bn.nanmean(vars, axis=0))
-            new_mask = bn.nansum(masks, axis=0).astype("bool")
             if skies.size != 0:
                 new_sky = bn.nansum(skies, axis=0)
             else:
