@@ -1584,7 +1584,7 @@ def science_reduction(expnum: int,
         mjd=sci_mjd,
         version=drpver,
         longterm_cals=use_longterm_cals,
-        from_sanbox=from_sandbox,
+        from_sandbox=from_sandbox,
         flavors=["pixmask", "pixflat", "bias", "centroids", "sigmas", "model", "wave", "lsf", "fiberflat_twilight"],
         return_mjd=True)
 

@@ -64,7 +64,7 @@ def mjd_from_expnum(expnum: Union[int, str, list, tuple]) -> List[int]:
     return [int(mjd)]
 
 
-def get_calib_paths(mjd, version=None, cameras="*", flavors=CALIBRATION_NAMES, longterm_cals=True, from_sanbox=False, return_mjd=False):
+def get_calib_paths(mjd, version=None, cameras="*", flavors=CALIBRATION_NAMES, longterm_cals=True, from_sandbox=False, return_mjd=False):
     """Returns a dictionary containing paths for calibration frames
 
     Parameters
@@ -79,7 +79,7 @@ def get_calib_paths(mjd, version=None, cameras="*", flavors=CALIBRATION_NAMES, l
         Only get paths for this calibrations, by default all available flavors
     longterm_cals : bool
         Whether to use long-term calibration frames or not, defaults to True
-    from_sanbox : bool, optional
+    from_sandbox : bool, optional
         Fall back option to pull calibrations from sandbox, by default False
 
     Returns
@@ -87,11 +87,11 @@ def get_calib_paths(mjd, version=None, cameras="*", flavors=CALIBRATION_NAMES, l
     calibs : dict[str, dict[str, str]]
         a dictionary containing calibrations for the given cameras
     """
-    if version is None and not from_sanbox:
+    if version is None and not from_sandbox:
         raise ValueError(f"You must provide a version string to get calibration paths, {version = } given")
 
     # make long-term if taking calibrations from sandbox (nightly calibrations are not stored in sandbox)
-    if from_sanbox:
+    if from_sandbox:
         longterm_cals = True
 
     cams = fnmatch.filter(CAMERAS, cameras)
@@ -105,7 +105,7 @@ def get_calib_paths(mjd, version=None, cameras="*", flavors=CALIBRATION_NAMES, l
 
     # define root path to pixel flats and masks
     # TODO: remove this once sdss-tree are updated with the corresponding species
-    if from_sanbox:
+    if from_sandbox:
         pixelmasks_path = os.path.join(MASTERS_DIR, "pixelmasks")
         path_species = "lvm_calib"
     else:
