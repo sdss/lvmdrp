@@ -2768,6 +2768,7 @@ def extract_spectra(
     rss.setHdrValue("NAXIS2", data.shape[0])
     rss.setHdrValue("NAXIS1", data.shape[1])
     rss.setHdrValue("DISPAXIS", 1, "axis of spectral dispersion")
+    rss.setHdrValue(f"HIERARCH {camera.upper()} FIBER SHIFT", numpy.round(median_shift, 4), "median fiber shift [pix]")
     rss.setHdrValue(f"HIERARCH {camera.upper()} FIBER CENT_MIN", numpy.round(bn.nanmin(trace_mask._data),4), "min. fiber centroid [pix]")
     rss.setHdrValue(f"HIERARCH {camera.upper()} FIBER CENT_MAX", numpy.round(bn.nanmax(trace_mask._data),4), "max. fiber centroid [pix]")
     rss.setHdrValue(f"HIERARCH {camera.upper()} FIBER CENT_AVG", numpy.round(bn.nanmean(trace_mask._data),4), "avg. fiber centroid [pix]")

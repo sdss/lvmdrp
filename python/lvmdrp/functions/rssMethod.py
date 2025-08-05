@@ -1714,6 +1714,9 @@ def apply_fiberflat(in_rss: str, out_frame: str, in_flat: str,
         slitmap=rss._slitmap,
         superflat=mflat._data
     )
+    rss._header[f"HIERARCH {channel.upper()}1 FIBERFLAT CORR"] =  (numpy.round(factor[0], 5), "fiberflat corr. spec. 1")
+    rss._header[f"HIERARCH {channel.upper()}2 FIBERFLAT CORR"] =  (numpy.round(factor[1], 5), "fiberflat corr. spec. 2")
+    rss._header[f"HIERARCH {channel.upper()}3 FIBERFLAT CORR"] =  (numpy.round(factor[2], 5), "fiberflat corr. spec. 3")
     lvmframe.set_header(orig_header=rss._header, flatname=os.path.basename(in_flat))
     lvmframe.writeFitsData(out_frame)
 
