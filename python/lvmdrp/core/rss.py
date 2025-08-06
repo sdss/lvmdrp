@@ -11,7 +11,7 @@ from astropy.table import Table
 from astropy.time import Time
 from astropy.coordinates import SkyCoord
 from astropy.coordinates import EarthLocation
-from astropy.stats import biweight_location
+from astropy.stats import biweight_location, biweight_scale
 from astropy import units as u
 
 from lvmdrp import log
@@ -366,6 +366,7 @@ class RSS(FiberRows):
         # optionally interpolate if the merged wavelengths are not monotonic
         fluxes, errors, masks, lsfs, skies, sky_errors = [], [], [], [], [], []
         skies_e, skies_w, sky_e_errors, sky_w_errors = [], [], [], []
+        fluxcals_sci, fluxcals_std = [], []
         if numpy.all(numpy.isclose(sampling, sampling[0], atol=1e-2)):
             log.info(f"current wavelength sampling: min = {sampling.min():.2f}, max = {sampling.max():.2f}")
             # extend rss._data to new_wave filling with NaNs
@@ -381,6 +382,8 @@ class RSS(FiberRows):
                 sky_e_errors.append(rss._sky_east_error)
                 skies_w.append(rss._sky_west)
                 sky_w_errors.append(rss._sky_west_error)
+                fluxcals_std.append(rss._fluxcal_std.to_pandas().values.T)
+                fluxcals_sci.append(rss._fluxcal_sci.to_pandas().values.T)
             fluxes = numpy.asarray(fluxes)
             errors = numpy.asarray(errors)
             masks = numpy.asarray(masks)
@@ -391,6 +394,8 @@ class RSS(FiberRows):
             sky_e_errors = numpy.asarray(sky_e_errors)
             skies_w = numpy.asarray(skies_w)
             sky_w_errors = numpy.asarray(sky_w_errors)
+            fluxcals_std = numpy.asarray(fluxcals_std)
+            fluxcals_sci = numpy.asarray(fluxcals_sci)
         else:
             log.error("merged wavelengths are not monotonic or uniform!")
             raise RuntimeError("merged wavelengths are not monotonic or uniform!")
@@ -452,6 +457,26 @@ class RSS(FiberRows):
                 new_skyw_error = numpy.sqrt(bn.nansum(sky_w_errors ** 2 * weights ** 2, axis=0))
             else:
                 new_skyw_error = None
+            if rss._fluxcal_std is not None:
+                std_selection = [numpy.where(rss._slitmap["orig_ifulabel"]==s)[0][0] for s in [rss._header[s[:-3]+"FIB"] for s in rss._fluxcal_std.colnames[:-2]] if s is not None]
+                w = numpy.full_like(fluxcals_std[:, :-2, :], fill_value=numpy.nan)
+                w[:, ~numpy.isnan(fluxcals_std[:, :-2, :]).all(axis=(0,2)), :] = weights[:, std_selection, :]
+                w = numpy.concatenate((w, biweight_location(w, axis=1, ignore_nan=True)[:, None, :], biweight_scale(w, axis=1, ignore_nan=True)[:, None, :]), axis=1)
+                a = bn.nansum(fluxcals_std * w, axis=0)
+                a[numpy.isnan(fluxcals_std).all(axis=(0,2)), :] = numpy.nan
+                new_fluxcal_std = Table(a.T, names=rss._fluxcal_std.colnames)
+            else:
+                new_fluxcal_std = None
+            if rss._fluxcal_sci is not None:
+                sci_selection = [numpy.where(rss._slitmap["fiberid"]==s)[0][0] for s in [rss._header.get(s[:-3]+"FIB") for s in rss._fluxcal_sci.colnames[:-2]] if s is not None]
+                w = numpy.full_like(fluxcals_sci[:, :-2, :], fill_value=numpy.nan)
+                w[:, ~numpy.isnan(fluxcals_sci[:, :-2, :]).all(axis=(0,2)), :] = weights[:, sci_selection, :]
+                w = numpy.concatenate((w, biweight_location(w, axis=1, ignore_nan=True)[:, None, :], biweight_scale(w, axis=1, ignore_nan=True)[:, None, :]), axis=1)
+                a = bn.nansum(fluxcals_sci * w, axis=0)
+                a[numpy.isnan(fluxcals_sci).all(axis=(0,2)), :] = numpy.nan
+                new_fluxcal_sci = Table(a.T, names=rss._fluxcal_sci.colnames)
+            else:
+                new_fluxcal_sci = None
         else:
             # channel-combine RSS data
             new_data = bn.nanmean(fluxes, axis=0)
@@ -481,6 +506,14 @@ class RSS(FiberRows):
                 new_skyw_error = numpy.sqrt(bn.nanmean(sky_w_errors ** 2, axis=0))
             else:
                 new_skyw_error = None
+            if rss._fluxcal_std is not None:
+                new_fluxcal_std = Table(bn.nanmean(fluxcals_std, axis=0).T, columns=rss._fluxcal_std.colnames)
+            else:
+                new_fluxcal_std = None
+            if rss._fluxcal_sci is not None:
+                new_fluxcal_sci = Table(bn.nanmean(fluxcals_sci, axis=0).T, columns=rss._fluxcal_sci.colnames)
+            else:
+                new_fluxcal_sci = None
 
         # create RSS
         new_hdr = rsss[0]._header.copy()
@@ -499,6 +532,8 @@ class RSS(FiberRows):
             sky_east_error=new_skye_error,
             sky_west=new_skyw,
             sky_west_error=new_skyw_error,
+            fluxcal_std=new_fluxcal_std,
+            fluxcal_sci=new_fluxcal_sci,
             header=new_hdr,
             slitmap=rsss[0]._slitmap
         )
@@ -1268,6 +1303,20 @@ class RSS(FiberRows):
             new_lsf[:, ipix:fpix+1] = self._lsf
         else:
             new_lsf = None
+        if self._fluxcal_std is not None:
+            fluxcal = self._fluxcal_std.to_pandas().values.T
+            new_fluxcal_std = numpy.full((fluxcal.shape[0], new_wave.size), numpy.nan, dtype=numpy.float32)
+            new_fluxcal_std[:, ipix:fpix+1] = fluxcal
+            new_fluxcal_std = Table(new_fluxcal_std.T, names=self._fluxcal_std.colnames)
+        else:
+            new_fluxcal_std = None
+        if self._fluxcal_sci is not None:
+            fluxcal = self._fluxcal_sci.to_pandas().values.T
+            new_fluxcal_sci = numpy.full((fluxcal.shape[0], new_wave.size), numpy.nan, dtype=numpy.float32)
+            new_fluxcal_sci[:, ipix:fpix+1] = fluxcal
+            new_fluxcal_sci = Table(new_fluxcal_sci.T, names=self._fluxcal_sci.colnames)
+        else:
+            new_fluxcal_sci = None
 
         # set new arrays
         self._data = new_data
@@ -1281,6 +1330,8 @@ class RSS(FiberRows):
         self._sky_error = new_sky_error
         self._lsf = new_lsf
         self._wave = new_wave
+        self._fluxcal_std = new_fluxcal_std
+        self._fluxcal_sci = new_fluxcal_sci
 
         return self
 
