@@ -20,7 +20,7 @@ from astropy.visualization import simple_norm
 from astropy.wcs import wcs
 from astropy import units as u
 import astropy.io.fits as fits
-from scipy import interpolate
+from scipy import interpolate, integrate
 from scipy import signal
 from tqdm import tqdm
 
@@ -3022,6 +3022,24 @@ def reprojectRSS_drp(
     rep.writeto(f"{out_path}/{out_name}_2d.fits", overwrite=True)
 
 
+def _gen_mexhat_basis(x, centroids, sigmas, fiber_radius, oversampling_factor):
+    dx = x[1, 0] - x[0, 0]
+    x_os = fp.oversample(x, oversampling_factor)
+    dx_os = dx / oversampling_factor
+
+    x_kernel = numpy.arange(0, 2*fiber_radius + dx_os, dx_os)
+    kernel = fp.fiber_profile(centroids=fiber_radius, radii=fiber_radius, x=x_kernel)
+    psfs = fp.gaussians((numpy.ones_like(centroids), centroids, sigmas), x_os.T, alpha=2, collapse=False)[0].T
+
+    profiles = signal.fftconvolve(psfs, kernel.T, mode="same", axes=0)
+    profiles /= integrate.trapezoid(profiles, x_os, axis=0)[None, :]
+
+    # reshape model into oversampled bins: (x, oversampling_factor)
+    profiles_binned = profiles.reshape((x.shape[0], oversampling_factor, x.shape[1]))
+    profiles = integrate.trapezoid(profiles_binned, dx=dx_os, axis=1)
+    return profiles
+
+
 def validate_extraction(in_image, in_cent, in_width, in_rss, plot_columns=[1000, 2000, 3000], display_plots=False):
     """Evaluates the extracted flux into the original 2D pixel grid
 
@@ -3058,68 +3076,35 @@ def validate_extraction(in_image, in_cent, in_width, in_rss, plot_columns=[1000,
     log.info(f"loading fiber parameters in {in_cent} and {in_width}")
     cent = TraceMask.from_file(in_cent)
     width = TraceMask.from_file(in_width)
-    width._data /= 2.354
 
     log.info(f"loading extracted flux in {in_rss}")
     rss = RSS.from_file(in_rss)
     rss._data = numpy.nan_to_num(rss._data)
 
-    ypix_cor = rss._slitmap[["spectrographid"] == specid][f"ypix_{channel}"]
-    ypix_ori = img._slitmap[["spectrographid"] == specid][f"ypix_{channel}"]
-    thermal_shift = ypix_cor - ypix_ori
-    log.info(f"fiber thermal shift in slitmap: {thermal_shift:.4f}")
-    cent._coeffs[:, 0] += thermal_shift
-    cent.eval_coeffs()
+    ypix_cor = rss._slitmap[rss._slitmap["spectrographid"] == specid][f"ypix_{channel}"]
+    ypix_ori = img._slitmap[img._slitmap["spectrographid"] == specid][f"ypix_{channel}"]
+    thermal_shift = (ypix_cor.astype("float32") - ypix_ori.astype("float32")).value
+    log.info(f"mean fiber thermal shift in slitmap: {thermal_shift.mean():.4f}")
+    cent._data[:] += thermal_shift[:, None]
 
     log.info(f"evaluating extracted flux into 2D pixel grid for {img._dim[1]} columns")
     x = numpy.arange(img._dim[0])
-    out = numpy.zeros(img._dim)
-    fact = numpy.sqrt(2.0 * numpy.pi)
+    x = numpy.repeat(x, cent._data.shape[0]).reshape(-1, cent._data.shape[0])
+    out = numpy.zeros(img._dim) + numpy.nan
 
-    fig, axs = create_subplots(to_display=display_plots, nrows=len(plot_columns), ncols=1, figsize=(15,2*len(plot_columns)), sharex=True, layout="constrained")
-    fig.supxlabel("X (pixels)", fontsize="x-large")
-    fig.supylabel("Relative residuals", fontsize="x-large")
-    for i in range(img._dim[1]):
-        A = (numpy.exp(-0.5 * ((x[:, None] - cent._data[:, i][None, :]) / abs(width._data[:, i][None, :])) ** 2) / (fact * abs(width._data[:, i][None, :])))
+    for i in tqdm(plot_columns):
+        A = _gen_mexhat_basis(x, cent._data[:, i], width._data[:, i], fiber_radius=1.4, oversampling_factor=100)
         spec = numpy.dot(A, rss._data[:, i])
         out[:, i] = spec
-        if i in plot_columns:
-            # axs[plot_columns.index(i)].errorbar(x, img._data[:, i], yerr=img._error[:, i], lw=1, elinewidth=1, color="tab:red", ecolor="0.2")
-            # axs[plot_columns.index(i)].step(x, spec, lw=1, color="tab:blue", where="mid")
 
-            axs[plot_columns.index(i)].axhspan(-0.01, 0.01, color="0.5", lw=0, alpha=0.5)
-            axs[plot_columns.index(i)].axhspan(-0.03, 0.03, color="0.5", lw=0, alpha=0.5)
-            axs[plot_columns.index(i)].axhspan(-0.05, 0.05, color="0.5", lw=0, alpha=0.5)
-            axs[plot_columns.index(i)].axhline(ls=":", color="0.2", lw=1)
-            axs[plot_columns.index(i)].fill_between(x, (spec-img._data[:, i]) / img._data[:, i], step="mid", lw=0, fc="tab:blue", alpha=0.5)
-            axs[plot_columns.index(i)].set_ylim(-0.1, +0.1)
+    model = copy(img)
+    model._data = out
+    model._error = None
+    model._mask = None
 
-    out_path = os.path.dirname(in_image)
-    out_name = os.path.basename(in_image).split(".fits")[0]
-    out_residual = os.path.join(out_path, f"{out_name}_residual.fits")
-    out_2dimage = os.path.join(out_path, f"{out_name}_2dimage.fits")
-    out_ratio = os.path.join(out_path, f"{out_name}_ratio.fits")
+    ratio = model / img
 
-    # fig, ax = create_subplots(to_display=display_plots, figsize=(15,5), layout="constrained")
-    # ax.axhspan(-0.01, 0.01, color="0.5", lw=0, alpha=0.5)
-    # ax.axhspan(-0.03, 0.03, color="0.5", lw=0, alpha=0.5)
-    # ax.axhspan(-0.05, 0.05, color="0.5", lw=0, alpha=0.5)
-    # ax.axhline(ls=":", color="0.2", lw=1)
-    # ax.plot(x, (out-img._data) / img._data, ".", lw=0, color="tab:blue")
-    # ax.set_ylim(-0.1, +0.1)
-    # save_fig(fig, product_path=out_2dimage, to_display=display_plots, figure_path="qa", label="2D_extracted_model")
-
-    log.info(f"writing residual to {out_residual}")
-    hdu = pyfits.PrimaryHDU(img._data - out)
-    hdu.writeto(out_residual, overwrite=True)
-
-    log.info(f"writing ratio to {out_ratio}")
-    hdu = pyfits.PrimaryHDU(out / img._data)
-    hdu.writeto(out_ratio, overwrite=True)
-
-    log.info(f"writing 2D model {out_2dimage}")
-    hdu = pyfits.PrimaryHDU(out)
-    hdu.writeto(out_2dimage, overwrite=True)
+    return model, ratio, img
 
 
 # TODO: for arcs take short exposures for bright lines & long exposures for faint lines
