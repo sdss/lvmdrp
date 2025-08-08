@@ -1639,8 +1639,7 @@ def science_reduction(expnum: int, use_longterm_cals: bool = False,
                                 camera=channel, imagetype=sci_imagetyp, expnum=expnum) for channel in "brz"]
 
         # #The model stellar atmosphere spectra selection
-        best_fit_models, model_to_gaia_median = model_selection(hsci_all_bands,
-                                                                GAIA_CACHE_DIR=MASTERS_DIR + '/gaia_cache')
+        model_selection(hsci_all_bands, GAIA_CACHE_DIR=MASTERS_DIR + '/gaia_cache')
         #
 
         for channel in "brz":
