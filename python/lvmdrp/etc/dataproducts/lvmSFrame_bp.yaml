@@ -67,6 +67,158 @@ hdu7:
   is_image: true
   shape: NWAVE x NFIBER
 hdu8:
+  name: FLUXCAL_STD
+  description: sensitivity from standard fibers in units of electron cm2 / erg
+  is_image: false
+  shape: BINARY FITS TABLE
+  columns:
+    STD1SEN:
+      name: STD1SEN
+      type: float32
+      unit: electron cm2 / erg
+      description: standard star 1
+    STD2SEN:
+      name: STD2SEN
+      type: float32
+      unit: electron cm2 / erg
+      description: standard star 2
+    STD3SEN:
+      name: STD3SEN
+      type: float32
+      unit: electron cm2 / erg
+      description: standard star 3
+    STD4SEN:
+      name: STD4SEN
+      type: float32
+      unit: electron cm2 / erg
+      description: standard star 4
+    STD5SEN:
+      name: STD5SEN
+      type: float32
+      unit: electron cm2 / erg
+      description: standard star 5
+    STD6SEN:
+      name: STD6SEN
+      type: float32
+      unit: electron cm2 / erg
+      description: standard star 6
+    STD7SEN:
+      name: STD7SEN
+      type: float32
+      unit: electron cm2 / erg
+      description: standard star 7
+    STD8SEN:
+      name: STD8SEN
+      type: float32
+      unit: electron cm2 / erg
+      description: standard star 8
+    STD9SEN:
+      name: STD9SEN
+      type: float32
+      unit: electron cm2 / erg
+      description: standard star 9
+    STD10SEN:
+      name: STD10SEN
+      type: float32
+      unit: electron cm2 / erg
+      description: standard star 10
+    STD11SEN:
+      name: STD11SEN
+      type: float32
+      unit: electron cm2 / erg
+      description: standard star 11
+    STD12SEN:
+      name: STD12SEN
+      type: float32
+      unit: electron cm2 / erg
+      description: standard star 12
+    MEAN_SENS:
+      name: MEAN_SENS
+      type: float32
+      unit: electron cm2 / erg
+      description: mean sensitivity
+    STDDEV_SENS:
+      name: STDDEV_SENS
+      type: float32
+      unit: electron cm2 / erg
+      description: standard deviation of sensitivity
+hdu9:
+  name: FLUXCAL_SCI
+  description: sensitivity in units of electron cm2 / erg from science fibers
+  is_image: false
+  shape: BINARY FITS TABLE
+  columns:
+    STD1SEN:
+      name: STD1SEN
+      type: float32
+      unit: electron cm2 / erg
+      description: standard star 1
+    STD2SEN:
+      name: STD2SEN
+      type: float32
+      unit: electron cm2 / erg
+      description: standard star 2
+    STD3SEN:
+      name: STD3SEN
+      type: float32
+      unit: electron cm2 / erg
+      description: standard star 3
+    STD4SEN:
+      name: STD4SEN
+      type: float32
+      unit: electron cm2 / erg
+      description: standard star 4
+    STD5SEN:
+      name: STD5SEN
+      type: float32
+      unit: electron cm2 / erg
+      description: standard star 5
+    STD6SEN:
+      name: STD6SEN
+      type: float32
+      unit: electron cm2 / erg
+      description: standard star 6
+    STD7SEN:
+      name: STD7SEN
+      type: float32
+      unit: electron cm2 / erg
+      description: standard star 7
+    STD8SEN:
+      name: STD8SEN
+      type: float32
+      unit: electron cm2 / erg
+      description: standard star 8
+    STD9SEN:
+      name: STD9SEN
+      type: float32
+      unit: electron cm2 / erg
+      description: standard star 9
+    STD10SEN:
+      name: STD10SEN
+      type: float32
+      unit: electron cm2 / erg
+      description: standard star 10
+    STD11SEN:
+      name: STD11SEN
+      type: float32
+      unit: electron cm2 / erg
+      description: standard star 11
+    STD12SEN:
+      name: STD12SEN
+      type: float32
+      unit: electron cm2 / erg
+      description: standard star 12
+    MEAN_SENS:
+      name: MEAN_SENS
+      type: float32
+      unit: electron cm2 / erg
+      description: mean sensitivity
+    STDDEV_SENS:
+      name: STDDEV_SENS
+      type: float32
+      unit: electron cm2 / erg
+      description: standard deviation of sensitivity
+hdu10:
   name: SLITMAP
   description: slitmap table describing fiber positions for this exposure
   is_image: false

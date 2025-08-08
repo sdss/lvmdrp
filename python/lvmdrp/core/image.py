@@ -2,7 +2,6 @@ from copy import deepcopy as copy
 from multiprocessing import Pool, cpu_count
 import warnings
 
-from mpl_toolkits.axes_grid1.axes_divider import make_axes_locatable
 from functools import partial
 from typing import List
 from tqdm import tqdm
