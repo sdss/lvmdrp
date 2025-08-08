@@ -3398,6 +3398,39 @@ class RSS(FiberRows):
 
         return x, y, z, coeffs, factor, science_g
 
+    def swap_fluxcal(self, method, inplace=True):
+        VALID_FLUXCAL_METHODS = ["SCI", "STD", "NONE"]
+        if method not in VALID_FLUXCAL_METHODS:
+            raise ValueError(f"Invalid value for 'method': {method}. Expected one of: {VALID_FLUXCAL_METHODS}")
+
+        rss = self if inplace else copy(self)
+        current_method = rss._header.get("FLUXCAL")
+        if current_method is None:
+            warnings.warn(f"No flux calibration has been applied. No need to swap to {method = }")
+            return rss
+        elif current_method == method:
+            warnings.warn(f"Flux calibration method is the same that is applied. No need to swap to {method = }")
+            return rss
+
+        # handle undoing flux calibration
+        sens_old = rss.get_fluxcal(source=current_method.lower())
+        rss *= sens_old["mean"]
+        if method == "NONE":
+            return rss
+
+        # handle swapping flux calibration method
+        sens_new = rss.get_fluxcal(source=method.lower())
+        if sens_old is None:
+            raise ValueError(f"No flux calibration table found for currently applied method: {current_method}")
+        if sens_new is None:
+            raise ValueError(f"No flux calibration table found for new method: {method}")
+
+        rss /= sens_new["mean"]
+
+        rss.setHdrValue("FLUXCAL", method)
+
+        return rss
+
     def writeFitsData(self, out_rss, replace_masked=True, include_wave=False):
         """Writes information from a RSS object into a FITS file.
 
