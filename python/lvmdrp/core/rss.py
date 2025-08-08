@@ -3769,20 +3769,22 @@ class lvmCFrame(lvmBaseProduct):
         sky_west = hdulist["SKY_WEST"].data
         sky_west_error = numpy.divide(1, hdulist["SKY_WEST_IVAR"].data, where=hdulist["SKY_WEST_IVAR"].data != 0, out=numpy.zeros_like(hdulist["SKY_WEST_IVAR"].data))
         sky_west_error = numpy.sqrt(sky_west_error)
+        fluxcal_std = Table.read(hdulist["FLUXCAL_STD"])
+        fluxcal_sci = Table.read(hdulist["FLUXCAL_SCI"])
         slitmap = Table.read(hdulist["SLITMAP"])
         return cls(data=data, error=error, mask=mask, header=header,
                    wave=wave, lsf=lsf,
                    sky_east=sky_east, sky_east_error=sky_east_error,
                    sky_west=sky_west, sky_west_error=sky_west_error,
-                   slitmap=slitmap)
+                   fluxcal_std=fluxcal_std, fluxcal_sci=fluxcal_sci, slitmap=slitmap)
 
     def __init__(self, data=None, error=None, mask=None, header=None, slitmap=None, wave=None, lsf=None,
-                 sky_east=None, sky_east_error=None, sky_west=None, sky_west_error=None, **kwargs):
+                 sky_east=None, sky_east_error=None, sky_west=None, sky_west_error=None, fluxcal_std=None, fluxcal_sci=None, **kwargs):
         lvmBaseProduct.__init__(self, data=data, error=error, mask=mask, header=header,
                      wave=wave, lsf=lsf,
                      sky_east=sky_east, sky_east_error=sky_east_error,
                      sky_west=sky_west, sky_west_error=sky_west_error,
-                     slitmap=slitmap)
+                     fluxcal_std=fluxcal_std, fluxcal_sci=fluxcal_sci, slitmap=slitmap)
 
         self._blueprint = dp.load_blueprint(name="lvmCFrame")
         self._template = dp.dump_template(dataproduct_bp=self._blueprint, save=False)
@@ -3826,6 +3828,8 @@ class lvmCFrame(lvmBaseProduct):
         self._template["SKY_EAST_IVAR"].data = numpy.divide(1, self._sky_east_error**2, where=self._sky_east_error != 0, out=numpy.zeros_like(self._sky_east_error))
         self._template["SKY_WEST"].data = self._sky_west
         self._template["SKY_WEST_IVAR"].data = numpy.divide(1, self._sky_west_error**2, where=self._sky_west_error != 0, out=numpy.zeros_like(self._sky_west_error))
+        self._template["FLUXCAL_STD"] = pyfits.BinTableHDU(data=self._fluxcal_std, name="FLUXCAL_STD")
+        self._template["FLUXCAL_SCI"] = pyfits.BinTableHDU(data=self._fluxcal_sci, name="FLUXCAL_SCI")
         self._template["SLITMAP"] = pyfits.BinTableHDU(data=self._slitmap, name="SLITMAP")
         self._template.verify("silentfix")
 
@@ -3852,14 +3856,18 @@ class lvmSFrame(lvmBaseProduct):
         sky = hdulist["SKY"].data
         sky_error = numpy.divide(1, hdulist["SKY_IVAR"].data, where=hdulist["SKY_IVAR"].data != 0, out=numpy.zeros_like(hdulist["SKY_IVAR"].data))
         sky_error = numpy.sqrt(sky_error)
+        fluxcal_std = Table.read(hdulist["FLUXCAL_STD"])
+        fluxcal_sci = Table.read(hdulist["FLUXCAL_SCI"])
         slitmap = Table.read(hdulist["SLITMAP"])
         return cls(data=data, error=error, mask=mask, header=header,
-                   wave=wave, lsf=lsf, sky=sky, sky_error=sky_error, slitmap=slitmap)
+                   wave=wave, lsf=lsf, sky=sky, sky_error=sky_error,
+                   fluxcal_std=fluxcal_std, fluxcal_sci=fluxcal_sci, slitmap=slitmap)
 
-    def __init__(self, data=None, error=None, mask=None, header=None, slitmap=None, wave=None, lsf=None, sky=None, sky_error=None, **kwargs):
+    def __init__(self, data=None, error=None, mask=None, header=None, slitmap=None, wave=None, lsf=None, sky=None, sky_error=None,
+                 fluxcal_std=None, fluxcal_sci=None, **kwargs):
         lvmBaseProduct.__init__(self, data=data, error=error, mask=mask, header=header,
-                     wave=wave, lsf=lsf,
-                     sky=sky, sky_error=sky_error, slitmap=slitmap)
+                     wave=wave, lsf=lsf, sky=sky, sky_error=sky_error,
+                     fluxcal_std=fluxcal_std, fluxcal_sci=fluxcal_sci, slitmap=slitmap)
 
         self._blueprint = dp.load_blueprint(name="lvmSFrame")
         self._template = dp.dump_template(dataproduct_bp=self._blueprint, save=False)
@@ -3899,6 +3907,8 @@ class lvmSFrame(lvmBaseProduct):
         self._template["LSF"].data = self._lsf
         self._template["SKY"].data = self._sky.astype("float32")
         self._template["SKY_IVAR"].data = numpy.divide(1, self._sky_error**2, where=self._sky_error != 0, out=numpy.zeros_like(self._sky_error))
+        self._template["FLUXCAL_STD"] = pyfits.BinTableHDU(data=self._fluxcal_std, name="FLUXCAL_STD")
+        self._template["FLUXCAL_SCI"] = pyfits.BinTableHDU(data=self._fluxcal_sci, name="FLUXCAL_SCI")
         self._template["SLITMAP"] = pyfits.BinTableHDU(data=self._slitmap, name="SLITMAP")
         self._template.verify("silentfix")
 
