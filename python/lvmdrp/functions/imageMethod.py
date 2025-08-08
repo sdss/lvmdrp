@@ -43,7 +43,7 @@ from lvmdrp.core.image import (
     loadImage,
 )
 from lvmdrp.core import fit_profile as fp
-from lvmdrp.core.plot import plt, create_subplots, plot_detrend, plot_error, plot_strips, plot_image_shift, plot_fiber_thermal_shift, plot_fiber_residuals, save_fig
+from lvmdrp.core.plot import plt, create_subplots, plot_detrend, plot_error, plot_strips, plot_image_shift, plot_fiber_thermal_shift, save_fig
 from lvmdrp.core.rss import RSS
 from lvmdrp.core.spectrum1d import Spectrum1D, _spec_from_lines, _cross_match
 from lvmdrp.core.tracemask import TraceMask
@@ -4393,7 +4393,7 @@ def guess_fibers_params(in_image: str,
     # read slitmap extension
     slitmap = img.getSlitmap()
     slitmap = slitmap[slitmap["spectrographid"] == int(img._header["SPEC"][-1])]
-    bad_fibers = slitmap["fibstatus"] == 1
+    # bad_fibers = slitmap["fibstatus"] == 1
 
     # perform median filtering along the dispersion axis to clean cosmic rays
     img = img.enhance(median_box=median_box, coadd=coadd, trust_errors=True, apply_mask=False)

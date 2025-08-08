@@ -125,7 +125,7 @@ def _make_arcline_axes(display_plots, pixel, ref_lines, ifiber, unit="e-", ncols
                                layout="tight")
     fig.suptitle(f"Gaussian fitting for fiber {ifiber}")
     fig.supylabel(f"Counts ({unit}/pixel)", fontsize="x-large")
-    fig.supxlabel(f"X (pixel)", fontsize="x-large")
+    fig.supxlabel("X (pixel)", fontsize="x-large")
     for i, ax in zip(range(nlines), axs):
         ax.set_title(f"line {ref_lines[i]:.2f} (Ang)", fontsize="large")
 

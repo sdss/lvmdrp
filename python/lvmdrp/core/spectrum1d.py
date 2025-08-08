@@ -1,6 +1,5 @@
 from copy import deepcopy
 import warnings
-from mpl_toolkits.axes_grid1.axes_divider import make_axes_locatable
 
 import numpy
 import bottleneck as bn
