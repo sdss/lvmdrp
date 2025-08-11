@@ -397,7 +397,7 @@ def prepare_spec(in_rss, width=3):
             lsf_conv_interpolated = fluxcal.interpolate_mask(w_tmp, lsf_conv, mask_lsf, fill_value="extrapolate")
 
             # # degrade observed std spectra
-            spec_tmp_convolved = fluxcal.lsf_convolve(spec_tmp, lsf_conv_interpolated, w_tmp)
+            spec_tmp_convolved = fluxcal.lsf_convolve(spec_ext_corr, lsf_conv_interpolated, w_tmp)
 
             # Obtain continuum with 160A median filter and normalize spectra
             best_continuum = ndimage.filters.median_filter(spec_tmp_convolved, int(160/0.5), mode="nearest")
@@ -405,8 +405,8 @@ def prepare_spec(in_rss, width=3):
             std_errors.append(error_tmp / best_continuum)
             normalized_spectra.append(spec_tmp_convolved/best_continuum) # normalized std spestra degraded to 2.3A for all
                                                                         # standards in each channel
-            best_continuum = ndimage.filters.median_filter(spec_tmp, int(160/0.5), mode="nearest")
-            normalized_spectra_unconv.append(spec_tmp/best_continuum)
+            best_continuum = ndimage.filters.median_filter(spec_ext_corr, int(160/0.5), mode="nearest")
+            normalized_spectra_unconv.append(spec_ext_corr/best_continuum)
             lsf.append(lsf_tmp) # initial std spec LSF for all standards in each channel
             std_spectra.append(spec_ext_corr)
 
