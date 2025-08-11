@@ -422,7 +422,6 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
     # TODO: telluric list should go in lvmcore
     # models_dir = '/Users/amejia/Downloads/stellar_models/'
     models_dir = os.path.join(MASTERS_DIR, "stellar_models")
-    template_model = 'M_p6250g3.5z0.50t1.0_a0.00c0.00n0.00o0.00r0.00s0.00_VIS.fits'
     telluric_file = os.path.join(os.getenv("LVMCORE_DIR"), 'etc', 'telluric_lines.txt')  # wavelength regions with Telluric
     # absorptions based on KPNO data (unknown source) with a 1% transmission threshold this file is used as a mask for
     # the fit of standard stars - from Alfredo.
@@ -433,7 +432,6 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
     with fits.open(name=models_dir + '/AMBRE_for_LVM.fits') as model:
         model_good = model[0].data
         model_norm = model[1].data
-        # model_norm_err = model[2].data
         model_info = pd.DataFrame(model[3].data)
     model_names = model_info['Model_name'].to_list()
     n_models = len(model_names)
@@ -450,7 +448,8 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
     #               [4080, 4120], [4180, 4550], [4800, 4900], [6450, 6700], [8400, 8900],
     #               [8950, 9050], [9200, 9250], [9500, 9600]) #[3060, 3110], [3200, 3300], , [9950, 10150], [10750, 11150]
 
-    rss, w, ext, normalized_spectra_all_bands, normalized_spectra_unconv_all_bands, std_errors_all_bands, lsf_all_bands, std_spectra_all_bands, gaia_ids, fibers = prepare_spec(in_rss, width=width)
+    (rss, w, ext, normalized_spectra_all_bands, normalized_spectra_unconv_all_bands, std_errors_all_bands, lsf_all_bands,
+     std_spectra_all_bands, gaia_ids, fibers) = prepare_spec(in_rss, width=width)
 
     # Stitch wavelength arrays in brz together
     wave_b = np.round(w[0],1)
@@ -477,11 +476,10 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
     mask_for_fit = telluric_tab
     mask_for_fit['Start'] = mask_for_fit['Start'] - 10
     mask_for_fit['End'] = mask_for_fit['End'] + 10
-    mask_for_fit.add_row([3500,3800]) #mask the bluest part of the spectra - prev.[3500,3715]
+    mask_for_fit.add_row([3500,3800]) #mask the bluest part of the spectra
     mask_for_fit.add_row([br_overlap_start, br_overlap_end])
     mask_for_fit.add_row([rz_overlap_start, rz_overlap_end])
     mask_for_fit.add_row([mask_line_start, mask_line_end])
-    # print(mask_for_fit)
 
     model_to_gaia_median = []
     best_fit_models = []
@@ -500,38 +498,15 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
         lsf_all = np.concatenate((lsf_all_bands[0][i][mask_b_norm],
                                              lsf_all_bands[1][i][mask_r_norm],
                                              lsf_all_bands[2][i][mask_z_norm]))
-        std_norm_unconv = np.concatenate((normalized_spectra_unconv_all_bands[0][i][mask_b_norm], normalized_spectra_unconv_all_bands[1][i][mask_r_norm],
-                              normalized_spectra_unconv_all_bands[2][i][mask_z_norm]))
-        # std_init_all = np.concatenate((std_spectra_all_bands[0][i][mask_b_norm], std_spectra_all_bands[1][i][mask_r_norm],
-        #                                std_spectra_all_bands[2][i][mask_z_norm]))
-        # TODO: switch to new resampling code
+        std_norm_unconv = np.concatenate((normalized_spectra_unconv_all_bands[0][i][mask_b_norm],
+                                          normalized_spectra_unconv_all_bands[1][i][mask_r_norm],
+                                          normalized_spectra_unconv_all_bands[2][i][mask_z_norm]))
         log_std_wave_all, flux_std_unconv_logscale = linear_to_logscale(std_wave_all, std_norm_unconv)
         log_std_wave_all, flux_std_logscale = linear_to_logscale(std_wave_all, std_normalized_all_convolved)
         std_errors_normalized_all = np.concatenate((std_errors_all_bands[0][i][mask_b_norm],
                                                     std_errors_all_bands[1][i][mask_r_norm],
                                                     std_errors_all_bands[2][i][mask_z_norm]))
         log_std_wave_all, log_std_errors_normalized_all = linear_to_logscale(std_wave_all, std_errors_normalized_all)
-
-        # load Gaia BP-RP spectrum from cache, or download from webapp, and fit the continuum to Gaia spec
-        try:
-            gw, gf = fluxcal.retrive_gaia_star(gaia_ids[i], GAIA_CACHE_DIR=GAIA_CACHE_DIR)
-            stdflux = np.interp(std_wave_all, gw, gf)  # interpolate to our wavelength grid
-            gaia_flux_interpolated.append(stdflux)
-
-            job = Gaia.launch_job(f"SELECT teff_gspspec, logg_gspspec, mh_gspspec FROM gaiadr3.astrophysical_parameters WHERE source_id = {gaia_ids[i]} ")
-            r = job.get_results()
-            gaia_Teff.append(r['teff_gspspec'])
-            gaia_logg.append(r['logg_gspspec'])
-            gaia_z.append(r['mh_gspspec'])
-
-        except fluxcal.GaiaStarNotFound as e:
-            log.warning(e)
-            rss_tmp.add_header_comment(f"Gaia star {gaia_id} not found")
-            continue
-        # best_continuum = ndimage.filters.median_filter(stdflux, int(160/0.5), mode="nearest")
-        # normalized_std_on_gaia_cont_single_tmp = best_continuum*std_normalized_all_convolved
-        # normalized_std_on_gaia_cont_single_tmp[mask_tellurics] = np.nan
-        # normalized_std_on_gaia_cont_single = normalized_std_on_gaia_cont_single_tmp / np.nansum(normalized_std_on_gaia_cont_single_tmp)
 
         # mask tellurics, channels overlaps, and bluest part of the spectra in log scale
         mask_good = np.zeros_like(log_std_wave_all, dtype=bool)
@@ -543,63 +518,41 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
         # canonical f-type model: Teff=6500, logg=4, Fe/H=-1.5 or something like that
         # Check the possible velocity offsets IN LOGSCALE
         # Now we use the model template with Teff=6250, logg=3.5, Fe/H=-0.5
-        # with fits.open(join(models_dir, 'norm_conv_logscale_selected_no_err', template_model), memmap=False) as hdul: #previous -> 'normalized_logscale'
         template_index =  model_info.index[(model_info['Teff'] == 6250) & (model_info['logg']==3.5) & (model_info['Z']==0.5)][0]
         template = model_norm[template_index]
         log_model_wave_all = log_std_wave_all
         flux_model_logscale = template
 
-        log_shift_full = fluxcal.derive_vecshift(flux_std_logscale[mask_good], flux_model_logscale[mask_good], max_ampl=3)*np.median(log_std_wave_all - np.roll(log_std_wave_all, 1))
+        log_shift_full = fluxcal.derive_vecshift(flux_std_logscale[mask_good], flux_model_logscale[mask_good],
+                                            max_ampl=3)*np.median(log_std_wave_all - np.roll(log_std_wave_all, 1))
         vel_shift_full = log_shift_full * 3e5
-
         flux_std_logscale_shifted = np.interp((log_std_wave_all - log_shift_full), log_std_wave_all, flux_std_logscale)
 
-        chi2 = [np.nansum((flux_std_logscale_shifted[mask_good] -
-                            model_norm[model_ind][mask_good]) ** 2 /(log_std_errors_normalized_all[mask_good] ** 2
-                            + (0.05*model_norm[model_ind][mask_good]) ** 2))/len(flux_std_logscale_shifted[mask_good]) for model_ind in range(len(model_norm))]
-        best_id = np.argmin(chi2)
-        chi2_bestfit = np.nansum((flux_std_logscale_shifted[mask_good] -
-                            model_norm[best_id][mask_good]) ** 2 / (log_std_errors_normalized_all[mask_good] ** 2
-                                + (0.05*model_norm[best_id][mask_good]) ** 2))/len(flux_std_logscale_shifted[mask_good])
-        chi2_wave_bestfit_0 = (flux_std_logscale_shifted[mask_good] -
-                           model_norm[best_id][mask_good]) ** 2 / (log_std_errors_normalized_all[mask_good] ** 2
-                            + (0.05*model_norm[best_id][mask_good]) ** 2)
+        best_id, chi2_bestfit, chi2_wave_bestfit_0 = chi2_model_matching(flux_std_logscale_shifted,
+                                                                            log_std_errors_normalized_all,
+                                                                            model_norm, mask_good)
         print(f'Initial chi2={chi2_bestfit:.2f}, initial model {best_id}')
         mask_chi2 = ~np.zeros_like(chi2_wave_bestfit_0, dtype=bool)
 
         do_mask = 1
-        # chi2_bestfit = np.nansum((flux_std_logscale_shifted[mask_good][mask_chi2] -
-        #                      model_norm[best_id][mask_good][mask_chi2]) ** 2 / (log_std_errors_normalized_all[mask_good][mask_chi2] ** 2
-        #                                                              + (0.05*model_norm[best_id][mask_good][mask_chi2]) ** 2))/len(flux_std_logscale_shifted[mask_good])
         chi2_threshold = 20
         peak_width = 10
-        # mask_chi2 = chi2_wave_bestfit_0 <= chi2_threshold
         peaks, properties = find_peaks(chi2_wave_bestfit_0, height=chi2_threshold, width=[1, peak_width])
-        # print(peaks, properties)
         for peak in peaks:
             width = int(properties["widths"][np.where(peaks == peak)][0])  # Use detected width
             start = max(0, peak - width)
             end = min(len(chi2_wave_bestfit_0), peak + width)
             # print('Start and end of the mask',start, end)
             mask_chi2[start:end] = False
-        # Apply mask
-        # masked_spectrum = np.ma.masked_array(spectrum, mask)
 
-        chi2 = [np.nansum((flux_std_logscale_shifted[mask_good][mask_chi2] -
-                           model_norm[model_ind][mask_good][mask_chi2]) ** 2 / (
-                                      log_std_errors_normalized_all[mask_good][mask_chi2] ** 2
-                                      + (0.05 * model_norm[best_id][mask_good][mask_chi2]) ** 2)) / len(
-            flux_std_logscale_shifted[mask_good]) for model_ind in range(len(model_norm))]
-        best_id = np.argmin(chi2)
-        chi2_bestfit = np.nansum((flux_std_logscale_shifted[mask_good][mask_chi2] -
-                                  model_norm[best_id][mask_good][mask_chi2]) ** 2 / (
-                                             log_std_errors_normalized_all[mask_good][mask_chi2] ** 2
-                                             + (0.05 * model_norm[best_id][mask_good][mask_chi2]) ** 2)) / len(
-            flux_std_logscale_shifted[mask_good][mask_chi2])
-        chi2_wave_bestfit = (flux_std_logscale_shifted[mask_good][mask_chi2] -
-                             model_norm[best_id][mask_good][mask_chi2]) ** 2 / (
-                                        log_std_errors_normalized_all[mask_good][mask_chi2] ** 2
-                                        + (0.05 * model_norm[best_id][mask_good][mask_chi2]) ** 2)
+        combined_mask = np.zeros_like(mask_good, dtype=bool)
+        combined_mask[mask_good] = mask_chi2
+        mask_upd = mask_good & combined_mask
+
+        best_id, chi2_bestfit, chi2_wave_bestfit = chi2_model_matching(flux_std_logscale_shifted,
+                                                                         log_std_errors_normalized_all,
+                                                                         model_norm, mask_upd)
+
         npix_masked = len(chi2_wave_bestfit_0) - len(chi2_wave_bestfit)
         print(f'Masked {npix_masked} pixels')
         print(f'After additional masking {chi2_bestfit:.2f}')
@@ -644,12 +597,29 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
         gaia_lsf_rp = np.interp(std_wave_all[mask_wl_rp], gaia_lsf_table_rp['wavelength'], gaia_lsf_table_rp['linewidth'])
         gaia_lsf = np.concatenate((gaia_lsf_bp, gaia_lsf_rp))
 
+        # load Gaia BP-RP spectrum from cache, or download from webapp, and fit the continuum to Gaia spec
+        try:
+            gw, gf = fluxcal.retrive_gaia_star(gaia_ids[i], GAIA_CACHE_DIR=GAIA_CACHE_DIR)
+            stdflux = np.interp(std_wave_all, gw, gf)  # interpolate to our wavelength grid
+            gaia_flux_interpolated.append(stdflux)
+
+            job = Gaia.launch_job(f"SELECT teff_gspspec, logg_gspspec, mh_gspspec FROM gaiadr3.astrophysical_parameters WHERE source_id = {gaia_ids[i]} ")
+            r = job.get_results()
+            gaia_Teff.append(r['teff_gspspec'])
+            gaia_logg.append(r['logg_gspspec'])
+            gaia_z.append(r['mh_gspspec'])
+
+        except fluxcal.GaiaStarNotFound as e:
+            log.warning(e)
+            rss_tmp.add_header_comment(f"Gaia star {gaia_id} not found")
+            continue
 
         # convolve model to gaia lsf
         model_convolved_to_gaia = fluxcal.lsf_convolve(model_flux_resampled, gaia_lsf, std_wave_all)
         model_to_gaia = stdflux/model_convolved_to_gaia
         model_to_gaia_median.append(np.median(model_to_gaia))
 
+        # prepare dictionaries to plot QA plots for model matching
         fig_path = in_rss[0]
         fiber_params = {'i':i,'fiber_id':fibers[i]}
         gaia_params = {'gaia_id':gaia_ids[i],'gaia_Teff':gaia_Teff[i][0],'gaia_logg':gaia_logg[i][0],'gaia_z':gaia_z[i][0]}
@@ -769,6 +739,17 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
         rss.writeFitsData(in_rss[n_chan])
 
     return
+
+def chi2_model_matching(std_spectra, std_errors, model_norm, mask):
+    chi2 = [np.nansum((std_spectra[mask] - model_norm[model_ind][mask]) ** 2 / (std_errors[mask] ** 2
+                                                            + (0.05 * model_norm[model_ind][mask]) ** 2)) /
+                                                            len(std_spectra) for model_ind in range(len(model_norm))]
+    best_id = np.argmin(chi2)
+    chi2_bestfit = np.nansum((std_spectra[mask] - model_norm[best_id][mask]) ** 2 / (std_errors[mask] ** 2 + (0.05 *
+                                                            model_norm[best_id][mask]) ** 2)) / len(std_spectra)
+    chi2_wave_bestfit = (std_spectra[mask] - model_norm[best_id][mask]) ** 2 / (std_errors[mask] ** 2 + (0.05 *
+                                                            model_norm[best_id][mask]) ** 2)
+    return best_id, chi2_bestfit, chi2_wave_bestfit
 
 def qa_model_matching(fig_path, fiber_params = None, gaia_params = None, model_params = None, matching_params = None,
                       wave_arrays = None, stdflux = None, flux_std_unconv_logscale = None,
