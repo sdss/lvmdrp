@@ -3,12 +3,9 @@
 
 import os
 import numpy
-import bottleneck as bn
-from copy import deepcopy as copy
 from astropy.io import fits as pyfits
 from astropy.table import Table
 from lvmdrp.core.fiberrows import FiberRows
-from lvmdrp.core import plot
 
 
 class TraceMask(FiberRows):

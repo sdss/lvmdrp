@@ -13,7 +13,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import bottleneck as bn
 from astropy.visualization import AsinhStretch, ImageNormalize, PercentileInterval, simple_norm
-from mpl_toolkits.axes_grid1.axes_divider import make_axes_locatable
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 import warnings
 

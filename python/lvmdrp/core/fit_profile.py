@@ -6,14 +6,14 @@ import itertools
 import numpy
 import bottleneck as bn
 from functools import wraps
-from functools import lru_cache
+from mpl_toolkits.axes_grid1.axes_divider import make_axes_locatable
 
 import astropy.io.fits as pyfits
 from astropy.modeling.functional_models import Voigt1D, Lorentz1D, Moffat1D
 from scipy import interpolate, integrate, optimize, special
-from scipy.signal import fftconvolve, convolve
+from scipy.signal import fftconvolve
 
-from lvmdrp.core.plot import plt, create_subplots, make_axes_locatable, plot_gradient_fit, plot_radial_gradient_fit
+from lvmdrp.core.plot import plt, create_subplots, plot_gradient_fit, plot_radial_gradient_fit
 
 
 fact = numpy.sqrt(2.0 * numpy.pi)

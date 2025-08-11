@@ -43,7 +43,7 @@ from lvmdrp.core.image import (
     loadImage,
 )
 from lvmdrp.core import fit_profile as fp
-from lvmdrp.core.plot import plt, create_subplots, plot_detrend, plot_error, plot_strips, plot_image_shift, plot_fiber_thermal_shift, plot_fiber_residuals, save_fig
+from lvmdrp.core.plot import plt, create_subplots, plot_detrend, plot_error, plot_strips, plot_image_shift, plot_fiber_thermal_shift, save_fig
 from lvmdrp.core.rss import RSS
 from lvmdrp.core.spectrum1d import Spectrum1D, _spec_from_lines, _cross_match
 from lvmdrp.core.tracemask import TraceMask
@@ -247,12 +247,10 @@ def _channel_combine_fiber_params(in_cent_traces, in_waves, add_overscan_columns
     """
     channels = "brz"
     # read master trace and wavelength
-    mtraces = [FiberRows() for _ in range(len(in_cent_traces))]
-    mwaves = [FiberRows() for _ in range(len(in_waves))]
+    mtraces = [TraceMask.from_file(in_cent) for in_cent in in_cent_traces]
+    mwaves = [TraceMask.from_file(in_wave) for in_wave in in_waves]
     channel_masks = []
-    for i, (mtrace_path, mwave_path) in enumerate(zip(in_cent_traces, in_waves)):
-        mtraces[i].loadFitsData(mtrace_path)
-        mwaves[i].loadFitsData(mwave_path)
+    for i in range(len(mtraces)):
 
         # add columns for OS region
         if add_overscan_columns:
@@ -272,9 +270,9 @@ def _channel_combine_fiber_params(in_cent_traces, in_waves, add_overscan_columns
 
         mtraces[i]._mask |= channel_mask
         mwaves[i]._mask |= channel_mask
-    mtrace = FiberRows()
+    mtrace = TraceMask()
     mtrace.unsplit(mtraces)
-    mwave = FiberRows()
+    mwave = TraceMask()
     mwave.unsplit(mwaves)
 
     return mtraces, mwaves, mtrace, mwave
@@ -4393,7 +4391,7 @@ def guess_fibers_params(in_image: str,
     # read slitmap extension
     slitmap = img.getSlitmap()
     slitmap = slitmap[slitmap["spectrographid"] == int(img._header["SPEC"][-1])]
-    bad_fibers = slitmap["fibstatus"] == 1
+    # bad_fibers = slitmap["fibstatus"] == 1
 
     # perform median filtering along the dispersion axis to clean cosmic rays
     img = img.enhance(median_box=median_box, coadd=coadd, trust_errors=True, apply_mask=False)

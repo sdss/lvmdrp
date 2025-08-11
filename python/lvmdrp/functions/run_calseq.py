@@ -1418,8 +1418,8 @@ def create_traces(mjd, cameras=CAMERAS, expnums_ldls=None, expnums_qrtz=None,
         }
 
         expnums = expnums_qrtz if camera[0] == "z" else expnums_ldls
-        select_lamp = MASTER_CON_LAMPS[camera[0]]
-        counts_threshold = counts_thresholds[select_lamp]
+        # select_lamp = MASTER_CON_LAMPS[camera[0]]
+        # counts_threshold = counts_thresholds[select_lamp]
 
         # first fibers fitting (guess using pure Gaussian profiles) using first exposure in sequence
         dflat_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="d", imagetype="flat", camera=camera, expnum=expnums[0])
@@ -1492,8 +1492,8 @@ def create_traces(mjd, cameras=CAMERAS, expnums_ldls=None, expnums_qrtz=None,
 
         # store final model and ratio
         model = image_tasks.combineImages(images=models, method="sum", normalize=False, background_subtract=False, replace_with_nan=False)
-        model.writeFitsData(path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, camera=camera, kind=f"mmodel"))
-        (model / img).writeFitsData(path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, camera=camera, kind=f"mratio"))
+        model.writeFitsData(path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, camera=camera, kind="mmodel"))
+        (model / img).writeFitsData(path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, camera=camera, kind="mratio"))
 
 
 def create_dome_fiberflats(mjd, expnums_ldls=None, expnums_qrtz=None, cals_mjd=None, use_longterm_cals=True, kind="longterm", skip_done=True, dry_run=False):
