@@ -279,7 +279,33 @@ def logscale_to_linear(wl_regular, wl_log, flux_log, shift=0):
     return flux
 
 def prepare_spec(in_rss, width=3):
-    rss = []
+    '''
+    Preparation of the staddard star spectra for subsequent model matching.
+    Read the standard star spectra and errors
+    Subtract the master sky, divide by exptime
+    Correct for atmospheric extinction
+    Convolve to 2.3A (the same as low resolution models)
+    Fit continuum (160A median filter) and normalize the spectra
+    :param in_rss:
+    :param width:
+    :return:
+    w:
+        wavelength array
+    gaia_ids:
+        gaia_ids (needed for QA plots)
+    fibers
+        fiber ids (P1-1,P1-2, etc; needed for QA plots)
+    std_spectra_all_bands:
+        standard star spectra for all bands (uncolvolved, unnormalized, needed for sens. curves), ext. corrected
+    normalized_spectra_unconv_all_bands:
+        normalized unconvolved std spectra (needed for QA model matching plots), ext. corrected
+    normalized_spectra_all_bands:
+        normalizes std spectra convolved to 2.3A (needed for model matching), ext. corrected
+    std_errors_all_bands:
+        error array
+    lsf_all_bands:
+        LVM spectrograph LSFs for standard star fibers (needed to convolve good res. models before calculation of the sens. curve)
+    '''
     w = [] # wavelength arrays
     ext = []
     normalized_spectra_all_bands = []
@@ -391,7 +417,7 @@ def prepare_spec(in_rss, width=3):
         lsf_all_bands.append(lsf) # initial std spec LSF for all standards and all channel together
         std_spectra_all_bands.append(std_spectra) # corrected for extinction
 
-    return rss, w, ext, normalized_spectra_all_bands, normalized_spectra_unconv_all_bands, std_errors_all_bands, lsf_all_bands, std_spectra_all_bands, gaia_ids, fibers
+    return w, gaia_ids, fibers, std_spectra_all_bands, normalized_spectra_unconv_all_bands, normalized_spectra_all_bands, std_errors_all_bands, lsf_all_bands
 
 def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
     """ Selection of the stellar atmosphere model spectra (POLLUX database, AMBRE library)
@@ -448,8 +474,9 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
     #               [4080, 4120], [4180, 4550], [4800, 4900], [6450, 6700], [8400, 8900],
     #               [8950, 9050], [9200, 9250], [9500, 9600]) #[3060, 3110], [3200, 3300], , [9950, 10150], [10750, 11150]
 
-    (rss, w, ext, normalized_spectra_all_bands, normalized_spectra_unconv_all_bands, std_errors_all_bands, lsf_all_bands,
-     std_spectra_all_bands, gaia_ids, fibers) = prepare_spec(in_rss, width=width)
+    # Prepare the spectra
+    (w, gaia_ids, fibers, std_spectra_all_bands, normalized_spectra_unconv_all_bands, normalized_spectra_all_bands,
+     std_errors_all_bands, lsf_all_bands) = prepare_spec(in_rss, width=width)
 
     # Stitch wavelength arrays in brz together
     wave_b = np.round(w[0],1)
