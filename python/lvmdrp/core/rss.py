@@ -1702,7 +1702,7 @@ class RSS(FiberRows):
         if rss._header is None:
             rss._header = pyfits.Header()
         unit = rss._header["BUNIT"]
-        if not unit.endswith(" / Angstrom"):
+        if not unit.endswith("/Angstrom"):
             dlambda = numpy.gradient(rss._wave, axis=1)
             rss._data /= dlambda
             if rss._error is not None:
@@ -1711,7 +1711,7 @@ class RSS(FiberRows):
                 rss._sky /= dlambda
             if rss._sky_error is not None:
                 rss._sky_error /= dlambda
-            unit = unit + " / Angstrom"
+            unit = unit + "/Angstrom"
 
         rss._header["BUNIT"] = unit
         rss._header["WAVREC"] = (True, "is wavelength rectified?")
