@@ -85,6 +85,9 @@ def mexhat(radius, x, normalize_area=True):
     return model
 
 def fiber_profile(centroids, radii, x):
+    '''
+    semicircular profile: tophat over the unit circle collapsed along one dimension
+    '''
     c = numpy.atleast_2d(centroids).T
     r = numpy.atleast_2d(radii).T
     x_ = numpy.atleast_2d(x)

@@ -3758,7 +3758,11 @@ class Spectrum1D(Header):
         return flux, cent, fwhm, bg
 
     def extract_flux(self, centroids, sigmas, fiber_radius=1.4, npixels=20, replace_error=numpy.inf, return_basis=False):
-
+        ''' 
+            fiber_radius is the image of the fiber core in pixels
+            sigmas is the gaussian kernel sigma
+            
+        '''
         def _gen_mexhat_basis(x, centroids, sigmas, fiber_radius, oversampling_factor):
             dx = x[1, 0] - x[0, 0]
             x_os = fit_profile.oversample(x, oversampling_factor)
