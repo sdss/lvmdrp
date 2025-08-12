@@ -466,14 +466,6 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
     GAIA_CACHE_DIR = "./" if GAIA_CACHE_DIR is None else GAIA_CACHE_DIR
     log.info(f"Using Gaia CACHE DIR '{GAIA_CACHE_DIR}'")
 
-    # Parameters for continuum fit
-    # nknots = 10
-    # median_box = 30
-    # niter = 10
-    # mask_bands = ([3785, 3805], [3820, 3840], [3870, 3980],
-    #               [4080, 4120], [4180, 4550], [4800, 4900], [6450, 6700], [8400, 8900],
-    #               [8950, 9050], [9200, 9250], [9500, 9600]) #[3060, 3110], [3200, 3300], , [9950, 10150], [10750, 11150]
-
     # Prepare the spectra
     (w, gaia_ids, fibers, std_spectra_all_bands, normalized_spectra_unconv_all_bands, normalized_spectra_all_bands,
      std_errors_all_bands, lsf_all_bands) = prepare_spec(in_rss, width=width)
@@ -518,21 +510,21 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
 
     # Stitch normalized spectra in brz together
     for i in range(len(lsf_all_bands[0])):
+        std_norm_unconv = np.concatenate((normalized_spectra_unconv_all_bands[0][i][mask_b_norm],
+                                          normalized_spectra_unconv_all_bands[1][i][mask_r_norm],
+                                          normalized_spectra_unconv_all_bands[2][i][mask_z_norm]))
         std_normalized_all_convolved = np.concatenate((normalized_spectra_all_bands[0][i][mask_b_norm],
                                              normalized_spectra_all_bands[1][i][mask_r_norm],
                                              normalized_spectra_all_bands[2][i][mask_z_norm]))
+        std_errors_normalized_all = np.concatenate((std_errors_all_bands[0][i][mask_b_norm],
+                                                    std_errors_all_bands[1][i][mask_r_norm],
+                                                    std_errors_all_bands[2][i][mask_z_norm]))
         # lsf_all (initial std lsf) - will be used to convolve good res models for sens curve calculation
         lsf_all = np.concatenate((lsf_all_bands[0][i][mask_b_norm],
                                              lsf_all_bands[1][i][mask_r_norm],
                                              lsf_all_bands[2][i][mask_z_norm]))
-        std_norm_unconv = np.concatenate((normalized_spectra_unconv_all_bands[0][i][mask_b_norm],
-                                          normalized_spectra_unconv_all_bands[1][i][mask_r_norm],
-                                          normalized_spectra_unconv_all_bands[2][i][mask_z_norm]))
         log_std_wave_all, flux_std_unconv_logscale = linear_to_logscale(std_wave_all, std_norm_unconv)
         log_std_wave_all, flux_std_logscale = linear_to_logscale(std_wave_all, std_normalized_all_convolved)
-        std_errors_normalized_all = np.concatenate((std_errors_all_bands[0][i][mask_b_norm],
-                                                    std_errors_all_bands[1][i][mask_r_norm],
-                                                    std_errors_all_bands[2][i][mask_z_norm]))
         log_std_wave_all, log_std_errors_normalized_all = linear_to_logscale(std_wave_all, std_errors_normalized_all)
 
         # mask tellurics, channels overlaps, and bluest part of the spectra in log scale
@@ -561,7 +553,6 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
         print(f'Initial chi2={chi2_bestfit:.2f}, initial model {best_id}')
         mask_chi2 = ~np.zeros_like(chi2_wave_bestfit_0, dtype=bool)
 
-        do_mask = 1
         chi2_threshold = 20
         peak_width = 10
         peaks, properties = find_peaks(chi2_wave_bestfit_0, height=chi2_threshold, width=[1, peak_width])
@@ -569,7 +560,6 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
             width = int(properties["widths"][np.where(peaks == peak)][0])  # Use detected width
             start = max(0, peak - width)
             end = min(len(chi2_wave_bestfit_0), peak + width)
-            # print('Start and end of the mask',start, end)
             mask_chi2[start:end] = False
 
         combined_mask = np.zeros_like(mask_good, dtype=bool)
@@ -698,6 +688,7 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
             frame1.set_xticklabels([])
 
         for i in range(len(lsf_all_bands[0])):
+            # !now telluric correction does not work!
             std_telluric_corrected = correct_tellurics(w[n_chan], std_spectra_all_bands[n_chan][i], lsf_all_bands[n_chan][i], in_rss[n_chan], chan)
             sens_tmp = calc_sensitivity_from_model(w[n_chan], std_telluric_corrected, lsf_all_bands[n_chan][i],
                                                    model_good[best_id], model_to_gaia_median[i], log_shift_full) #model_names[best_id]
@@ -768,6 +759,20 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
     return
 
 def chi2_model_matching(std_spectra, std_errors, model_norm, mask):
+    """
+    Find best-fit model with chi-square
+    :param std_spectra:
+    :param std_errors:
+    :param model_norm:
+    :param mask:
+    :return:
+    best_id:
+        id of the best fit model
+    chi2_bestfit:
+        reduced chi square
+    chi2_wave_bestfit:
+        chi2 values by wavelength
+    """
     chi2 = [np.nansum((std_spectra[mask] - model_norm[model_ind][mask]) ** 2 / (std_errors[mask] ** 2
                                                             + (0.05 * model_norm[model_ind][mask]) ** 2)) /
                                                             len(std_spectra) for model_ind in range(len(model_norm))]
@@ -1153,13 +1158,13 @@ def calc_sensitivity_from_model(wl, obs_spec, spec_lsf, model_flux=[], model_to_
     log_model_wave, flux_model_logscale = linear_to_logscale(model_wave, model_flux)
     flux_model_shifted = logscale_to_linear(model_wave, log_model_wave, flux_model_logscale, shift=model_log_shift)
 
-    # #resample model to the same step
+    #resample model to the same step
     model_flux_resampled = np.interp(wl, model_wave, flux_model_shifted)
     spec_lsf = np.sqrt(spec_lsf**2 - 0.3**2)  # as model spectra were already convolved with lsf=0.3, we need to account for this
 
-    # # convolve model to spec lsf
-    # TODO: make sure we do this once
+    # convolve model to spec lsf after vel. shift
     model_convolved_spec_lsf = fluxcal.lsf_convolve(model_flux_resampled, spec_lsf, wl)
+    # first multiply to model_to_gaia_median to be able to compare sens. curve with STD and SCI methods
     sens = model_convolved_spec_lsf * model_to_gaia_median / obs_spec
 
     return sens
