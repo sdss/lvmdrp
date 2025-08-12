@@ -421,22 +421,22 @@ def prepare_spec(in_rss, width=3):
 
 def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
     """ Selection of the stellar atmosphere model spectra (POLLUX database, AMBRE library)
-    Read all the models already convolved with Gaia LSF and normalized
+    Read file with models that contains:
+    - good res. (0.3A), non-normalized models - will be used to get the sensitivity curves
+    - logscale, low-resolution (convolved to 2.3A), normalized models - will be used for model matching
+    - model parameters
     Correct observed standard spectrum for the atmospheric extinction
     Fit continuum to observed (corrected for the extinction) standard spectra (in 3 channels separately)
     Normalise observed standard spectra and stitch 3 channels together
-    Fit continuum to Gaia spectra
-    Multuply Gaia continuum and normalise observed standard spectra
-    Mask telluric lines
-    Normalise to total sum = 1
-    Find the best-fit model from the set of models convolved with Gaia LSF and nolmalised (to total sum = 1)
-    with chi-square method
-    Check for possible velocity offsets - CAN BE USED LATER TO ADD CORRECTION FOR VELOCITIES
+    Find the vel. shift relative to template model
+    Shift the standard star spectrum in logscale and find the best-fit model using chi-square
+    Mask regions with high chi-square values and find the best-fit model using chi-square
     Find the conversion coefficient between model units and Gaia units:
         Read the best-fit model with good resolution, non-normalised
         Convolve with Gaia LSF
         Calculate median fot stdflux/model_convolved_to_gaia - we will use this coefficient
-
+    QA plots
+    Calculate the sensitivity curves
 
     :param in_rss:
     :param GAIA_CACHE_DIR:
