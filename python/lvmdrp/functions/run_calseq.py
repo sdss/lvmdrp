@@ -773,8 +773,8 @@ def _create_wavelengths_60177(use_longterm_cals=True, skip_done=True, dry_run=Fa
                 log.info(f"skipping {xarc_path}, file already exists")
             else:
                 image_tasks.extract_spectra(in_image=carc_path, out_rss=xarc_path,
-                                            in_trace=calibs["trace"][camera],
-                                            in_sigma=calibs["width"][camera],
+                                            in_trace=calibs["centroids"][camera],
+                                            in_sigma=calibs["sigmas"][camera],
                                             in_model=calibs["model"][camera])
 
     expnum_str = f"{frames.expnum.min():>08}_{frames.expnum.max():>08}"
