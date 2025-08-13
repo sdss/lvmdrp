@@ -1200,7 +1200,7 @@ def resample_wavelength(in_rss: str, out_rss: str, method: str = "spline",
 
     # resample the wavelength solution
     log.info("resampling the spectra ...")
-    new_rss = rss.rectify_wave(wave_range=wave_range, wave_disp=wave_disp, return_density=convert_to_density)
+    new_rss = rss.rectify_wave(wave_range=wave_range, wave_disp=wave_disp, method=method, return_density=convert_to_density)
 
     # create error propagation plot
     fig = plt.figure(figsize=(15, 5), layout="constrained")
@@ -1692,6 +1692,9 @@ def apply_fiberflat(in_rss: str, out_frame: str, in_flat: str,
     mflat *= flatfield_corr[:, None]
     rss /= mflat
     skyline_slit /= flatfield_corr
+
+    # update pixel mask
+    rss._mask = numpy.isnan(rss._data)|numpy.isnan(rss._error)
 
     ax_cor = fig.add_subplot(gs_cor[-1, :])
     ax_cor.set_title(f"Flatfielded skyline @ {sky_cwave:.2f}+/-{dwave:.2f} Angstroms", loc="left")
