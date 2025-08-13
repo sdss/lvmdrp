@@ -790,33 +790,25 @@ def _create_wavelengths_60177(use_longterm_cals=True, skip_done=True, dry_run=Fa
         # fit wavelength solution
         mwave_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, camera=camera, kind="mwave")
         mlsf_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, camera=camera, kind="mlsf")
-        if skip_done and os.path.isfile(mwave_path) and os.path.isfile(mlsf_path):
-            log.info(f"skipping wavelength solution {mwave_path} and {mlsf_path}, files already exists")
-        else:
-            pixels = pixwav[camera][:, 0] if camera in pixwav else []
-            waves = pixwav[camera][:, 1] if camera in pixwav else []
-            use_lines = pixwav[camera][:, 2].astype(bool) if camera in pixwav else []
-            rss_tasks.determine_wavelength_solution(in_arcs=xarc_paths[camera], out_wave=calibs["wave"][camera], out_lsf=calibs["lsf"][camera],
-                                                    pixel=pixels, ref_lines=waves, use_line=use_lines)
+        pixels = pixwav[camera][:, 0] if camera in pixwav else []
+        waves = pixwav[camera][:, 1] if camera in pixwav else []
+        use_lines = pixwav[camera][:, 2].astype(bool) if camera in pixwav else []
+        rss_tasks.determine_wavelength_solution(in_arcs=xarc_paths[camera], out_wave=mwave_path, out_lsf=mlsf_path,
+                                                pixel=pixels, ref_lines=waves, use_line=use_lines)
 
-    mwave_paths = group_calib_paths(calibs["wave"])
-    mlsf_paths = group_calib_paths(calibs["lsf"])
     for channel in "brz":
         xarc_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="x", imagetype="arc", camera=channel, expnum=expnum_str)
         harc_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="h", imagetype="arc", camera=channel, expnum=expnum_str)
+        mwave_paths = [path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, camera=f"{channel}{spec+1}", kind="mwave") for spec in range(3)]
+        mlsf_paths = [path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, camera=f"{channel}{spec+1}", kind="mlsf") for spec in range(3)]
 
         # stack spectragraphs
-        if skip_done and os.path.isfile(xarc_path):
-            log.info(f"skipping stacked arc {xarc_path}, file already exists")
-        else:
-            xarc_paths = sorted(path.expand("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="x", imagetype="arc", camera=f"{channel}?", expnum=expnum_str))
-            rss_tasks.stack_spectrographs(in_rsss=xarc_paths, out_rss=xarc_path)
+        xarc_paths = sorted(path.expand("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="x", imagetype="arc", camera=f"{channel}?", expnum=expnum_str))
+        rss_tasks.stack_spectrographs(in_rsss=xarc_paths, out_rss=xarc_path)
+
         # apply wavelength solution to arcs and rectify
-        if skip_done and os.path.isfile(harc_path):
-            log.info(f"skipping rectified arc {harc_path}, file already exists")
-        else:
-            rss_tasks.create_pixel_table(in_rss=xarc_path, out_rss=harc_path, in_waves=mwave_paths[channel], in_lsfs=mlsf_paths[channel])
-            rss_tasks.resample_wavelength(in_rss=harc_path, out_rss=harc_path, method="linear", wave_range=SPEC_CHANNELS[channel], wave_disp=0.5)
+        rss_tasks.create_pixel_table(in_rss=xarc_path, out_rss=harc_path, in_waves=mwave_paths, in_lsfs=mlsf_paths)
+        rss_tasks.resample_wavelength(in_rss=harc_path, out_rss=harc_path, method="linear", wave_range=SPEC_CHANNELS[channel], wave_disp=0.5)
 
 
 def _copy_fiberflats_from(mjd, mjd_dest=60177, use_longterm_cals=True):
