@@ -421,6 +421,7 @@ def prepare_spec(in_rss, width=3):
 
 def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
     """ Selection of the stellar atmosphere model spectra (POLLUX database, AMBRE library)
+    The model spectra: -1.5 <= Z <= 0.75; 3 <= logg <= 5; 5500 <0 Teff <= 8000; microturb_vel = 1.0; O/Fe = 0.0
     Read file with models that contains:
     - good res. (0.3A), non-normalized models - will be used to get the sensitivity curves
     - logscale, low-resolution (convolved to 2.3A), normalized models - will be used for model matching
@@ -458,7 +459,7 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
     with fits.open(name=models_dir + '/AMBRE_for_LVM.fits') as model:
         model_good = model[0].data
         model_norm = model[1].data
-        model_info = pd.DataFrame(model[3].data)
+        model_info = pd.DataFrame(model[2].data)
     model_names = model_info['Model_name'].to_list()
     n_models = len(model_names)
     log.info(f'Number of models: {n_models}')
