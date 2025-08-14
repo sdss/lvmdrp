@@ -455,7 +455,7 @@ def create_stellar_templates(target_fwhm, models_dir=STELLAR_TEMP_PATH, model_fw
         diff_lsf = np.sqrt(model_lsf**2 - model_fwhm**2)
 
         # convolve model to spec lsf
-        new_models.append(fluxcal.lsf_convolve(model_flux, diff_lsf, model_wave))
+        new_models.append(lsf_convolve(model_flux, diff_lsf, model_wave))
 
     new_header = fits.Header()
     new_header["MODPATH"] = (models_dir, "directory of original models")

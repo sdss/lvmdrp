@@ -629,7 +629,8 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
 
         except fluxcal.GaiaStarNotFound as e:
             log.warning(e)
-            rss_tmp.add_header_comment(f"Gaia star {gaia_id} not found")
+            # rss_tmp.add_header_comment(f"Gaia star {gaia_ids[i]} not found")
+            log.info(f"Gaia star {gaia_ids[i]} not found")
             continue
 
         # convolve model to gaia lsf
@@ -718,7 +719,7 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
             res_mod[f"STD{i}SEN"] = s(w[n_chan]).astype(np.float32)*sens_coef
             sens = sens0*sens_coef
 
-            fig_path = in_rss[n_chan]
+            # fig_path = in_rss[n_chan]
             if plot:
                 plt.plot(wgood, sgood*sens_coef, ".k", markersize=2, zorder=-999)
                 plt.plot(w[n_chan], sens, linewidth=1, zorder=-999, label = fibers[i])
