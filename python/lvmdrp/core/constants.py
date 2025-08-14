@@ -160,3 +160,6 @@ CONTINUUM_FIBERFLAT = {
     "r": 6760,
     "z": 8170
 }
+
+# stellar templates
+STELLAR_TEMP_PATH = os.path.join(os.getenv("LVM_SANDBOX"), "stellar_models")
