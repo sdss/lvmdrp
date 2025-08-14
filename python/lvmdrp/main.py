@@ -1705,8 +1705,7 @@ def science_reduction(expnum: int,
             #  and field stars found in the sci ifu
             # mode='GAIA' -> old behavior; 'model' -> new version with the spectra from the Pollux library
             with Timer(name='Fluxcal '+hsci_path, logger=log.info):
-                fluxcal_standard_stars(hsci_path, GAIA_CACHE_DIR=MASTERS_DIR+'/gaia_cache', mode='model',
-                                   model_list=best_fit_models, model_coef=model_to_gaia_median)
+                fluxcal_standard_stars(hsci_path, GAIA_CACHE_DIR=MASTERS_DIR+'/gaia_cache')
                 fluxcal_sci_ifu_stars(hsci_path, GAIA_CACHE_DIR=MASTERS_DIR+'/gaia_cache')
 
                 # flux-calibrate each channel

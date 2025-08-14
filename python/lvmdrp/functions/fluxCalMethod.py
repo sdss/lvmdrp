@@ -1322,7 +1322,7 @@ def science_sensitivity(rss, res_sci, ext, GAIA_CACHE_DIR, NSCI_MAX=15, r_spaxel
     return rss, res_sci
 
 
-def fluxcal_standard_stars(in_rss, plot=True, GAIA_CACHE_DIR=None, mode='GAIA', model_list=[], model_coef=[], model_log_shifts=[]):
+def fluxcal_standard_stars(in_rss, plot=True, GAIA_CACHE_DIR=None):
     """
     Create sensitivity functions for LVM data using the 12 spectra of stars observed through
     the Spec telescope.
