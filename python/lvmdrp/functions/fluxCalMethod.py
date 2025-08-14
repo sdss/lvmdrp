@@ -1295,10 +1295,10 @@ def science_sensitivity(rss, res_sci, ext, GAIA_CACHE_DIR, NSCI_MAX=15, r_spaxel
             lvmflux = fluxcal.spec_to_LVM_flux(channel, obswave, obsflux)
             sens = fluxcal.spec_to_LVM_flux(channel, gwave, gflux) / lvmflux
             sens *= np.interp(obswave, mean_sens[channel]['wavelength'], mean_sens[channel]['sens'])
-            res_sci[f"STD{i+1}SEN"] = sens.astype(np.float32) * u.Unit("erg / (ct cm2)")
+            res_sci[f"SCI{i+1}SEN"] = sens.astype(np.float32) * u.Unit("erg / (ct cm2)")
             # reject sensitivity that yield negative instrumental magnitude
             if lvmflux <= 0:
-                res_sci[f"STD{i+1}SEN"][:] = np.nan
+                res_sci[f"SCI{i+1}SEN"][:] = np.nan
 
             mAB_std = np.round(fluxcal.spec_to_LVM_mAB(channel, gwave, gflux), 2)
             mAB_obs = np.round(fluxcal.spec_to_LVM_mAB(channel, obswave, obsflux), 2)
@@ -1316,7 +1316,7 @@ def science_sensitivity(rss, res_sci, ext, GAIA_CACHE_DIR, NSCI_MAX=15, r_spaxel
             if plot:
                 plt.plot(obswave, np.interp(obswave, gwave, gflux)/obsflux, '.',
                          color=colors[i%len(colors)] , markersize=2, zorder=-999)
-                plt.plot(obswave, res_sci[f"STD{i+1}SEN"], color=colors[i%len(colors)], linewidth=2)
+                plt.plot(obswave, res_sci[f"SCI{i+1}SEN"], color=colors[i%len(colors)], linewidth=2)
 
     return rss, res_sci
 
@@ -1443,7 +1443,7 @@ def fluxcal_sci_ifu_stars(in_rss, plot=True, GAIA_CACHE_DIR=None, NSCI_MAX=15):
     w = rss._wave
 
     # define dummy sensitivity array in (ergs/s/cm^2/A) / (e-/s/A) for standard star fibers
-    colnames = [f"STD{i}SEN" for i in range(1, NSCI_MAX + 1)]
+    colnames = [f"SCI{i}SEN" for i in range(1, NSCI_MAX + 1)]
     res_sci = Table(np.full(w.size, np.nan, dtype=list(zip(colnames, ["f8"] * len(colnames)))), units=[u.Unit("erg / (ct cm2)")]*len(colnames))
     mean_sci, rms_sci = np.full(w.size, np.nan), np.full(w.size, np.nan)
 

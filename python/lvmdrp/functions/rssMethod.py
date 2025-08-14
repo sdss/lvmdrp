@@ -22,16 +22,18 @@ from numpy import polynomial
 from scipy import interpolate, ndimage
 
 from lvmdrp.utils.decorators import skip_on_missing_input_path, skip_if_drpqual_flags
-from lvmdrp.core.constants import CONFIG_PATH, ARC_LAMPS
+from lvmdrp.core.constants import CONFIG_PATH, ARC_LAMPS, REF_SKYLINES, SKYLINES_FIBERFLAT, CONTINUUM_FIBERFLAT
 from lvmdrp.core.cube import Cube
 from lvmdrp.core.tracemask import TraceMask
 from lvmdrp.core.image import loadImage
 from lvmdrp.core.passband import PassBand
+from lvmdrp.core import fit_profile as fp
 from lvmdrp.core.plot import (plt, create_subplots, save_fig,
                               plot_error,
                               plot_wavesol_coeffs, plot_wavesol_residuals,
                               plot_wavesol_spec, plot_wavesol_wave,
-                              plot_wavesol_lsf)
+                              plot_wavesol_lsf,
+                              slit)
 from lvmdrp.core.rss import RSS, _read_pixwav_map, loadRSS, lvmFrame, lvmFFrame, lvmCFrame
 from lvmdrp.core.spectrum1d import Spectrum1D, _spec_from_lines, _cross_match_float
 from lvmdrp.core.fluxcal import galExtinct
@@ -57,10 +59,6 @@ DONE_PASS = "gi"
 DONE_MAGS = numpy.asarray([22, 21])
 DONE_LIMS = numpy.asarray([1.7, 5.0])
 
-# GB hand picked isolated bright lines across each channel which are not doublest in UVES atlas
-# true wavelengths taken from UVES sky line atlas
-REF_SKYLINES = {'b':[5577.346680], 'r':[6363.782715, 7358.680176, 7392.209961], 'z':[8399.175781, 8988.383789, 9552.546875, 9719.838867]}
-
 
 def _linear_model(pars, xdata):
     """simple linear model
@@ -82,7 +80,7 @@ def _linear_model(pars, xdata):
 
 def _illumination_correction(fiberflat, apply_correction=True):
     # define fiberflat spectrograph id
-    specid = int(fiberflat._header["CCD"][1])
+    specid = int(fiberflat._header["SPEC"][-1])
     # load fibermap and select fibers
     fibermap = Table(fiberflat._slitmap)
     fibermap = fibermap[fibermap["spectrographid"] == specid]
@@ -118,18 +116,18 @@ def _illumination_correction(fiberflat, apply_correction=True):
     return fiberflat, dict(zip(("Sci", "SkyW", "SkyE", "Std"), (sci_factor, skw_factor, ske_factor, std_factor)))
 
 
-def _make_arcline_axes(display_plots, pixel, ref_lines, ifiber, unit="e-", ncols=3, fig_shape=(5, 4)):
+def _make_arcline_axes(display_plots, pixel, ref_lines, ifiber, unit="e-", ncols=3, fig_shape=(5,6)):
     nlines = len(pixel)
     nrows = int(numpy.ceil(nlines / ncols))
     fig, axs = create_subplots(to_display=display_plots,
                                nrows=nrows, ncols=ncols,
                                figsize=(fig_shape[0]*ncols, fig_shape[1]*nrows),
-                               layout="constrained")
+                               layout="tight")
     fig.suptitle(f"Gaussian fitting for fiber {ifiber}")
-    fig.supylabel(f"Counts ({unit}/pixel)")
+    fig.supylabel(f"Counts ({unit}/pixel)", fontsize="x-large")
+    fig.supxlabel("X (pixel)", fontsize="x-large")
     for i, ax in zip(range(nlines), axs):
-        ax.set_title(f"line {ref_lines[i]:.2f} (Ang)")
-        ax.set_xlabel("X (pixel)")
+        ax.set_title(f"line {ref_lines[i]:.2f} (Ang)", fontsize="large")
 
     return fig, axs
 
@@ -157,7 +155,7 @@ def _get_exposed_std_rss(rss, ref_fibers=None, return_nonexposed=False, plot=Fal
     """
     # get standard fiber positions
     slitmap = rss._slitmap
-    slitmap = slitmap[slitmap["spectrographid"] == int(rss._header["CCD"][1])]
+    slitmap = slitmap[slitmap["spectrographid"] == int(rss._header["SPEC"][-1])]
     std_fibers = numpy.where(slitmap["telescope"] == "Spec")[0]
     std_names = slitmap["orig_ifulabel"][std_fibers]
 
@@ -1150,7 +1148,7 @@ def correctPixTable_drp(
 # TODO: hacer esto antes de hacer el rasampling en wl
 @skip_on_missing_input_path(["in_rss"])
 @skip_if_drpqual_flags(["BADTRACE", "EXTRACTBAD"], "in_rss")
-def resample_wavelength(in_rss: str, out_rss: str, method: str = "linear",
+def resample_wavelength(in_rss: str, out_rss: str, method: str = "spline",
                         wave_range: Tuple[float,float] = None, wave_disp: float = None,
                         convert_to_density: bool = False, display_plots: bool = False) -> RSS:
     """Resamples the RSS wavelength solutions to a common wavelength solution
@@ -1165,7 +1163,7 @@ def resample_wavelength(in_rss: str, out_rss: str, method: str = "linear",
         Input RSS FITS file where the wavelength is stored as a pixel table
     out_rss : string
         Output RSS FITS file with a common wavelength solution
-    method : string, optional with default: 'linear'
+    method : string, optional with default: 'spline'
         Interpolation scheme used for the spectral resampling of the data.
         Available options are:
             - linear
@@ -1202,7 +1200,7 @@ def resample_wavelength(in_rss: str, out_rss: str, method: str = "linear",
 
     # resample the wavelength solution
     log.info("resampling the spectra ...")
-    new_rss = rss.rectify_wave(wave_range=wave_range, wave_disp=wave_disp)
+    new_rss = rss.rectify_wave(wave_range=wave_range, wave_disp=wave_disp, method=method, return_density=convert_to_density)
 
     # create error propagation plot
     fig = plt.figure(figsize=(15, 5), layout="constrained")
@@ -1623,7 +1621,10 @@ def correctTraceMask_drp(trace_in, trace_out, logfile, ref_file, poly_smooth="")
     trace.writeFitsData(trace_out)
 
 
-def apply_fiberflat(in_rss: str, out_frame: str, in_flat: str, clip_below: float = 0.0) -> RSS:
+def apply_fiberflat(in_rss: str, out_frame: str, in_flat: str,
+                    sky_cwaves: Dict[str, float] = SKYLINES_FIBERFLAT,
+                    cont_cwaves: Dict[str, float] = CONTINUUM_FIBERFLAT,
+                    groupby: str = "spec", quantiles: Tuple[float, float] = (5.0, 97.0), display_plots: bool = False) -> RSS:
     """applies fiberflat correction to target RSS file
 
     This function applies a fiberflat correction to a target RSS file. The
@@ -1651,50 +1652,60 @@ def apply_fiberflat(in_rss: str, out_frame: str, in_flat: str, clip_below: float
     # load target data
     log.info(f"reading target data from {os.path.basename(in_rss)}")
     rss = RSS.from_file(in_rss)
+    channel = rss._header["CCD"][0]
+    sky_cwave = sky_cwaves[channel]
+    cont_cwave = cont_cwaves[channel]
+    dwave = 20.0
 
     # load fiberflat
     log.info(f"reading fiberflat from {os.path.basename(in_flat)}")
-    flat = RSS.from_file(in_flat)
-    if flat._wave is None:
-        flat.set_wave_trace(rss._wave_trace)
-        flat.set_wave_array()
+    mflat = RSS.from_file(in_flat)
+    if mflat._wave is None:
+        mflat.set_wave_trace(rss._wave_trace)
+        mflat.set_wave_array()
 
     # check if fiberflat has the same number of fibers as the target data
-    if rss._fibers != flat._fibers:
-        log.error(f"number of fibers in target data ({rss._fibers}) and fiberflat ({flat._fibers}) do not match")
-        raise RuntimeError(f"number of fibers in target data ({rss._fibers}) and fiberflat ({flat._fibers}) do not match")
+    if rss._fibers != mflat._fibers:
+        log.error(f"number of fibers in target data ({rss._fibers}) and fiberflat ({mflat._fibers}) do not match")
+        raise RuntimeError(f"number of fibers in target data ({rss._fibers}) and fiberflat ({mflat._fibers}) do not match")
 
     # check if fiberflat has the same wavelength grid as the target data
-    if not numpy.isclose(rss._wave, flat._wave).all():
+    if not numpy.isclose(rss._wave, mflat._wave).all():
         log.warning("target data and fiberflat have different wavelength grids")
         rss.add_header_comment("target data and fiberflat have different wavelength grids")
 
-    # apply fiberflat
-    log.info(f"applying fiberflat correction to {rss._fibers} fibers with minimum relative transmission of {clip_below}")
-    for i in range(flat._fibers):
-        # extract fibers spectra
-        spec_flat = flat.getSpec(i)
-        spec_data = rss.getSpec(i)
+    # apply flatfield and measure sky lines
+    fig = plt.figure(figsize=(14,3*2))
+    fig.suptitle(f"Fiber flatfield correction for {channel = } around sky line @ {sky_cwave:.2f} Angstroms", fontsize="xx-large")
+    gs_gra = gridspec.GridSpec(2, 5, hspace=0.01, wspace=0.01, left=0.07, right=0.99, figure=fig)
+    gs_cor = gridspec.GridSpec(2, 5, hspace=0.5, wspace=0.01, left=0.07, right=0.99, figure=fig)
+    axs = [fig.add_subplot(gs_gra[0, j]) for j in range(5)]
+    log.info(f"measuring sky line {sky_cwave:.2f}+/-{dwave:.2f} Angstroms in {rss._fibers} fibers")
+    x, y, skyline_slit, coeffs, factor, _ = rss.measure_skyline_flatfield(
+            mflat=mflat, sky_cwave=sky_cwave, cont_cwave=cont_cwave, dwave=dwave,
+            quantiles=quantiles, guess_coeffs=[1,0,0,0], fixed_coeffs=[0,1,2,3], groupby=groupby,
+            axs=axs, labels=True)
 
-        if not numpy.isclose(spec_flat._wave, spec_data._wave).all():
-            deltas = spec_flat._wave - spec_data._wave
-            log.error(f"Fiber {i} fiberflat wrong wavelengh grid: {numpy.min(deltas):.4f} - {numpy.max(deltas):.4f}")
-            raise RuntimeError(f"Fiber {i} fiberflat wrong wavelengh grid: {numpy.min(deltas):.4f} - {numpy.max(deltas):.4f}")
+    log.info("applying flatfield correction")
+    fiber_groups = mflat._get_fiber_groups(by="spec")
+    flatfield_corr = fp.IFUGradient.ifu_factors(factor, fiber_groups)
+    mflat *= flatfield_corr[:, None]
+    rss /= mflat
+    skyline_slit /= flatfield_corr
 
-        # apply clipping
-        select_clip_below = (spec_flat < clip_below) | numpy.isnan(spec_flat._data)
-        spec_flat._data[select_clip_below] = 1
-        # if spec_flat._mask is not None:
-        #     spec_flat._mask[select_clip_below] = True
+    # update pixel mask
+    rss._mask = numpy.isnan(rss._data)|numpy.isnan(rss._error)
 
-        # correct
-        spec_new = spec_data / spec_flat._data
-        rss.setSpec(i, spec_new)
-
-    # load ancillary data
-    log.info(f"writing lvmFrame to {os.path.basename(out_frame)}")
+    ax_cor = fig.add_subplot(gs_cor[-1, :])
+    ax_cor.set_title(f"Flatfielded skyline @ {sky_cwave:.2f}+/-{dwave:.2f} Angstroms", loc="left")
+    ax_cor.set_xlabel("Fiber ID", fontsize="large")
+    ax_cor.set_ylabel("Normalized counts", fontsize="large")
+    ax_cor.set_ylim(0.92, 1.08)
+    slit(x=rss._slitmap["fiberid"].data, y=skyline_slit, data=rss._data, ax=ax_cor)
+    save_fig(fig, out_frame, to_display=display_plots, figure_path="qa", label="fiberflat_correction")
 
     # create lvmFrame
+    log.info(f"writing lvmFrame to {os.path.basename(out_frame)}")
     lvmframe = lvmFrame(
         data=rss._data,
         error=rss._error,
@@ -1704,8 +1715,11 @@ def apply_fiberflat(in_rss: str, out_frame: str, in_flat: str, clip_below: float
         wave_trace=rss._wave_trace,
         lsf_trace=rss._lsf_trace,
         slitmap=rss._slitmap,
-        superflat=flat._data
+        superflat=mflat._data
     )
+    rss._header[f"HIERARCH {channel.upper()}1 FIBERFLAT CORR"] =  (numpy.round(factor[0], 5), "fiberflat corr. spec. 1")
+    rss._header[f"HIERARCH {channel.upper()}2 FIBERFLAT CORR"] =  (numpy.round(factor[1], 5), "fiberflat corr. spec. 2")
+    rss._header[f"HIERARCH {channel.upper()}3 FIBERFLAT CORR"] =  (numpy.round(factor[2], 5), "fiberflat corr. spec. 3")
     lvmframe.set_header(orig_header=rss._header, flatname=os.path.basename(in_flat))
     lvmframe.writeFitsData(out_frame)
 
@@ -3046,7 +3060,7 @@ def join_spec_channels(in_fframes: List[str], out_cframe: str, use_weights: bool
                        wave=new_rss._wave, lsf=new_rss._lsf,
                        sky_east=new_rss._sky_east, sky_east_error=new_rss._sky_east_error,
                        sky_west=new_rss._sky_west, sky_west_error=new_rss._sky_west_error,
-                       slitmap=new_rss._slitmap)
+                       fluxcal_std=new_rss._fluxcal_std, fluxcal_sci=new_rss._fluxcal_sci, slitmap=new_rss._slitmap)
 
     # write output RSS
     if out_cframe is not None:

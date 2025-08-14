@@ -3,15 +3,19 @@ from astropy.io import fits as pyfits
 from scipy import interpolate
 from tqdm import tqdm
 from copy import deepcopy as copy
+import warnings
 
 import bottleneck as bn
+import pandas as pd
 from lvmdrp import log
-from scipy import optimize
 from astropy.table import Table
+from astropy.stats import biweight_location, biweight_scale
+
+from lvmdrp.core.constants import LVM_NBLOCKS, LVM_BLOCKSIZE, LVM_NFIBERS
 from lvmdrp.core.header import Header, combineHdr
 from lvmdrp.core.positionTable import PositionTable
 from lvmdrp.core.spectrum1d import Spectrum1D, _cross_match_float
-from lvmdrp.core.plot import plt
+from lvmdrp.core import plot
 
 
 def fillin_gap(x, distances, inplace=False):
@@ -61,6 +65,34 @@ def _residual_spline(c, x, y, t, k, w=None):
 class FiberRows(Header, PositionTable):
 
     @classmethod
+    def create_empty(cls, data_dim, smoothing_kind=None, poly_deg=None, samples_columns=None, header=None, slitmap=None):
+        data = numpy.full(data_dim, numpy.nan, dtype=numpy.float32)
+        fibers = data.shape[0]
+        error = numpy.full(data_dim, numpy.nan, dtype=numpy.float32)
+        mask = numpy.ones(data_dim, dtype="bool")
+        if samples_columns is not None:
+            samples = Table(data=numpy.full((data_dim[0], len(samples_columns)), numpy.nan), names=samples_columns)
+            samples_error = Table(data=numpy.full((data_dim[0], len(samples_columns)), numpy.nan), names=samples_columns)
+        else:
+            samples = None
+            samples_error = None
+        if poly_deg is not None:
+            coeffs = numpy.full((data_dim[0], poly_deg+1), numpy.nan, dtype=numpy.float32)
+        else:
+            coeffs = None
+
+        new_fiberrows = cls(data=data, error=error, mask=mask, samples=samples, samples_error=samples_error, smoothing_kind=smoothing_kind, coeffs=coeffs, header=header, slitmap=slitmap)
+        new_fiberrows.setFibers(fibers)
+        return new_fiberrows
+
+    @classmethod
+    def from_samples(cls, data_dim, samples, samples_error=None, samples_columns=None, header=None, slitmap=None):
+        new_fiberrows = cls.create_empty(data_dim=data_dim, samples_columns=samples_columns, header=header, slitmap=slitmap)
+        new_fiberrows.set_samples(samples, columns=samples_columns)
+        new_fiberrows.set_samples_error(samples_error, columns=samples_columns)
+        return new_fiberrows
+
+    @classmethod
     def from_coeff_table(cls, coeff_table, **kwargs):
         """Creates an FiberRows instance from a table of coefficients"""
 
@@ -74,7 +106,7 @@ class FiberRows(Header, PositionTable):
         data = numpy.zeros((nfibers, npixels), dtype=numpy.float32)
         coeffs = numpy.zeros((nfibers, coeff_table["COEFF"].shape[1]), dtype=numpy.float32)
         for ifiber in range(nfibers):
-            poly_cls = Spectrum1D.select_poly_class(poly_kind=coeff_table[ifiber]["FUNC"])
+            poly_cls = Spectrum1D.select_poly_class(coeff_table[ifiber]["FUNC"])
             data[ifiber] = poly_cls(coeff_table[ifiber]["COEFF"])(x_pixels)
             coeffs[ifiber] = coeff_table[ifiber]["COEFF"]
 
@@ -131,7 +163,10 @@ class FiberRows(Header, PositionTable):
         header=None,
         error=None,
         mask=None,
+        slitmap=None,
         samples=None,
+        samples_error=None,
+        samples_columns=None,
         shape=None,
         size=None,
         arc_position_x=None,
@@ -139,8 +174,7 @@ class FiberRows(Header, PositionTable):
         good_fibers=None,
         fiber_type=None,
         coeffs=None,
-        poly_kind=None,
-        poly_deg=None
+        smoothing_kind=None
     ):
         Header.__init__(self, header=header)
         PositionTable.__init__(
@@ -153,328 +187,61 @@ class FiberRows(Header, PositionTable):
             fiber_type=fiber_type,
         )
         self.setData(data=data, error=error, mask=mask)
-        self.set_samples(samples)
-        self.set_coeffs(coeffs=coeffs, poly_kind=poly_kind)
+        self.set_samples(samples, samples_columns)
+        self.set_samples_error(samples_error, samples_columns)
+        self.set_coeffs(coeffs=coeffs, smoothing_kind=smoothing_kind)
         if self._data is None and self._coeffs is not None:
             self.eval_coeffs()
+
+        self.setSlitmap(slitmap)
 
     def __len__(self):
         return self._fibers
 
-    def __truediv__(self, other):
-        """
-        Operator to divide two Images or divide by another type if possible
-        """
-        if isinstance(other, self.__class__):
-            # define behaviour if the other is of the same instance
+    def _propagate_error(self, other, operation):
+        """ Error propagation for different operations. """
+        if self._error is None and getattr(other, "_error", None) is None:
+            return None
 
-            img = self.__class__(
-                header=self._header,
-                shape=self._shape,
-                size=self._size,
-                arc_position_x=self._arc_position_x,
-                arc_position_y=self._arc_position_y,
-                good_fibers=self._good_fibers,
-                fiber_type=self._fiber_type,
-            )
+        err1 = self._error if self._error is not None else 0
+        err2 = other._error if isinstance(other, self.__class__) and other._error is not None else 0
 
-            # subtract data if contained in both
-            if self._data is not None and other._data is not None:
-                new_data = self._data / other._data
-                img.setData(data=new_data)
-            else:
-                img.setData(data=self._data)
-
-            # add error if contained in both
-            if self._error is not None and other._error is not None:
-                new_error = numpy.sqrt(
-                    (self._error / other._data) ** 2
-                    + (self._data * other._error / other._data**2) ** 2
-                )
-                img.setData(error=new_error)
-            elif self._error is not None and other._error is None:
-                new_error = self._error / other._data
-                img.setData(error=new_error)
-            else:
-                img.setData(error=self._error)
-
-            # combined mask of valid pixels if contained in both
-            if self._mask is not None and other._mask is not None:
-                new_mask = numpy.logical_or(self._mask, other._mask)
-                img.setData(mask=new_mask)
-            else:
-                img.setData(mask=self._mask)
-            return img
-
-        elif isinstance(other, numpy.ndarray):
-            img = self.__class__(
-                error=self._error,
-                mask=self._mask,
-                header=self._header,
-                shape=self._shape,
-                size=self._size,
-                arc_position_x=self._arc_position_x,
-                arc_position_y=self._arc_position_y,
-                good_fibers=self._good_fibers,
-                fiber_type=self._fiber_type,
-            )
-
-            if self._data is not None:  # check if there is data in the object
-                dim = other.shape
-                # add ndarray according do its dimensions
-                if self._data.shape == dim:
-                    new_data = self._data / other
-                elif len(dim) == 1:
-                    if self._data.shape[0] == dim[0]:
-                        new_data = self._data / other[:, numpy.newaxis]
-                    elif self._data.shape[1] == dim[0]:
-                        new_data = self._data / other[numpy.newaxis, :]
-                else:
-                    new_data = self._data
-                if self._error is not None:
-                    new_error = self._error / other
-                else:
-                    new_error = None
-                img.setData(data=new_data, error=new_error)
-            return img
+        if operation in ('add', 'sub'):
+            return numpy.sqrt(err1**2 + err2**2)
+        elif operation == 'mul':
+            return numpy.sqrt((err1 * other._data)**2 + (self._data * err2)**2)
+        elif operation == 'div':
+            return numpy.sqrt((err1 / other._data)**2 + (self._data * err2 / other._data**2)**2)
         else:
-            # try to do addtion for other types, e.g. float, int, etc.
-            # try:
-            new_data = self._data / other
-            if self._error is not None:
-                new_error = self._error / other
-            else:
-                new_error = None
-            img = self.__class__(
-                data=new_data,
-                error=new_error,
-                mask=self._mask,
-                header=self._header,
-                shape=self._shape,
-                size=self._size,
-                arc_position_x=self._arc_position_x,
-                arc_position_y=self._arc_position_y,
-                good_fibers=self._good_fibers,
-                fiber_type=self._fiber_type,
-            )
-            return img
-        # except:
-        # raise exception if the type are not matching in general
-        #   raise exceptions.TypeError("unsupported operand type(s) for /: %s and %s"%(str(type(self)).split("'")[1], str(type(other)).split("'")[1]))
+            raise ValueError(f"Unknown operation: {operation}")
+
+    def _apply_operation(self, other, op, op_name):
+        if isinstance(other, self.__class__):
+            new_data = op(self._data, other._data)
+            new_error = self._propagate_error(other, op_name)
+            new_mask = numpy.logical_or(self._mask, other._mask) if self._mask is not None and other._mask is not None else None
+        elif isinstance(other, numpy.ndarray) or numpy.isscalar(other):
+            new_data = op(self._data, other)
+            new_error = (op(self._error, other) if self._error is not None else None)
+            new_mask = self._mask
+        else:
+            raise NotImplementedError(f"operation '{op_name}' between {self.__class__} and {type(other)} is not implemented")
+
+        new = copy(self)
+        new.setData(data=new_data, error=new_error, mask=new_mask)
+        return new
 
     def __add__(self, other):
-        """
-        Operator to add two FiberRow or divide by another type if possible
-        """
-        if isinstance(other, self.__class__):
-            # define behaviour if the other is of the same instance
+        return self._apply_operation(other, numpy.add, 'add')
 
-            img = self.__class__(
-                header=self._header,
-                shape=self._shape,
-                size=self._size,
-                arc_position_x=self._arc_position_x,
-                arc_position_y=self._arc_position_y,
-                good_fibers=self._good_fibers,
-                fiber_type=self._fiber_type,
-            )
-
-            # subtract data if contained in both
-            if self._data is not None and other._data is not None:
-                new_data = self._data + other._data
-                img.setData(data=new_data)
-            else:
-                img.setData(data=self._data)
-
-            # add error if contained in both
-            if self._error is not None and other._error is not None:
-                new_error = numpy.sqrt(self._error**2 + other._error**2)
-                img.setData(error=new_error)
-            else:
-                img.setData(error=self._error)
-
-            # combined mask of valid pixels if contained in both
-            if self._mask is not None and other._mask is not None:
-                new_mask = numpy.logical_or(self._mask, other._mask)
-                img.setData(mask=new_mask)
-            else:
-                img.setData(mask=self._mask)
-            return img
-
-        elif isinstance(other, numpy.ndarray):
-            img = self.__class__(
-                error=self._error,
-                mask=self._mask,
-                header=self._header,
-                shape=self._shape,
-                size=self._size,
-                arc_position_x=self._arc_position_x,
-                arc_position_y=self._arc_position_y,
-                good_fibers=self._good_fibers,
-                fiber_type=self._fiber_type,
-            )
-
-            if self._data is not None:  # check if there is data in the object
-                dim = other.shape
-                # add ndarray according do its dimensions
-                if self._dim == dim:
-                    new_data = self._data + other
-                elif len(dim) == 1:
-                    if self._dim[0] == dim[0]:
-                        new_data = self._data + other[:, numpy.newaxis]
-                    elif self._dim[1] == dim[0]:
-                        new_data = self._data + other[numpy.newaxis, :]
-                else:
-                    new_data = self._data
-                img.setData(data=new_data)
-            return img
-
-        elif isinstance(other, Spectrum1D):
-            img = self.__class__(
-                error=self._error,
-                mask=self._mask,
-                header=self._header,
-                shape=self._shape,
-                size=self._size,
-                arc_position_x=self._arc_position_x,
-                arc_position_y=self._arc_position_y,
-                good_fibers=self._good_fibers,
-                fiber_type=self._fiber_type,
-            )
-
-            if self._data is not None:  # check if there is data in the object
-                # add ndarray according do its dimensions
-                if self._fibers == other._dim:
-                    new_data = self._data + other._data[:, numpy.newaxis]
-                elif self._data.shape[1] == other._dim:
-                    new_data = self._data + other._data[numpy.newaxis, :]
-                else:
-                    new_data = self._data
-                img.setData(data=new_data)
-            return img
-        else:
-            # try to do addtion for other types, e.g. float, int, etc.
-            try:
-                new_data = self._data + other
-                img = self.__class__(
-                    data=new_data,
-                    error=self._error,
-                    mask=self._mask,
-                    header=self._header,
-                    shape=self._shape,
-                    size=self._size,
-                    arc_position_x=self._arc_position_x,
-                    arc_position_y=self._arc_position_y,
-                    good_fibers=self._good_fibers,
-                    fiber_type=self._fiber_type,
-                )
-                return img
-            except Exception:
-                # raise exception if the type are not matching in general
-                raise TypeError(
-                    "unsupported operand type(s) for +: %s and %s"
-                    % (str(type(self)).split("'")[1], str(type(other)).split("'")[1])
-                )
+    def __sub__(self, other):
+        return self._apply_operation(other, numpy.subtract, 'sub')
 
     def __mul__(self, other):
-        """
-        Operator to add two FiberRow or divide by another type if possible
-        """
-        if isinstance(other, self.__class__):
-            # define behaviour if the other is of the same instance
+        return self._apply_operation(other, numpy.multiply, 'mul')
 
-            img = self.__class__(
-                header=self._header,
-                shape=self._shape,
-                size=self._size,
-                arc_position_x=self._arc_position_x,
-                arc_position_y=self._arc_position_y,
-                good_fibers=self._good_fibers,
-                fiber_type=self._fiber_type,
-            )
-
-            # subtract data if contained in both
-            if self._data is not None and other._data is not None:
-                new_data = self._data * other._data
-                img.setData(data=new_data)
-            else:
-                img.setData(data=self._data)
-
-            # add error if contained in both
-            if self._error is not None and other._error is not None:
-                new_error = numpy.sqrt(
-                    other._data**2 * self._error**2
-                    + self._data**2 * other._error**2
-                )
-                img.setData(error=new_error)
-            elif self._error is not None:
-                new_error = other._data * self._error
-                img.setData(error=new_error)
-            else:
-                img.setData(error=self._error)
-
-            # combined mask of valid pixels if contained in both
-            if self._mask is not None and other._mask is not None:
-                new_mask = numpy.logical_or(self._mask, other._mask)
-                img.setData(mask=new_mask)
-            else:
-                img.setData(mask=self._mask)
-            return img
-
-        elif isinstance(other, numpy.ndarray):
-            img = self.__class__(
-                error=self._error,
-                mask=self._mask,
-                header=self._header,
-                shape=self._shape,
-                size=self._size,
-                arc_position_x=self._arc_position_x,
-                arc_position_y=self._arc_position_y,
-                good_fibers=self._good_fibers,
-                fiber_type=self._fiber_type,
-            )
-
-            if self._data is not None:  # check if there is data in the object
-                dim = other.shape
-                # add ndarray according do its dimensions
-                if self._dim == dim:
-                    new_data = self._data * other
-                elif len(dim) == 1:
-                    if self._dim[0] == dim[0]:
-                        new_data = self._data * other[:, numpy.newaxis]
-                    elif self._dim[1] == dim[0]:
-                        new_data = self._data * other[numpy.newaxis, :]
-                else:
-                    new_data = self._data
-                img.setData(data=new_data)
-            return img
-        else:
-            # try to do addtion for other types, e.g. float, int, etc.
-            try:
-                new_data = self._data * other
-                if self._error is not None:
-                    new_error = self._error * other
-                else:
-                    new_error = self._error
-                img = self.__class__(
-                    data=new_data,
-                    error=new_error,
-                    mask=self._mask,
-                    header=self._header,
-                    shape=self._shape,
-                    size=self._size,
-                    arc_position_x=self._arc_position_x,
-                    arc_position_y=self._arc_position_y,
-                    good_fibers=self._good_fibers,
-                    fiber_type=self._fiber_type,
-                )
-                return img
-            except Exception:
-                # raise exception if the type are not matching in general
-                raise TypeError(
-                    "unsupported operand type(s) for *: %s and %s"
-                    % (str(type(self)).split("'")[1], str(type(other)).split("'")[1])
-                )
+    def __truediv__(self, other):
+        return self._apply_operation(other, numpy.divide, 'div')
 
     def __getitem__(self, fiber):
         if not isinstance(fiber, int):
@@ -533,7 +300,140 @@ class FiberRows(Header, PositionTable):
 
         return self.__class__(data=data, error=error, mask=mask)
 
-    def createEmpty(self, data_dim=None, poly_deg=None, samples_columns=None):
+    def _get_iblocks(self):
+        slitmap = self._filter_slitmap().to_pandas()
+        iblocks = slitmap["blockid"].str[1:].drop_duplicates().values.astype("int") - 1
+        return iblocks
+
+    def _validate_blockid(self, iblock, blockid, slitmap):
+        if blockid is not None:
+            pass
+        elif iblock is not None:
+            blockid = f"B{iblock+1}"
+        else:
+            raise ValueError(f"Either `iblock` or `blockid` needs to be given: {iblock = }, {blockid = }")
+        if blockid not in slitmap["blockid"]:
+            raise ValueError(f"Given {blockid = } not found in slitmap column `blockid`")
+
+        return blockid
+
+    def _validate_table(self, table, columns):
+        if table is None:
+            return
+        if isinstance(table, Table):
+            table_ = table
+        elif isinstance(table, pd.DataFrame):
+            table.columns = table.columns.astype("str")
+            table_ = Table.from_pandas(table)
+        elif isinstance(table, numpy.ndarray) and columns is not None:
+            table_ = Table(data=table, names=columns)
+        elif isinstance(table, (int, float)) and columns is not None:
+            table_ = Table(data=numpy.ones((self._fibers, columns.size)) * table, names=columns)
+        else:
+            raise ValueError(f"Invalid `table` type: {type(table)}. Expected {Table}, {pd.DataFrame}, {numpy.ndarray} or {int}/{float}")
+
+        table_ = Table({name: numpy.array(table_[name], dtype="float32") for name in table_.colnames})
+        return table_
+
+    def _merge_tables(self, table, array, nfibers, block_selection):
+        table = table.to_pandas().astype("float32")
+        if array.shape[1] != table.shape[1]:
+            raise ValueError(f"Incompatible column sizes for array. Trying to set array with {array.shape[1]} columns to {table.columns.size} columns")
+        if array.shape[0] != nfibers:
+            raise ValueError(f"Incompatible sample sizes. Trying to set array with {array.shape[0]} fibers to {nfibers} fibers")
+        array = array.astype("float32")
+        for i, column in enumerate(table.columns):
+            table.loc[block_selection, column] = array[:, i]
+        return table
+
+    def fill(self, data, error, mask, samples, samples_error, samples_columns=None):
+        columns = samples_columns
+        if columns is None and self._samples is not None:
+            columns = numpy.asarray(self._samples.colnames)
+
+        empty_pixels = numpy.ones_like(self._data, dtype="bool")
+        self.setData(data=data, error=error, mask=mask, select=empty_pixels)
+        self.set_samples(samples=samples, columns=columns)
+        self.set_samples_error(samples_error=samples_error, columns=columns)
+        return self
+
+    def get_block(self, iblock=None, blockid=None):
+        slitmap = self._filter_slitmap()
+        blockid = self._validate_blockid(iblock, blockid, slitmap=slitmap)
+        block_selection = slitmap["blockid"] == blockid
+        if block_selection.sum() == 0:
+            raise ValueError(f"Requested block: {iblock = }, {blockid = }, is not present in slitmap")
+
+        new_trace = copy(self)
+        new_trace._data = self._data[block_selection]
+        new_trace._error = self._error[block_selection] if self._error is not None else None
+        new_trace._mask = self._mask[block_selection] if self._mask is not None else None
+        new_trace._samples = self._samples[block_selection] if self._samples is not None else None
+        new_trace._samples_error = self._samples_error[block_selection] if self._samples_error is not None else None
+        new_trace.set_coeffs(self._coeffs[block_selection] if self._coeffs is not None else None, smoothing_kind=self._smoothing_kind)
+        new_trace.setFibers(block_selection.sum())
+        new_trace.setSlitmap(slitmap[block_selection])
+
+        return new_trace
+
+    def set_block(self, data=None, iblock=None, blockid=None, error=None, mask=None, samples=None, samples_error=None, coeffs=None, smoothing_kind=None, slitmap=None, from_instance=None):
+
+        if from_instance is not None:
+            samples_o = from_instance.get_samples(as_pandas=True)
+            samples_error_o = from_instance.get_samples_error(as_pandas=True)
+            samples_o = samples_o.values if samples_o is not None else None
+            samples_error_o = samples_error_o.values if samples_error_o is not None else None
+
+            self.set_block(
+                data=from_instance._data, iblock=iblock, blockid=blockid,
+                error=from_instance._error, mask=from_instance._mask,
+                samples=samples_o, samples_error=samples_error_o, coeffs=from_instance._coeffs, smoothing_kind=from_instance._smoothing_kind,
+                slitmap=from_instance._slitmap)
+            return
+
+        slitmap_o = self._filter_slitmap()
+        blockid = self._validate_blockid(iblock, blockid, slitmap=slitmap_o)
+        block_selection = slitmap_o["blockid"] == blockid
+        nfibers = block_selection.sum()
+
+        if data is not None:
+            if data.shape[0] != nfibers:
+                raise ValueError(f"Incompatible data shapes. Trying to set a block of {data.shape[0]} fibers to a selection of {nfibers} fibers")
+            self._data[block_selection] = data
+        if error is not None and self._error is not None:
+            self._error[block_selection] = error
+        if mask is not None and self._error is not None:
+            self._mask[block_selection] = mask
+        if samples is not None and self._samples is not None:
+            samples_i = self._merge_tables(self._samples, samples, nfibers, block_selection)
+            self.set_samples(samples_i)
+        if samples_error is not None and self._samples_error is not None:
+            samples_error_i = self._merge_tables(self._samples_error, samples_error, nfibers, block_selection)
+            self.set_samples_error(samples_error_i)
+        if coeffs is not None and smoothing_kind is not None and self._coeffs is not None:
+            if self._smoothing_kind != smoothing_kind:
+                raise ValueError(f"Incompatible smoothing kinds. Trying to set {smoothing_kind} to a tracemask of {self._smoothing_kind}")
+            self.set_coeffs(coeffs, smoothing_kind=smoothing_kind)
+        if slitmap is not None:
+            select_i = numpy.isin(self._slitmap["fiberid"], slitmap["fiberid"])
+            if select_i.size == 0:
+                raise ValueError(f"Incompatible slitmaps. Trying to set {select_i.size} fibers to {len(self._slitmap)}")
+            self._slitmap[select_i] = slitmap
+
+
+    def get_distances(self):
+        samples = self.get_samples(as_pandas=True).values
+        if samples is not None:
+            sample_distances = numpy.gradient(samples, axis=0)
+        else:
+            sample_distances = None
+        if self._data is not None:
+            model_distances = numpy.gradient(self._data, axis=0)
+        else:
+            model_distances = None
+        return sample_distances, model_distances
+
+    def createEmpty(self, data_dim, poly_deg=None, samples_columns=None, header=None, slitmap=None):
         """
         Fill the FiberRows object with empty data
 
@@ -544,24 +444,16 @@ class FiberRows(Header, PositionTable):
         poly_deg: int, optional with default: None
             Degree of the polynomial trace to be created
         """
-        if data_dim is not None:
-            # create empty  data array and set number of fibers
-            self._data = numpy.zeros(data_dim, dtype=numpy.float32) + numpy.nan
-            self._fibers = self._data.shape[0]
-
-        if data_dim is not None:
-            # create empty  error array
-            self._error = numpy.zeros(data_dim, dtype=numpy.float32) + numpy.nan
-
-        if data_dim is not None:
-            # create empty mask all pixel assigned bad
-            self._mask = numpy.ones(data_dim, dtype="bool")
-
-        if data_dim is not None and samples_columns is not None:
-            self._samples = Table(data=numpy.zeros((data_dim[0], len(samples_columns))) + numpy.nan, names=samples_columns)
-
-        if data_dim is not None and poly_deg is not None:
-            self._coeffs = numpy.zeros((data_dim[0], poly_deg+1), dtype=numpy.float32)
+        self._data = numpy.full(data_dim, numpy.nan, dtype=numpy.float32)
+        self._fibers = self._data.shape[0]
+        self._error = numpy.full(data_dim, numpy.nan, dtype=numpy.float32)
+        self._mask = numpy.ones(data_dim, dtype="bool")
+        if samples_columns is not None:
+            self._samples = Table(data=numpy.full((data_dim[0], len(samples_columns)), numpy.nan), names=samples_columns)
+        if poly_deg is not None:
+            self._coeffs = numpy.full((data_dim[0], poly_deg+1), numpy.nan, dtype=numpy.float32)
+        self.setHeader(header)
+        self.setSlitmap(slitmap)
 
     def setFibers(self, fibers):
         """
@@ -735,20 +627,74 @@ class FiberRows(Header, PositionTable):
             elif not hasattr(self, "_pixels"):
                 self._pixels = None
 
-    def set_samples(self, samples=None, columns=None):
-        if isinstance(samples, Table):
-            self._samples = samples
-        elif isinstance(samples, numpy.ndarray) and columns is not None:
-            self._samples = Table(data=samples, names=columns)
-        elif columns is not None:
-            self._samples = Table(data=numpy.zeros((self._fibers, len(columns))) + numpy.nan, names=columns)
+    def _filter_slitmap(self):
+        if self._slitmap is None:
+                raise ValueError(f"Attribute `_slitmap` needs to be set: {self._slitmap = }")
+        if self._header is None:
+            raise ValueError(f"Attribute `_header` needs to be set: {self._header = }")
+
+        slitmap = self._slitmap
+        if self._fibers == LVM_NFIBERS:
+            slitmap = self._slitmap[self._slitmap["spectrographid"]==int(self._header["SPEC"][-1])]
+        return slitmap
+
+    def getSlitmap(self):
+        return self._slitmap
+
+    def setSlitmap(self, slitmap):
+        if slitmap is None:
+            self._slitmap = None
+            return
+        if isinstance(slitmap, pyfits.BinTableHDU):
+            self._slitmap = Table.read(slitmap)
+        elif isinstance(slitmap, Table):
+            self._slitmap = slitmap
         else:
-            self._samples = None
+            raise TypeError(f"Invalid slitmap table type '{type(slitmap)}'")
 
+    def set_samples(self, samples=None, columns=None, from_data=False):
+        self._samples = None
+        if from_data and columns is not None:
+            self._samples = Table(data=self._data[:, columns], names=columns)
+        else:
+            self._samples = self._validate_table(table=samples, columns=columns)
         return self._samples
 
-    def get_samples(self):
+    def get_samples(self, as_pandas=False):
+        if self._samples is None:
+            return None
+        if as_pandas:
+            df = self._samples.to_pandas()
+            df.columns = df.columns.astype("int")
+            return df
         return self._samples
+
+    def set_samples_error(self, samples_error=None, columns=None, from_error=False):
+        self._samples_error = None
+        if from_error and columns is not None and self._error is not None:
+            self._samples_error = Table(data=self._error[:, columns], names=columns)
+        else:
+            self._samples_error = self._validate_table(table=samples_error, columns=columns)
+        return self._samples_error
+
+    def get_samples_error(self, as_pandas=False):
+        if self._samples_error is None:
+            return None
+        if as_pandas:
+            df = self._samples_error.to_pandas()
+            df.columns = df.columns.astype("int")
+            return df
+        return self._samples_error
+
+    def apply_pixelmask(self, mask=None):
+        if mask is None:
+            mask = self._mask
+        if mask is None:
+            return self
+
+        self._data[mask] = numpy.nan
+        self._error[mask] = numpy.nan
+        return self
 
     def split(self, fragments, axis="x"):
         list = []
@@ -795,70 +741,16 @@ class FiberRows(Header, PositionTable):
         if image_list[0]._header is not None:
             self._header = image_list[0]._header
 
-    def loadFitsData(
-        self,
-        file,
-        extension_data=None,
-        extension_mask=None,
-        extension_error=None,
-        extension_coeffs=None,
-        extension_hdr=None,
-    ):
-        """
-        Load data from a FITS image into an FiberRows object (Fibers in y-direction, dispersion in x-direction)
-
-        Parameters
-        --------------
-        filename : string
-            Name or Path of the FITS image from which the data shall be loaded
-
-        extension_data : int, optional with default: None
-            Number of the FITS extension containing the data
-
-        extension_mask : int, optional with default: None
-            Number of the FITS extension containing the masked pixels
-
-        extension_error : int, optional with default: None
-            Number of the FITS extension containing the errors for the values
-        """
-        hdu = pyfits.open(file, uint=True, do_not_scale_image_data=True, memmap=False)
-        if (
-            extension_data is None
-            and extension_mask is None
-            and extension_error is None
-            and extension_coeffs is None
-        ):
-            self._data = hdu[0].data.astype("float32")
-            self._fibers = self._data.shape[0]
-            self._pixels = numpy.arange(self._data.shape[1])
-            self.setHeader(hdu[0].header)
-            if len(hdu) > 1:
-                for i in range(1, len(hdu)):
-                    if hdu[i].header["EXTNAME"].split()[0] == "ERROR":
-                        self._error = hdu[i].data.astype("float32")
-                    elif hdu[i].header["EXTNAME"].split()[0] == "BADPIX":
-                        self._mask = hdu[i].data.astype("bool")
-                        self._good_fibers = numpy.where(numpy.sum(self._mask, axis=1) != self._data.shape[1])[0]
-                    elif hdu[i].header["EXTNAME"].split()[0] == "COEFFS":
-                        self._coeffs = hdu[i].data.astype("float32")
-
+    def select_outliers(self, on_distances=False, nsigmas=2):
+        if on_distances:
+            samples_, _ = self.get_distances()
         else:
-            if extension_data is not None:
-                self._data = hdu[extension_data].data.astype("float32")
-                self._fibers = self._data.shape[0]
-                self._pixels = numpy.arange(self._data.shape[1])
-            if extension_mask is not None:
-                self._mask = hdu[extension_mask].data.astype("bool")
-                self._good_fibers = numpy.where(numpy.sum(self._mask, axis=1) != self._data.shape[1])[0]
-            if extension_error is not None:
-                self._error = hdu[extension_error].data.astype("float32")
-            if extension_coeffs is not None:
-                self._coeffs = hdu[extension_coeffs].data.astype("float32")
+            samples_ = self.get_samples(as_pandas=True).values
 
-        hdu.close()
-
-        if extension_hdr is not None:
-            self.setHeader(hdu[extension_hdr].header)
+        mu = biweight_location(samples_, axis=0, ignore_nan=True)
+        sigma = biweight_scale(samples_, axis=0, ignore_nan=True)
+        zscore = abs(samples_ - mu[None]) / sigma[None]
+        return zscore > nsigmas, mu, sigma
 
     def applyFibers(self, function, args):
         result = []
@@ -1025,7 +917,7 @@ class FiberRows(Header, PositionTable):
             combined_hdr = combineHdr([self, rows])
             self.setHeader(combined_hdr._header)
 
-    def fit_spline(self, degree=3, nknots=5, knots=None, smoothing=None, weights=None, constraints=None, clip=None):
+    def fit_spline(self, deg=3, nknots=5, knots=None, smoothing=None, clip=None, use_weights=True, nsigmas=None, min_samples_frac=0.0):
         """
         smooths the traces along the dispersion direction with a spline function for each individual fiber
 
@@ -1055,40 +947,67 @@ class FiberRows(Header, PositionTable):
         else:
             knots = None
 
-        self._coeffs = numpy.zeros(self._data.shape[0], dtype=object)
+        samples = self.get_samples(as_pandas=True)
+        samples_error = self.get_samples_error(as_pandas=True)
+        columns = samples.columns.astype("int")
+        samples = samples.values
+        coeffs = numpy.full(self._data.shape[0], numpy.nan, dtype=object)
+        if nsigmas is not None:
+            outliers, _, _ = self.select_outliers(nsigmas=nsigmas)
+            inliers = ~outliers
+        else:
+            inliers = numpy.ones_like(samples, dtype="bool")
+        if use_weights and self._samples_error is not None:
+            weights = numpy.nan_to_num(1 / samples_error.values, nan=0.0, posinf=0.0, neginf=0.0)
+        else:
+            weights = numpy.ones_like(samples)
 
         pix_table = []
         poly_table = []
         poly_all_table = []
         for i in range(self._fibers):
-            good_pix = numpy.logical_not(self._mask[i, :])
-            if numpy.sum(good_pix) >= nknots + 1:
-                pixels_, data_ = pixels[good_pix], self._data[i, good_pix]
-                (t0, c0, k) = _guess_spline(pixels_, data_, k=degree, s=smoothing, w=weights)
+            good_sam = numpy.isfinite(samples[i, :]) & inliers[i, :]
+            n_goodsam = good_sam.sum()
+            if n_goodsam == 0:
+                self._mask[i, :] = True
+                continue
+
+            nsamples = good_sam.size
+            can_fit = n_goodsam >= deg + 1
+            enough_samples = n_goodsam / nsamples > min_samples_frac
+            if can_fit and enough_samples:
+
+                # try to fit
                 try:
-                    opt = optimize.minimize(_residual_spline, (t0, c0), (pixels_, data_, k, weights), constraints=constraints)
-                    t, c = opt.x
-                    tck = (t, c, k)
-                    pix_table.extend(numpy.column_stack([pixels_, data_]).tolist())
-                    poly_table.extend(numpy.column_stack([pixels_, interpolate.splev(pixels_, tck)]).tolist())
+                    tck = interpolate.splrep(columns[good_sam], samples[i, good_sam], weights[i, good_sam], s=smoothing)
+
+                    pix_table.extend(numpy.column_stack([columns[good_sam], samples[i, good_sam]]).tolist())
+                    poly_table.extend(numpy.column_stack([pixels[columns], interpolate.splev(pixels[columns], tck)]).tolist())
                     poly_all_table.extend(numpy.column_stack([pixels, interpolate.splev(pixels, tck)]).tolist())
-                except ValueError as e:
-                    log.error(f'Fiber trace failure at fiber {i}: {e}')
+                except Exception as e:
+                    warnings.warn(f'Fiber trace failure at fiber {i}: {e}')
                     self._mask[i, :] = True
                     continue
 
-                self._coeffs[i] = tck
+                coeffs[i] = tck
                 self._data[i, :] = interpolate.splev(pixels, tck)
 
                 if clip is not None:
                     self._data = numpy.clip(self._data, clip[0], clip[1])
                 self._mask[i, :] = False
             else:
+                if not can_fit:
+                    warnings.warn(f"fiber {i} does not meet criterium: {n_goodsam = } >= {deg + 1 = }")
+                elif not enough_samples:
+                    warnings.warn(f"fiber {i} does not meet criterium: {n_goodsam / nsamples = :.3f} > {min_samples_frac = :.3f}")
                 self._mask[i, :] = True
+
+        # TODO: port existing code to deal with tck objects as tables
+        self._coeffs = coeffs
 
         return numpy.asarray(pix_table), numpy.asarray(poly_table), numpy.asarray(poly_all_table)
 
-    def fit_polynomial(self, deg, poly_kind="poly", clip=None, min_samples_frac=0.0):
+    def fit_polynomial(self, deg, smoothing_kind="poly", clip=None, nsigmas=None, min_samples_frac=0.0):
         """
         smooths the traces along the dispersion direction with a polynomical function for each individual fiber
 
@@ -1096,7 +1015,7 @@ class FiberRows(Header, PositionTable):
         ----------
         deg: int
             degree of the polynomial function to describe the trace along diserpsion direction
-        poly_kind : string, optional with default 'poly'
+        smoothing_kind : string, optional with default 'poly'
             the kind of polynomial to use when smoothing the trace, valid options are: 'poly' (power series, default), 'legendre', 'chebyshev'
         clip : 2-tuple of int, optional with default None
             clip data around this values, defaults to no clipping
@@ -1104,41 +1023,123 @@ class FiberRows(Header, PositionTable):
             minimum fraction of valid samples, by default 0.0 (no threshold)
         """
         pixels = numpy.arange(self._data.shape[1])
-        samples = self._samples.to_pandas().values
-        self._coeffs = numpy.zeros((self._data.shape[0], numpy.abs(deg) + 1))
+        _ = self._samples.to_pandas()
+        columns = _.columns.astype("int")
+        samples = _.values
+        coeffs = numpy.full((self._data.shape[0], numpy.abs(deg) + 1), numpy.nan)
+        if nsigmas is not None:
+            outliers, _, _ = self.select_outliers(nsigmas=nsigmas)
+            inliers = ~outliers
+        else:
+            inliers = numpy.ones_like(samples, dtype="bool")
         # iterate over each fiber
         pix_table = []
         poly_table = []
         poly_all_table = []
         for i in range(self._fibers):
-            good_pix = numpy.logical_not(self._mask[i, :])
-            good_sam = numpy.isfinite(samples[i, :])
-            if numpy.sum(good_pix) >= deg + 1 and good_sam.sum() / good_sam.size > min_samples_frac:
+            good_sam = numpy.isfinite(samples[i, :]) & inliers[i, :]
+            n_goodsam = good_sam.sum()
+            if n_goodsam == 0:
+                self._mask[i, :] = True
+                continue
+
+            nsamples = good_sam.size
+            can_fit = n_goodsam >= deg + 1
+            enough_samples = n_goodsam / nsamples > min_samples_frac
+            if can_fit and enough_samples:
                 # select the polynomial class
-                poly_cls = Spectrum1D.select_poly_class(poly_kind)
+                poly_cls = Spectrum1D.select_poly_class(smoothing_kind)
 
                 # try to fit
                 try:
-                    poly = poly_cls.fit(pixels[good_pix], self._data[i, good_pix], deg=deg)
-                    pix_table.extend(numpy.column_stack([pixels[good_pix], self._data[i, good_pix]]).tolist())
-                    poly_table.extend(numpy.column_stack([pixels[good_pix], poly(pixels[good_pix])]).tolist())
+                    poly = poly_cls.fit(columns[good_sam], samples[i, good_sam], deg=deg)
+                    pix_table.extend(numpy.column_stack([columns[good_sam], samples[i, good_sam]]).tolist())
+                    poly_table.extend(numpy.column_stack([pixels[columns], poly(pixels[columns])]).tolist())
                     poly_all_table.extend(numpy.column_stack([pixels, poly(pixels)]).tolist())
                 except numpy.linalg.LinAlgError as e:
-                    log.error(f'Fiber trace failure at fiber {i}: {e}')
+                    warnings.warn(f'Fiber trace failure at fiber {i}: {e}')
                     self._mask[i, :] = True
                     continue
 
-                self._coeffs[i, :] = poly.convert().coef
+                coeffs[i, :] = poly.convert().coef
                 self._data[i, :] = poly(pixels)
 
                 if clip is not None:
                     self._data = numpy.clip(self._data, clip[0], clip[1])
                 self._mask[i, :] = False
             else:
-                log.warning(f"fiber {i} does not meet criteria: {good_pix.sum() = } >= {deg + 1 = } or {good_sam.sum() / good_sam.size = } > {min_samples_frac = }")
+                if not can_fit:
+                    warnings.warn(f"fiber {i} does not meet criterium: {n_goodsam = } >= {deg + 1 = }")
+                elif not enough_samples:
+                    warnings.warn(f"fiber {i} does not meet criterium: {n_goodsam / nsamples = :.3f} > {min_samples_frac = :.3f}")
                 self._mask[i, :] = True
 
+        self.set_coeffs(coeffs, smoothing_kind=smoothing_kind)
+
         return numpy.asarray(pix_table), numpy.asarray(poly_table), numpy.asarray(poly_all_table)
+
+    def fit_spline2d(self, deg_x=3, deg_y=3, smoothing=None, clip=None, use_weights=True, nsigmas=None, min_samples_frac=0.0, min_fibers_frac=0.0):
+        iblocks = self._get_iblocks()
+
+        columns = numpy.asarray(self._samples.colnames).astype("int")
+        ifibers = numpy.arange(LVM_BLOCKSIZE)
+        X, Y = numpy.meshgrid(columns, ifibers, indexing="xy")
+        x, y = X.ravel(), Y.ravel()
+        x_pixels = numpy.arange(self._data.shape[1])
+
+        nsamples = columns.size
+        npixels = x_pixels.size
+        nfibers = LVM_BLOCKSIZE
+
+        for iblock in tqdm(iblocks, desc="fitting 2D spline to fiber blocks", ascii=True, unit="block"):
+            block = self.get_block(iblock=iblock)
+
+            samples = block.get_samples(as_pandas=True).values
+            if nsigmas is not None:
+                outliers, _, _ = self.select_outliers(nsigmas=nsigmas)
+                inliers = ~outliers
+            else:
+                inliers = numpy.ones_like(samples, dtype="bool")
+            if use_weights and self._samples_error is not None:
+                weights = numpy.nan_to_num(1 / block.get_samples_error(as_pandas=True).values, nan=0.0, posinf=0.0, neginf=0.0)
+            else:
+                weights = numpy.ones_like(samples)
+
+            good_sam = numpy.isfinite(samples) & inliers
+            n_goodsam_per_fiber = good_sam.sum(axis=1)
+            n_goodsam = n_goodsam_per_fiber.sum()
+            if n_goodsam == 0:
+                warnings.warn(f"skipping fiber block B{iblock+1}, no good samples found")
+                block._mask[:] = True
+                continue
+
+            good_fib = (n_goodsam_per_fiber / nsamples > min_samples_frac)
+            n_goodfib = good_fib.sum()
+            enough_fibers = n_goodfib / nfibers > min_fibers_frac
+            can_fit = n_goodsam >= (deg_x + 1) * (deg_y + 1)
+
+            block._mask[~good_fib] = True
+
+            if not can_fit:
+                warnings.warn(f"fiber block B{iblock+1} does not meet criterium: {n_goodsam = } >= {(deg_x + 1) * (deg_y + 1) = }")
+                block._mask[:] = True
+                continue
+            elif not enough_fibers:
+                warnings.warn(f"fiber block B{iblock+1} does not meet criterium: {n_goodfib / nfibers = :.3f} > {min_fibers_frac = :.3f}")
+                block._mask[:] = True
+                continue
+
+            good_sam[good_fib] = True
+            select = good_sam.ravel()
+
+            z = samples.ravel()
+            w = weights.ravel()
+            x_, y_, z_, w_ = x[select], y[select], z[select], w[select]
+
+            tck = interpolate.bisplrep(x_, y_, z_, w_, s=smoothing, xb=0, xe=npixels, yb=0, ye=nfibers, eps=1e-8)
+            block_model = interpolate.bisplev(x_pixels, ifibers, tck).T
+
+            self.set_block(iblock=iblock, data=block_model)
 
     def smoothTraceDist(
         self, start_slice, poly_cross=[4, 1, 4], poly_disp=8, bound=[350, 2000]
@@ -1246,11 +1247,11 @@ class FiberRows(Header, PositionTable):
             if i == -3930:
                 print(change)
                 print(good_mask)
-                plt.plot(
+                plot.plt.plot(
                     x[select_good][select], change_dist[select_good, i][select], "ok"
                 )
-                plt.plot(x, numpy.polyval(fit_par[:, i], x), "r")
-                plt.show()
+                plot.plt.plot(x, numpy.polyval(fit_par[:, i], x), "r")
+                plot.plt.show()
 
         wave = numpy.arange(
             fit_par.shape[1]
@@ -1325,27 +1326,29 @@ class FiberRows(Header, PositionTable):
         """Returns the polynomial coefficients"""
         return self._coeffs
 
-    def set_coeffs(self, coeffs, poly_kind):
-        """Sets the polynomial coefficients"""
+    def set_coeffs(self, coeffs, smoothing_kind):
+        """Sets the smoothing parameters"""
         if coeffs is not None:
             self._coeffs = coeffs
-            self._poly_kind = poly_kind
-            self._poly_deg = coeffs.shape[1] - 1
+            self._smoothing_kind = smoothing_kind
         else:
             self._coeffs = None
-            self._poly_kind = None
-            self._poly_deg = None
+            self._smoothing_kind = None
 
     def eval_coeffs(self, pixels=None):
-        """Evaluates the polynomial coefficients to the corresponding data values"""
-        poly_cls = Spectrum1D.select_poly_class(self._poly_kind)
+        """Evaluates the smoothing coefficients to the corresponding data values"""
+        poly_cls = Spectrum1D.select_poly_class(self._smoothing_kind)
 
         if pixels is None:
             pixels = self._pixels
 
-        self._data = numpy.zeros((self._fibers, pixels.size))
+        if self._data is None:
+            self._data = numpy.full((self._fibers, pixels.size), numpy.nan)
         for i in range(self._fibers):
-            poly = poly_cls(self._coeffs[i, :])
+            coeffs = self._coeffs[i, :]
+            if not numpy.isfinite(coeffs).all():
+                continue
+            poly = poly_cls(coeffs)
             self._data[i, :] = poly(pixels)
 
         return self._data
@@ -1382,7 +1385,7 @@ class FiberRows(Header, PositionTable):
 
         return self
 
-    def interpolate_data(self, axis="Y", extrapolate=False, reset_mask=True):
+    def interpolate_data(self, axis="Y", reset_mask=True):
         """Interpolate data of bad fibers (axis='Y') or bad pixels along the dispersion axis (axis='X')
 
         Parameters
@@ -1390,8 +1393,6 @@ class FiberRows(Header, PositionTable):
         axis : string or int, optional with default: 'Y'
             Defines the axis of the slice to be inserted, 'X', 'x', or 1 for the x-axis or
             'Y','y', or 0 for the y-axis.
-        extrapolate : bool, optional with default: False
-            If True, extrapolate data for bad fibers or bad pixels along the dispersion axis
         reset_mask : bool, optional with default: True
             If True, reset the mask of interpolated fibers to False
 
@@ -1405,24 +1406,37 @@ class FiberRows(Header, PositionTable):
         ValueError
             If axis is not 'X', 'x', 1, 'Y', 'y', or 0
         """
+        if self._mask is None:
+            raise ValueError(f"Attribute `_mask` needs to be set: {self._mask = }")
+
         # define coordinates
         x_pixels = numpy.arange(self._data.shape[1])
         y_pixels = numpy.arange(self._fibers)
 
         # interpolate data
         if axis == "Y" or axis == "y" or axis == 0:
-            bad_fibers = self._mask.all(axis=1)
-            if bad_fibers.sum() == self._fibers:
-                return self
-            f_data = interpolate.interp1d(y_pixels[~bad_fibers], self._data[~bad_fibers, :], axis=0, bounds_error=False, fill_value="extrapolate")
-            self._data = f_data(y_pixels)
-            if self._error is not None:
-                f_error = interpolate.interp1d(y_pixels[~bad_fibers], self._error[~bad_fibers, :], axis=0, bounds_error=False, fill_value="extrapolate")
-                self._error = f_error(y_pixels)
+            slitmap = self._filter_slitmap()
 
-            # unmask interpolated fibers
-            if self._mask is not None:
-                self._mask[bad_fibers, :] = False
+            for block_idx in range(LVM_NBLOCKS):
+                select_block = slitmap["blockid"] == f"B{block_idx+1}"
+                y = y_pixels[select_block]
+                data = self._data[select_block]
+                mask = self._mask[select_block]
+
+                bad_fibers = mask.all(axis=1)
+                if bad_fibers.sum() == 0 or bad_fibers.sum() == LVM_BLOCKSIZE:
+                    continue
+
+                f_data = interpolate.interp1d(y[~bad_fibers], data[~bad_fibers], axis=0, bounds_error=False, fill_value="extrapolate")
+                self._data[select_block] = f_data(y)
+                if self._error is not None:
+                    error = self._error[select_block]
+                    f_error = interpolate.interp1d(y[~bad_fibers], error[~bad_fibers], axis=0, bounds_error=False, fill_value="extrapolate")
+                    self._error[select_block] = f_error(y)
+
+                # unmask interpolated fibers
+                if reset_mask:
+                    self._mask[select_block] = False
         elif axis == "X" or axis == "x" or axis == 1:
             for ifiber in y_pixels:
                 bad_pixels = (self._data[ifiber] <= 0) | (self._mask[ifiber, :])
@@ -1444,3 +1458,127 @@ class FiberRows(Header, PositionTable):
             raise ValueError(f"axis {axis} not supported")
 
         return self
+
+    def plot_block(self, iblock=None, blockid=None, ref_column=None, nsigmas=None,
+                   show_samples=True, show_model_samples=True, show_model=True, show_residuals=True, show_outliers=True,
+                   axs=None, **plot_kwargs):
+
+        plot_config = {
+            "samples": dict(marker=".", ls="", ms=5, mew=0, mfc="0.2"),
+            "model@samples": dict(marker="s", ls="", ms=5, mew=1, mec="0.2", mfc="none"),
+            "model": dict(ls="-", lw=1),
+            "residuals": dict(marker=".", ls="-", lw=0.2, ms=5, mew=0),
+            "outliers": dict(marker=".", ms=10, mew=1, mfc="none", color="tab:red"),
+            "mu": dict(ls="-", lw=1, color="0.7", zorder=-10),
+            "sigma": dict(ls="--", lw=1, color="0.7", zorder=-10)
+        }
+        for n in plot_kwargs:
+            plot_config[n].update(plot_kwargs[n])
+
+        if iblock is None and blockid is None:
+            block = copy(self)
+        else:
+            block = self.get_block(iblock=iblock, blockid=blockid)
+
+        pixels = numpy.arange(block._data.shape[1], dtype="int")
+        samples = block.get_samples(as_pandas=True)
+        # samples_error = block.get_samples_error(as_pandas=True)
+
+        if axs is None:
+            _, axs = plot.create_subplots(to_display=True, figsize=(15,5), layout="tight")
+        if not isinstance(axs, dict) or "mod" not in axs:
+            axs = {"mod": axs}
+
+        if ref_column is not None:
+            axs["mod"].axvline(ref_column, ls=":", lw=1, color="0.7")
+
+        ylims = None
+
+        if samples is not None:
+            if show_samples:
+                # if samples_error is not None:
+                #     axs["mod"].errorbar(samples.columns, samples.T, yerr=samples_error.T, fmt="", ecolor="0.2", elinewidth=1, label="samples")
+                # else:
+                axs["mod"].plot(samples.columns, samples.T, label="samples", **plot_config["samples"])
+                ylims = axs["mod"].get_ylim()
+            if show_model_samples:
+                axs["mod"].plot(samples.columns, block._data[:, samples.columns].T, label="model@samples", **plot_config["model@samples"])
+            if nsigmas is not None:
+                outliers, mu, sg = block.select_outliers(nsigmas=nsigmas)
+                samples_masked = samples.copy()
+                samples_masked[~outliers] = numpy.nan
+                axs["mod"].plot(samples.columns, mu, **plot_config["mu"])
+                axs["mod"].plot(samples.columns, mu-nsigmas*sg, **plot_config["sigma"])
+                axs["mod"].plot(samples.columns, mu+nsigmas*sg, **plot_config["sigma"])
+                if show_outliers:
+                    axs["mod"].plot(samples.columns, samples_masked.T, label="outliers", **plot_config["outliers"])
+
+        if show_model:
+            axs["mod"].plot(pixels, block._data.T, label="model", **plot_config["model"])
+        if ylims is not None:
+            axs["mod"].set_ylim(*ylims)
+
+        if show_residuals:
+            if "res" not in axs:
+                axs["mod"].tick_params(labelbottom=False)
+
+                ax_divider = plot.make_axes_locatable(axs["mod"])
+                ax_res = ax_divider.append_axes("bottom", size="30%", pad="5%")
+                ax_res.sharex(axs["mod"])
+
+                axs["res"] = ax_res
+
+            axs["res"].axhline(ls="--", lw=1, color="0.4")
+            axs["res"].axhline(-0.01, ls=":", lw=1, color="0.4")
+            axs["res"].axhline(+0.01, ls=":", lw=1, color="0.4")
+            if samples is not None:
+                axs["res"].plot(samples.columns, ((block._data[:, samples.columns] - samples)/samples).T, **plot_config["residuals"])
+            axs["res"].set_ylim(-0.05, +0.05)
+
+        return axs
+
+    def plot_block_distances(self, iblock=None, blockid=None, show_samples=True, show_model_samples=True, show_model=True, axs=None):
+        if iblock is None and blockid is None:
+            block = copy(self)
+        else:
+            block = self.get_block(iblock=iblock, blockid=blockid)
+
+        pixels = numpy.arange(block._data.shape[1], dtype="int")
+        samples = block.get_samples(as_pandas=True)
+
+        sample_distances, model_distances = block.get_distances()
+
+        if axs is None:
+            _, axs = plot.create_subplots(to_display=True, figsize=(15,5), layout="constrained")
+
+        if show_model:
+            axs.plot(pixels, model_distances.T, "-", lw=1, label="model")
+        if samples is not None:
+            if show_samples:
+                axs.plot(samples.columns, sample_distances.T, ".", ms=5, mew=0, mfc="0.2", label="data")
+            if show_model_samples:
+                axs.plot(samples.columns, model_distances[:, samples.columns].T, "s", ms=5, mew=1, mec="0.2", mfc="none", label="model@data")
+
+    def plot_fiber(self, ifiber, show_samples=True, axs=None):
+        fiber = self[ifiber]
+
+        pixels = fiber._wave
+        data = fiber._data
+        error = fiber._error
+        mask = fiber._mask
+
+        if axs is None:
+            _, axs = plot.create_subplots(to_display=True, figsize=(15,5), layout="constrained")
+
+        if mask is not None:
+            selection = ~mask
+            axs.vlines(pixels[mask], numpy.nanmin(data[selection]), numpy.nanmax(data[selection]), lw=1, color="0.7")
+        if error is not None:
+            axs.errorbar(pixels, data, yerr=error, fmt="", elinewidth=1, ecolor="0.5")
+        axs.step(pixels, data, lw=1, color="0.2")
+
+        if show_samples and self._samples is not None:
+            samples = self.get_samples(as_pandas=True)
+            axs.plot(samples.columns, samples.iloc[ifiber], ".", color="0.2", mew=0, ms=7)
+
+        return axs

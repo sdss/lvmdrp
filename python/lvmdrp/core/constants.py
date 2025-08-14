@@ -101,18 +101,18 @@ SKYCORR_PAR_MAP = {
     "PLOT_TYPE": "plotType",
 }
 
-FRAMES_CALIB_NEEDS = {
-    "bias": [],
-    "dark": ["bias"],
-    "pixflat": ["bias", "dark"],
-    "pixmask": ["bias", "dark", "pixflat"],
-    "flat": ["pixmask", "bias", "dark", "pixflat", "trace", "fwhm", "wave", "lsf"],
-    "arc": ["pixmask", "bias", "dark", "pixflat", "trace", "fwhm", "wave", "lsf"],
-    "object": ["pixmask", "bias", "dark", "pixflat", "fiberflat", "trace", "fwhm", "wave", "lsf"],
+CALIBRATION_NEEDS = {
+    "bias": ["pixmask"],
+    "pixflat": ["pixmask", "bias", "dark"],
+    "trace": ["pixmask", "pixflat", "bias"],
+    "wave": ["pixmask", "pixflat", "bias", "centroids", "sigmas", "model"],
+    "dome": ["pixmask", "pixflat", "bias", "centroids", "sigmas", "model", "wave", "lsf"],
+    "twilight": ["pixmask", "pixflat", "bias", "centroids", "sigmas", "model", "wave", "lsf"],
+    "object": ["pixmask", "pixflat", "bias", "centroids", "sigmas", "model", "wave", "lsf", "fiberflat_twilight"],
 }
-CALIBRATION_NAMES = {"pixmask", "pixflat", "bias", "trace_guess", "trace", "width", "amp", "model", "wave", "lsf", "fiberflat_dome", "fiberflat_twilight"}
+CALIBRATION_NAMES = {"pixmask", "pixflat", "bias", "trace_guess", "centroids", "sigmas", "counts", "model", "wave", "lsf", "fiberflat_dome", "fiberflat_twilight"}
 CALIBRATION_MATCH = {
-    "trace": ["trace", "width", "model"],
+    "trace": ["centroids", "sigmas", "model"],
     "wave": ["wave", "lsf"],
     "dome": ["fiberflat_dome"],
     "twilight": ["fiberflat_twilight"]}
@@ -127,10 +127,39 @@ SPEC_CHANNELS = {"b": (3600, 5800), "r": (5775, 7570), "z": (7520, 9800)}
 ARC_LAMPS = ["NEON", "HGNE", "ARGON", "XENON"]
 CON_LAMPS = ["LDLS", "QUARTZ"]
 
+# 2D image constants
+LVM_NOVER = 17
+LVM_NPRE = 3
+LVM_NROWS = 4080
+LVM_NCOLS = 4086
+
 LVM_NBLOCKS = 18
+LVM_BLOCKSIZE = 36
+LVM_NFIBERS = LVM_NBLOCKS * LVM_BLOCKSIZE
 LVM_REFERENCE_COLUMN = 2000
 FIDUCIAL_PLATESCALE = 112.36748321030637 # Focal plane platescale in "/mm
 
+# GB hand picked isolated bright lines across each channel which are not doublest in UVES atlas
+# true wavelengths taken from UVES sky line atlas
+REF_SKYLINES = {
+    "b": [5577.346680],
+    "r": [6363.782715, 7358.680176, 7392.209961],
+    "z": [8399.175781, 8988.383789, 9552.546875, 9719.838867]
+}
+
+# sky lines to fit spec-to-spec flat field factors
+SKYLINES_FIBERFLAT = {
+    "b": 5577.346680,
+    "r": 6363.782715,
+    "z": 8399.175781
+}
+
+# continuum wavelengths
+CONTINUUM_FIBERFLAT = {
+    "b": 4600,
+    "r": 6760,
+    "z": 8170
+}
 
 # stellar templates
 STELLAR_TEMP_PATH = os.path.join(os.getenv("LVM_SANDBOX"), "stellar_models")

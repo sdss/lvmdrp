@@ -1641,7 +1641,9 @@ def quick_sky_subtraction(in_cframe, out_sframe, skymethod: str = 'farlines_near
     # print("writing lvmSFrame")
     log.info(f"writing lvmSframe to {out_sframe}")
     sframe = lvmSFrame(data=skysub_data, error=skysub_error, mask=cframe._mask.astype(bool), sky=skydata, sky_error=sky_error,
-                       wave=cframe._wave, lsf=cframe._lsf, header=cframe._header, slitmap=cframe._slitmap)
+                       wave=cframe._wave, lsf=cframe._lsf, header=cframe._header,
+                       fluxcal_std=cframe._fluxcal_std, fluxcal_sci=cframe._fluxcal_sci,
+                       slitmap=cframe._slitmap)
     sframe._mask |= ~np.isfinite(sframe._error)
     sframe.writeFitsData(out_sframe)
     # TODO: check on expnum=7632 for halpha emission in sky fibers
@@ -1971,7 +1973,7 @@ def create_skysub_spectrum(hdu: fits.HDUList, tel: str,
         rmax = 1.5
 
         minimum = ksl_bisection(
-            fit_func, rmin, rmax, tol=0.001, maxiter=8, args=(lsci, uselsky)
+            fit_func, rmin, rmax, tol=0.001, maxiter=8, args=(np.nan_to_num(lsci), np.nan_to_num(uselsky))
         )
         log.info(f"Results {minimum} with wmin {wmin} and wmax {wmax}.")
 
