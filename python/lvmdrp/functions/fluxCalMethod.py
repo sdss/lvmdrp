@@ -8,14 +8,14 @@
 
 
 import os
-from os import listdir
-from os.path import isfile, join
+# from os import listdir
+# from os.path import isfile, join
 import numpy as np
 from scipy import interpolate
 from scipy import ndimage
-from scipy.ndimage import median_filter
+# from scipy.ndimage import median_filter
 from scipy.signal import find_peaks
-import re
+# import re
 import pandas as pd
 
 from astropy import units as u
@@ -592,8 +592,8 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
         best_continuum = ndimage.filters.median_filter(model_convolved_spec_lsf, int(160/0.5), mode="nearest")
         model_norm_convolved_spec_lsf = model_convolved_spec_lsf / best_continuum
         log_std_wave_all_tmp, log_model_norm_convolved_spec_lsf = linear_to_logscale(std_wave_all, model_norm_convolved_spec_lsf)
-        model_shifted_norm_convolved_spec_lsf = logscale_to_linear(std_wave_all, log_std_wave_all_tmp,
-                                                                   log_model_norm_convolved_spec_lsf, log_shift_full)
+        # model_shifted_norm_convolved_spec_lsf = logscale_to_linear(std_wave_all, log_std_wave_all_tmp,
+        #                                                            log_model_norm_convolved_spec_lsf, log_shift_full)
 
         # Gaia LSF
         gaia_lsf_path = os.getenv("LVMCORE_DIR") + "/etc/Gaia_BPRP_resolution.txt"
@@ -1510,7 +1510,7 @@ def correct_tellurics(wave, std_spec, lsf, in_rss, chan):
     # absorptions based on KPNO data (unknown source) with a 1% transmission threshold this file is used as a mask for
     # the fit of standard stars - from Alfredo.
     # https://github.com/desihub/desispec/blob/main/py/desispec/data/arc_lines/telluric_lines.txt
-    telluric_lines_tab = Table.read(telluric_lines, format='ascii.fixed_width_two_line')
+    # telluric_lines_tab = Table.read(telluric_lines, format='ascii.fixed_width_two_line')
 
     with fits.open(telluric_file) as hdul:
         data = hdul[1].data
