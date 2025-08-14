@@ -454,7 +454,6 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
     # the fit of standard stars - from Alfredo.
     # https://github.com/desihub/desispec/blob/main/py/desispec/data/arc_lines/telluric_lines.txt
     telluric_tab = Table.read(telluric_file, format='ascii.fixed_width_two_line')
-    model_specs_norm = []
 
     with fits.open(name=models_dir + '/AMBRE_for_LVM.fits') as model:
         model_good = model[0].data
@@ -503,7 +502,6 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
 
     model_to_gaia_median = []
     best_fit_models = []
-    log_shift_brz_all = []
     gaia_flux_interpolated = []
     gaia_Teff = []
     gaia_logg = []
@@ -790,7 +788,7 @@ def qa_model_matching(fig_path, fiber_params = None, gaia_params = None, model_p
                       log_std_errors_normalized_all = None, model_flux_resampled = None,
                       log_model_norm_convolved_spec_lsf = None, model_convolved_to_gaia = None, mask_dict = None):
 
-    fig = plt.figure(figsize=(14, 27))
+    plt.figure(figsize=(14, 27))
 
     plt.subplot(611)
     plt.title(label=f'Gaia ID: {gaia_params["gaia_id"]}. Model: {model_params["model_name"]}', fontsize=14)
@@ -1069,7 +1067,7 @@ def calc_sensitivity_from_model(wl, obs_spec, spec_lsf, model_flux=[], model_to_
 
     # read the best-fit model and convolve with spectrograph LSF
     # model_dir = '/Users/amejia/Downloads/stellar_models/'
-    models_dir = os.path.join(MASTERS_DIR, "stellar_models")
+    # models_dir = os.path.join(MASTERS_DIR, "stellar_models")
 
     n_steps = int((9850-3550) / 0.05) + 1
     model_wave = np.linspace(3550, 9850, n_steps)
@@ -1123,7 +1121,7 @@ def standard_sensitivity(stds, rss, GAIA_CACHE_DIR, ext, res, plot=False, width=
 
         # subtract sky spectrum and divide by exptime
         spec = rss._data[fibidx[0], :]
-        lsf = rss._lsf[fibidx[0], :]
+        # lsf = rss._lsf[fibidx[0], :]
         if np.nanmean(spec) < 100:
             log.warning(f"fiber {fiber} @ {fibidx[0]} has counts < 100 e-, skipping")
             rss.add_header_comment(f"fiber {fiber} @ {fibidx[0]} has counts < 100 e-, skipping")
@@ -1516,7 +1514,7 @@ def correct_tellurics(wave, std_spec, lsf, in_rss, chan):
 
     with fits.open(telluric_file) as hdul:
         data = hdul[1].data
-        hdr = hdul[1].header
+        # hdr = hdul[1].header
     telluric_table = Table(data)
     telluric_table['lam'] *= 10
     tell_continuum = ndimage.filters.median_filter(telluric_table['trans'], int(1500 / 1), mode="nearest")
