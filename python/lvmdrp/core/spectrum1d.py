@@ -763,12 +763,12 @@ def convolution_matrix(kernel, normalize=True):
 class FiberProfileCache(object):
     def __init__(self, fiber_radius=1.4, oversampling_factor=100, npixels=8):
         self.sigma_min = 0.5
-        self.sigma_max = 2.0
+        self.sigma_max = 2.5
         assert(fiber_radius>0)
         self.fiber_radius = fiber_radius
         assert (oversampling_factor>0)
         self.oversampling_factor = oversampling_factor
-        self.nprofiles = 15001
+        self.nprofiles = 20001
         assert (npixels>0)
         self.npixels = npixels
         self.x = numpy.linspace(numpy.zeros(self.nprofiles)-npixels, numpy.zeros(self.nprofiles)+npixels, 2*npixels+1, endpoint=True)
@@ -778,8 +778,8 @@ class FiberProfileCache(object):
         self.profile_cumsum = numpy.cumsum(self.profile_cache, axis=0) / oversampling_factor
 
     def __call__(self, centroids, sigmas):
-        lines = numpy.clip((numpy.round((sigmas - self.sigma_min)*(self.nprofiles-1))).astype(int), \
-                           a_min=0, a_max=self.nprofiles-1)
+        lines = numpy.clip((numpy.round(self.nprofiles/(self.sigma_max - self.sigma_min)*(sigmas-self.sigma_min))).astype(int), 
+                            a_min=0, a_max=self.nprofiles-1)
         cumsums = self.profile_cumsum[:,lines]
         # calculate the shift relative to the given fractional centroid
         cen_fracs = centroids - numpy.trunc(centroids) + 0.5 # account for pixel boundaries [0...1]
@@ -3814,28 +3814,28 @@ class Spectrum1D(Header):
 
         return flux, cent, fwhm, bg
 
-    def extract_flux(self, centroids, sigmas, fiber_radius=1.4, npixels=10, replace_error=numpy.inf, return_basis=False):
+    def extract_flux(self, centroids, sigmas, fiber_radius=1.4, npixels=15, replace_error=numpy.inf, return_basis=False):
         ''' 
             fiber_radius is the image of the fiber core in pixels
             sigmas is the gaussian kernel sigma
             
         '''
-        def _gen_mexhat_basis(x, centroids, sigmas, fiber_radius, oversampling_factor):
-            dx = x[1, 0] - x[0, 0]
-            x_os = fit_profile.oversample(x, oversampling_factor)
-            dx_os = dx / oversampling_factor
+        # def _gen_mexhat_basis(x, centroids, sigmas, fiber_radius, oversampling_factor):
+        #     dx = x[1, 0] - x[0, 0]
+        #     x_os = fit_profile.oversample(x, oversampling_factor)
+        #     dx_os = dx / oversampling_factor
 
-            x_kernel = numpy.arange(0, 2*fiber_radius + dx_os, dx_os)
-            kernel = fit_profile.fiber_profile(centroids=fiber_radius, radii=fiber_radius, x=x_kernel)
-            psfs = fit_profile.gaussians((numpy.ones_like(centroids), centroids, sigmas), x_os.T, alpha=2, collapse=False)[0].T
+        #     x_kernel = numpy.arange(0, 2*fiber_radius + dx_os, dx_os)
+        #     kernel = fit_profile.fiber_profile(centroids=fiber_radius, radii=fiber_radius, x=x_kernel)
+        #     psfs = fit_profile.gaussians((numpy.ones_like(centroids), centroids, sigmas), x_os.T, alpha=2, collapse=False)[0].T
 
-            profiles = signal.fftconvolve(psfs, kernel.T, mode="same", axes=0)
-            profiles /= integrate.trapezoid(profiles, x_os, axis=0)[None, :]
+        #     profiles = signal.fftconvolve(psfs, kernel.T, mode="same", axes=0)
+        #     profiles /= integrate.trapezoid(profiles, x_os, axis=0)[None, :]
 
-            # reshape model into oversampled bins: (x, oversampling_factor)
-            profiles_binned = profiles.reshape((x.shape[0], oversampling_factor, x.shape[1]))
-            profiles = integrate.trapezoid(profiles_binned, dx=dx_os, axis=1)
-            return profiles
+        #     # reshape model into oversampled bins: (x, oversampling_factor)
+        #     profiles_binned = profiles.reshape((x.shape[0], oversampling_factor, x.shape[1]))
+        #     profiles = integrate.trapezoid(profiles_binned, dx=dx_os, axis=1)
+        #     return profiles
 
         nfibers = centroids.size
         # round up fiber locations
