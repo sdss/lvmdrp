@@ -382,8 +382,8 @@ class RSS(FiberRows):
                 sky_e_errors.append(rss._sky_east_error)
                 skies_w.append(rss._sky_west)
                 sky_w_errors.append(rss._sky_west_error)
-                fluxcals_std.append(rss._fluxcal_std.to_pandas().values.T)
-                fluxcals_sci.append(rss._fluxcal_sci.to_pandas().values.T)
+                fluxcals_std.append(rss._fluxcal_std.to_pandas().values.T if rss._fluxcal_std is not None else None)
+                fluxcals_sci.append(rss._fluxcal_sci.to_pandas().values.T if rss._fluxcal_sci is not None else None)
             fluxes = numpy.asarray(fluxes)
             errors = numpy.asarray(errors)
             masks = numpy.asarray(masks)
@@ -431,8 +431,11 @@ class RSS(FiberRows):
             weights[2, :, mask_z] = 1.0
 
             new_data = bn.nansum(fluxes * weights, axis=0)
-            new_lsf = bn.nansum(lsfs * weights, axis=0)
             new_error = numpy.sqrt(bn.nansum(vars, axis=0))
+            if rss._lsf is not None:
+                new_lsf = bn.nansum(lsfs * weights, axis=0)
+            else:
+                new_lsf = None
             if rss._sky is not None:
                 new_sky = bn.nansum(skies * weights, axis=0)
             else:
@@ -458,9 +461,11 @@ class RSS(FiberRows):
             else:
                 new_skyw_error = None
             if rss._fluxcal_std is not None:
-                std_selection = [numpy.where(rss._slitmap["orig_ifulabel"]==s)[0][0] for s in [rss._header[s[:-3]+"FIB"] for s in rss._fluxcal_std.colnames[:-2]] if s is not None]
+                df = rss._fluxcal_std.to_pandas().drop(columns={"mean", "rms"})
+                col_selection = df.notna().any()
+                std_selection = [numpy.where(rss._slitmap["orig_ifulabel"]==s)[0][0] for s in [rss._header[s[:-3]+"FIB"] for s, v in col_selection.items() if v]]
                 w = numpy.full_like(fluxcals_std[:, :-2, :], fill_value=numpy.nan)
-                w[:, ~numpy.isnan(fluxcals_std[:, :-2, :]).all(axis=(0,2)), :] = weights[:, std_selection, :]
+                w[:, col_selection.values, :] = weights[:, std_selection, :]
                 w = numpy.concatenate((w, biweight_location(w, axis=1, ignore_nan=True)[:, None, :], biweight_scale(w, axis=1, ignore_nan=True)[:, None, :]), axis=1)
                 a = bn.nansum(fluxcals_std * w, axis=0)
                 a[numpy.isnan(fluxcals_std).all(axis=(0,2)), :] = numpy.nan
@@ -468,9 +473,11 @@ class RSS(FiberRows):
             else:
                 new_fluxcal_std = None
             if rss._fluxcal_sci is not None:
-                sci_selection = [numpy.where(rss._slitmap["fiberid"]==s)[0][0] for s in [rss._header.get(s[:-3]+"FIB") for s in rss._fluxcal_sci.colnames[:-2]] if s is not None]
+                df = rss._fluxcal_sci.to_pandas().drop(columns={"mean", "rms"})
+                col_selection = df.notna().any()
+                sci_selection = [numpy.where(rss._slitmap["fiberid"]==s)[0][0] for s in [rss._header[s[:-3]+"FIB"] for s, v in col_selection.items() if v]]
                 w = numpy.full_like(fluxcals_sci[:, :-2, :], fill_value=numpy.nan)
-                w[:, ~numpy.isnan(fluxcals_sci[:, :-2, :]).all(axis=(0,2)), :] = weights[:, sci_selection, :]
+                w[:, col_selection.values, :] = weights[:, sci_selection, :]
                 w = numpy.concatenate((w, biweight_location(w, axis=1, ignore_nan=True)[:, None, :], biweight_scale(w, axis=1, ignore_nan=True)[:, None, :]), axis=1)
                 a = bn.nansum(fluxcals_sci * w, axis=0)
                 a[numpy.isnan(fluxcals_sci).all(axis=(0,2)), :] = numpy.nan
