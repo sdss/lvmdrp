@@ -794,7 +794,7 @@ def _create_wavelengths_60177(use_longterm_cals=True, skip_done=True, dry_run=Fa
         waves = pixwav[camera][:, 1] if camera in pixwav else []
         use_lines = pixwav[camera][:, 2].astype(bool) if camera in pixwav else []
         rss_tasks.determine_wavelength_solution(in_arcs=xarc_paths[camera], out_wave=mwave_path, out_lsf=mlsf_path,
-                                                pixel=pixels, ref_lines=waves, use_line=use_lines)
+                                                pixel=pixels, ref_lines=waves, use_line=use_lines, cent_range=[-4, 4])
 
     for channel in "brz":
         xarc_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="x", imagetype="arc", camera=channel, expnum=expnum_str)
