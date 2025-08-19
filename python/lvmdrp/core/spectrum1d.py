@@ -3734,7 +3734,8 @@ class Spectrum1D(Header):
                 axs_ = gauss.plot(self._wave[select], self._data[select], mask=self._mask[select], axs={"mod": axs[i]})
                 axs[i] = axs_["mod"]
                 axs[i].axhline(bg[i], ls="--", color="tab:blue", lw=1)
-                axs[i].axvspan(x[0], x[-1], alpha=0.1, fc="0.5", label="reg. of masking")
+                if len(x) != 0:
+                    axs[i].axvspan(x[0], x[-1], alpha=0.1, fc="0.5", label="reg. of masking")
                 axs[i].axvline(cent_guess[i], ls="--", lw=1, color="tab:red", label="cent. guess")
                 axs[i].axvline(cent[i], ls="--", lw=1, color="tab:blue", label="cent. model")
                 axs[i].set_title(f"{axs[i].get_title()} @ {cent[i]:.1f} {'Angstroms' if self._pixels[0]!=self._wave[0] else 'pixels'}")
@@ -3744,12 +3745,12 @@ class Spectrum1D(Header):
                 axs[i].text(0.05, 0.6, f"bg   = {bg[i]:.2f}", va="bottom", ha="left", transform=axs[i].transAxes, fontsize=11)
                 axs[i].legend(loc="upper right", frameon=False, fontsize=11)
 
-            # mask line if >=2 pixels are masked within 3.5sigma
+            # mask line if >= badpix_threshold pixels are masked within 3.5sigma
             model_badpix = data[select] == 0
             if not numpy.isnan([cent[i], fwhm[i]]).any():
                 select_2 = (self._wave>=cent[i]-3.5*fwhm[i]/2.354) & (self._wave<=cent[i]+3.5*fwhm[i]/2.354)
                 model_badpix = mask[select_2]
-                if model_badpix.sum() >= 2:
+                if model_badpix.sum() >= badpix_threshold:
                     warnings.warn(f"masking line @ {centre:.2f} with >= 2 masked pixels within a 3.5 sigma window")
                     self.add_header_comment(f"masking line @ {centre:.2f} with >= 2 masked pixels within a 3.5 sigma window")
                     flux[i] = cent[i] = fwhm[i] = bg[i] = numpy.nan
@@ -3757,10 +3758,10 @@ class Spectrum1D(Header):
         return flux, cent, fwhm, bg
 
     def extract_flux(self, centroids, sigmas, fiber_radius=1.4, npixels=20, replace_error=numpy.inf, return_basis=False):
-        ''' 
+        '''
             fiber_radius is the image of the fiber core in pixels
             sigmas is the gaussian kernel sigma
-            
+
         '''
         def _gen_mexhat_basis(x, centroids, sigmas, fiber_radius, oversampling_factor):
             dx = x[1, 0] - x[0, 0]
@@ -3781,7 +3782,8 @@ class Spectrum1D(Header):
 
         nfibers = centroids.size
         # round up fiber locations
-        pixels = numpy.round(centroids[:, None] + numpy.arange(-npixels / 2.0, npixels / 2.0, 1.0)[None, :]).astype("int")
+        mask_threshold = 3
+        pixels = numpy.round(centroids[:, None] + numpy.arange(-mask_threshold / 2.0, mask_threshold / 2.0, 1.0)[None, :]).astype("int")
         # defining bad pixels for each fiber if needed
         if self._mask is not None:
             # select: fibers in the boundary of the chip
@@ -3790,8 +3792,8 @@ class Spectrum1D(Header):
             nselect = numpy.logical_not(select)
             mask[select] = True
 
-            # masking fibers if all pixels are bad within npixels
-            mask[nselect] = bn.nansum(self._mask[pixels[nselect, :]], 1) == npixels
+            # masking fibers if all pixels are bad within mask_threshold
+            mask[nselect] = bn.nansum(self._mask[pixels[nselect, :]], 1) == mask_threshold
         else:
             mask = None
 
