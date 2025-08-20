@@ -112,15 +112,22 @@ def apply_fluxcal(in_rss: str, out_fframe: str, method: str = 'STD', display_plo
     # TODO: reject sensitivity curves based on the overall shape by normalizing using a median curve
     # calculate the biweight mean sensitivity
 
+    # update the fluxcal extension
+    fframe._fluxcal_std["mean"] = biweight_location(fframe._fluxcal_std.to_pandas().values, axis=1, ignore_nan=True) * u.Unit("erg / (ct cm2)")
+    fframe._fluxcal_std["rms"] = biweight_scale(fframe._fluxcal_std.to_pandas().values, axis=1, ignore_nan=True) * u.Unit("erg / (ct cm2)")
+
+    fframe._fluxcal_mod["mean"] = biweight_location(fframe._fluxcal_mod.to_pandas().values, axis=1, ignore_nan=True) * u.Unit("erg / (ct cm2)")
+    fframe._fluxcal_mod["rms"] = biweight_scale(fframe._fluxcal_mod.to_pandas().values, axis=1, ignore_nan=True) * u.Unit("erg / (ct cm2)")
+
+    fframe._fluxcal_sci["mean"] = biweight_location(fframe._fluxcal_sci.to_pandas().values, axis=1, ignore_nan=True) * u.Unit("erg / (ct cm2)")
+    fframe._fluxcal_sci["rms"] = biweight_scale(fframe._fluxcal_sci.to_pandas().values, axis=1, ignore_nan=True) * u.Unit("erg / (ct cm2)")
+
     # if instructed, use standard stars
     if method == 'STD':
-        log.info("flux-calibrating using STD standard stars")
-        sens_arr = fframe._fluxcal_std.to_pandas().values  # * (std_exp / std_exp.sum())[None]
-        sens_ave = biweight_location(sens_arr, axis=1, ignore_nan=True)
-        sens_rms = biweight_scale(sens_arr, axis=1, ignore_nan=True)
-        # update the fluxcal extension
-        fframe._fluxcal_std["mean"] = sens_ave * u.Unit("erg / (ct cm2)")
-        fframe._fluxcal_std["rms"] = sens_rms * u.Unit("erg / (ct cm2)")
+        log.info("calculating sensitivity using STD standard stars")
+
+        sens_arr = fframe._fluxcal_std.to_pandas().values[:, :-2]
+        sens_ave = fframe._fluxcal_std["mean"].value
 
         # fall back to science field if all invalid values
         if (sens_ave == 0).all() or np.isnan(sens_ave).all() or (sens_ave<0).any():
@@ -128,42 +135,35 @@ def apply_fluxcal(in_rss: str, out_fframe: str, method: str = 'STD', display_plo
             rss.add_header_comment("all standard star sensitivities are <=0 or NaN, falling back to SCI stars")
             method = 'SCI'
         # fall back to science field if less than 8 standard stars
-        elif np.isnan(sens_arr).all(axis=0).sum() < 8:
+        elif (~np.isnan(sens_arr).all(axis=0)).sum() < 8:
             log.warning("less than 8 good standard fibers, falling back to science field calibration")
             rss.add_header_comment("less than 8 good standard fibers, falling back to science field calibration")
             method = "SCI"
 
     if method == 'MOD':
-        log.info("flux-calibratimg using model stellar spectra")
-        sens_arr = fframe._fluxcal_mod.to_pandas().values  # * (std_exp / std_exp.sum())[None]
-        sens_ave = biweight_location(sens_arr, axis=1, ignore_nan=True)
-        sens_rms = biweight_scale(sens_arr, axis=1, ignore_nan=True)
-        # update the fluxcal extension
-        fframe._fluxcal_mod["mean"] = sens_ave * u.Unit("erg / (ct cm2)")
-        fframe._fluxcal_mod["rms"] = sens_rms * u.Unit("erg / (ct cm2)")
+        log.info("calculating sensitivity using model stellar spectra")
+
+        sens_arr = fframe._fluxcal_mod.to_pandas().values[:, :-2]
+        sens_ave = fframe._fluxcal_mod["mean"].value
 
         # fall back to science field if all invalid values
-        if (sens_ave == 0).all() or np.isnan(sens_ave).all() or (sens_ave<0).any():
+        if (sens_ave == 0).all() or np.isnan(sens_ave).all():
             log.warning("all standard star sensitivities are <=0 or NaN, falling back to SCI stars")
             rss.add_header_comment("all standard star sensitivities are <=0 or NaN, falling back to SCI stars")
             method = 'SCI'
         # fall back to science field if less than 8 standard stars
-        elif np.isnan(sens_arr).all(axis=0).sum() < 8:
-            log.warning(np.isnan(sens_arr).all(axis=0).sum(),"good standard fibers")
-            print(sens_arr)
+        elif (~np.isnan(sens_arr).all(axis=0)).sum() < 8:
+            log.warning(f"{np.isnan(sens_arr).all(axis=0).sum()} good standard fibers")
             log.warning("less than 8 good standard fibers, falling back to science field calibration")
             rss.add_header_comment("less than 8 good standard fibers, falling back to science field calibration")
             method = "SCI"
 
     # fall back to science ifu field stars if above failed or if instructed to use this method
     if method == 'SCI':
-        log.info("flux-calibrating using SCI field stars")
-        sens_arr = fframe._fluxcal_sci.to_pandas().values  # * (std_exp / std_exp.sum())[None]
-        sens_ave = biweight_location(sens_arr, axis=1, ignore_nan=True)
-        sens_rms = biweight_scale(sens_arr, axis=1, ignore_nan=True)
-        # update the fluxcal extension
-        fframe._fluxcal_sci["mean"] = sens_ave * u.Unit("erg / (ct cm2)")
-        fframe._fluxcal_sci["rms"] = sens_rms * u.Unit("erg / (ct cm2)")
+        log.info("calculating sensitivity using SCI field stars")
+
+        sens_arr = fframe._fluxcal_sci.to_pandas().values[:, :-2]
+        sens_ave = fframe._fluxcal_sci["mean"].value
 
         # fix case of all invalid values
         if (sens_ave == 0).all() or np.isnan(sens_ave).all():
@@ -175,12 +175,14 @@ def apply_fluxcal(in_rss: str, out_fframe: str, method: str = 'STD', display_plo
     # final check on sensitivities
     if method == "STD" and np.nanmean(fframe._fluxcal_std["mean"]) > 1e-12:
         method = "SCI"
-        sens_ave = fframe._fluxcal_sci["mean"]
+        sens_arr = fframe._fluxcal_sci.to_pandas().values[:, :-2]
+        sens_ave = fframe._fluxcal_sci["mean"].value
         log.warning("standard calibration has average sensitivity > 1e-12, falling back to science field calibration")
         rss.add_header_comment("standard calibration has average sensitivity > 1e-12, falling back to science field calibration")
     if method == "SCI" and np.nanmean(fframe._fluxcal_sci["mean"]) > 1e-12:
         method = "STD"
-        sens_ave = fframe._fluxcal_std["mean"]
+        sens_arr = fframe._fluxcal_std.to_pandas().values[:, :-2]
+        sens_ave = fframe._fluxcal_std["mean"].value
         log.warning("science field calibration has average sensitivity > 1e-12, falling back to standard calibration")
         rss.add_header_comment("science field calibration has average sensitivity > 1e-12, falling back to standard calibration")
     # if method == 'MOD':

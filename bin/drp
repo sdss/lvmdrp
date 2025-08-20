@@ -152,7 +152,7 @@ def run(mjd, mjd_list, mjd_range, with_cals, no_sci, expnum, exp_list, exp_range
 
     if fluxcal_method is None:
         fluxcal_method = 'STD'
-    assert (fluxcal_method in ['STD', 'SCI', 'NONE']), 'Fluxcal method must be either STD or SCI or NONE'
+    assert (fluxcal_method in ['STD', 'SCI', 'MOD', 'NONE']), 'Fluxcal method must be either STD or SCI or MOD or NONE'
 
     if use_nightly_cals:
         use_untagged_cals = True
