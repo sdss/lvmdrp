@@ -27,6 +27,7 @@
 
 import os
 import yaml
+import warnings
 import numpy as np
 import bottleneck as bn
 import pandas as pd
@@ -417,7 +418,8 @@ def _get_reference_expnum(frame, ref_frames):
 
     ref_expnums = refs.expnum.unique()
     if len(ref_expnums) < 2:
-        raise ValueError(f"no reference frame found for {frame.imagetyp}")
+        warnings.warn(f"no reference frame found for {frame.imagetyp}, found only {len(ref_expnums)} exposure(s)")
+        return None
     idx = np.argmin(np.abs(ref_expnums-frame.expnum))
     if idx > 0:
         idx -= 1
@@ -1078,6 +1080,9 @@ def fix_raw_pixel_shifts(mjd, expnums=None, ref_expnums=None, use_longterm_cals=
 
             # find suitable reference frame for current frame
             ref_expnum = _get_reference_expnum(frame, ref_frames)
+            if ref_expnum is None:
+                warnings.warn(f"missing reference frame for {frame.expnum = } of {frame.imagetyp = }")
+                continue
 
             rframe_paths = sorted(path.expand("lvm_raw", hemi="s", camspec=f"?{spec}", mjd=mjd, expnum=expnum))
             rframe_paths = [rframe_path for rframe_path in rframe_paths if ".gz" in rframe_path]
