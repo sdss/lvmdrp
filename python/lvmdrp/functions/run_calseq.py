@@ -793,8 +793,14 @@ def _create_wavelengths_60177(use_longterm_cals=True, skip_done=True, dry_run=Fa
         pixels = pixwav[camera][:, 0] if camera in pixwav else []
         waves = pixwav[camera][:, 1] if camera in pixwav else []
         use_lines = pixwav[camera][:, 2].astype(bool) if camera in pixwav else []
-        rss_tasks.determine_wavelength_solution(in_arcs=xarc_paths[camera], out_wave=mwave_path, out_lsf=mlsf_path,
-                                                pixel=pixels, ref_lines=waves, use_line=use_lines, cent_range=[-4, 4])
+        ref_lines, _, cent_wave, _, rss, wave_trace, fwhm_trace = rss_tasks.determine_wavelength_solution(in_arcs=xarc_paths[camera], out_wave=mwave_path, out_lsf=mlsf_path,
+                                                                                                          pixel=pixels, ref_lines=waves, use_line=use_lines,
+                                                                                                          flux_range=[800, np.inf], cent_range=[-4, 4])
+
+        lvmarc = lvmArc(data=rss._data, error=rss._error, mask=rss._mask, header=rss._header,
+                        ref_wave=ref_lines, cent_line=cent_wave,
+                        wave_trace=wave_trace, lsf_trace=fwhm_trace)
+        lvmarc.writeFitsData(path.full("lvm_frame", mjd=mjd, tileid=11111, drpver=drpver, expnum=expnum_str, kind=f'Arc-{camera}'))
 
     for channel in "brz":
         xarc_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="x", imagetype="arc", camera=channel, expnum=expnum_str)
