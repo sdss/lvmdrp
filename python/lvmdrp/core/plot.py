@@ -80,11 +80,10 @@ def plot_image_shift(ax, image, column_shift, xpos=None, inset_pos=(0.0,1.0-0.32
     for i, irow in enumerate(irows):
         iy, fy, ix, fx = xpos-30, xpos+30, irow-30, irow+30
         image_region = image[ix:fx, iy:fy]
-        vmin = np.abs(np.nanmean(image_region)-3*np.nanstd(image_region))
-        vmax = np.abs(np.nanmean(image_region)+3*np.nanstd(image_region))
 
         axi = ax.inset_axes((inset_pos[0],inset_pos[1]-i/3.2, *inset_box))
-        axi.imshow(image_region, extent=[iy,fy,ix,fx], origin="lower", cmap=cmap, vmin=vmin, vmax=vmax)
+        norm = simple_norm(image_region, max_percent=80)
+        axi.imshow(image_region, extent=[iy,fy,ix,fx], origin="lower", cmap=cmap, norm=norm)
         axi.tick_params(axis="both", labelsize=10)
         if i == 0 and irows.size > 1:
             axi.tick_params(axis="both", labelbottom=False)
