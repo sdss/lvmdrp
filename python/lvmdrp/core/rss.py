@@ -1674,20 +1674,20 @@ class RSS(FiberRows):
             sel = ~rss._mask[ifiber]
             if sel.sum() == 0:
                 continue
-            f = interpolate.interp1d(rss._wave[ifiber][sel], rss._data[ifiber][sel], kind=method, bounds_error=False, fill_value=numpy.nan)
+            f = interpolate.interp1d(rss._wave[ifiber][sel], rss._data[ifiber][sel], kind=method, bounds_error=False, fill_value=numpy.nan, assume_sorted=True)
             new_rss._data[ifiber] = f(wave).astype("float32")
-            f = interpolate.interp1d(rss._wave[ifiber][sel], rss._error[ifiber][sel], kind=method, bounds_error=False, fill_value=numpy.nan)
+            f = interpolate.interp1d(rss._wave[ifiber][sel], rss._error[ifiber][sel], kind=method, bounds_error=False, fill_value=numpy.nan, assume_sorted=True)
             new_rss._error[ifiber] = f(wave).astype("float32")
-            f = interpolate.interp1d(rss._wave[ifiber], rss._mask[ifiber], kind="nearest", bounds_error=False, fill_value=1)
+            f = interpolate.interp1d(rss._wave[ifiber], rss._mask[ifiber], kind="nearest", bounds_error=False, fill_value=1, assume_sorted=True)
             new_rss._mask[ifiber] = f(wave).astype("bool")
             if rss._lsf is not None:
                 f = numpy.interp(wave, rss._wave[ifiber], rss._lsf[ifiber])
                 new_rss._lsf[ifiber] = f.astype("float32")
             if rss._sky is not None:
-                f = interpolate.interp1d(rss._wave[ifiber][sel], rss._sky[ifiber][sel], kind=method, bounds_error=False, fill_value=numpy.nan)
+                f = interpolate.interp1d(rss._wave[ifiber][sel], rss._sky[ifiber][sel], kind=method, bounds_error=False, fill_value=numpy.nan, assume_sorted=True)
                 new_rss._sky[ifiber] = f(wave).astype("float32")
             if rss._sky_error is not None:
-                f = interpolate.interp1d(rss._wave[ifiber][sel], rss._sky_error[ifiber][sel], kind=method, bounds_error=False, fill_value=numpy.nan)
+                f = interpolate.interp1d(rss._wave[ifiber][sel], rss._sky_error[ifiber][sel], kind=method, bounds_error=False, fill_value=numpy.nan, assume_sorted=True)
                 new_rss._sky_error[ifiber] = f(wave).astype("float32")
 
         if not return_density:
