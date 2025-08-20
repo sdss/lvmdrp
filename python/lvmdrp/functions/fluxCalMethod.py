@@ -455,7 +455,7 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
     # https://github.com/desihub/desispec/blob/main/py/desispec/data/arc_lines/telluric_lines.txt
     telluric_tab = Table.read(telluric_file, format='ascii.fixed_width_two_line')
 
-    with fits.open(name=models_dir + '/AMBRE_for_LVM.fits') as model:
+    with fits.open(name=models_dir + '/lvm-models_ambre-all.fits') as model:
         model_good = model[0].data
         model_norm = model[1].data
         model_info = pd.DataFrame(model[2].data)

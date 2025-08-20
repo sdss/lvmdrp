@@ -451,6 +451,7 @@ def get_calibs(kind, mjd, camera):
     """
     a = Access()
     a.remote()
+    a.add('lvm_calib', kind="odels_ambre", mjd="stellar_models", camera="all")
     a.add('lvm_calib', kind="pix*", mjd="pixelmasks", camera=camera)
     a.add('lvm_calib', kind=kind, mjd=mjd, camera=camera)
     a.set_stream()
