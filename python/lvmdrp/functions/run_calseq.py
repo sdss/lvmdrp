@@ -795,7 +795,7 @@ def _create_wavelengths_60177(use_longterm_cals=True, skip_done=True, dry_run=Fa
         use_lines = pixwav[camera][:, 2].astype(bool) if camera in pixwav else []
         ref_lines, _, cent_wave, _, rss, wave_trace, fwhm_trace = rss_tasks.determine_wavelength_solution(in_arcs=xarc_paths[camera], out_wave=mwave_path, out_lsf=mlsf_path,
                                                                                                           pixel=pixels, ref_lines=waves, use_line=use_lines,
-                                                                                                          flux_range=[800, np.inf], cent_range=[-4, 4])
+                                                                                                          flux_range=[800, np.inf], cent_range=[-1.5, 1.5], fwhm_range=[2.0, 4.5])
 
         lvmarc = lvmArc(data=rss._data, error=rss._error, mask=rss._mask, header=rss._header,
                         ref_wave=ref_lines, cent_line=cent_wave,
