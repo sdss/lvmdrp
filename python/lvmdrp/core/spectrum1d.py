@@ -3745,12 +3745,12 @@ class Spectrum1D(Header):
                 axs[i].text(0.05, 0.6, f"bg   = {bg[i]:.2f}", va="bottom", ha="left", transform=axs[i].transAxes, fontsize=11)
                 axs[i].legend(loc="upper right", frameon=False, fontsize=11)
 
-            # mask line if >= badpix_threshold pixels are masked within 3.5sigma
+            # mask line if >= 2 pixels are masked within 3.5sigma
             model_badpix = data[select] == 0
             if not numpy.isnan([cent[i], fwhm[i]]).any():
                 select_2 = (self._wave>=cent[i]-3.5*fwhm[i]/2.354) & (self._wave<=cent[i]+3.5*fwhm[i]/2.354)
                 model_badpix = mask[select_2]
-                if model_badpix.sum() >= badpix_threshold:
+                if model_badpix.sum() >= 2:
                     warnings.warn(f"masking line @ {centre:.2f} with >= 2 masked pixels within a 3.5 sigma window")
                     self.add_header_comment(f"masking line @ {centre:.2f} with >= 2 masked pixels within a 3.5 sigma window")
                     flux[i] = cent[i] = fwhm[i] = bg[i] = numpy.nan
