@@ -2744,7 +2744,9 @@ def extract_spectra(
     if len(exposed_selection) != 0:
         exposed_std = numpy.array(list(img._header["STD*FIB"].values()))[exposed_selection]
         mask |= (~(numpy.isin(slitmap_spec["orig_ifulabel"], exposed_std))&((slitmap_spec["telescope"] == "Spec")))[:, None]
-        mask |= (slitmap_spec["fibstatus"] == 1)[:, None]
+
+    # mask broken fibers
+    mask |= (slitmap_spec["fibstatus"] == 1)[:, None]
 
     # propagate thermal shift to slitmap
     channel = camera[0]

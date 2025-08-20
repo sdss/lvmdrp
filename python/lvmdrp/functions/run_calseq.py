@@ -27,6 +27,7 @@
 
 import os
 import yaml
+import warnings
 import numpy as np
 import bottleneck as bn
 import pandas as pd
@@ -417,7 +418,8 @@ def _get_reference_expnum(frame, ref_frames):
 
     ref_expnums = refs.expnum.unique()
     if len(ref_expnums) < 2:
-        raise ValueError(f"no reference frame found for {frame.imagetyp}")
+        warnings.warn(f"no reference frame found for {frame.imagetyp}, found only {len(ref_expnums)} exposure(s)")
+        return None
     idx = np.argmin(np.abs(ref_expnums-frame.expnum))
     if idx > 0:
         idx -= 1
@@ -793,8 +795,14 @@ def _create_wavelengths_60177(use_longterm_cals=True, skip_done=True, dry_run=Fa
         pixels = pixwav[camera][:, 0] if camera in pixwav else []
         waves = pixwav[camera][:, 1] if camera in pixwav else []
         use_lines = pixwav[camera][:, 2].astype(bool) if camera in pixwav else []
-        rss_tasks.determine_wavelength_solution(in_arcs=xarc_paths[camera], out_wave=mwave_path, out_lsf=mlsf_path,
-                                                pixel=pixels, ref_lines=waves, use_line=use_lines)
+        ref_lines, _, cent_wave, _, rss, wave_trace, fwhm_trace = rss_tasks.determine_wavelength_solution(in_arcs=xarc_paths[camera], out_wave=mwave_path, out_lsf=mlsf_path,
+                                                                                                          pixel=pixels, ref_lines=waves, use_line=use_lines,
+                                                                                                          flux_range=[800, np.inf], cent_range=[-1.5, 1.5], fwhm_range=[2.0, 4.5])
+
+        lvmarc = lvmArc(data=rss._data, error=rss._error, mask=rss._mask, header=rss._header,
+                        ref_wave=ref_lines, cent_line=cent_wave,
+                        wave_trace=wave_trace, lsf_trace=fwhm_trace)
+        lvmarc.writeFitsData(path.full("lvm_frame", mjd=mjd, tileid=11111, drpver=drpver, expnum=expnum_str, kind=f'Arc-{camera}'))
 
     for channel in "brz":
         xarc_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="x", imagetype="arc", camera=channel, expnum=expnum_str)
@@ -1072,6 +1080,9 @@ def fix_raw_pixel_shifts(mjd, expnums=None, ref_expnums=None, use_longterm_cals=
 
             # find suitable reference frame for current frame
             ref_expnum = _get_reference_expnum(frame, ref_frames)
+            if ref_expnum is None:
+                warnings.warn(f"missing reference frame for {frame.expnum = } of {frame.imagetyp = }")
+                continue
 
             rframe_paths = sorted(path.expand("lvm_raw", hemi="s", camspec=f"?{spec}", mjd=mjd, expnum=expnum))
             rframe_paths = [rframe_path for rframe_path in rframe_paths if ".gz" in rframe_path]
@@ -1883,19 +1894,15 @@ def create_wavelengths(mjd, expnums=None, cals_mjd=None, use_longterm_cals=True,
                                         in_model=calibs["model"][camera])
 
         # fit wavelength solution
-        if skip_done and os.path.isfile(mwave_path) and os.path.isfile(mlsf_path):
-            log.info(f"skipping wavelength solution {mwave_path} and {mlsf_path}, files already exists")
-        else:
-            ref_lines, _, cent_wave, _, rss, wave_trace, fwhm_trace = rss_tasks.determine_wavelength_solution(
-                in_arcs=xarc_path,
-                out_wave=mwave_path,
-                out_lsf=mlsf_path
-            )
+        ref_lines, _, cent_wave, _, rss, wave_trace, fwhm_trace = rss_tasks.determine_wavelength_solution(
+            in_arcs=xarc_path,
+            out_wave=mwave_path,
+            out_lsf=mlsf_path)
 
-            lvmarc = lvmArc(data=rss._data, error=rss._error, mask=rss._mask, header=rss._header,
-                            ref_wave=ref_lines, cent_line=cent_wave,
-                            wave_trace=wave_trace, lsf_trace=fwhm_trace)
-            lvmarc.writeFitsData(path.full("lvm_frame", mjd=mjd, tileid=11111, drpver=drpver, expnum=expnum_str, kind=f'Arc-{camera}'))
+        lvmarc = lvmArc(data=rss._data, error=rss._error, mask=rss._mask, header=rss._header,
+                        ref_wave=ref_lines, cent_line=cent_wave,
+                        wave_trace=wave_trace, lsf_trace=fwhm_trace)
+        lvmarc.writeFitsData(path.full("lvm_frame", mjd=mjd, tileid=11111, drpver=drpver, expnum=expnum_str, kind=f'Arc-{camera}'))
 
     for channel in "brz":
         if kind == "longterm":
@@ -1910,16 +1917,10 @@ def create_wavelengths(mjd, expnums=None, cals_mjd=None, use_longterm_cals=True,
         harc_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="h", imagetype="arc", camera=channel, expnum=expnum_str)
 
         # stack spectragraphs
-        if skip_done and os.path.isfile(xarc_path):
-            log.info(f"skipping stacked arc {xarc_path}, file already exists")
-        else:
-            rss_tasks.stack_spectrographs(in_rsss=xarc_paths, out_rss=xarc_path)
+        rss_tasks.stack_spectrographs(in_rsss=xarc_paths, out_rss=xarc_path)
         # apply wavelength solution to arcs and rectify
-        if skip_done and os.path.isfile(harc_path):
-            log.info(f"skipping rectified arc {harc_path}, file already exists")
-        else:
-            rss_tasks.create_pixel_table(in_rss=xarc_path, out_rss=harc_path, in_waves=mwave_paths, in_lsfs=mlsf_paths)
-            rss_tasks.resample_wavelength(in_rss=harc_path, out_rss=harc_path, method="linear", wave_range=SPEC_CHANNELS[channel], wave_disp=0.5)
+        rss_tasks.create_pixel_table(in_rss=xarc_path, out_rss=harc_path, in_waves=mwave_paths, in_lsfs=mlsf_paths)
+        rss_tasks.resample_wavelength(in_rss=harc_path, out_rss=harc_path, method="linear", wave_range=SPEC_CHANNELS[channel], wave_disp=0.5)
 
 
 def reduce_nightly_sequence(mjd, use_longterm_cals=False, reject_cr=True, only_cals=CAL_FLAVORS,
