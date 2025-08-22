@@ -3403,8 +3403,10 @@ class Image(Header):
                 img_original.replace_subselect(select, mask=True)  # set the new mask
                 if increase_radius > 0:
                     mask_img = Image(data=img_original._mask)
-                    mask_new = mask_img.convolveImg(kernel=numpy.ones((2*increase_radius+1, 2*increase_radius+1)))
-                    img_original._mask = mask_new
+                    kernel = numpy.ones((2*increase_radius+1, 2*increase_radius+1))
+                    kernel /= kernel.sum()
+                    mask_new = mask_img.convolveImg(kernel=kernel)
+                    img_original._mask = mask_new._data >= 2/kernel.size
                 if binary_closure:
                     bmask = img_original._mask > 0
                     bc_mask = numpy.zeros(bmask.shape, dtype=img_original._mask.dtype)
