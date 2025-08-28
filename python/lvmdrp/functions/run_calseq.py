@@ -45,7 +45,8 @@ from collections.abc import Callable
 from lvmdrp import log, path, __version__ as drpver
 from lvmdrp.utils import metadata as md
 from lvmdrp.utils.convert import tileid_grp
-from lvmdrp.utils.paths import get_master_mjd, get_calib_paths, group_calib_paths, get_frames_paths
+from lvmdrp.utils.paths import get_calib_paths, group_calib_paths, get_frames_paths
+from lvmdrp.utils import pixshifts
 from lvmdrp.core.constants import CALIBRATION_NAMES, SKYLINES_FIBERFLAT, CONTINUUM_FIBERFLAT, CALIBRATION_NEEDS
 from lvmdrp.core.constants import LVM_NFIBERS, LVM_NCOLS
 from lvmdrp.core.plot import create_subplots, save_fig
@@ -368,64 +369,6 @@ def parse_calibration_epochs(mjd, sources=None, trigger=None, comment=None):
     for source_mjd in sources:
         calibs_mjds.update({flavor: source_mjd for flavor in sources[source_mjd]})
     return calibs_mjds
-
-
-def _load_shift_report(mjd):
-    """Reads QC reports with the electronic pixel shifts"""
-
-    with open(os.path.join(os.environ["LVM_SANDBOX"], "shift_monitor", f"shift_{mjd}.txt"), "r") as f:
-        lines = f.readlines()[2:]
-
-    shifts_report = {}
-    for line in lines:
-        cols = line[:-1].split()
-        if not cols:
-            continue
-        _, exp, _, spec = cols[:4]
-        exp = int(exp)
-        spec = spec[-1]
-        shifts = np.array([int(_) for _ in cols[4:]])
-        shifts_report[(spec, exp)] = (shifts[::2], shifts[1::2])
-
-    return shifts_report
-
-
-def _get_reference_expnum(frame, ref_frames):
-    """Get reference frame for a given frame
-
-    Given a frame and a set of reference frames, get the reference frame for the
-    given frame. This routine will return the reference frame with the closest
-    exposure number to the given frame.
-
-    Parameters:
-    ----------
-    frame : pd.Series
-        Frame metadata
-    ref_frames : pd.DataFrame
-        Reference frames metadata
-
-    Returns:
-    -------
-    pd.Series
-        Reference frame metadata
-    """
-    if frame.imagetyp == "flat" and frame.ldls|frame.quartz:
-        refs = ref_frames.query("imagetyp == 'flat' and (ldls|quartz)")
-    elif frame.imagetyp == "flat":
-        refs = ref_frames.query("imagetyp == 'flat' and not (ldls|quartz)")
-    else:
-        refs = ref_frames.query("imagetyp == @frame.imagetyp")
-
-    ref_expnums = refs.expnum.unique()
-    if len(ref_expnums) < 2:
-        warnings.warn(f"no reference frame found for {frame.imagetyp}, found only {len(ref_expnums)} exposure(s)")
-        return None
-    idx = np.argmin(np.abs(ref_expnums-frame.expnum))
-    if idx > 0:
-        idx -= 1
-    if idx == 0:
-        idx += 1
-    return ref_expnums[idx]
 
 
 def _clean_ancillary(mjd, expnums=None, flavors="all"):
@@ -996,10 +939,9 @@ def messup_frame(mjd, expnum, spec="1", shifts=[1500, 2000, 3500], shift_size=-2
     return messed_up_frames
 
 
-def fix_raw_pixel_shifts(mjd, expnums=None, ref_expnums=None, use_longterm_cals=True, specs="123", imagetyps=None,
-                         y_widths=5, wave_list=None, wave_widths=0.6*5, max_shift=10, flat_spikes=11,
-                         threshold_spikes=np.inf, shift_rows=None, interactive=False, skip_done=False,
-                         display_plots=False):
+def fix_raw_pixel_shifts(mjd, expnums=None, ref_expnums=None, specs="123", imagetyps=None,
+                         max_shift=10, flat_spikes=11, threshold_spikes=np.inf, shift_rows=None,
+                         interactive=False, display_plots=False):
     """Attempts to fix pixel shifts in a list of raw frames
 
     Given an MJD and (optionally) exposure numbers, fix the pixel shifts in a
@@ -1020,12 +962,6 @@ def fix_raw_pixel_shifts(mjd, expnums=None, ref_expnums=None, use_longterm_cals=
         Spectrograph channels
     imagetyps : list
         List of image types to analyse, by default None (any image type)
-    y_widths : int
-        Width of the fibers along y-axis, by default 5
-    wave_list : list
-        List of lines to use for the wavelength calibration, by default None
-    wave_widths : float
-        Width of the wavelength axis for the lines, by default 0.6*5
     max_shift : int
         Maximum shift in pixels, by default 10
     flat_spikes : int
@@ -1036,8 +972,6 @@ def fix_raw_pixel_shifts(mjd, expnums=None, ref_expnums=None, use_longterm_cals=
         Rows to shift, by default None
     interactive : bool
         Interactive mode when report and measured shifts are different, by default False
-    skip_done : bool
-        Skip pipeline steps that have already been done
     display_plots : bool
         Display plots, by default False
     """
@@ -1046,84 +980,62 @@ def fix_raw_pixel_shifts(mjd, expnums=None, ref_expnums=None, use_longterm_cals=
         shift_rows = {}
     elif not isinstance(shift_rows, dict):
         raise ValueError("shift_rows must be a dictionary with keys (spec, expnum) and values a list of rows to shift")
+    # load QC shifts reports
+    shifts_qc = pixshifts.load_qc_shifts(mjd)
+    # load final reported shifts if exist
+    shifts = pixshifts.load_shifts(mjd=mjd)
 
     # get target frames & reference frames metadata
-    frames = md.get_frames_metadata(mjd)
+    frames = md.get_frames_metadata(mjd).sort_values(by=["spec", "expnum"])
+    ref_frames = pixshifts._clean_reference(frames.copy(), shifts_qc)
     if imagetyps is not None:
         frames.query("imagetyp in @imagetyps", inplace=True)
+        ref_frames.query("imagetyp in @imagetyps", inplace=True)
     if expnums is not None:
         frames.query("expnum in @expnums", inplace=True)
-    ref_frames = md.get_frames_metadata(mjd)
-    if imagetyps is not None:
-        ref_frames.query("imagetyp in @imagetyps", inplace=True)
     if ref_expnums is not None:
         ref_frames.query("expnum in @ref_expnums", inplace=True)
-
-    if use_longterm_cals:
-        masters_mjd = get_master_mjd(mjd)
-        masters_path = os.path.join(MASTERS_DIR, str(masters_mjd))
+    if specs is not None:
+        specs = [f"sp{s}" for s in specs]
+        frames.query("spec in @specs", inplace=True)
+        ref_frames.query("spec in @specs", inplace=True)
 
     ref_imagetyps = set(ref_frames.imagetyp)
     imagetyps = set(frames.imagetyp)
     if not imagetyps.issubset(ref_imagetyps):
-        raise ValueError(f"the following image types are not present in the reference frames: {imagetyps - ref_imagetyps}")
+        warnings.warn(f"the following image types are not present in the reference frames: {imagetyps - ref_imagetyps}")
 
-    shifts_path = os.path.join(os.getenv('LVM_SANDBOX'), 'shift_monitor', f'shift_{mjd}.txt')
-    shifts_report = {}
-    if os.path.isfile(shifts_path):
-        shifts_report = _load_shift_report(mjd)
+    for _, frame in frames.iterrows():
+        # find suitable reference frame for current frame
+        ref_expnum = pixshifts._get_reference_expnum(frame, ref_frames)
+        if ref_expnum is None:
+            warnings.warn(f"missing reference frame for {frame.expnum = } of {frame.imagetyp = }")
+            continue
+        elif ref_expnum == frame.expnum:
+            warnings.warn(f"chosen reference exposure is the same as the target exposure: {frame.expnum} = {ref_expnum}")
+            continue
 
-    expnums_grp = frames.groupby("expnum")
-    for spec in specs:
-        for expnum in expnums_grp.groups:
-            frame = expnums_grp.get_group(expnum).iloc[0]
+        xframe_path = path.full("lvm_raw", hemi="s", camspec=frame.camera, mjd=frame.mjd, expnum=frame.expnum)
+        rframe_path = path.full("lvm_raw", hemi="s", camspec=frame.camera, mjd=mjd, expnum=ref_expnum)
 
-            # find suitable reference frame for current frame
-            ref_expnum = _get_reference_expnum(frame, ref_frames)
-            if ref_expnum is None:
-                warnings.warn(f"missing reference frame for {frame.expnum = } of {frame.imagetyp = }")
-                continue
+        if not os.path.isfile(rframe_path):
+            log.warning(f"skipping {rframe_path = }, file not found")
+            continue
 
-            rframe_paths = sorted(path.expand("lvm_raw", hemi="s", camspec=f"?{spec}", mjd=mjd, expnum=expnum))
-            rframe_paths = [rframe_path for rframe_path in rframe_paths if ".gz" in rframe_path]
+        shift_profile, source, _, _ = pixshifts.detect_shifts(in_image=xframe_path,
+                                                              ref_image=rframe_path, report=shifts_qc.get((frame.spec[-1], frame.expnum)),
+                                                              flat_spikes=flat_spikes, threshold_spikes=threshold_spikes,
+                                                              max_shift=max_shift, shift_rows=shift_rows.get((frame.spec[-1], frame.expnum)),
+                                                              interactive=interactive, display_plots=display_plots)
 
-            # use fixed reference if exist, else use original raw frame
-            cframe_paths = sorted([path.full("lvm_anc", drpver=drpver, tileid=frame.tileid, mjd=mjd, kind="e", imagetype=frame.imagetyp, expnum=ref_expnum, camera=f"{channel}{spec}") for channel in "brz"])
-            if not all([os.path.exists(cframe_path) for cframe_path in cframe_paths]):
-                cframe_paths = sorted(path.expand("lvm_raw", hemi="s", camspec=f"?{spec}", mjd=mjd, expnum=ref_expnum))
-                cframe_paths = [cframe_path for cframe_path in cframe_paths if ".gz" in cframe_path]
+        if (shift_profile != 0).any():
+            rows = pixshifts.compress_shifts(shift_profile, as_dict=True)
+            shifts = pixshifts.set_shifted(shifts=shifts, expnum=frame.expnum, camera=frame.camera, imagetype=frame.imagetyp, rows=rows, source=source)
 
-            eframe_paths = [path.full("lvm_anc", drpver=drpver, tileid=frame.tileid, mjd=mjd, kind="e", imagetype=frame.imagetyp, expnum=expnum, camera=f"{channel}{spec}") for channel in "brz"]
-            mask_2d_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, imagetype="mask2d",
-                                     expnum=0, camera=f"sp{spec}", kind="")
+            # update reference table by removing affected frame
+            ref_frames = ref_frames.loc[(ref_frames.expnum != frame.expnum) & (ref_frames.camera != frame.camera)]
 
-            if len(rframe_paths) < 3:
-                log.warning(f"skipping {rframe_paths = }, less than 3 files found")
-                continue
-            if len(cframe_paths) < 3:
-                log.warning(f"skipping {cframe_paths = }, less than 3 files found")
-                continue
-
-            if use_longterm_cals:
-                mwave_paths = sorted(glob(os.path.join(masters_path, f"lvm-mwave-?{spec}.fits")))
-                mtrace_paths = sorted(glob(os.path.join(masters_path, f"lvm-mtrace-?{spec}.fits")))
-            else:
-                mwave_paths = sorted(path.expand("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, kind="mwave", camera=f"?{spec}"))
-                mtrace_paths = sorted(path.expand("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, kind="mtrace", camera=f"?{spec}"))
-
-            if skip_done and os.path.exists(mask_2d_path):
-                log.info(f"skipping {mask_2d_path}, file already exists")
-            else:
-                image_tasks.select_lines_2d(in_images=cframe_paths, out_mask=mask_2d_path, lines_list=wave_list,
-                                            in_cent_traces=mtrace_paths, in_waves=mwave_paths,
-                                            y_widths=y_widths, wave_widths=wave_widths,
-                                            display_plots=display_plots)
-
-            image_tasks.fix_pixel_shifts(in_images=rframe_paths, out_images=eframe_paths,
-                                         ref_images=cframe_paths, in_mask=mask_2d_path, report=shifts_report.get((spec, expnum), None),
-                                         flat_spikes=flat_spikes, threshold_spikes=threshold_spikes,
-                                         max_shift=max_shift, shift_rows=shift_rows.get((spec, expnum), None),
-                                         interactive=interactive, display_plots=display_plots)
+    pixshifts.write_shifts(shifts or None, mjd=mjd, verbose=True)
 
 
 def create_bias(mjd, expnums=None, cals_mjd=None, use_longterm_cals=True, assume_imagetyp=None, skip_done=True, dry_run=False):
