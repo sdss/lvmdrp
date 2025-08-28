@@ -7,7 +7,7 @@ from astropy.io import fits
 
 from lvmdrp import log, path, __version__ as drpver
 from lvmdrp.functions import imageMethod as image_tasks
-from cextern.fast_median.fast_median import fast_median_filter_2d
+from lvmdrp.external.fast_median import fast_median_filter_2d
 from lvmdrp.utils import metadata as md
 from lvmdrp import main as drp
 from scipy import ndimage as ndi
