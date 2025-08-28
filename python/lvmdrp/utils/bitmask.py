@@ -99,8 +99,8 @@ class BaseBitmask(IntFlag):
 
 class RawFrameQuality(BaseBitmask):
     GOOD = auto()  # bit whether a raw frame is good for reduction
-    TEST = auto()  # bit whether a raw frame is for instrument testing purposes
     BAD = auto()  # bit whether a raw frame is bad for reduction
+    TEST = auto()  # bit whether a raw frame is for instrument testing purposes
 
 
 class ReductionStatus(BaseBitmask):

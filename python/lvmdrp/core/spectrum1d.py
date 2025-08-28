@@ -1,15 +1,16 @@
 from copy import deepcopy
+import warnings
 
 import numpy
 import bottleneck as bn
 from astropy.io import fits as pyfits
+from astropy.stats import biweight_location
 from numpy import polynomial
 from scipy.linalg import norm
-from scipy import signal, interpolate, ndimage, sparse
+from scipy import signal, interpolate, integrate, ndimage, sparse
 from scipy.ndimage import zoom, median_filter
 from typing import List, Tuple
 
-from lvmdrp import log
 from lvmdrp.utils import gaussian
 from lvmdrp.core import fit_profile
 from lvmdrp.core import plot
@@ -55,7 +56,7 @@ def find_continuum(spec_s,niter=15,thresh=0.8,median_box_max=100,median_box_min=
     """
     median_box=median_box_max
     spec_s_org = spec_s.copy()
-    mask = (spec_s>(-1)*numpy.abs(numpy.min(spec_s)))
+    mask = (spec_s>(-1)*numpy.abs(numpy.nanmin(spec_s)))
     #m_spec_s = adaptive_smooth(spec_s, median_box, int(median_box_max*0.5))
     m_spec_s = median_filter(spec_s, median_box)
     pixels = numpy.arange(0,spec_s.shape[0])
@@ -223,14 +224,104 @@ def _cross_match(
     return max_correlation, best_shift, best_stretch_factor
 
 
-def _normalize_peaks(data, min_peak_dist):
+def _normalize_peaks(data, ref, min_peak_dist):
     data_ = numpy.asarray(data).copy()
-    peaks, _ = signal.find_peaks(data_, distance=min_peak_dist)
-    if peaks.size == 0:
-        return data_
-    norm = numpy.interp(numpy.arange(data_.shape[0]), peaks, data_[peaks])
-    data_ /= norm
-    return data_
+    dat_peaks, dat_peak_pars = signal.find_peaks(data_, distance=min_peak_dist)
+
+    ref_ = numpy.asarray(ref).copy()
+    ref_peaks, ref_peak_pars = signal.find_peaks(ref_, distance=min_peak_dist, rel_height=0.5, width=(2,4), prominence=1.5)
+
+    if dat_peaks.size == 0 or ref_peaks.size == 0:
+        return data_, ref_, None, None, None, None
+
+    # dat_norm = interpolate.interp1d(dat_peaks, data_[dat_peaks], kind="linear", bounds_error=False, fill_value=0.0)(numpy.arange(data_.shape[0]))
+    # ref_norm = interpolate.interp1d(ref_peaks, ref_[ref_peaks], kind="linear", bounds_error=False, fill_value=0.0)(numpy.arange(data_.shape[0]))
+    dat_norm = numpy.interp(numpy.arange(data_.shape[0]), dat_peaks, data_[dat_peaks])
+    ref_norm = numpy.interp(numpy.arange(data_.shape[0]), ref_peaks, ref_[ref_peaks])
+
+
+    ref_ = ref_ / ref_norm
+    data_ = data_ / dat_norm
+    # ref_ = ref_ / ref_norm * dat_norm / numpy.median(data_)
+    # data_ = data_ / numpy.median(data_)
+
+    # import matplotlib.pyplot as plt
+    # plt.figure()
+    # plt.plot(dat_norm, "-b")
+    # plt.vlines(dat_peaks, 0, 1, lw=1, color="tab:blue")
+    # # plt.plot(ref_norm, "-r")
+    # # plt.vlines(ref_peaks, 0, 1, lw=1, color="tab:red")
+
+    return data_, ref_, dat_peaks, dat_peak_pars, ref_peaks, ref_peak_pars
+
+
+def _choose_cc_peak(cc, shifts, min_shift, max_shift):
+    mask = (shifts >= min_shift) & (max_shift >= shifts)
+
+    ccp, _ = signal.find_peaks(cc[mask])
+
+    # import matplotlib.pyplot as plt
+    # plt.figure(figsize=(15,5))
+    # plt.plot(shifts[mask], cc[mask], "-o")
+    # plt.vlines(shifts[mask][ccp], 0, 1)
+
+    sum_cc = []
+    for p in ccp:
+        sum_cc.append(max((cc[mask][p-1], cc[mask][p+1])) + cc[mask][p])
+        # plt.vlines(shifts[mask][p-2], 0, 1, ls="--", color="k")
+        # plt.vlines(shifts[mask][p+3], 0, 1, ls="--", color="k")
+        # mask = (shifts >= p-7) & (shifts <= p+7)
+        # guess = [numpy.trapz(cc[mask], shifts[mask]), p, 1.0, 0.0]
+        # bound_lower = [0.0, p+min_shift, 2, -numpy.inf]
+        # bound_upper = [numpy.inf, p+max_shift, 5, numpy.inf]
+        # best_gauss = fit_profile.Gaussian_const(guess)
+        # best_gauss.fit(
+        #     shifts[mask],
+        #     cc[mask],
+        #     sigma=1.0,
+        #     p0=guess,
+        #     bounds=(bound_lower, bound_upper)
+        # )
+        # area, best_shift_sp, sigma, bg = best_gauss.getPar()
+        # sum_cc.append(area)
+
+
+    # print(ccp, sum_cc)
+    return ccp[numpy.argmax(sum_cc)]
+
+
+def _align_fiber_blocks(ref_spec, obs_spec, median_box=21, clip_factor=0.7, axs=None):
+    """Cross-correlate median-filtered versions of fiber profile data and model to get coarse alignment"""
+    # sigma-clip spectra to half median to remove fiber features
+    obs_avg = biweight_location(obs_spec, ignore_nan=True)
+    ref_avg = biweight_location(ref_spec, ignore_nan=True)
+    obs_spec = numpy.clip(obs_spec, 0, clip_factor*obs_avg)
+    ref_spec = numpy.clip(ref_spec, 0, clip_factor*ref_avg)
+
+    obs_median = signal.medfilt(obs_spec, median_box)
+    ref_median = signal.medfilt(ref_spec, median_box)
+
+    obs_median /= numpy.median(obs_median)
+    ref_median /= numpy.median(ref_median)
+
+    cc = signal.correlate(obs_median, ref_median, mode="same")
+
+    shifts = signal.correlation_lags(len(obs_spec), len(ref_spec), mode="same")
+    best_shift = shifts[numpy.argmax(cc)]
+
+    if axs is not None and len(axs) >= 2:
+        pixels = numpy.arange(obs_spec.size)
+        axs[0].step(pixels, obs_median, where="mid", color="k", lw=2, label="obs. profile")
+        axs[0].step(pixels, ref_median, where="mid", color="tab:blue", lw=1, label="ref. profile")
+        axs[0].set_xlabel("Y (pix)")
+        axs[0].set_ylabel("Fiber blocks")
+        axs[0].legend(loc=2, frameon=False, ncols=2)
+        axs[0].set_ylim(-0.1, 1.2)
+        axs[1].step(shifts, cc, where="mid")
+        axs[1].set_xlabel("Shifts (pix)")
+        axs[1].set_ylabel("Cross-correlation")
+
+    return best_shift
 
 
 def _cross_match_float(
@@ -298,7 +389,6 @@ def _cross_match_float(
     else:
         ref_spec_ = ref_spec.copy()
         obs_spec_ = obs_spec.copy()
-    #return ref_spec_, obs_spec_
 
     for factor in stretch_factors:
         # Stretch the first signal
@@ -369,6 +459,135 @@ def _cross_match_float(
         ax.axvline(best_shift_sp, color="tab:red", lw=1)
         ax.text(best_shift, (best_cross_corr[mask_cc]).min(), f"shift = {best_shift}", va="bottom", ha="left", color="tab:blue")
         ax.text(best_shift_sp, (best_cross_corr[mask_cc]).min(), f"subpix. shift = {best_shift_sp:.3f}", va="top", ha="right", color="tab:red")
+
+    return max_correlation, best_shift_sp, best_stretch_factor
+
+
+def _fiber_cc_match(
+    ref_spec: numpy.ndarray,
+    obs_spec: numpy.ndarray,
+    guess_shift : int,
+    shift_range: List[int],
+    min_peak_dist: float = 5.0,
+    gauss_window: List[int] = [-10, 10],
+    gauss_sigmas: List[float] = [0.0, 5.0],
+    normalize_spectra : bool = True,
+    ax: None|plot.plt.Axes = None
+) -> Tuple[float, float, float]:
+    """Find the best fractional-pixel cross correlation between two fiber profiles.
+
+    This function finds the best cross correlation between two fiber profiles
+    by shifting the first spectrum and computing the cross correlation with the
+    second spectrum. The best cross correlation is defined as the
+    fractional-pixel offset with the highest correlation value. The spectra are
+    "peak-normalized" before correlating, making all peaks about 1 unit in
+    height.
+
+    This is used for measuring fiber shifts during the night
+
+    Parameters
+    ----------
+    ref_spec : ndarray
+        The reference spectrum.
+    obs_spec : ndarray
+        The observed spectrum.
+    guess_shift : int
+        Guess for the best CC shift
+    shift_range : tuple
+        The range of shifts to use.
+    min_peak_dist : float, optional
+        Minimum distance between two consecutive peaks to be considered signal, by default 5.0
+    gauss_window : list[int], optional
+        Range of pixels to consider in Gaussian fitting relative to peak, by default [-5, 5]
+    gauss_sigmas : list[float], optional
+        Gaussian sigma boundaries, by default [0.0, 5.0]
+    normalize_spectra : bool, optional
+        Normalize both spectrum to have peaks ~1, by default True
+    ax : None|plt.Axes, optional
+        The matplotlib axes where to draw the CC and the
+
+    Returns
+    -------
+    max_correlation : float
+        The maximum correlation value.
+    best_shift : float
+        The fractional pixel shift that maximizes the correlation
+    best_stretch_factor : float
+        The best stretch factor.
+    """
+
+    min_shift, max_shift = shift_range
+    max_correlation = -numpy.inf
+    best_shift = 0
+    best_stretch_factor = 1
+
+    # normalize the peaks to roughly magnitude 1, so that individual very bright
+    # fibers do not dominate the signal
+    if normalize_spectra:
+        obs_spec_, ref_spec_, obs_peak, obs_peak_pars, ref_peaks, ref_peak_pars = _normalize_peaks(obs_spec, ref_spec, min_peak_dist=min_peak_dist)
+    else:
+        ref_spec_ = ref_spec.copy()
+        obs_spec_ = obs_spec.copy()
+
+    # Get the correlation shifts
+    shifts = signal.correlation_lags(
+        len(obs_spec_), len(ref_spec_), mode="same"
+    )
+    cross_corr = signal.correlate(obs_spec_, ref_spec_, mode="same")
+
+    # import matplotlib.pyplot as plt
+    # plt.figure()
+    # pixels = numpy.arange(obs_spec_.size)
+    # plt.step(pixels, obs_spec_, where="mid")
+    # plt.step(pixels, ref_spec_, where="mid")
+    # plt.figure()
+    # plt.step(shifts, cross_corr, where="mid")
+
+    # Normalize the cross correlation
+    cross_corr = cross_corr.astype(numpy.float32)
+    cross_corr /= norm(ref_spec_) * norm(obs_spec_)
+    cross_corr = numpy.nan_to_num(cross_corr)
+
+    # Find the max correlation and the corresponding shift for this stretch factor
+    mask = (shifts >= min_shift+guess_shift) & (shifts <= max_shift+guess_shift)
+    idx_max_corr = numpy.argmax(cross_corr[mask])
+    max_corr = cross_corr[mask][idx_max_corr]
+    shift = shifts[mask][idx_max_corr]
+
+    if ax is not None:
+        ax.step(shifts[mask], cross_corr[mask], color="0.7", lw=1, where="mid", alpha=0.3)
+
+    condition = max_corr > max_correlation
+
+    if condition:
+        best_shifts, best_cross_corr = shifts, cross_corr
+        max_correlation = max_corr
+        best_shift = shift
+
+    # Fit Gaussian around maximum cross-correlation peak
+    mask = (shifts >= min_shift+best_shift) & (shifts <= max_shift+best_shift)
+    guess = [numpy.trapz(best_cross_corr[mask], best_shifts[mask]), best_shift, 1.0, 0.0]
+    bound_lower = [0.0, best_shift+min_shift, gauss_sigmas[0], -numpy.inf]
+    bound_upper = [numpy.inf, best_shift+max_shift, gauss_sigmas[1], numpy.inf]
+    best_gauss = fit_profile.Gaussian_const(guess)
+    best_gauss.fit(
+        best_shifts[mask],
+        best_cross_corr[mask],
+        sigma=1.0,
+        p0=guess,
+        bounds=(bound_lower, bound_upper)
+    )
+    area, best_shift_sp, sigma, bg = best_gauss.getPar()
+
+    # display best match
+    if ax is not None:
+        mask = (best_shifts >= best_shift+gauss_window[0]) & (best_shifts <= best_shift+gauss_window[1])
+        ax.step(best_shifts[mask], best_cross_corr[mask], color="0.2", lw=2, where="mid")
+        ax.step(best_shifts[mask], best_gauss(best_shifts[mask]), color="tab:red", lw=2, where="mid")
+        ax.axvline(best_shift, color="tab:blue", lw=1, ls="--")
+        ax.axvline(best_shift_sp, color="tab:red", lw=1)
+        ax.text(best_shift, (best_cross_corr[mask]).min(), f"shift = {best_shift}", va="bottom", ha="left", color="tab:blue")
+        ax.text(best_shift_sp, (best_cross_corr[mask]).min(), f"subpix. shift = {best_shift_sp:.3f}", va="top", ha="right", color="tab:red")
 
     return max_correlation, best_shift_sp, best_stretch_factor
 
@@ -2897,121 +3116,84 @@ class Spectrum1D(Header):
 
         return pixels, wave, data
 
-    def measurePeaks(self, init_pos, method="gauss", init_sigma=1.0, threshold=0, max_diff=1.5, bounds=(-numpy.inf, numpy.inf), ftol=1e-3, xtol=1e-3):
-        """
-        Find the subpixel centre for the local maxima in a Spectrum.
+
+    def measure_fibers_profile(self, centroids_guess, fwhms_guess=2.5, counts_range=[0,numpy.inf], centroids_range=[-5,5], fwhms_range=[1.0,3.5],
+                               npixels=2, ftol=1e-3, xtol=1e-3, solver="dogbox"):
+        """Finds the subpixel centers for local maxima in a spectrum by fitting a Gaussian to each peak.
 
         Parameters
-        --------------
-        init_pos : numpy.ndarray
-            Initial guess for the peak centres
+        ----------
+        centroids_guess : numpy.ndarray
+            Initial guess for the peak centers (pixel positions).
+        fwhms_guess : float, optional
+            Initial guess for the Gaussian width (sigma) used for modeling each peak (default: 2.5).
+        bounds : tuple of numpy.ndarray or float, optional
+            Lower and upper bounds for the fit parameters (amplitude, center, sigma) for each peak.
+            Should be a tuple (lower, upper), where each is an array of length 3*N or a scalar (default: (-inf, inf)).
+        npixels : int, optional
+            Number of pixels around the peak to use in the fitting, by default +/-2
+        ftol : float, optional
+            Relative tolerance for the fit optimization (default: 1e-3).
+        xtol : float, optional
+            Absolute tolerance for the fit optimization (default: 1e-3).
+        solver : str, optional
+            Optimization algorithm to use (default: "dogbox").
 
-        method : string, optional with default='gauss'
-            Select the method to measure the peaks, either 'gauss' or 'hyperbolic'.
-            The first one fits a Gaussian to the 3 brightest pixels around each peak,
-            the second one uses a hyperbolic approximation to the 3 brightest pixels around each peak.
+        Returns
+        -------
+        centroids : numpy.ndarray
+            Array of subpixel peak positions (float).
+        mask : numpy.ndarray
+            Boolean array indicating which peaks have uncertain or invalid measurements.
 
-        init_sigma: float, optional with default=1.0
-            Initial guess of the Gaussian width used for the modelling.
-            Only used with the method 'gauss'
-
-        threshold: float, optional with default = 0
-            It defines the contrast between the minmum of maximum values for the
-            3 brightest pixel around a peak for which an estimated centre is assumed to be valid.
-
-        max_diff: float, optional with default = 0
-            If greater than zero, all peak centres which are different from the initial guess position by
-            this value are assumed to be invalid.
-
-        Returns (positions, mask)
-        -----------
-        positions :  numpy.ndarray (float)
-            Array of subpixel peaks positions
-        mask : numpy.ndarray (bool)
-            Array of pixels with uncertain measurements
+        Notes
+        -----
+        For each initial peak position, a Gaussian is fit to the 3 brightest pixels around the peak.
+        Peaks for which the fit fails or returns NaN are masked as invalid.
         """
-        # compute the minimum and maximum value for the 3 pixels around all peaks
-        # selection of fibers within the boundaries of the detector
-        select = numpy.logical_and(
-            init_pos - 1 >= [0], init_pos + 1 <= self._data.shape[0] - 1
-        )
-        mask = numpy.zeros(len(init_pos), dtype="bool")
-        # minimum counts of three pixels around each peak
-        # min = numpy.amin(
-        #     [
-        #         numpy.take(self._data, init_pos[select] + 1),
-        #         numpy.take(self._data, init_pos[select]),
-        #         numpy.take(self._data, init_pos[select] - 1),
-        #     ],
-        #     axis=0,
-        # )
-        # minimum counts of three pixels around each peak
-        max = numpy.amax(
-            [
-                numpy.take(self._data, init_pos[select] + 1),
-                numpy.take(self._data, init_pos[select]),
-                numpy.take(self._data, init_pos[select] - 1),
-            ],
-            axis=0,
-        )
-        # print(init_pos, max)
-        # mask all peaks where the contrast between maximum and minimum is below a threshold
-        mask[select] = (max) < threshold
-        # masking fibers outside the detector
-        mask[numpy.logical_not(select)] = True
+        fact = numpy.sqrt(2 * numpy.pi)
+        sigmas_guess = fwhms_guess / 2.354
 
-        if method == "hyperbolic":
-            # compute the subpixel peak position using the hyperbolic
-            d = (
-                numpy.take(self._data, init_pos + 1)
-                - 2 * numpy.take(self._data, init_pos)
-                + numpy.take(self._data, init_pos - 1)
+        counts = numpy.full(len(centroids_guess), numpy.nan, dtype="float32")
+        centroids = numpy.full(len(centroids_guess), numpy.nan, dtype="float32")
+        sigmas = numpy.full(len(centroids_guess), numpy.nan, dtype="float32")
+        mask = numpy.isnan(centroids_guess)
+
+        bounds = self._parse_gaussians_boundaries(
+            ngaussians=centroids.size, centroids=centroids_guess, counts_range=counts_range, centroids_range=centroids_range, fwhms_range=fwhms_range, to_sigmas=True)
+
+        counts_lower, centroids_lower, sigmas_lower = numpy.split(bounds[0], 3)
+        counts_upper, centroids_upper, sigmas_upper = numpy.split(bounds[1], 3)
+        for j in range(len(centroids_guess)):
+            if mask[j]:
+                continue
+
+            pixels_selection = numpy.logical_and(
+                self._wave > centroids_guess[j] - npixels,
+                self._wave < centroids_guess[j] + npixels,
             )
-            positions = (
-                init_pos
-                + 1
-                - (
-                    (
-                        numpy.take(self._data, init_pos + 1)
-                        - numpy.take(self._data, init_pos)
-                    )
-                    / d
-                    + 0.5
-                )
-            )
+            counts_guess = numpy.interp(centroids_guess[j], self._wave, self._data) * fact * sigmas_guess
 
-        elif method == "gauss":
-            # compute the subpixel peak position by fitting a gaussian to all peaks (3 pixel to get a unique solution
-            fact = numpy.sqrt(2 * numpy.pi)
-            ypixels = numpy.arange(self._data.size)
-            positions = numpy.zeros(len(init_pos), dtype="float32")
-            lower, upper = bounds
-            amp_lower, pos_lower, sig_lower = numpy.split(lower, 3)
-            amp_upper, pos_upper, sig_upper = numpy.split(upper, 3)
-            for j in range(len(init_pos)):
-                guess_par = [
-                                numpy.interp(init_pos[j], ypixels, self._data) * fact * init_sigma,
-                                init_pos[j],
-                                init_sigma,
-                            ]
-                # only pixels with enough contrast are fitted
-                if not mask[j]:
-                    gauss = fit_profile.Gaussian(guess_par)
-                    gauss.fit(
-                        self._pixels[init_pos[j] - 1 : init_pos[j] + 2],
-                        self._data[init_pos[j] - 1 : init_pos[j] + 2],
-                        sigma=self._error[init_pos[j]-1:init_pos[j]+2],
-                        p0=guess_par,
-                        bounds=([amp_lower[j], pos_lower[j], sig_lower[j]], [amp_upper[j], pos_upper[j], sig_upper[j]]),
-                        warning=False, ftol=ftol, xtol=xtol
-                    )  # perform fitting
-                    positions[j] = gauss.getPar()[1]
+            guess_par = [counts_guess, centroids_guess[j], sigmas_guess]
+            gauss = fit_profile.Gaussian(guess_par)
+            gauss.fit(
+                self._wave[pixels_selection],
+                self._data[pixels_selection],
+                sigma=self._error[pixels_selection],
+                p0=guess_par,
+                bounds=([counts_lower[j], centroids_lower[j], sigmas_lower[j]], [counts_upper[j], centroids_upper[j], sigmas_upper[j]]),
+                ftol=ftol, xtol=xtol,
+                solver=solver)
 
-        mask = numpy.logical_or(
-            mask, numpy.isnan(positions)
-        )  # masked all corrupt subpixel peak positions
+            params = gauss.getPar()
+            counts[j] = params[0]
+            centroids[j] = params[1]
+            sigmas[j] = params[2]
 
-        return positions, mask
+        mask = mask | numpy.isnan(counts) | numpy.isnan(centroids)# | numpy.isnan(sigmas)
+        centroids[mask] = numpy.nan
+
+        return counts, centroids, sigmas*2.354, mask
 
     def measureFWHMPeaks(
         self, pos, nblocks, init_fwhm=2.4, threshold_flux=None, plot=-1
@@ -3260,47 +3442,189 @@ class Spectrum1D(Header):
                 med_pos[i] = 0.0
         return offsets, med_pos
 
-    def fitMultiGauss(self, centres, init_fwhm, bounds=(-numpy.inf, numpy.inf), ftol=1e-3, xtol=1e-3):
+    def _guess_gaussians_integral(self, centroids, fwhms, nsigma=6, return_pixels_selection=False):
         fact = numpy.sqrt(2 * numpy.pi)
-        select = numpy.zeros(self._dim, dtype="bool")
-        flux_in = numpy.zeros(len(centres), dtype=numpy.float32)
-        sig_in = numpy.ones(len(centres), dtype=numpy.float32) * init_fwhm / 2.354
-        error = numpy.ones(self._dim, dtype=numpy.float32) if self._error is None else self._error
-        for i in range(len(centres)):
-            select_line = numpy.logical_and(
-                self._wave > centres[i] - 2 * init_fwhm,
-                self._wave < centres[i] + 2 * init_fwhm,
-            )
-            flux_in[i] = numpy.interp(centres[i], self._pixels, self._data) * fact * sig_in[i]
-            select = numpy.logical_or(select, select_line)
-        par = numpy.concatenate([flux_in, centres, sig_in])
-        gauss_multi = fit_profile.Gaussians(par)
-        gauss_multi.fit(self._wave[select], self._data[select], p0=par, sigma=error[select], bounds=bounds, ftol=ftol, xtol=xtol)
-        return gauss_multi, gauss_multi.getPar()
+        integrals = numpy.zeros(len(centroids), dtype=numpy.float32)
+        sigmas = fwhms / 2.354
 
-    def fitMultiGauss_fixed_cent(self, centres, init_fwhm):
         select = numpy.zeros(self._dim, dtype="bool")
-        flux_in = numpy.zeros(len(centres), dtype=numpy.float32)
-        sig_in = numpy.ones_like(flux_in) * init_fwhm / 2.354
-        cent = numpy.zeros(len(centres), dtype=numpy.float32)
-        if self._error is not None:
-            error = self._error
-        else:
-            error = numpy.ones_like(self._dim, dtype=numpy.float32)
-        for i in range(len(centres)):
-            select_line = numpy.logical_and(
-                self._wave > centres[i] - 2 * init_fwhm,
-                self._wave < centres[i] + 2 * init_fwhm,
+        for i in range(len(centroids)):
+            select_ = numpy.logical_and(
+                self._wave > centroids[i] - nsigma * sigmas[i],
+                self._wave < centroids[i] + nsigma * sigmas[i],
             )
-            flux_in[i] = numpy.sum(self._data[select_line])
-            select = numpy.logical_or(select, select_line)
-            cent[i] = centres[i]
-        par = numpy.concatenate([sig_in, flux_in])
-        gauss_multi = fit_profile.Gaussians_width(par, args=cent)
-        gauss_multi.fit(self._wave[select], self._data[select], sigma=error[select])
-        params = numpy.split(gauss_multi.getPar(), 2)
-        params = numpy.concatenate([params[1], cent, params[0]])
+            integrals[i] = numpy.interp(centroids[i], self._wave, self._data) * fact * sigmas[i]
+            select = numpy.logical_or(select, select_)
+        if return_pixels_selection:
+            return integrals, select
+        return integrals
+
+    def _parse_gaussians_params(self, counts=None, centroids=None, sigmas=None, fwhms=None, to_sigmas=False, to_fwhms=False):
+        if fwhms is not None and sigmas is not None:
+            raise ValueError(f"Invalid values for `fwhms` or `sigmas`: {sigmas = }, {fwhms = }. Only one or none has to be given")
+
+        params = []
+        if counts is not None:
+            params.append(counts)
+        if centroids is not None:
+            params.append(centroids)
+        if sigmas is not None:
+            params.append(sigmas * (2.354 if to_fwhms else 1.0))
+        if fwhms is not None:
+            params.append(fwhms / (2.354 if to_sigmas else 1.0))
+
+        return numpy.concatenate(params)
+
+    def _parse_gaussians_boundaries(self, ngaussians, counts=None, centroids=None, fwhms=None, counts_range=None, centroids_range=None, fwhms_range=None, to_sigmas=False):
+
+        bounds_lower, bounds_upper = [], []
+        _ = numpy.ones(ngaussians)
+        def _set_boundaries(x, x_range, to_sigmas=False, clip=None):
+            if x is not None and x_range is None:
+                raise ValueError(f"Invalid value for `x_range`: {x_range = }. Expected `x_range` when `x` is given")
+
+            if x is not None and x_range is not None:
+                lower = x + x_range[0]
+                upper = x + x_range[1]
+            elif x_range is not None:
+                lower = _ * x_range[0]
+                upper = _ * x_range[1]
+            else:
+                lower = numpy.array([])
+                upper = numpy.array([])
+
+            if clip is not None and isinstance(clip, (tuple,list)) and len(clip) == 2:
+                if clip[0] is not None:
+                    lower = numpy.clip(lower, a_min=clip[0], a_max=None)
+                if clip[1] is not None:
+                    upper = numpy.clip(upper, a_min=None, a_max=clip[1])
+
+            if to_sigmas:
+                lower /= 2.354
+                upper /= 2.354
+
+            bounds_lower.append(lower)
+            bounds_upper.append(upper)
+
+        _set_boundaries(counts, counts_range, clip=(0.0,None))
+        _set_boundaries(centroids, centroids_range, clip=(self._wave.min(),self._wave.max()))
+        _set_boundaries(fwhms, fwhms_range, clip=(0.0,None), to_sigmas=to_sigmas)
+
+        if len(bounds_lower) == 0 or len(bounds_upper) == 0:
+            return [-numpy.inf, +numpy.inf]
+
+        return [numpy.concatenate(bounds_lower), numpy.concatenate(bounds_upper)]
+
+    def fitMultiGauss(self, pixels_selection, counts_guess, centroids_guess, fwhms_guess, counts_range=[0.0,numpy.inf], centroids_range=[-5,+5], fwhms_range=[1.0,3.5],
+                      ftol=1e-3, xtol=1e-3, solver="trf", loss="linear"):
+        error = numpy.ones(self._dim, dtype=numpy.float32) if self._error is None else self._error
+
+        guess = self._parse_gaussians_params(counts=counts_guess, centroids=centroids_guess, fwhms=fwhms_guess, to_sigmas=True)
+        bounds = self._parse_gaussians_boundaries(
+            ngaussians=counts_guess.size, centroids=centroids_guess,
+            counts_range=counts_range, centroids_range=centroids_range, fwhms_range=fwhms_range, to_sigmas=True)
+
+        gauss_multi = fit_profile.Gaussians(guess)
+        gauss_multi.fit(
+            self._wave[pixels_selection], self._data[pixels_selection], sigma=error[pixels_selection],
+            bounds=bounds, ftol=ftol, xtol=xtol, solver=solver, loss=loss)
+
+        counts, centroids, sigmas = numpy.split(gauss_multi.getPar(), 3)
+        params = self._parse_gaussians_params(counts, centroids, sigmas=sigmas, to_fwhms=True)
+
         return gauss_multi, params
+
+    def fitMultiGauss_fixed_counts(self, pixels_selection, counts, centroids, fwhms_guess, fwhms_range=[1.0,3.5], ftol=1e-3, xtol=1e-3, solver="trf", loss="linear"):
+        error = numpy.ones(self._dim, dtype=numpy.float32) if self._error is None else self._error
+
+        guess = self._parse_gaussians_params(fwhms=fwhms_guess, to_sigmas=True)
+        fixed = self._parse_gaussians_params(counts=counts, centroids=centroids)
+        bounds = self._parse_gaussians_boundaries(ngaussians=counts.size, fwhms_range=fwhms_range, to_sigmas=True)
+
+        gauss_multi = fit_profile.Gaussians_width(guess, args=fixed)
+        gauss_multi.fit(
+            self._wave[pixels_selection], self._data[pixels_selection], sigma=error[pixels_selection],
+            bounds=bounds, ftol=ftol, xtol=xtol, solver=solver, loss=loss)
+
+        sigmas = gauss_multi.getPar()
+        params = self._parse_gaussians_params(counts, centroids, sigmas, to_fwhms=True)
+        return gauss_multi, params
+
+    def fitMultiGauss_centroids(self, pixels_selection, counts, centroids_guess, fwhms, centroids_range=[-5,+5], ftol=1e-3, xtol=1e-3, solver="trf", loss="linear"):
+        error = numpy.ones(self._dim, dtype=numpy.float32) if self._error is None else self._error
+
+        guess = self._parse_gaussians_params(centroids=centroids_guess)
+        fixed = self._parse_gaussians_params(counts=counts, fwhms=fwhms, to_sigmas=True)
+        bounds = self._parse_gaussians_boundaries(ngaussians=counts.size, centroids=centroids_guess, centroids_range=centroids_range, to_sigmas=True)
+
+        gauss_multi = fit_profile.Gaussians_centroids(guess, args=fixed)
+        gauss_multi.fit(
+            self._wave[pixels_selection], self._data[pixels_selection], sigma=error[pixels_selection],
+            bounds=bounds, ftol=ftol, xtol=xtol, solver=solver, loss=loss)
+
+        centroids = gauss_multi.getPar()
+        params = self._parse_gaussians_params(counts, centroids, fwhms, to_fwhms=False)
+        return gauss_multi, params
+
+    def fitMultiGauss_fixed_width(self, pixels_selection, counts_guess, centroids, fwhms, counts_range=[0.0,numpy.inf], ftol=1e-3, xtol=1e-3, solver="trf", loss="linear"):
+        error = numpy.ones(self._dim, dtype=numpy.float32) if self._error is None else self._error
+
+        guess = self._parse_gaussians_params(counts=counts_guess)
+        fixed = self._parse_gaussians_params(centroids=centroids, fwhms=fwhms, to_sigmas=True)
+        bounds = self._parse_gaussians_boundaries(ngaussians=counts_guess.size, counts_range=counts_range)
+
+        gauss_multi = fit_profile.Gaussians_counts(guess, args=fixed)
+        gauss_multi.fit(
+            self._wave[pixels_selection], self._data[pixels_selection], sigma=error[pixels_selection],
+            bounds=bounds, ftol=ftol, xtol=xtol, solver=solver, loss=loss)
+
+        counts = gauss_multi.getPar()
+        params = self._parse_gaussians_params(counts, centroids, fwhms, to_fwhms=False)
+        return gauss_multi, params
+
+    def fitMultiGauss_alphas(self, pixels_selection, counts, centroids, fwhms, alphas, alphas_range=[-1.0,+1.0], ftol=1e-3, xtol=1e-3, solver="trf", loss="linear"):
+        error = numpy.ones(self._dim, dtype=numpy.float32) if self._error is None else self._error
+
+        guess = alphas
+        _ = numpy.ones_like(alphas)
+        fixed = self._parse_gaussians_params(counts=counts, centroids=centroids, fwhms=fwhms, to_sigmas=True)
+        bounds = [_ * alphas_range[0], _ * alphas_range[1]]
+
+        gauss_multi = fit_profile.SkewedGaussians(guess, args=fixed)
+        gauss_multi.fit(
+            self._wave[pixels_selection], self._data[pixels_selection], sigma=error[pixels_selection],
+            bounds=bounds, ftol=ftol, xtol=xtol, solver=solver, loss=loss)
+
+        alphas = gauss_multi.getPar()
+        params = numpy.concatenate([counts, centroids, fwhms, alphas])
+        return gauss_multi, params
+
+    def fit_gaussians(self, pars_guess, pars_fixed, bounds, fitting_params, profile="mexhat", npixels=4, oversampling_factor=10, axs=None):
+        profile_class = fit_profile.PROFILES.get(profile)
+        if profile_class is None:
+            raise ValueError(f"Invalid value for `profile`: {profile}. Expected one of: {fit_profile.PROFILES}")
+
+        error = numpy.ones(self._dim, dtype=numpy.float32) if self._error is None else self._error
+
+        centroids = pars_guess.get("centroids", pars_fixed.get("centroids"))
+        lower = numpy.nanmin(centroids) - npixels
+        upper = numpy.nanmax(centroids) + npixels
+        pixels_selection = (lower <= self._wave) & (self._wave <= upper)
+
+        model = profile_class(pars=pars_guess, fixed=pars_fixed, bounds=bounds, oversampling_factor=oversampling_factor)
+        kwargs = fitting_params.copy()
+        args = kwargs.pop("args", ())
+        model.fit(self._wave[pixels_selection], self._data[pixels_selection], error[pixels_selection], *args, **kwargs)
+
+        params = model._pars
+        errors = model._errs
+
+        if axs is not None:
+            axs = model.plot(
+                x=self._wave[pixels_selection], y=self._data[pixels_selection],
+                sigma=self._error[pixels_selection], mask=self._mask[pixels_selection], axs=axs)
+
+        return model, params, errors
 
     def fitParFile(
         self, par, err_sim=0, ftol=1e-8, xtol=1e-8, method="leastsq", parallel="auto"
@@ -3343,13 +3667,18 @@ class Spectrum1D(Header):
         ftol=1e-8,
         xtol=1e-8,
         axs=None,
-        fit_bg=True,
-        warning=False,
+        fit_bg=True
     ):
-        error = self._error if self._error is not None else numpy.ones(self._dim, dtype=numpy.float32)
-        mask = self._mask if self._mask is not None else numpy.zeros(self._dim, dtype=bool)
-        error[mask] = numpy.inf
+        # copy main arrays to avoid side effects
         data = self._data.copy()
+        error = self._error.copy() if self._error is not None else numpy.ones(self._dim, dtype=numpy.float32)
+        mask = self._mask.copy() if self._mask is not None else numpy.zeros(self._dim, dtype=bool)
+
+        # update mask to account for unmasked invalid pixels
+        # mask |= (~numpy.isfinite(data) | ~numpy.isfinite(error))
+
+        # reset bad pixels in data and error
+        error[mask] = numpy.inf
         data[mask] = 0.0
 
         flux = numpy.ones(len(cent_guess)) * numpy.nan
@@ -3366,8 +3695,8 @@ class Spectrum1D(Header):
             select = (self._wave >= centre - hw) & (self._wave <= centre + hw)
             # print(i, centre, self._wave.min(), self._wave.max(), select.sum())
             if mask[select].sum() >= badpix_threshold:
-                log.warning(f"skipping line at pixel {centre} with {mask[select].sum()} >= {badpix_threshold = } bad pixels")
-                self.add_header_comment(f"skipping line at pixel {centre} with {mask[select].sum()} >= {badpix_threshold = } bad pixels")
+                warnings.warn(f"skipping line @ {centre:.2f} with {mask[select].sum()} >= {badpix_threshold = } bad pixels")
+                self.add_header_comment(f"skipping line @ {centre:.2f} with {mask[select].sum()} >= {badpix_threshold = } bad pixels")
                 continue
 
             flux_guess = numpy.interp(centre, self._wave[select], data[select]) * fact * fwhm_guess / 2.354
@@ -3389,8 +3718,7 @@ class Spectrum1D(Header):
                 p0=guess,
                 bounds=(bound_lower, bound_upper),
                 ftol=ftol,
-                xtol=xtol,
-                warning=warning,
+                xtol=xtol
             )
 
             if fit_bg:
@@ -3400,16 +3728,104 @@ class Spectrum1D(Header):
             fwhm[i] *= 2.354
 
             if axs is not None:
-                axs[i] = gauss.plot(self._wave[select], self._data[select], mask=self._mask[select], ax=axs[i])
+                select_2 = (self._wave>=cent[i]-3.5*fwhm[i]/2.354) & (self._wave<=cent[i]+3.5*fwhm[i]/2.354)
+                x = self._wave[select_2]
+                axs[i].plot(self._wave, (select)*numpy.nan+bn.nanmin(data), "ok")
+                axs_ = gauss.plot(self._wave[select], self._data[select], mask=self._mask[select], axs={"mod": axs[i]})
+                axs[i] = axs_["mod"]
+                axs[i].axhline(bg[i], ls="--", color="tab:blue", lw=1)
+                if len(x) != 0:
+                    axs[i].axvspan(x[0], x[-1], alpha=0.1, fc="0.5", label="reg. of masking")
                 axs[i].axvline(cent_guess[i], ls="--", lw=1, color="tab:red", label="cent. guess")
-                axs[i].set_title(f"{axs[i].get_title()} @ {cent[i]:.1f} (pixel)")
+                axs[i].axvline(cent[i], ls="--", lw=1, color="tab:blue", label="cent. model")
+                axs[i].set_title(f"{axs[i].get_title()} @ {cent[i]:.1f} {'Angstroms' if self._pixels[0]!=self._wave[0] else 'pixels'}")
                 axs[i].text(0.05, 0.9, f"flux = {flux[i]:.2f}", va="bottom", ha="left", transform=axs[i].transAxes, fontsize=11)
                 axs[i].text(0.05, 0.8, f"cent = {cent[i]:.2f}", va="bottom", ha="left", transform=axs[i].transAxes, fontsize=11)
                 axs[i].text(0.05, 0.7, f"fwhm = {fwhm[i]:.2f}", va="bottom", ha="left", transform=axs[i].transAxes, fontsize=11)
+                axs[i].text(0.05, 0.6, f"bg   = {bg[i]:.2f}", va="bottom", ha="left", transform=axs[i].transAxes, fontsize=11)
                 axs[i].legend(loc="upper right", frameon=False, fontsize=11)
+
+            # mask line if >= 2 pixels are masked within 3.5sigma
+            model_badpix = data[select] == 0
+            if not numpy.isnan([cent[i], fwhm[i]]).any():
+                select_2 = (self._wave>=cent[i]-3.5*fwhm[i]/2.354) & (self._wave<=cent[i]+3.5*fwhm[i]/2.354)
+                model_badpix = mask[select_2]
+                if model_badpix.sum() >= 2:
+                    warnings.warn(f"masking line @ {centre:.2f} with >= 2 masked pixels within a 3.5 sigma window")
+                    self.add_header_comment(f"masking line @ {centre:.2f} with >= 2 masked pixels within a 3.5 sigma window")
+                    flux[i] = cent[i] = fwhm[i] = bg[i] = numpy.nan
 
         return flux, cent, fwhm, bg
 
+    def extract_flux(self, centroids, sigmas, fiber_radius=1.4, npixels=20, replace_error=numpy.inf, return_basis=False):
+        '''
+            fiber_radius is the image of the fiber core in pixels
+            sigmas is the gaussian kernel sigma
+
+        '''
+        def _gen_mexhat_basis(x, centroids, sigmas, fiber_radius, oversampling_factor):
+            dx = x[1, 0] - x[0, 0]
+            x_os = fit_profile.oversample(x, oversampling_factor)
+            dx_os = dx / oversampling_factor
+
+            x_kernel = numpy.arange(0, 2*fiber_radius + dx_os, dx_os)
+            kernel = fit_profile.fiber_profile(centroids=fiber_radius, radii=fiber_radius, x=x_kernel)
+            psfs = fit_profile.gaussians((numpy.ones_like(centroids), centroids, sigmas), x_os.T, alpha=2, collapse=False)[0].T
+
+            profiles = signal.fftconvolve(psfs, kernel.T, mode="same", axes=0)
+            profiles /= integrate.trapezoid(profiles, x_os, axis=0)[None, :]
+
+            # reshape model into oversampled bins: (x, oversampling_factor)
+            profiles_binned = profiles.reshape((x.shape[0], oversampling_factor, x.shape[1]))
+            profiles = integrate.trapezoid(profiles_binned, dx=dx_os, axis=1)
+            return profiles
+
+        nfibers = centroids.size
+        # round up fiber locations
+        mask_threshold = 3
+        pixels = numpy.round(centroids[:, None] + numpy.arange(-mask_threshold / 2.0, mask_threshold / 2.0, 1.0)[None, :]).astype("int")
+        # defining bad pixels for each fiber if needed
+        if self._mask is not None:
+            # select: fibers in the boundary of the chip
+            mask = numpy.zeros(nfibers, dtype="bool")
+            select = bn.nansum(pixels >= self._mask.shape[0], 1)
+            nselect = numpy.logical_not(select)
+            mask[select] = True
+
+            # masking fibers if all pixels are bad within mask_threshold
+            mask[nselect] = bn.nansum(self._mask[pixels[nselect, :]], 1) == mask_threshold
+        else:
+            mask = None
+
+        # evaluate basis
+        xx = numpy.repeat(numpy.arange(nfibers, dtype="int"), 2*npixels+1)
+        # pixel ranges of fiber images
+        pos_t = numpy.trunc(centroids)
+        yyv = numpy.linspace(pos_t-npixels, pos_t+npixels, 2*npixels+1, endpoint=True)
+
+        v = _gen_mexhat_basis(yyv, centroids, sigmas, fiber_radius=fiber_radius, oversampling_factor=100)
+
+        yyv = yyv.T.ravel()
+        v = v.T.ravel()# / self._error[yyv.astype("int")]
+
+        B = sparse.csc_matrix((v, (yyv, xx)), shape=(len(self._data), nfibers))
+        B = B.multiply(1/self._error[:, None])
+
+        # invert the projection matrix and solve
+        ypixels = numpy.arange(self._data.size)
+        guess_flux = numpy.interp(centroids, ypixels, self._data) * fit_profile.fact * sigmas
+        out = sparse.linalg.lsmr(B, self._data / self._error, atol=1e-3, btol=1e-3, x0=guess_flux)
+        flux = out[0]
+
+        error = numpy.sqrt(1 / ((B.multiply(B)).sum(axis=0))).A
+        error = error[0,:]
+        if mask is not None and bn.nansum(mask) > 0:
+            error[mask] = replace_error
+
+        if return_basis:
+            return flux, error, mask, B, out
+
+        return flux, error, mask
 
     def obtainGaussFluxPeaks(self, pos, sigma, replace_error=1e10, plot=False):
         """returns Gaussian peaks parameters, flux error and mask
@@ -3481,8 +3897,8 @@ class Spectrum1D(Header):
         yyv = numpy.linspace(pos_t-kernel_width, pos_t+kernel_width, 2*kernel_width+1, endpoint=True)
         # nfibers x kernel_size pixel values
         v = numpy.exp(-0.5 * ((yyv-pos) / sigma) ** 2) / (fact * sigma)
-        yyv = yyv.T.flatten()
-        v = v.T.flatten() / self._error[yyv.astype(numpy.int32)]
+        yyv = yyv.T.ravel()
+        v = v.T.ravel() / self._error[yyv.astype(numpy.int32)]
         B = sparse.csc_matrix((v, (yyv, xx)), shape=(len(self._data), nfibers))
 
         # invert the projection matrix and solve
@@ -3496,7 +3912,7 @@ class Spectrum1D(Header):
         if bad_pix is not None and bn.nansum(bad_pix) > 0:
             error[bad_pix] = replace_error
 
-        # pyfits.writeto('B.fits', B.toarray(), overwrite=True)    
+        # pyfits.writeto('B.fits', B.toarray(), overwrite=True)
         # if plot:
         #     plt.plot(self._data, "ok")
         #     plt.plot(numpy.dot(A * self._error[:, None], out[0]), "-r")
@@ -3609,3 +4025,23 @@ class Spectrum1D(Header):
         masks = numpy.logical_or(masks, numpy.isnan(sky_errors))
 
         return Spectrum1D(wave=wave, data=fluxes, error=errors, lsf=fwhms, mask=masks, sky=skies, sky_error=sky_errors)
+
+    def fit_lines(self, cwaves, dwave=8, axs=None):
+
+        cwaves_ = numpy.atleast_1d(cwaves)
+
+        if self._lsf is None:
+            fwhm_guess = 2.5
+        else:
+            fwhm_guess = numpy.nanmean(numpy.interp(cwaves_, self._wave, self._lsf))
+
+        if axs is not None:
+            axs = numpy.atleast_1d(axs)
+        flux, sky_wave, fwhm, bg = self.fitSepGauss(cwaves_, dwave,
+                                                    fwhm_guess, 0.0,
+                                                    [0, numpy.inf],
+                                                    [-2.5, 2.5],
+                                                    [max(fwhm_guess - 1.5, 0), fwhm_guess + 1.5],
+                                                    [0.0, numpy.inf],
+                                                    axs=axs)
+        return flux, sky_wave, fwhm, bg

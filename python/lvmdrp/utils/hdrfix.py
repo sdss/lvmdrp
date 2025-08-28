@@ -90,19 +90,24 @@ def write_hdrfix_file(mjd: int, fileroot: str, keyword: str, value: str):
     if not path.parent.exists():
         path.parent.mkdir(parents=True, exist_ok=True)
 
-    fix = read_hdrfix_file(mjd)
+    read_hdrfix_file.cache_clear()
+    fix = read_hdrfix_file.__wrapped__(mjd)
     if fix is None or fix.empty:
         fix = pd.DataFrame.from_dict([{'fileroot': fileroot, 'keyword': keyword, 'value': value}])
     else:
-        fix.loc[len(fix)] = {'fileroot': fileroot, 'keyword': keyword, 'value': value}
+        new_fix = {'fileroot': fileroot, 'keyword': keyword, 'value': value}
+        if (fix == new_fix).all(1).any():
+            log.info(f"skipping header fix for {mjd = }, {fileroot = }: {keyword} = '{value}', already exist")
+            return
+        fix.loc[len(fix)] = new_fix
 
     # get schema
-    schema = [{'name': 'fileroot', 'dtype': 'str',
-               'description': 'the raw frame file root with * as wildcard'},
-              {'name': 'keyword', 'dtype': 'str',
-               'description': 'the name of the header keyword to fix'},
-              {'name': 'value', 'dtype': 'str',
-               'description': 'the value of the header keyword to update'}]
+    schema = [{'description': 'the raw frame file root with * as wildcard', 'dtype': 'str',
+               'name': 'fileroot'},
+              {'description': 'the name of the header keyword to fix', 'dtype': 'str',
+               'name': 'keyword'},
+              {'description': 'the value of the header keyword to update', 'dtype': 'str',
+               'name': 'value'}]
 
     # get data
     data = fix.to_dict(orient='records')
@@ -111,6 +116,7 @@ def write_hdrfix_file(mjd: int, fileroot: str, keyword: str, value: str):
     # write the file
     with open(path, 'w+') as f:
         f.write(yaml.safe_dump(data, sort_keys=False, indent=2))
+    log.info(f"created header fix for {mjd = }, {fileroot = }: {keyword} = '{value}'")
 
 
 def apply_hdrfix(mjd: int, camera: str = None, expnum: int = None,
@@ -168,6 +174,10 @@ def apply_hdrfix(mjd: int, camera: str = None, expnum: int = None,
     tileid = 11111 if tileid in (-999, 999, None) else tileid
     hdr['TILE_ID'] = tileid
 
+    # add QA header keywords default values
+    hdr['QAQUAL'] = ('GOOD', 'string value for raw data quality flag')
+    hdr['QAFLAG'] = ('0000', 'bitmask value for raw data quality flag')
+
     # read the hdr fix file
     fix = read_hdrfix_file(mjd)
 
@@ -184,5 +194,9 @@ def apply_hdrfix(mjd: int, camera: str = None, expnum: int = None,
         if fnmatch.fnmatch(current_file, row['fileroot']):
             hdr[row['keyword']] = row['value']
             log.info(f'Applying header fix on {current_file} for key: {row["keyword"]}, value: {row["value"]}.')
+
+    # fix typing in QAFLAG keyword
+    # hdr['QAQUAL'] = ('GOOD', 'string value for raw data quality flag')
+    # hdr.set('QAFLAG', QAFlag(int(hdr['QAFLAG'], base=2)), 'bitmask value for raw data quality flag')
 
     return hdr

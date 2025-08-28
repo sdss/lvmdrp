@@ -5,12 +5,14 @@
 #include <stdexcept>
 #include <stdint.h>
 
+
 #ifndef __arm64__
 #include <x86intrin.h>
 #endif
 
 // see https://github.com/suomela/mf2d
 
+#include <Python.h>
 #include "fast_median.hpp"
 
 const uint64_t ONE64 = 1;
@@ -667,3 +669,115 @@ void median_filter_1d_double(int nx, int box_x, int blockhint, const double *in,
     return median_filter_1d<double>(nx, hx, blockhint, in, out);
 }
 
+
+// Wrapper for median_filter_1d_float
+static PyObject* py_median_filter_1d_float(PyObject* self, PyObject* args) {
+    Py_buffer input_buf, output_buf;
+    int nx, box_x, blockhint;
+
+    if (!PyArg_ParseTuple(args, "iiiy*y*", &nx, &box_x, &blockhint, &input_buf, &output_buf)) {
+        PyErr_SetString(PyExc_ValueError, "Failed to parse arguments. Expected: int, int, int, buffer, buffer.");
+        return NULL;
+    }
+
+    if (input_buf.len != output_buf.len || nx * sizeof(float) != input_buf.len) {
+        PyErr_SetString(PyExc_ValueError, "Buffer sizes do not match input dimensions.");
+        return NULL;
+    }
+
+    median_filter_1d_float(nx, box_x, blockhint, (const float*)input_buf.buf, (float*)output_buf.buf);
+
+    PyBuffer_Release(&input_buf);
+    PyBuffer_Release(&output_buf);
+
+    Py_RETURN_NONE;
+}
+
+// Wrapper for median_filter_1d_double
+static PyObject* py_median_filter_1d_double(PyObject* self, PyObject* args) {
+    Py_buffer input_buf, output_buf;
+    int nx, box_x, blockhint;
+
+    if (!PyArg_ParseTuple(args, "iiiy*y*", &nx, &box_x, &blockhint, &input_buf, &output_buf)) {
+        PyErr_SetString(PyExc_ValueError, "Failed to parse arguments. Expected: int, int, int, buffer, buffer.");
+        return NULL;
+    }
+
+    if (input_buf.len != output_buf.len || nx * sizeof(double) != input_buf.len) {
+        PyErr_SetString(PyExc_ValueError, "Buffer sizes do not match input dimensions.");
+        return NULL;
+    }
+
+    median_filter_1d_double(nx, box_x, blockhint, (const double*)input_buf.buf, (double*)output_buf.buf);
+
+    PyBuffer_Release(&input_buf);
+    PyBuffer_Release(&output_buf);
+
+    Py_RETURN_NONE;
+}
+
+// Wrapper for median_filter_2d_float
+static PyObject* py_median_filter_2d_float(PyObject* self, PyObject* args) {
+    Py_buffer input_buf, output_buf;
+    int nx, ny, box_x, box_y, blockhint;
+
+    if (!PyArg_ParseTuple(args, "iiiiiy*y*", &nx, &ny, &box_x, &box_y, &blockhint, &input_buf, &output_buf)) {
+        PyErr_SetString(PyExc_ValueError, "Failed to parse arguments. Expected: int, int, int, int, int, buffer, buffer.");
+        return NULL;
+    }
+
+    if (input_buf.len != output_buf.len || nx * ny * sizeof(float) != input_buf.len) {
+        PyErr_SetString(PyExc_ValueError, "Buffer sizes do not match input dimensions.");
+        return NULL;
+    }
+
+    median_filter_2d_float(nx, ny, box_x, box_y, blockhint, (const float*)input_buf.buf, (float*)output_buf.buf);
+
+    PyBuffer_Release(&input_buf);
+    PyBuffer_Release(&output_buf);
+
+    Py_RETURN_NONE;
+}
+
+// Wrapper for median_filter_2d_double
+static PyObject* py_median_filter_2d_double(PyObject* self, PyObject* args) {
+    Py_buffer input_buf, output_buf;
+    int nx, ny, box_x, box_y, blockhint;
+
+    if (!PyArg_ParseTuple(args, "iiiiiy*y*", &nx, &ny, &box_x, &box_y, &blockhint, &input_buf, &output_buf)) {
+        PyErr_SetString(PyExc_ValueError, "Failed to parse arguments. Expected: int, int, int, int, int, buffer, buffer.");
+        return NULL;
+    }
+
+    if (input_buf.len != output_buf.len || nx * ny * sizeof(double) != input_buf.len) {
+        PyErr_SetString(PyExc_ValueError, "Buffer sizes do not match input dimensions.");
+        return NULL;
+    }
+
+    median_filter_2d_double(nx, ny, box_x, box_y, blockhint, (const double*)input_buf.buf, (double*)output_buf.buf);
+
+    PyBuffer_Release(&input_buf);
+    PyBuffer_Release(&output_buf);
+
+    Py_RETURN_NONE;
+}
+
+static PyMethodDef FastMedianMethods[] = {
+    {"median_filter_1d_float", py_median_filter_1d_float, METH_VARARGS, "1D median filter for float arrays"},
+    {"median_filter_1d_double", py_median_filter_1d_double, METH_VARARGS, "1D median filter for double arrays"},
+    {"median_filter_2d_float", py_median_filter_2d_float, METH_VARARGS, "2D median filter for float arrays"},
+    {"median_filter_2d_double", py_median_filter_2d_double, METH_VARARGS, "2D median filter for double arrays"},
+    {NULL, NULL, 0, NULL}  // Sentinel
+};
+
+static struct PyModuleDef fast_median_module = {
+    PyModuleDef_HEAD_INIT,
+    "fast_median",                  // Module name
+    "Fast median filters",          // Module docstring
+    -1,                             // Size of per-interpreter state or -1 for global
+    FastMedianMethods               // Method table
+};
+
+extern "C" PyMODINIT_FUNC PyInit_fast_median(void) {
+    return PyModule_Create(&fast_median_module);
+}
