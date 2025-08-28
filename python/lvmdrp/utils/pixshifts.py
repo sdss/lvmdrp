@@ -211,6 +211,8 @@ def load_shifts(mjd, shifts_dir=PIXELSHIFTS_DIR):
     shifts_path = os.path.join(shifts_dir, f"shifts-{mjd}.yaml")
     if not os.path.isfile(shifts_path):
         return []
+
+    log.info(f"loading pixel shifts from {shifts_path}")
     with open(shifts_path, 'r') as f:
         shift_detections = yaml.safe_load(f) or {}
     shifts = shift_detections.get("shifts", []) or []
@@ -272,18 +274,42 @@ def compress_shifts(shift_profile, as_dict=False):
     return rows, shift_profile[rows].astype("int32").tolist()
 
 
-def apply_shift_correction(image, shifts):
+def apply_shift_correction(image, shifts, display_plots=False):
     image_out = copy(image)
+    mjd = image._header.get("SMJD", image._header.get("MJD"))
+    expnum = image._header["EXPOSURE"]
+    camera = image._header["CCD"]
+    imagetyp = image._header["IMAGETYP"]
+
+    y_pixels = np.arange(LVM_NROWS)
 
     idx, shift = locate_shifted(shifts, expnum=image._header["EXPOSURE"], camera=image._header["CCD"])
     if idx is not None:
-        rows = list(zip(*shift.get("rows").items()))
+        source = shift["source"]
+        rows = shift["rows"]
+        log.info(f"applying electronic pixel shifts for {expnum = } | {camera = } | {imagetyp = }: {rows}")
         shift_profile = expand_shifts(rows)
         for irow in range(len(shift_profile)):
             if shift_profile[irow] > 0:
                 image_out._data[irow, :] = np.roll(image._data[irow, :], int(shift_profile[irow]))
+        for i, (row, amount) in enumerate(rows.items()):
+            image_out._header[f"HIERARCH {camera.upper()} PIXSHIFT SHIFT{i+1}"] = (f"{row}:{amount}", f"electronic pixel shift row:amount")
+        image_out._header[f"HIERARCH {camera.upper()} PIXSHIFT SOURCE"] = (source, "electronic pixel shift source")
 
-    return image_out
+        cmaps = {"drp": "Blues", "qc": "Greens", "user": "Purples"}
+        fig, ax = create_subplots(to_display=display_plots, figsize=(15,7), sharex=True, layout="constrained")
+        fig.suptitle(f"{mjd = } | {expnum = } | {camera = } | {imagetyp = }", fontsize="x-large")
+        ax.step(y_pixels, shift_profile, where="mid", lw=2, color="tab:purple", label=source)
+        ax.legend(loc="lower right", frameon=False)
+        ax.set_xlabel("Y (pixel)")
+        ax.set_ylabel("Shift (pixel)")
+        plot_image_shift(ax, image._data, shift_profile, cmap="Reds")
+        axis = plot_image_shift(ax, image_out._data, shift_profile, cmap=cmaps[source], inset_pos=(0.14,1.0-0.32))
+        plt.setp(axis, yticklabels=[], ylabel="")
+    else:
+        fig = None
+        log.info(f"no electronic pixel shifts found for {expnum = } | {camera = } | {imagetyp = }")
+    return image_out, fig
 
 
 def compare_shifts(image, drp_shifts=None, qc_shifts=None, user_shifts=None, raw_shifts=None, which_shifts="drp", display_plots=False):

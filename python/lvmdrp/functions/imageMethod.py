@@ -30,6 +30,7 @@ from lvmdrp import log, DRP_COMMIT, __version__ as DRPVER
 from lvmdrp.core.constants import CONFIG_PATH, SPEC_CHANNELS, ARC_LAMPS, LVM_REFERENCE_COLUMN, FIDUCIAL_PLATESCALE, LVM_NFIBERS, LVM_NBLOCKS
 from lvmdrp.utils.decorators import skip_on_missing_input_path, drop_missing_input_paths
 from lvmdrp.utils.bitmask import QualityFlag
+from lvmdrp.utils.pixshifts import load_shifts, apply_shift_correction
 from lvmdrp.core.fiberrows import FiberRows, _read_fiber_ypix
 from lvmdrp.core.image import (
     Image,
@@ -2881,18 +2882,30 @@ def preproc_raw_frame(
     # load image
     log.info(f"starting preprocessing of raw image '{os.path.basename(in_image)}'")
     org_img = loadImage(in_image)
-    org_header = org_img.getHeader()
-
-    camera = org_header["CCD"]
 
     # fix the header with header fix file
     # convert real MJD to SJD
     try:
-        sjd = int(dateobs_to_sjd(org_header.get("OBSTIME")))
+        sjd = int(dateobs_to_sjd(org_img._header.get("OBSTIME")))
         sjd = correct_sjd(in_image, sjd)
-        org_header = apply_hdrfix(sjd, hdr=org_header) or org_header
+        org_img._header = apply_hdrfix(sjd, hdr=org_img._header) or org_img._header
     except ValueError as e:
         log.error(f"cannot apply header fix: {e}")
+
+    # fix pixel shifts if present
+    shifts = load_shifts(sjd)
+    org_img, fig = apply_shift_correction(org_img, shifts)
+    if fig is not None:
+        save_fig(
+            fig,
+            product_path=out_image,
+            to_display=display_plots,
+            figure_path="qa",
+            label="pixel_shifts"
+        )
+
+    org_header = org_img.getHeader()
+    camera = org_header["CCD"]
 
     # assume imagetyp or not
     if assume_imagetyp:
