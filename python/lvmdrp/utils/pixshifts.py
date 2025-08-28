@@ -293,7 +293,7 @@ def apply_shift_correction(image, shifts, display_plots=False):
             if shift_profile[irow] > 0:
                 image_out._data[irow, :] = np.roll(image._data[irow, :], int(shift_profile[irow]))
         for i, (row, amount) in enumerate(rows.items()):
-            image_out._header[f"HIERARCH {camera.upper()} PIXSHIFT SHIFT{i+1}"] = (f"{row}:{amount}", f"electronic pixel shift row:amount")
+            image_out._header[f"HIERARCH {camera.upper()} PIXSHIFT SHIFT{i+1}"] = (f"{row}:{amount}", "electronic pixel shift row:amount")
         image_out._header[f"HIERARCH {camera.upper()} PIXSHIFT SOURCE"] = (source, "electronic pixel shift source")
 
         cmaps = {"drp": "Blues", "qc": "Greens", "user": "Purples"}
@@ -546,7 +546,7 @@ def detect_shifts(in_image, ref_image, report=None,
         corrs = np.zeros_like(ushifts)
         which_shifts = "user"
     elif not shift_detected_or_reported:
-        log.info(f"no shifts detected or reported")
+        log.info("no shifts detected or reported")
 
     # apply pixel shifts to the images
     image_out, shifts, _, = compare_shifts(image=image, raw_shifts=raw_shifts,
