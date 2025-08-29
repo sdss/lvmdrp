@@ -201,76 +201,56 @@ def compare_pixflats(mjd, camera, flat_expnums_a, flat_expnums_b):
     #   - From a selection of features in flats, compare the two
 
 
-def do_for_quadrants(image, func, *args, **kwargs):
-    sections = image.getHdrValue("*AMP? TRIMSEC*").values()
-
-    f_image = copy(image)
-    for _, sec in enumerate(sections):
-        quad = image.getSection(sec)
-        data, error, mask = quad._data, quad._error, quad._mask
-        mask = ~mask*~np.isfinite(data)*error<=0
-        ivar = np.where(mask, 1.0/(error**2), 0.0)
-        f_data = func(data, ivar, *args, **kwargs)
-        quad.setData(data=f_data)
-
-        f_image.setSection(sec, quad)
-
-    return image, f_image
-
-
-def median_nan(image, ivar, size=51):
-    image_tmp = np.where(ivar>0, image, np.NaN)
-    return fast_median_filter_2d(image_tmp, size=(size, size))
-
-
-def filtering(image, ivar, size=51, debug=False):
+def filtering(image, size=51, return_all=False):
 
     minflat = 0.001
     min_flat_for_fit_mask = 0.99
     max_flat_for_fit_mask = 1.02
 
-    # initial model
-    smooth = median_nan(image, ivar, size=size)
-    if debug:
-        fits.writeto('testmodel0.fits', smooth, overwrite=True)
+    data = image._data
+    error = image._error
+    ivar = image.get_ivar()
 
-    # initial flat by dividing by smoothed image, masking only where we have no data
-    flat  =  (ivar>0)*(smooth>minflat)*image/(smooth*(smooth>minflat)+(smooth<=minflat))
-    flat  += (smooth<=minflat)|(ivar<=0)  # set flat to 1 where masked
-    if debug:
-        fits.writeto('testflat0.fits', flat, overwrite=True)
+    # initial model
+    smooth_ini = fast_median_filter_2d(np.where(ivar > 0, data, np.NaN), size=(size, size))
+
+    # initial flat by dividing by smooth image, masking only where we have no data
+    flat_ini = np.where((ivar > 0) & (smooth_ini > minflat), data / smooth_ini, 1.0)
 
     # dilate the mask, increasing sigma until not too large
-    err = np.sqrt(1./(ivar+(ivar==0)))/(smooth*(image>0)+(image<=0))  # error image
+    flat_error = error / smooth_ini
     for nsig in [3.,3.5,4.,5.,10.,20.]:
-        mask = (flat<(min_flat_for_fit_mask-nsig*err))|(flat>(max_flat_for_fit_mask+nsig*err))
+        low  = flat_ini < (min_flat_for_fit_mask - nsig * flat_error)
+        high = flat_ini > (max_flat_for_fit_mask + nsig * flat_error)
+        mask = low | high
+
         mask = ndi.binary_dilation(mask)
-        frac = np.sum(mask>0)/float(np.sum(ivar>0))
-        if frac<0.05 :
+        frac = np.sum(mask > 0) / np.sum(ivar > 0)
+        if frac < 0.05:
+            log.info(f"Used nsig = {nsig}, frac = {frac:4.3f}")
             break
-    log.info(f"Used nsig = {nsig}, frac = {frac:4.3f}")
 
     # https://github.com/desihub/desispec/blob/main/bin/desi_compute_pixel_flatfield#L619
 
-    # now start iterating smoothing and filtering the flat, ignoring newly mased pixels in the smoothing
+    # now start iterating smoothing and filtering the flat, ignoring newly masked pixels in the smoothing
     mask = mask | (ivar==0)
-    smooth = median_nan(image, ~mask, size=size)
-    flat  =  (ivar>0)*(smooth>minflat)*image/(smooth*(smooth>minflat)+(smooth<=minflat))   # divide by model
-    flat  += (smooth<=minflat)|(ivar<=0)  # set flat to 1 where no data
+    smooth = fast_median_filter_2d(np.where(~mask, data, np.NaN), size=(size, size))
 
-    if debug:
-        fits.writeto('testmask.fits', mask.astype(int), overwrite=True)
-        fits.writeto('testivar.fits', ivar, overwrite=True)
-        fits.writeto('testmodel.fits', smooth, overwrite=True)
-        fits.writeto('testflat.fits', flat, overwrite=True)
+    # compute flat
+    flat = np.where((ivar > 0) & (smooth > minflat), data / smooth, 1.0)
 
-    smooth = image / flat
+    flat_img = copy(image)
+    flat_img.setData(data=flat, error=flat_error, mask=mask)
 
+    smooth = image / flat_img
+
+    if return_all:
+        return smooth, flat_img
     return smooth
 
 
 def _desi_pixflat(cflat, size):
-    _, filtered = do_for_quadrants(cflat, filtering, size=size)
+    filtered = cflat.apply_per_quadrant(filtering, size=size)
     mflat = cflat / filtered
     return cflat, mflat
 
@@ -294,8 +274,8 @@ def get_pixflat(cflat_path, mpixflat_path, fflat_path, size=51, flatfield_thresh
     elif method == "simple":
         cflat, mflat = _simple_pixflat(cflat, size=size)
 
-    log.info(f"replacing invalid values and flatfield values below {flatfield_threshold} with NaNs")
-    mflat._data = np.where((mflat._data > flatfield_threshold) & np.isfinite(mflat._data), mflat._data, np.nan)
+    log.info(f"replacing invalid values and flatfield values below {flatfield_threshold} with 1.0")
+    mflat._data = np.where((mflat._data > flatfield_threshold) & np.isfinite(mflat._data), mflat._data, 1.0)
     log.info(f"writing master pixelflat to {mpixflat_path}")
     mflat.writeFitsData(mpixflat_path)
 
