@@ -789,6 +789,11 @@ class Image(Header):
         """
         return self._error
 
+    def get_ivar(self):
+        if self._error is None:
+            return None
+        return numpy.divide(1.0, self._error**2, out=numpy.zeros_like(self._error))
+
     def getPixel(self, y, x):
         """
         Returns the information for a single pixel of the image.
@@ -908,6 +913,19 @@ class Image(Header):
                 new_image.setHeader(header)  # set header
 
         return new_image
+
+    def apply_per_quadrant(self, func, *args, **kwargs):
+        sections = list(self.getHdrValue("*AMP? TRIMSEC*").values())
+        if len(sections) == 0:
+            raise ValueError("No quadrant section found in primary header")
+
+        f_image = copy(self)
+        for _, sec in enumerate(sections):
+            quad = self.getSection(sec)
+            quad = func(quad, *args, **kwargs)
+            f_image.setSection(sec, quad)
+
+        return f_image
 
     def convertUnit(self, to, assume="adu", gain_field="GAIN", inplace=False):
         """converts the unit of the image
