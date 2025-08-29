@@ -1,8 +1,10 @@
 import os
 import numpy as np
 import pandas as pd
+import matplotlib.pyplot as plt
 from copy import deepcopy as copy
 from astropy.io import fits
+from astropy.table import Table
 
 
 from lvmdrp import log, path, __version__ as drpver
@@ -185,8 +187,8 @@ def test_pixflats(mjd, camera, flat_expnums, target_expnum):
     calibs = drp.get_calib_paths(mjd=mjd, from_sanbox=True)
     mflat_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="m", imagetype="pixflat", expnum=f"{flat_expnums.min()}_{flat_expnums.max()}", camera=camera)
 
-    image_tasks.preproc_raw_frame(in_image=rframe_path, out_image=pframe_path)
-    image_tasks.detrend_frame(in_image=pframe_path, out_image=dframe_path, in_bias=calibs["bias"][camera], in_pixelflat=mflat_path, reject_cr=False)
+    # TODO: detrend and extract frame
+    # TODO: display CCD artifacts on extracted frame
 
     return dframe_path
 
@@ -200,16 +202,15 @@ def compare_pixflats(mjd, camera, flat_expnums_a, flat_expnums_b):
 
 
 def do_for_quadrants(image, func, *args, **kwargs):
-    sections = image.getHdrValue("AMP? TRIMSEC").values()
+    sections = image.getHdrValue("*AMP? TRIMSEC*").values()
 
     f_image = copy(image)
-    for isec, sec in enumerate(sections):
+    for _, sec in enumerate(sections):
         quad = image.getSection(sec)
         data, error, mask = quad._data, quad._error, quad._mask
         mask = ~mask*~np.isfinite(data)*error<=0
         ivar = np.where(mask, 1.0/(error**2), 0.0)
-        _, f_data = func(data, ivar, *args, **kwargs)
-
+        f_data = func(data, ivar, *args, **kwargs)
         quad.setData(data=f_data)
 
         f_image.setSection(sec, quad)
@@ -222,20 +223,15 @@ def median_nan(image, ivar, size=51):
     return fast_median_filter_2d(image_tmp, size=(size, size))
 
 
-def filtering(image, ivar, size=51, replace_with_nan=True, debug=False):
+def filtering(image, ivar, size=51, debug=False):
 
     minflat = 0.001
     min_flat_for_fit_mask = 0.99
     max_flat_for_fit_mask = 1.02
 
-    # if replace_with_nan:
-    #     image.apply_pixelmask()
-
     # initial model
     smooth = median_nan(image, ivar, size=size)
-    # smooth = image.medianImg()
     if debug:
-    #     smooth.writeFitsData('testmodel0.fits')
         fits.writeto('testmodel0.fits', smooth, overwrite=True)
 
     # initial flat by dividing by smoothed image, masking only where we have no data
@@ -268,15 +264,13 @@ def filtering(image, ivar, size=51, replace_with_nan=True, debug=False):
         fits.writeto('testmodel.fits', smooth, overwrite=True)
         fits.writeto('testflat.fits', flat, overwrite=True)
 
-    return image, smooth
+    smooth = image / flat
 
-
-def filter_image(image, size):
-    return do_for_quadrants(image, filtering, size=size)
+    return smooth
 
 
 def _desi_pixflat(cflat, size):
-    cflat, filtered = filter_image(cflat, size)
+    _, filtered = do_for_quadrants(cflat, filtering, size=size)
     mflat = cflat / filtered
     return cflat, mflat
 
