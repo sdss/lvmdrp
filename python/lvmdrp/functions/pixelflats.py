@@ -120,7 +120,7 @@ def detrend_pixelflats(mjds, camera, flat_expnums, bias_expnums=[], dark_expnums
     return dflat_paths
 
 
-def combine_pixelflats(mjds, camera, flat_expnums, comb_stat=np.median, median_box=(31,31), skip_done=True):
+def combine_pixelflats(mjds, camera, flat_expnums, comb_stat="median", skip_done=True):
     frames = get_enights_metadata(mjds=mjds).query("camera == @camera").sort_values("expnum")
 
     flats = frames.query("expnum in @flat_expnums")
@@ -131,7 +131,7 @@ def combine_pixelflats(mjds, camera, flat_expnums, comb_stat=np.median, median_b
         cflat = image_tasks.loadImage(cflat_path)
         return cflat, cflat_path
     else:
-        cflat = image_tasks.combineImages([image_tasks.loadImage(dflat_path) for dflat_path in dflat_paths], method="median", replace_with_nan=False)
+        cflat = image_tasks.combineImages([image_tasks.loadImage(dflat_path) for dflat_path in dflat_paths], method=comb_stat, replace_with_nan=False)
         cflat.writeFitsData(cflat_path)
 
     return cflat, cflat_path
@@ -201,11 +201,7 @@ def compare_pixflats(mjd, camera, flat_expnums_a, flat_expnums_b):
     #   - From a selection of features in flats, compare the two
 
 
-def filtering(image, size=51, return_all=False):
-
-    minflat = 0.001
-    min_flat_for_fit_mask = 0.99
-    max_flat_for_fit_mask = 1.02
+def filtering(image, size=31, min_flat=0.001, min_flat_masking=0.99, max_flat_masking=1.02, return_all=False):
 
     data = image._data
     error = image._error
@@ -215,13 +211,14 @@ def filtering(image, size=51, return_all=False):
     smooth_ini = fast_median_filter_2d(np.where(ivar > 0, data, np.NaN), size=(size, size))
 
     # initial flat by dividing by smooth image, masking only where we have no data
-    flat_ini = np.where((ivar > 0) & (smooth_ini > minflat), data / smooth_ini, 1.0)
+    flat_ini = data / smooth_ini
+    flat_ini = np.where((ivar > 0) & (flat_ini > min_flat), flat_ini, 1.0)
 
     # dilate the mask, increasing sigma until not too large
     flat_error = error / smooth_ini
     for nsig in [3.,3.5,4.,5.,10.,20.]:
-        low  = flat_ini < (min_flat_for_fit_mask - nsig * flat_error)
-        high = flat_ini > (max_flat_for_fit_mask + nsig * flat_error)
+        low  = flat_ini < (min_flat_masking - nsig * flat_error)
+        high = flat_ini > (max_flat_masking + nsig * flat_error)
         mask = low | high
 
         mask = ndi.binary_dilation(mask)
@@ -237,7 +234,7 @@ def filtering(image, size=51, return_all=False):
     smooth = fast_median_filter_2d(np.where(~mask, data, np.NaN), size=(size, size))
 
     # compute flat
-    flat = np.where((ivar > 0) & (smooth > minflat), data / smooth, 1.0)
+    flat = np.where((ivar > 0) & (smooth > min_flat), data / smooth, 1.0)
 
     flat_img = copy(image)
     flat_img.setData(data=flat, error=flat_error, mask=mask)
@@ -261,7 +258,7 @@ def _simple_pixflat(cflat, size):
     return cflat, mflat
 
 
-def get_pixflat(cflat_path, mpixflat_path, fflat_path, size=51, flatfield_threshold=0.01, method="desi"):
+def get_pixflat(cflat_path, mpixflat_path, fflat_path, size=31, flatfield_threshold=0.001, method="desi"):
     if method not in ["desi", "simple"]:
         raise ValueError(f"Invalid value for `method`: {method}. Expected either 'desi' or 'simple'")
 
@@ -342,7 +339,7 @@ def _parse_sequence(sequence, repeat=False):
     return expnums_dict
 
 
-def create_pixflats(mjds, camera, sequence, size=51, flatfield_threshold=0.01, method="desi", skip_done=True):
+def create_pixflats(mjds, camera, sequence, size=31, flatfield_threshold=0.01, method="desi", skip_done=True):
     """
     Creates pixel flat-field calibration files for a given camera and set of MJDs.
 
@@ -356,7 +353,7 @@ def create_pixflats(mjds, camera, sequence, size=51, flatfield_threshold=0.01, m
         Dictionary containing exposure sequences with keys such as "flat", "dark",
         and "bias", and their corresponding exposure numbers.
     size : int, optional
-        Size of the smoothing kernel for flat-field correction. Default is 51.
+        Size of the smoothing kernel for flat-field correction. Default is 31.
     flatfield_threshold : float, optional
         Threshold for flat-field correction. Default is 0.01.
     method : str, optional
