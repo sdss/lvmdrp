@@ -1,11 +1,10 @@
 import os
+import yaml
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from copy import deepcopy as copy
-from astropy.io import fits
-from astropy.table import Table
-
+from pprint import pformat
 
 from lvmdrp import log, path, __version__ as drpver
 from lvmdrp.functions import imageMethod as image_tasks
@@ -14,6 +13,89 @@ from lvmdrp.utils import metadata as md
 from lvmdrp import main as drp
 from scipy import ndimage as ndi
 
+
+PIXFLAT_EPOCHS_PATH = os.path.join(os.getenv("LVMCORE_DIR"), "etc", "pixflat-epochs.yaml")
+
+
+def _parse_expnums(expnums):
+    parsed_expnums = [[]]
+    for idx, expnum in enumerate(expnums):
+        if isinstance(expnum, int):
+            parsed_expnums.append([expnum])
+        elif isinstance(expnum, str) and "," in expnum:
+            expnum_range = tuple(int(i) for i in expnum.split(","))
+            parsed_expnums.append(np.arange(*expnum_range))
+        else:
+            raise TypeError(f"Invalid type in `expnums` at {idx}: {expnum}")
+    parsed_expnums = np.concatenate(parsed_expnums)
+    parsed_expnums.sort()
+    return parsed_expnums.astype("int")
+
+
+def _parse_sequence(sequence):
+    parsed_sequence = copy(sequence)
+    expnums = _parse_expnums(sequence.get("expnums", []) or [])
+    rejects = _parse_expnums(sequence.get("rejects", []) or [])
+    parsed_sequence["expnums"] = expnums
+    parsed_sequence["rejects"] = rejects
+
+    return parsed_sequence
+
+
+def _expand_sequence(sequence, repeat=False):
+    """Expands a sequence dictionary to extract exposure numbers grouped by type.
+
+    The function interprets the "kind" key in the input dictionary to determine
+    the types of exposures (e.g., flat, bias, dark) and their respective counts.
+    It then uses the "expnums" key to group the exposure numbers accordingly.
+
+    Parameters
+    ----------
+    sequence : dict
+        A dictionary containing the following keys:
+        - "kind" : str
+            A string where even-indexed characters represent counts and
+            odd-indexed characters represent types ('f' for flat, 'b' for bias,
+            'd' for dark).
+        - "expnums" : list
+            A list of exposure numbers.
+    repeat : bool, optional
+        Whether to pad bias/dark sequences shorter than flat sequence, by default False
+
+    Returns
+    -------
+    dict
+        A dictionary where keys are exposure types (e.g., "flat_expnums",
+    """
+    typ_maps = {"f": "flat", "b": "bias", "d": "dark"}
+
+    kind = sequence.get("kind")
+    kind_ = list(kind)
+    typs = kind_[1::2]
+    nums = {typ_maps[typ]: num for typ, num in zip(typs, map(int, kind_[::2]))}
+    expnums = sequence.get("expnums")
+    rejects = sequence.get("rejects", [])
+
+    expnums = np.asarray(list(set(expnums).difference(rejects)))
+    expnums.sort()
+
+    expnums_split = np.split(expnums, expnums.size//sum(nums.values()))
+    expnums_dict = {typ_maps[typ]: np.array([], dtype="int") for typ in typs}
+    for exps in expnums_split:
+        offset = 0
+        for key in expnums_dict:
+            expnums_dict[key] = np.append(expnums_dict[key], exps[offset:offset+nums[key]])
+            offset += nums[key]
+
+    if repeat:
+        nflats = len(expnums_dict.get("flat", []))
+        for key in {"bias", "dark"}:
+            expnums_ = expnums_dict.get(key)
+            if expnums_ is None:
+                continue
+            n = len(expnums_)
+            expnums_dict[key] = np.repeat(expnums_, nflats//n)
+    return expnums_dict
 
 def rsync_enight(mjds):
     """rsyncs egineering nights from LCO directly
@@ -44,6 +126,27 @@ def get_enights_metadata(mjds):
     for mjd in mjds:
         metadata.append(md.get_frames_metadata(mjd, overwrite=False, suffix="fits.gz"))
     return pd.concat(metadata, axis="index", ignore_index=True).sort_values("expnum")
+
+
+def load_pixflat_epochs(epochs_path=None, filter_by=None):
+    epochs_path = epochs_path or PIXFLAT_EPOCHS_PATH
+    with open(epochs_path) as f:
+        epochs = yaml.safe_load(f)["epochs"]
+
+    log.info(f"loaded {len(epochs)} epochs:")
+    for mjd in epochs:
+        log.info(f"  {mjd}: {pformat(epochs[mjd])}")
+
+    if filter_by is not None and isinstance(filter_by, (list, tuple)):
+        log.info(f"filtering by {filter_by}")
+        epochs = {mjd: epochs[mjd] for mjd in filter_by if mjd in epochs}
+        if len(epochs) == 0:
+            log.error(f"epoch(s) {filter_by} not found in calibration epochs file: '{epochs_path}'")
+            return epochs
+        log.info(f"after filtering {len(epochs)} epoch(s):")
+        for mjd in epochs:
+            log.info(f"  {mjd}: {epochs[mjd]}")
+    return epochs
 
 
 def detrend_pixelflats(mjds, camera, flat_expnums, bias_expnums=[], dark_expnums=[], use_pixmask=True, skip_done=True):
@@ -120,12 +223,12 @@ def detrend_pixelflats(mjds, camera, flat_expnums, bias_expnums=[], dark_expnums
     return dflat_paths
 
 
-def combine_pixelflats(mjds, camera, flat_expnums, comb_stat="median", skip_done=True):
+def combine_pixelflats(mjds, mjd_epoch, camera, flat_expnums, comb_stat="median", skip_done=True):
     frames = get_enights_metadata(mjds=mjds).query("camera == @camera").sort_values("expnum")
 
     flats = frames.query("expnum in @flat_expnums")
     dflat_paths = [path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=flat.mjd, kind="d", imagetype="pixflat", expnum=flat.expnum, camera=camera) for _, flat in flats.iterrows()]
-    cflat_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=flats.mjd.max(), kind="c", imagetype="pixflat", expnum=f"{flats.expnum.min()}_{flats.expnum.max()}", camera=camera)
+    cflat_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd_epoch, kind="cpixflat", camera=camera)
 
     if skip_done and os.path.isfile(cflat_path):
         cflat = image_tasks.loadImage(cflat_path)
@@ -161,7 +264,7 @@ def create_pixflats_60171(median_box=(31,31), skip_done=True):
                 image_tasks.preproc_raw_frame(in_image=rflat_path, out_image=pflat_path, assume_imagetyp="pixflat")
                 image_tasks.detrend_frame(in_image=pflat_path, out_image=dflat_path, in_bias=calibs["bias"][flat.camera], reject_cr=False, normalize_pixelflat=False)
 
-        cflat, cflat_path = combine_pixelflats(mjds=mjd, camera=camera, flat_expnums=flat_expnums, median_box=median_box, skip_done=skip_done)
+        cflat, cflat_path = combine_pixelflats(mjds=mjd, mjd_epoch=mjd, camera=camera, flat_expnums=flat_expnums, median_box=median_box, skip_done=skip_done)
 
         mflat_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="m", imagetype="pixflat", expnum=f"{flats.expnum.min()}_{flats.expnum.max()}", camera=camera)
         fflat_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="f", imagetype="pixflat", expnum=f"{flats.expnum.min()}_{flats.expnum.max()}", camera=camera)
@@ -283,63 +386,7 @@ def get_pixflat(cflat_path, mpixflat_path, fflat_path, size=31, flatfield_thresh
     return cflat, mflat, fflat
 
 
-def _parse_sequence(sequence, repeat=False):
-    """Parses a sequence dictionary to extract exposure numbers grouped by type.
-
-    The function interprets the "kind" key in the input dictionary to determine
-    the types of exposures (e.g., flat, bias, dark) and their respective counts.
-    It then uses the "expnums" key to group the exposure numbers accordingly.
-
-    Parameters
-    ----------
-    sequence : dict
-        A dictionary containing the following keys:
-        - "kind" : str
-            A string where even-indexed characters represent counts and
-            odd-indexed characters represent types ('f' for flat, 'b' for bias,
-            'd' for dark).
-        - "expnums" : list
-            A list of exposure numbers.
-    repeat : bool, optional
-        Whether to pad bias/dark sequences shorter than flat sequence, by default False
-
-    Returns
-    -------
-    dict
-        A dictionary where keys are exposure types (e.g., "flat_expnums",
-    """
-    typ_maps = {"f": "flat", "b": "bias", "d": "dark"}
-
-    kind = sequence.get("kind")
-    kind_ = list(kind)
-    typs = kind_[1::2]
-    nums = {typ_maps[typ]: num for typ, num in zip(typs, map(int, kind_[::2]))}
-    expnums = sequence.get("expnums")
-    rejects = sequence.get("rejects", [])
-
-    expnums = np.asarray(list(set(expnums).difference(rejects)))
-    expnums.sort()
-
-    expnums_split = np.split(expnums, expnums.size//sum(nums.values()))
-    expnums_dict = {typ_maps[typ]: np.array([], dtype="int") for typ in typs}
-    for exps in expnums_split:
-        offset = 0
-        for key in expnums_dict:
-            expnums_dict[key] = np.append(expnums_dict[key], exps[offset:offset+nums[key]])
-            offset += nums[key]
-
-    if repeat:
-        nflats = len(expnums_dict.get("flat", []))
-        for key in {"bias", "dark"}:
-            expnums_ = expnums_dict.get(key)
-            if expnums_ is None:
-                continue
-            n = len(expnums_)
-            expnums_dict[key] = np.repeat(expnums_, nflats//n)
-    return expnums_dict
-
-
-def create_pixflats(mjds, camera, sequence, size=31, flatfield_threshold=0.01, method="desi", skip_done=True):
+def create_pixflats(mjds, mjd_epoch, camera, sequence, size=31, flatfield_threshold=0.01, method="desi", skip_done=True):
     """
     Creates pixel flat-field calibration files for a given camera and set of MJDs.
 
@@ -347,6 +394,8 @@ def create_pixflats(mjds, camera, sequence, size=31, flatfield_threshold=0.01, m
     ----------
     mjds : list or array-like
         List of Modified Julian Dates (MJDs) to process.
+    mjd_epoch : int
+        MJD for the pixel flat epoch. All master pixel flats will be stored in the corresponding directory.
     camera : str
         Identifier for the camera (e.g., 'r1', 'b2').
     sequence : dict
@@ -376,10 +425,14 @@ def create_pixflats(mjds, camera, sequence, size=31, flatfield_threshold=0.01, m
     - If no matching frames are found, the function logs an error and exits.
     - The function performs detrending, combines pixel flats, and generates the final flat-field files.
     """
-    expnums_dict = _parse_sequence(sequence)
+    parsed_sequence = _parse_sequence(sequence=sequence)
+    expnums_dict = _expand_sequence(parsed_sequence)
     flat_expnums = expnums_dict.get("flat")
     dark_expnums = expnums_dict.get("dark", [])
     bias_expnums = expnums_dict.get("bias", [])
+
+    if flat_expnums is None:
+        raise ValueError(f"No pixel flat exposures found for {camera = } with sequence: {sequence}")
 
     frames = get_enights_metadata(mjds=mjds)
     frames = frames.query("expnum in @flat_expnums and camera == @camera")
@@ -389,11 +442,10 @@ def create_pixflats(mjds, camera, sequence, size=31, flatfield_threshold=0.01, m
         return
 
     detrend_pixelflats(mjds=mjds, camera=camera, flat_expnums=flat_expnums, dark_expnums=dark_expnums, bias_expnums=bias_expnums, skip_done=skip_done)
-    cflat, cflat_path = combine_pixelflats(mjds=mjds, camera=camera, flat_expnums=flat_expnums, skip_done=skip_done)
+    _, cflat_path = combine_pixelflats(mjds=mjds, mjd_epoch=mjd_epoch, camera=camera, flat_expnums=flat_expnums, skip_done=skip_done)
 
-    mjd = frames.mjd.max()
-    mflat_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, kind="mpixflat", camera=camera)
-    fflat_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="f", imagetype="pixflat", expnum=f"{flat_expnums.min()}_{flat_expnums.max()}", camera=camera)
+    mflat_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd_epoch, kind="mpixflat", camera=camera)
+    fflat_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd_epoch, kind="fpixflat", camera=camera)
 
     get_pixflat(cflat_path, mflat_path, fflat_path, size=size, flatfield_threshold=flatfield_threshold, method=method)
 
