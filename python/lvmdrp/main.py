@@ -1939,8 +1939,8 @@ def create_drpall(drp_version: str = None, overwrite: bool = False) -> None:
     """
     drp_version = drp_version or drpver
 
+    drpall = path.full('lvm_drpall', drpver=drp_version)
     if overwrite:
-        drpall = path.full('lvm_drpall', drpver=drp_version)
         drpall = drpall.replace('.fits', '.h5')
         if os.path.isfile(drpall):
             log.info(f"removing existing {drpall}")
