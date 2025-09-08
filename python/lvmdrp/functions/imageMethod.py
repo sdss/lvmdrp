@@ -3742,6 +3742,7 @@ def detrend_frame(
     calculate_error: bool = True,
     replace_with_nan: bool = True,
     reject_cr: bool = True,
+    increase_radius: int = 1,
     median_box: list = [0, 0],
     display_plots: bool = False,
 ):
@@ -3769,6 +3770,8 @@ def detrend_frame(
         whether to replace or not NaN values by zeros, by default True
     reject_cr : bool, optional
         whether to reject or not cosmic rays from detrended image, by default True
+    increase_radius : int, optional
+        Number of pixels by which the mask will be growth through a convolution with box kernel of side 2*increase_radius+1, by default 1
     median_box : tuple, optional
         size of the median box to refine pixel mask, by default [0,0]
     display_plots : str, optional
@@ -3895,7 +3898,8 @@ def detrend_frame(
         log.info("rejecting cosmic rays")
         rdnoise = detrended_img.getHdrValue(f"{camera.upper()} AMP1 RDNOISE")
         detrended_img.reject_cosmics(gain=1.0, rdnoise=rdnoise, rlim=1.3, iterations=5, fwhm_gauss=[2.75, 2.75],
-                                     replace_box=[10,2], replace_error=1e6, verbose=True, inplace=True)
+                                     replace_box=[10,2], replace_error=1e6,
+                                     increase_radius=increase_radius, verbose=True, inplace=True)
 
     # replace masked pixels with NaNs
     if replace_with_nan:
