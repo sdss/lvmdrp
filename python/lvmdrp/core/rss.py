@@ -3304,7 +3304,7 @@ class RSS(FiberRows):
         else:
             raise ValueError(f"Invalid value for `coadd_method`: {coadd_method}. Expected either 'average', 'integrate' or 'fit'")
 
-        mu = numpy.nanmean(z)
+        mu = biweight_location(z, ignore_nan=True)
         z_ = z / mu
 
         # define guess and boundary values
@@ -3347,11 +3347,19 @@ class RSS(FiberRows):
         rss_corr /= joint_model[:, None]
         return rss_corr
 
-    def reject_fibers(self, cwave, dwave=20, coadd_stat=bn.nanmedian, quantiles=(5,97), ax=None):
-        z_cont = self.coadd_flux(cwave=cwave, dwave=dwave, comb_stat=coadd_stat)
+    def reject_fibers(self, cwave, dwave=20, coadd_stat=bn.nanmedian, groupby=None, quantiles=(5,97), ax=None):
 
-        qth = numpy.nanpercentile(z_cont, q=quantiles)
-        rejects = (z_cont < qth[0]) | (z_cont > qth[1])
+        z = self.coadd_flux(cwave=cwave, dwave=dwave, comb_stat=coadd_stat)
+        if groupby is not None:
+            fiber_groups = self._get_fiber_groups(groupby)
+        else:
+            fiber_groups = numpy.ones_like(z, dtype="int32")
+
+        rejects = numpy.zeros_like(z, dtype="bool")
+        for group in set(fiber_groups):
+            select = fiber_groups == group
+            qth = numpy.nanpercentile(z[select], q=quantiles)
+            rejects[select] = (z[select] < qth[0]) | (z[select] > qth[1])
 
         if ax is not None:
             select = ~rejects
@@ -3375,9 +3383,17 @@ class RSS(FiberRows):
         fscience = copy(self) / mflat
         if quantiles is not None and isinstance(quantiles, tuple):
             rejects = fscience.reject_fibers(cwave=cont_cwave, quantiles=quantiles)
+            log.info(f"rejected {rejects.sum()} stellar sources @ {cont_cwave} Angstroms outside quantiles {quantiles[0]}th and {quantiles[1]}th")
             fscience._data[rejects, :] = numpy.nan
             fscience._error[rejects, :] = numpy.nan
             fscience._mask[rejects, :] = True
+
+        # mask outlying sky fluxes (do this by spectrograph/quadrants)
+        rejects = fscience.reject_fibers(cwave=sky_cwave, dwave=dwave, comb_stat=bn.nanmean, quantiles=(10, 90), groupby="quad")
+        log.info(f"rejected {rejects.sum()} outlying fibers outside quantiles 10th and 90th")
+        fscience._data[rejects, :] = numpy.nan
+        fscience._error[rejects, :] = numpy.nan
+        fscience._mask[rejects, :] = True
 
         _, offsets_model = fscience.measure_wave_shifts(cwaves=sky_cwave, dwave=dwave, smooth=True)
         mean_offset, std_offset = bn.nanmean(offsets_model), bn.nanstd(offsets_model)
