@@ -3378,19 +3378,18 @@ class RSS(FiberRows):
                                   coadd_method="fit", axs=None, labels=False):
         expnum = self._header["EXPOSURE"]
         imagetyp = self._header["IMAGETYP"]
-        log.info(f" processing {expnum = }")
 
         fscience = copy(self) / mflat
         if quantiles is not None and isinstance(quantiles, tuple):
             rejects = fscience.reject_fibers(cwave=cont_cwave, quantiles=quantiles)
-            log.info(f"rejected {rejects.sum()} stellar sources @ {cont_cwave} Angstroms outside quantiles {quantiles[0]}th and {quantiles[1]}th")
+            log.info(f"  rejected {rejects.sum()} stellar sources @ {cont_cwave} Angstroms outside quantiles {quantiles[0]}th and {quantiles[1]}th")
             fscience._data[rejects, :] = numpy.nan
             fscience._error[rejects, :] = numpy.nan
             fscience._mask[rejects, :] = True
 
         # mask outlying sky fluxes (do this by spectrograph/quadrants)
-        rejects = fscience.reject_fibers(cwave=sky_cwave, dwave=dwave, comb_stat=bn.nanmean, quantiles=(10, 90), groupby="quad")
-        log.info(f"rejected {rejects.sum()} outlying fibers outside quantiles 10th and 90th")
+        rejects = fscience.reject_fibers(cwave=sky_cwave, dwave=dwave, coadd_stat=bn.nanmean, quantiles=(10, 90), groupby="quad")
+        log.info(f"  rejected {rejects.sum()} outlying fibers outside quantiles 10th and 90th")
         fscience._data[rejects, :] = numpy.nan
         fscience._error[rejects, :] = numpy.nan
         fscience._mask[rejects, :] = True
