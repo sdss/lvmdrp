@@ -172,9 +172,9 @@ def butter_lowpass_filter(data, cutoff_freq, nyq_freq, order=4):
     return y
 
 
-def filter_channel(w, f, k=3):
+def filter_channel(w, f, k=3, cutoff_freq=0.01):
     c = np.where(np.isfinite(f))
-    s = butter_lowpass_filter(f[c], 0.01, 2)
+    s = butter_lowpass_filter(f[c], cutoff_freq, 2)
     res = s - f[c]
     # plt.plot(w[c], f[c], 'k.')
     # plt.plot(w[c], s, 'b-')
