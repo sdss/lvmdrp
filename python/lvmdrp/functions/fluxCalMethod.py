@@ -551,7 +551,7 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
         best_id, chi2_bestfit, chi2_wave_bestfit_0 = chi2_model_matching(flux_std_logscale_shifted,
                                                                             log_std_errors_normalized_all,
                                                                             model_norm, mask_good)
-        print(f'Initial chi2={chi2_bestfit:.2f}, initial model {best_id}')
+        log.info(f'Initial chi2={chi2_bestfit:.2f}, initial model {best_id}')
         mask_chi2 = ~np.zeros_like(chi2_wave_bestfit_0, dtype=bool)
 
         chi2_threshold = 20
@@ -572,8 +572,8 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
                                                                          model_norm, mask_upd)
 
         npix_masked = len(chi2_wave_bestfit_0) - len(chi2_wave_bestfit)
-        print(f'Masked {npix_masked} pixels')
-        print(f'After additional masking {chi2_bestfit:.2f}')
+        log.info(f'Masked {npix_masked} pixels')
+        log.info(f'After additional masking {chi2_bestfit:.2f}')
 
         log.info(f"GAIA id:{gaia_ids[i]}. Best model is: {best_id}, {model_names[best_id]}")
         best_fit_models.append(model_names[best_id])
@@ -739,7 +739,6 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
         rss.setHdrValue(f"MODSENR{label}", rms_mod_band, f"Mean model sensitivity rms in {chan}")
         log.info(f"Mean model sensitivity in {chan} : {mean_mod_band}")
 
-        print(f"product_path = {in_rss[n_chan]}")
         if plot:
             plt.ylabel("sensitivity [(ergs/s/cm^2/A) / (e-/s/A)]")
             plt.xlabel("wavelength [A]")
@@ -758,7 +757,7 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
             save_fig(plt.gcf(), product_path=in_rss[n_chan], to_display=False, figure_path="qa", label="fluxcal_mod")
 
         # update sensitivity extension
-        log.info('appending FLUXCAL_MOD table')
+        log.info(f'appending FLUXCAL_MOD table to {in_rss[n_chan]}')
         rss.set_fluxcal(fluxcal=res_mod, source='mod')
         rss.writeFitsData(in_rss[n_chan])
 
@@ -1402,7 +1401,6 @@ def fluxcal_standard_stars(in_rss, plot=True, GAIA_CACHE_DIR=None):
     rss.setHdrValue(f"STDSENR{label}", rms_std_band, f"mean stdstar sensitivity rms in {channel}")
     log.info(f"Mean stdstar sensitivity in {channel} : {mean_std_band}")
 
-    print(f"product_path = {in_rss}")
     if plot:
         plt.ylabel("sensitivity [(ergs/s/cm^2/A) / (e-/s/A)]")
         plt.xlabel("wavelength [A]")
@@ -1421,7 +1419,7 @@ def fluxcal_standard_stars(in_rss, plot=True, GAIA_CACHE_DIR=None):
         save_fig(plt.gcf(), product_path=in_rss, to_display=False, figure_path="qa", label="fluxcal_std")
 
     # update sensitivity extension
-    log.info('appending FLUXCAL_STD table')
+    log.info(f'appending FLUXCAL_STD table to {in_rss}')
     rss.set_fluxcal(fluxcal=res_std, source='std')
     rss.writeFitsData(in_rss)
 
@@ -1497,7 +1495,7 @@ def fluxcal_sci_ifu_stars(in_rss, plot=True, GAIA_CACHE_DIR=None, NSCI_MAX=15):
         save_fig(plt.gcf(), product_path=in_rss, to_display=False, figure_path="qa", label="fluxcal_sciifu")
 
     # update sensitivity extension
-    log.info('appending FLUXCAL_SCI table')
+    log.info(f'appending FLUXCAL_SCI table to {in_rss}')
     rss.set_fluxcal(fluxcal=res_sci, source='sci')
     rss.writeFitsData(in_rss)
 
