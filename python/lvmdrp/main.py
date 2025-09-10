@@ -1663,7 +1663,7 @@ def science_reduction(expnum: int,
                 stack_spectrographs(in_rsss=xsci_paths, out_rss=xsci_path)
             if not os.path.exists(xsci_path):
                 log.error(f'No stacked file found: {xsci_path}. Skipping remaining pipeline.')
-                continue
+                return
 
             # wavelength calibrate
             with Timer(name='Wavelengths '+wsci_path, logger=log.info):
