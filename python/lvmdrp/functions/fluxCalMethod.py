@@ -1507,6 +1507,9 @@ def correct_tellurics(wave, std_spec, lsf, in_rss, chan):
     :return:
     """
     std_telluric_corrected = std_spec.copy()
+    warnings.warn(f"Tellurics correction is not implemented yet. Skipping correction.")
+    return std_telluric_corrected
+
     telluric_file = os.path.join(os.getenv("LVMCORE_DIR"), "etc", "skytable.fits")
     # telluric_lines = '/Users/jane/Science/LVMFluxCalib/notebooks/atmabs.txt'  # wavelength regions with Telluric
     # absorptions based on KPNO data (unknown source) with a 1% transmission threshold this file is used as a mask for
