@@ -3232,9 +3232,9 @@ class RSS(FiberRows):
                 continue
 
             wave_offsets[:, ifiber] = sky_wave - cwaves
-            offset_slit = bn.nanmedian(wave_offsets, axis=0)
 
         # fit smooth function to each spectrograph trend
+        offset_slit = bn.nanmedian(wave_offsets, axis=0)
         wave_offsets_mod = offset_slit.copy()
         for spec_offset, specid in zip(numpy.split(offset_slit, 3), [1, 2, 3]):
             spec = self._slitmap['spectrographid'].data==specid
