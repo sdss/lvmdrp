@@ -731,9 +731,13 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
         mean_mod = biweight_location(res_mod_pd, axis=1, ignore_nan=True)
 
         label = rss._header['CCD']
-        rss.setHdrValue(f"MODSENM{label}", np.nanmean(mean_mod[1000:3000]), f"Mean model sensitivity in {chan}")
-        rss.setHdrValue(f"MODSENR{label}", np.nanmean(rms_mod[1000:3000]), f"Mean model sensitivity rms in {chan}")
-        log.info(f"Mean model sensitivity in {chan} : {np.nanmean(mean_mod[1000:3000])}")
+        mean_mod_band = np.nanmean(mean_mod[1000:3000])
+        rms_mod_band = np.nanmean(rms_mod[1000:3000])
+        mean_mod_band = -999.9 if np.isnan(mean_mod_band) else mean_mod_band
+        rms_mod_band = -999.9 if np.isnan(rms_mod_band) else rms_mod_band
+        rss.setHdrValue(f"MODSENM{label}", mean_mod_band, f"Mean model sensitivity in {chan}")
+        rss.setHdrValue(f"MODSENR{label}", rms_mod_band, f"Mean model sensitivity rms in {chan}")
+        log.info(f"Mean model sensitivity in {chan} : {mean_mod_band}")
 
         print(f"product_path = {in_rss[n_chan]}")
         if plot:
