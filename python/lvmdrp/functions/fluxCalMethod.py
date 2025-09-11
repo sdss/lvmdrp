@@ -8,7 +8,6 @@
 
 
 import os
-import warnings
 # from os import listdir
 # from os.path import isfile, join
 import numpy as np
@@ -1510,7 +1509,7 @@ def correct_tellurics(wave, std_spec, lsf, in_rss, chan):
     :return:
     """
     std_telluric_corrected = std_spec.copy()
-    warnings.warn("Tellurics correction is not implemented yet. Skipping correction.")
+    log.warning("Tellurics correction is not implemented yet. Skipping correction.")
     return std_telluric_corrected
 
     telluric_file = os.path.join(os.getenv("LVMCORE_DIR"), "etc", "skytable.fits")
