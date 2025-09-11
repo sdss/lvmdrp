@@ -33,7 +33,7 @@ from lvmdrp.functions.rssMethod import (determine_wavelength_solution, create_pi
                                         resample_wavelength, shift_wave_skylines, join_spec_channels, stack_spectrographs)
 from lvmdrp.functions.skyMethod import interpolate_sky, combine_skies, quick_sky_subtraction
 from lvmdrp.core import fluxcal
-from lvmdrp.functions.fluxCalMethod import fluxcal_standard_stars, fluxcal_sci_ifu_stars, apply_fluxcal
+from lvmdrp.functions.fluxCalMethod import fluxcal_standard_stars, fluxcal_sci_ifu_stars, apply_fluxcal, model_selection
 from lvmdrp.utils.metadata import (get_frames_metadata, get_master_metadata, extract_metadata,
                                    get_analog_groups, match_master_metadata, create_master_path,
                                    update_summary_file, convert_h5_to_fits)
@@ -1519,7 +1519,7 @@ def reduce_1d(mjd, calibrations, expnums=None, cameras=CAMERAS, replace_with_nan
 def science_reduction(expnum: int,
                       use_longterm_cals: bool = True, from_sandbox: bool = True,
                       sky_weights: Tuple[float, float] = None,
-                      fluxcal_method: str = 'STD',
+                      fluxcal_method: str = 'MOD',
                       ncpus: int = None,
                       aperture_extraction: bool = False,
                       clean_ancillary: bool = False,
@@ -1641,6 +1641,7 @@ def science_reduction(expnum: int,
     else:
         mwave_groups = group_calib_paths(calibs["wave"])
         mlsf_groups = group_calib_paths(calibs["lsf"])
+
         for channel in "brz":
             xsci_paths = sorted(path.expand('lvm_anc', mjd=sci_mjd, tileid=sci_tileid, drpver=drpver,
                                             kind='x', camera=f'{channel}[123]', imagetype=sci_imagetyp, expnum=expnum))
@@ -1663,7 +1664,7 @@ def science_reduction(expnum: int,
                 stack_spectrographs(in_rsss=xsci_paths, out_rss=xsci_path)
             if not os.path.exists(xsci_path):
                 log.error(f'No stacked file found: {xsci_path}. Skipping remaining pipeline.')
-                continue
+                return
 
             # wavelength calibrate
             with Timer(name='Wavelengths '+wsci_path, logger=log.info):
@@ -1689,8 +1690,20 @@ def science_reduction(expnum: int,
             with Timer(name='Resample '+hsci_path, logger=log.info):
                 resample_wavelength(in_rss=ssci_path,  out_rss=hsci_path, wave_range=SPEC_CHANNELS[channel], wave_disp=0.5, convert_to_density=True)
 
+
+        hsci_all_bands = [path.full('lvm_anc', mjd=sci_mjd, tileid=sci_tileid, drpver=drpver, kind='h',
+                                camera=channel, imagetype=sci_imagetyp, expnum=expnum) for channel in "brz"]
+
+        # #The model stellar atmosphere spectra selection
+        model_selection(hsci_all_bands, GAIA_CACHE_DIR=MASTERS_DIR + '/gaia_cache')
+        #
+
+        for channel in "brz":
+            hsci_path = path.full('lvm_anc', mjd=sci_mjd, tileid=sci_tileid, drpver=drpver,
+                                kind='h', camera=channel, imagetype=sci_imagetyp, expnum=expnum)
             # use resampled frames for flux calibration in each camera, using standard stars observed in the spec telescope
             #  and field stars found in the sci ifu
+            # mode='GAIA' -> old behavior; 'model' -> new version with the spectra from the Pollux library
             with Timer(name='Fluxcal '+hsci_path, logger=log.info):
                 fluxcal_standard_stars(hsci_path, GAIA_CACHE_DIR=MASTERS_DIR+'/gaia_cache')
                 fluxcal_sci_ifu_stars(hsci_path, GAIA_CACHE_DIR=MASTERS_DIR+'/gaia_cache')
@@ -1752,7 +1765,7 @@ def science_reduction(expnum: int,
 
 def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
             with_cals: bool = False, no_sci: bool = False,
-            fluxcal_method: str = 'STD',
+            fluxcal_method: str = 'MOD',
             skip_2d: bool = False, skip_1d: bool = False, skip_post_1d: bool = False, skip_drpall: bool = False,
             use_nightly_cals: bool = False, use_untagged_cals: bool = False,
             clean_ancillary: bool = False, debug_mode: bool = False, force_run: bool = False):
@@ -1775,7 +1788,7 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
     no_sci : bool, optional
         Flag to turn off science frame reduction, by default False
     fluxcal_method : str, optional
-        'NONE' or 'STD' for standard stars, 'SCI' for field stars in science IFU
+        'NONE' or 'STD' for standard stars, 'SCI' for field stars in science IFU, 'MOD' for standard stars with template matching
     skip_2d : bool, optional
         Skip preprocessing and detrending, by default False
     skip_1d : bool, optional

@@ -122,7 +122,7 @@ def cli():
 @click.option('-el', '--exp-list', type=int, multiple=True, help='a list of specific exposures to reduce')
 @click.option('-er', '--exp-range', type=str, help='a range of exposure numbers to reduce')
 @click.option('-F', '--exp-file', type=str, help='a file containing a list of exposure numbers')
-@click.option('-f', '--fluxcal-method', type=str, help='Use "NONE" or "STD" for standard stars, "SCI" for field stars')
+@click.option('-f', '--fluxcal-method', type=str, help='Use "NONE" or "STD" for standard stars or "MOD" for standard stars with template matching or "SCI" for field stars')
 @click.option('-2d', '--skip-2d', is_flag=True, default=False, help='Skip preprocessing and detrending')
 @click.option('-1d', '--skip-1d', is_flag=True, default=False, help='Skip astrometry, straylight subtraction and extraction')
 @click.option('-p1d', '--skip-post-1d', is_flag=True, default=False, help='Skip wavelength calibration, flatfielding, sky processing and flux calibration')
@@ -151,8 +151,8 @@ def run(mjd, mjd_list, mjd_range, with_cals, no_sci, expnum, exp_list, exp_range
         expnum = expnum or exp_list or exp_range
 
     if fluxcal_method is None:
-        fluxcal_method = 'STD'
-    assert (fluxcal_method in ['STD', 'SCI', 'NONE']), 'Fluxcal method must be either STD or SCI or NONE'
+        fluxcal_method = 'MOD'
+    assert (fluxcal_method in ['STD', 'SCI', 'MOD', 'NONE']), 'Fluxcal method must be either STD or SCI or MOD or NONE'
 
     if use_nightly_cals:
         use_untagged_cals = True
@@ -451,6 +451,7 @@ def get_calibs(kind, mjd, camera):
     """
     a = Access()
     a.remote()
+    a.add('lvm_calib', kind="odels_ambre", mjd="stellar_models", camera="all")
     a.add('lvm_calib', kind="pix*", mjd="pixelmasks", camera=camera)
     a.add('lvm_calib', kind=kind, mjd=mjd, camera=camera)
     a.set_stream()
