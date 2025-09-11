@@ -1524,7 +1524,7 @@ def correct_tellurics(wave, std_spec, lsf, in_rss, chan):
         # hdr = hdul[1].header
     telluric_table = Table(data)
     telluric_table['lam'] *= 10
-    tell_continuum = ndimage.filters.median_filter(telluric_table['trans'], int(1500 / 1), mode="nearest")
+    tell_continuum = ndimage.filters.median_filter(telluric_table.as_array()['trans'], int(1500 / 1), mode="nearest")
     telluric_table['trans_norm'] = telluric_table['trans'] / tell_continuum
 
     # if chan == 'b':
