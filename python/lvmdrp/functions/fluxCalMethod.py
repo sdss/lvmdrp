@@ -37,7 +37,7 @@ from lvmdrp.core.constants import MASTERS_DIR
 description = "provides flux calibration tasks"
 
 
-def apply_fluxcal(in_rss: str, out_fframe: str, method: str = 'STD', display_plots: bool = False):
+def apply_fluxcal(in_rss: str, out_fframe: str, method: str = 'MOD', display_plots: bool = False):
     """applies flux calibration to spectrograph-combined data
 
     Parameters
@@ -47,9 +47,9 @@ def apply_fluxcal(in_rss: str, out_fframe: str, method: str = 'STD', display_plo
     out_rss : str
         output RSS file
     method : str
-        'STD' - apply calibration inferred from standard stars  (default)
+        'STD' - apply calibration inferred from standard stars
         'SCI' - apply calibration inferred from field stars in science ifu (fallback if STD not available)
-        'MOD' - apply calibration inferred from stellar atmosphere models
+        'MOD' - apply calibration inferred from stellar atmosphere models  (default)
         'NONE' - do not apply flux calibration
     display_plots : bool, optional
 
@@ -171,7 +171,7 @@ def apply_fluxcal(in_rss: str, out_fframe: str, method: str = 'STD', display_plo
             log.warning("all field star sensitivities are zero or NaN, can't calibrate")
             rss.add_header_comment("all field star sensitivities are zero or NaN, can't calibrate")
             sens_ave = np.ones_like(sens_ave)
-            sens_rms = np.zeros_like(sens_rms)
+            # sens_rms = np.zeros_like(sens_rms)
 
     # final check on sensitivities
     if method == "STD" and np.nanmean(fframe._fluxcal_std["mean"]) > 1e-12:
@@ -1510,7 +1510,7 @@ def correct_tellurics(wave, std_spec, lsf, in_rss, chan):
     :return:
     """
     std_telluric_corrected = std_spec.copy()
-    warnings.warn(f"Tellurics correction is not implemented yet. Skipping correction.")
+    warnings.warn("Tellurics correction is not implemented yet. Skipping correction.")
     return std_telluric_corrected
 
     telluric_file = os.path.join(os.getenv("LVMCORE_DIR"), "etc", "skytable.fits")

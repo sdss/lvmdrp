@@ -1519,7 +1519,7 @@ def reduce_1d(mjd, calibrations, expnums=None, cameras=CAMERAS, replace_with_nan
 def science_reduction(expnum: int,
                       use_longterm_cals: bool = True, from_sandbox: bool = True,
                       sky_weights: Tuple[float, float] = None,
-                      fluxcal_method: str = 'STD',
+                      fluxcal_method: str = 'MOD',
                       ncpus: int = None,
                       aperture_extraction: bool = False,
                       clean_ancillary: bool = False,
@@ -1765,7 +1765,7 @@ def science_reduction(expnum: int,
 
 def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
             with_cals: bool = False, no_sci: bool = False,
-            fluxcal_method: str = 'STD',
+            fluxcal_method: str = 'MOD',
             skip_2d: bool = False, skip_1d: bool = False, skip_post_1d: bool = False, skip_drpall: bool = False,
             use_nightly_cals: bool = False, use_untagged_cals: bool = False,
             clean_ancillary: bool = False, debug_mode: bool = False, force_run: bool = False):
@@ -1788,7 +1788,7 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
     no_sci : bool, optional
         Flag to turn off science frame reduction, by default False
     fluxcal_method : str, optional
-        'NONE' or 'STD' for standard stars, 'SCI' for field stars in science IFU
+        'NONE' or 'STD' for standard stars, 'SCI' for field stars in science IFU, 'MOD' for standard stars with template matching
     skip_2d : bool, optional
         Skip preprocessing and detrending, by default False
     skip_1d : bool, optional
