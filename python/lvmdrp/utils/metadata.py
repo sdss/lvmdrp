@@ -29,6 +29,8 @@ from lvmdrp import log, __version__, path
 from lvmdrp.utils.hdrfix import apply_hdrfix
 from lvmdrp.utils.convert import dateobs_to_sjd, correct_sjd, tileid_grp
 
+pd.set_option('io.hdf.default_format', 'table')
+
 
 DRPVER = __version__
 
@@ -1488,6 +1490,23 @@ def _collect_header_data(filename: str) -> dict:
         return hdrrow
 
 
+def safe_hdf_append(df: pd.DataFrame, h5file: str, key: str = "summary",
+                    min_itemsize: dict = None, data_columns: bool = True):
+    for col in df.select_dtypes(include=["object"]).columns:
+        df[col] = df[col].astype(str)
+
+    if os.path.exists(h5file):
+        existing_df = pd.read_hdf(h5file, key=key)
+        df = pd.concat([existing_df, df], ignore_index=True)
+        df.drop_duplicates(subset=("expnum",), keep="last", inplace=True)
+        df.reset_index(drop=True, inplace=True)
+        os.remove(h5file)
+
+    df.to_hdf(h5file, key=key, format="table",
+                data_columns=data_columns,
+                min_itemsize=min_itemsize)
+
+
 def update_summary_file(filename: str, tileid: int = None, mjd: int = None, expnum: int = None,
                         master_mjd: int = None, drpver: str = None):
     """ Update the DRPall summary file
@@ -1545,7 +1564,7 @@ def update_summary_file(filename: str, tileid: int = None, mjd: int = None, expn
     tels = {'sci', 'skye', 'skyw'}
     keys = {'ra', 'dec', 'amass', 'kmpos', 'focpos', 'sh_hght', 'moon_sep'}
     dtypes = {f'{i}_{j}': 'float64' for i, j in itertools.product(tels, keys)}
-    dtypes.update({colname: 'float64' for colname in ('moon_ra', 'moon_dec', 'moon_phase', 'moon_fli', 'sun_alt', 'moon_alt')})
+    dtypes.update({colname: 'float64' for colname in ('moon_ra', 'moon_dec', 'moon_phase', 'moon_fli', 'sun_alt', 'moon_alt', 'sci_pa')})
     dtypes['calib_mjd'] = 'int64'
     df = df.astype(dtypes)
 
@@ -1564,12 +1583,13 @@ def update_summary_file(filename: str, tileid: int = None, mjd: int = None, expn
 
     # set min column sizes for some columns
     min_itemsize = {'skye_name': 20, 'skyw_name': 20, 'location': 120, 'agcam_location': 120,
-                    'object': 24, 'obstime': 23}
+                    'object': 24, 'filename': 120, 'obstime': 23, 'drpver': 15}
 
     # write to pytables hdf5
     try:
         with lock:
-            df.to_hdf(drpall, key='summary', mode='a', append=True, data_columns=True, min_itemsize=min_itemsize)
+            safe_hdf_append(df, drpall, key="summary",
+                    min_itemsize=min_itemsize, data_columns=True)
     except ImportError:
         log.error('Missing pytables dependency. Install with `pip install "pandas[hdf5]"`. '
                       'On macs, you may first need to first run "brew install hdf5".')

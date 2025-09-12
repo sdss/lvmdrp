@@ -1953,8 +1953,13 @@ def create_drpall(drp_version: str = None, overwrite: bool = False) -> None:
     drp_version = drp_version or drpver
 
     drpall = path.full('lvm_drpall', drpver=drp_version)
+    drpall_h5 = drpall.replace('.fits', '.h5')
     if overwrite:
-        drpall = drpall.replace('.fits', '.h5')
+        if os.path.isfile(drpall_h5):
+            log.info(f"removing existing {drpall_h5}")
+            os.remove(drpall_h5)
+        else:
+            log.info(f"no drpall file found for {drp_version = }")
         if os.path.isfile(drpall):
             log.info(f"removing existing {drpall}")
             os.remove(drpall)
@@ -1983,13 +1988,13 @@ def create_drpall(drp_version: str = None, overwrite: bool = False) -> None:
             failed.append(sframe_path)
             continue
 
-    log.info(f"finished summarizing {nframes-nfailed} lvmSFrames in {drpall}")
+    log.info(f"finished summarizing {nframes-nfailed} lvmSFrames in {drpall_h5}")
     if nfailed != 0:
         log.warning(f"with {nfailed} failed frames:")
         log.warning(f"{failed = }")
 
-    convert_h5_to_fits(drpall)
-    log.info(f"finished converting HDF5 to FITS format in {drpall.replace('h5', '.fits')}")
+    convert_h5_to_fits(drpall_h5)
+    log.info(f"finished converting HDF5 to FITS format in {drpall}")
 
 
 def cache_gaia_spectra(mjds: Union[int, str, list], min_acquired=999, dry_run: bool = False) -> None:
