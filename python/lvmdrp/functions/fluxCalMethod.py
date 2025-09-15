@@ -72,13 +72,6 @@ def apply_fluxcal(in_rss: str, out_fframe: str, method: str = 'MOD', display_plo
                        fluxcal_std=rss._fluxcal_std, fluxcal_sci=rss._fluxcal_sci,
                        fluxcal_mod=rss._fluxcal_mod, slitmap=rss._slitmap)
 
-    # check for flux calibration data
-    fframe.setHdrValue("FLUXCAL", 'NONE', "flux-calibration method")
-    if method == "NONE":
-        log.info("skipping flux calibration")
-        fframe.writeFitsData(out_fframe)
-        return fframe
-
     expnum = fframe._header["EXPOSURE"]
     channel = fframe._header["CCD"]
 
@@ -86,21 +79,6 @@ def apply_fluxcal(in_rss: str, out_fframe: str, method: str = 'MOD', display_plo
     fframe.apply_pixelmask()
     # load fibermap and filter for current spectrograph
     slitmap = fframe._slitmap
-
-    # define exposure time factors
-    exptimes = np.zeros(len(slitmap))
-    exptimes[
-        (slitmap["targettype"] == "science") | (slitmap["targettype"] == "SKY")
-    ] = fframe._header["EXPTIME"]
-    if len(fframe._header["STD*EXP"]) == 0:
-        exptimes[slitmap["telescope"] == "Spec"] = fframe._header["EXPTIME"] / 12
-        log.warning(f"missing standard stars exposure time, assuming exptime = {fframe._header['EXPTIME'] / 12}s")
-        fframe.add_header_comment(f"missing standard stars exposure time, assuming exptime = {fframe._header['EXPTIME'] / 12} s")
-    else:
-        for std_hd in fframe._fluxcal_std.colnames:
-            exptime = fframe._header[f"{std_hd[:-3]}EXP"]
-            fiberid = fframe._header[f"{std_hd[:-3]}FIB"]
-            exptimes[slitmap["orig_ifulabel"] == fiberid] = exptime
 
     # apply joint sensitivity curve
     fig, ax = create_subplots(to_display=display_plots, figsize=(10, 5))
@@ -121,6 +99,13 @@ def apply_fluxcal(in_rss: str, out_fframe: str, method: str = 'MOD', display_plo
 
     fframe._fluxcal_sci["mean"] = biweight_location(fframe._fluxcal_sci.to_pandas().values, axis=1, ignore_nan=True) * u.Unit("erg / (ct cm2)")
     fframe._fluxcal_sci["rms"] = biweight_scale(fframe._fluxcal_sci.to_pandas().values, axis=1, ignore_nan=True) * u.Unit("erg / (ct cm2)")
+
+    # check for flux calibration data
+    if method == "NONE":
+        log.info("skipping flux calibration")
+        fframe.setHdrValue("FLUXCAL", 'NONE', "flux-calibration method")
+        fframe.writeFitsData(out_fframe)
+        return fframe
 
     # if instructed, use standard stars
     if method == 'STD':
@@ -220,6 +205,21 @@ def apply_fluxcal(in_rss: str, out_fframe: str, method: str = 'MOD', display_plo
     lext, ext = txt[:, 0], txt[:, 1]
     ext = np.interp(fframe._wave, lext, ext)
     sci_secz = fframe._header["TESCIAM"]
+
+    # define exposure time factors
+    exptimes = np.zeros(len(slitmap))
+    exptimes[
+        (slitmap["targettype"] == "science") | (slitmap["targettype"] == "SKY")
+    ] = fframe._header["EXPTIME"]
+    if len(fframe._header["STD*EXP"]) == 0:
+        exptimes[slitmap["telescope"] == "Spec"] = fframe._header["EXPTIME"] / 12
+        log.warning(f"missing standard stars exposure time, assuming exptime = {fframe._header['EXPTIME'] / 12}s")
+        fframe.add_header_comment(f"missing standard stars exposure time, assuming exptime = {fframe._header['EXPTIME'] / 12} s")
+    else:
+        for std_hd in fframe._fluxcal_std.colnames[:-2]:
+            exptime = fframe._header[f"{std_hd[:-3]}EXP"]
+            fiberid = fframe._header[f"{std_hd[:-3]}FIB"]
+            exptimes[slitmap["orig_ifulabel"] == fiberid] = exptime
 
     # optionally sky flux calibration
     if method == 'NONE':
