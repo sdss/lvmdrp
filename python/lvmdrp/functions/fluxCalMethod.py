@@ -628,9 +628,13 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
             gaia_z.append(r['mh_gspspec'])
 
         except fluxcal.GaiaStarNotFound as e:
-            log.warning(e)
+            gaia_Teff.append(np.nan)
+            gaia_logg.append(np.nan)
+            gaia_z.append(np.nan)
+            gaia_flux_interpolated.append(np.ones_like(std_wave_all) * np.nan)
+            model_to_gaia_median.append(np.nan)
+            log.warning(f"Gaia star {gaia_ids[i]} not found: {e}")
             # rss_tmp.add_header_comment(f"Gaia star {gaia_ids[i]} not found")
-            log.info(f"Gaia star {gaia_ids[i]} not found")
             continue
 
         # convolve model to gaia lsf
@@ -690,6 +694,8 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
             frame1.set_xticklabels([])
 
         for i in range(len(lsf_all_bands[0])):
+            if np.isnan(model_to_gaia_median[i]):
+                continue
             # !now telluric correction does not work!
             std_telluric_corrected = correct_tellurics(w[n_chan], std_spectra_all_bands[n_chan][i], lsf_all_bands[n_chan][i], in_rss[n_chan], chan)
             sens_tmp = calc_sensitivity_from_model(w[n_chan], std_telluric_corrected, lsf_all_bands[n_chan][i],
