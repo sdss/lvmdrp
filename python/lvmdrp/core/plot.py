@@ -16,7 +16,7 @@ from astropy.visualization import AsinhStretch, ImageNormalize, PercentileInterv
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 import warnings
 
-from lvmdrp.core.constants import LVM_NCOLS, LVM_NROWS
+from lvmdrp.core.constants import LVM_NCOLS, LVM_NROWS, LVM_NOVER
 
 warnings.filterwarnings(
     action="ignore",
@@ -79,11 +79,15 @@ def plot_image_shift(ax, image, column_shift, xpos=None, inset_pos=(0.0,1.0-0.32
     axis = []
     for i, irow in enumerate(irows):
         iy, fy, ix, fx = xpos-30, xpos+30, irow-30, irow+30
+        ix, fx = max(ix, 0), min(fx, LVM_NROWS)
+        iy, fy = max(iy, 0), min(fy, LVM_NCOLS+2*LVM_NOVER)
         image_region = image[ix:fx, iy:fy]
 
         axi = ax.inset_axes((inset_pos[0],inset_pos[1]-i/3.2, *inset_box))
-        norm = simple_norm(image_region, max_percent=80)
-        axi.imshow(image_region, extent=[iy,fy,ix,fx], origin="lower", cmap=cmap, norm=norm)
+        norm = simple_norm(image_region, max_percent=70)
+        axi.imshow(image_region, extent=[iy,fy,ix,fx], origin="lower", cmap=cmap, norm=norm, interpolation="none")
+        axi.axhline(irow+1, ls="--", lw=0.5, color="0.2")
+        axi.text(image.shape[1]//2, irow+1, f"{irow+1}", va="bottom", ha="center")
         axi.tick_params(axis="both", labelsize=10)
         if i == 0 and irows.size > 1:
             axi.tick_params(axis="both", labelbottom=False)
