@@ -18,8 +18,9 @@ from astropy.io import fits
 from astropy.table import Table
 from filelock import FileLock, Timeout
 from tqdm import tqdm
+import warnings
 
-from lvmdrp.core.constants import CALIBRATION_NEEDS, CAMERAS
+from lvmdrp.core.constants import CALIBRATION_TYPES, CALIBRATION_NEEDS, CAMERAS
 from lvmdrp.utils.bitmask import (
     QualityFlag,
     ReductionStage,
@@ -965,7 +966,24 @@ def get_metadata(
     return metadata
 
 
-def get_sequence_metadata(mjd, expnums=None, exptime=None, cameras=CAMERAS, for_cals={"bias", "trace", "wave", "dome", "twilight"}, extract_metadata=False):
+def get_calibration_groups(frames):
+    # definitions of calibration frames
+    bias = (frames.imagetyp == "bias")
+    dome = (frames.ldls|frames.quartz) & ~(frames.neon|frames.hgne|frames.argon|frames.xenon)
+    twilight = (frames.imagetyp == "flat") & ~(frames.ldls|frames.quartz) & ~(frames.neon|frames.hgne|frames.argon|frames.xenon)
+    arc = (frames.neon|frames.hgne|frames.argon|frames.xenon) & ~(frames.ldls|frames.quartz)
+
+    cals_selections = {
+        "bias": bias,
+        "trace": dome,
+        "wave": arc,
+        "dome": dome,
+        "twilight": twilight
+    }
+    return cals_selections
+
+
+def get_sequence_metadata(from_epoch=None, mjds=None, expnums=None, exptime=None, cameras=CAMERAS, for_cals=CALIBRATION_TYPES, extract_metadata=False):
     """Get frames metadata for a given sequence
 
     Given a set of MJDs and (optionally) exposure numbers, get the frames
@@ -974,13 +992,15 @@ def get_sequence_metadata(mjd, expnums=None, exptime=None, cameras=CAMERAS, for_
 
     Parameters:
     ----------
-    mjd : int
-        MJD to reduce
+    from_epoch : dict[str, list[int]]
+        Dictionary specifying a calibration epoch
+    mjds : int|list[int]
+        Single MJD or a list of MJDs
     expnums : list
         List of exposure numbers to reduce
     exptime : int
         Filter frames metadata by exposure
-    cameras : list
+    cameras : list[str]
         List of cameras (e.g., "b1", "r3") to filter by
     for_cals : list, tuple or set, optional
         Only return frames meant to produce given calibrations, {'bias', 'trace', 'wave', 'dome', 'twilight'}
@@ -994,12 +1014,29 @@ def get_sequence_metadata(mjd, expnums=None, exptime=None, cameras=CAMERAS, for_
     masters_mjd : float
         MJD for master frames
     """
+
+    if mjds is None and from_epoch is None:
+        raise ValueError(f"Invalid value(s) for `mjds` or `from_epoch`: {mjds = }, {from_epoch = }. Either `mjds` or `from_epoch` has to be given")
+    if not isinstance(mjds, (tuple, list, set)):
+        mjds = [mjds]
+
+    # if an epoch is given, it takes precedence
+    if from_epoch is not None:
+        for_cals = list(from_epoch.keys())
+        mjds = []
+        for cal in for_cals:
+            mjds += from_epoch[cal]
+
+    # remove repeated MJDs and sort
+    mjds = sorted(set(mjds))
+
     # get frames metadata
-    frames = get_frames_metadata(mjd=mjd, overwrite=extract_metadata)
+    frames = [get_frames_metadata(mjd=mjd, overwrite=extract_metadata) for mjd in mjds]
+    frames = pd.concat(frames, ignore_index=True)
     frames.query("imagetyp in ['bias', 'flat', 'arc']", inplace=True)
     if len(frames) == 0:
-        log.error(f"no calibration frames found for MJD = {mjd}")
-        return frames, {}
+        log.error(f"no calibration frames found for MJD = {mjds}")
+        return {}
 
     # filter by given expnums
     if expnums is not None:
@@ -1012,34 +1049,21 @@ def get_sequence_metadata(mjd, expnums=None, exptime=None, cameras=CAMERAS, for_
     if cameras:
         frames.query("camera in @cameras", inplace=True)
 
-    # simple fix of imagetyp, some images have the wrong type in the header
-    bias_selection = (frames.imagetyp == "bias")
-    twilight_selection = (frames.imagetyp == "flat") & ~(frames.ldls|frames.quartz) & ~(frames.neon|frames.hgne|frames.argon|frames.xenon)
-    domeflat_selection = (frames.ldls|frames.quartz) & ~(frames.neon|frames.hgne|frames.argon|frames.xenon)
-    arc_selection = (frames.neon|frames.hgne|frames.argon|frames.xenon) & ~(frames.ldls|frames.quartz)
-    frames.loc[twilight_selection, "imagetyp"] = "flat"
-    frames.loc[domeflat_selection, "imagetyp"] = "flat"
-    frames.loc[arc_selection, "imagetyp"] = "arc"
+    # group calibrations according to their type
+    cals_selections = get_calibration_groups(frames)
+    # group calibrations by the requested MJDs
+    mjds_selections = {cal: frames.mjd.isin(from_epoch[cal]) if from_epoch is not None else np.ones_like(cals_selections[cal], dtype="bool") for cal in cals_selections}
 
-    found_cals = {'bias', 'trace', 'wave', 'dome', 'twilight'}
-    if bias_selection.sum() == 0 and "bias" in for_cals:
-        log.error("no bias exposures found")
-        found_cals.remove("bias")
-    elif domeflat_selection.sum() == 0 and "trace" in for_cals:
-        log.error("no dome flat exposures found")
-        found_cals.remove("trace")
-    elif arc_selection.sum() == 0 and "wave" in for_cals:
-        log.error("no arc exposures found")
-        found_cals.remove("wave")
-    elif domeflat_selection.sum() == 0 and "dome" in for_cals:
-        log.error("no dome flat exposures found")
-    elif twilight_selection.sum() == 0 and "twilight" in for_cals:
-        log.error("no twilight exposures found")
-        found_cals.remove("twilight")
-
+    # manually fix image types to match their selection
+    frames.loc[cals_selections["bias"], "imagetyp"] = "bias"
+    frames.loc[cals_selections["dome"], "imagetyp"] = "flat"
+    frames.loc[cals_selections["wave"], "imagetyp"] = "arc"
+    frames.loc[cals_selections["twilight"], "imagetyp"] = "flat"
     frames.sort_values(["expnum", "camera"], inplace=True)
 
-    return frames, found_cals
+    # filter requested calibrations
+    calibrations = {cal: frames.loc[cals_selections[cal] & mjds_selections[cal]] for cal in for_cals}
+    return calibrations
 
 
 # TODO: implement matching of analogs and calibration masters

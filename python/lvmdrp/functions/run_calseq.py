@@ -46,7 +46,7 @@ from lvmdrp import log, path, __version__ as drpver
 from lvmdrp.utils import metadata as md
 from lvmdrp.utils.convert import tileid_grp
 from lvmdrp.utils.paths import get_master_mjd, get_calib_paths, group_calib_paths, get_frames_paths
-from lvmdrp.core.constants import CALIBRATION_NAMES, SKYLINES_FIBERFLAT, CONTINUUM_FIBERFLAT, CALIBRATION_NEEDS
+from lvmdrp.core.constants import CALIBRATION_PRODUCTS, SKYLINES_FIBERFLAT, CONTINUUM_FIBERFLAT, CALIBRATION_NEEDS
 from lvmdrp.core.constants import LVM_NFIBERS, LVM_NCOLS
 from lvmdrp.core.plot import create_subplots, save_fig
 from lvmdrp.core import dataproducts as dp
@@ -172,11 +172,10 @@ def choose_sequence(frames, flavor, kind, truncate=True):
         return chosen_frames, chosen_expnums
 
     # fall back to full set of frames and randomly select the best matching exposures
-    log.info(f"chosen sequence for {flavor = } has the wrong length {sequence_length} != {expected_length = }")
+    log.warning(f"chosen sequence for {flavor = } has the wrong length {sequence_length} != {expected_length = }")
     chosen_expnums = expnums
     sequence_length = len(chosen_expnums)
     chosen_frames = cleaned_frames.query("expnum in @chosen_expnums")
-    log.info(f"selecting full set of frames with {sequence_length = } exposures")
 
     # handle case of sequence longer than expected and truncate == True
     if truncate and sequence_length > expected_length:
@@ -194,7 +193,9 @@ def choose_sequence(frames, flavor, kind, truncate=True):
         chosen_frames = cleaned_frames.query("expnum in @chosen_expnums")
         chosen_frames.sort_values(["expnum", "camera"], inplace=True)
     elif sequence_length < expected_length:
-        log.warning(f"chosen sequence for {flavor = } is still shorter than expected {sequence_length} < {expected_length = }")
+        log.warning(f"chosen sequence for {flavor = } is shorter than expected {sequence_length} < {expected_length = }")
+    else:
+        log.info(f"selecting full set of frames with {sequence_length = } exposures")
 
     return chosen_frames, chosen_expnums
 
@@ -913,7 +914,7 @@ def copy_longterm_calibrations(mjd, flavors=None, dry_run=False):
     elif isinstance(flavors, str) and flavors in flavors:
         flavors = {flavors}
     elif flavors is None:
-        flavors = CALIBRATION_NAMES.difference({"pixmask", "pixflat", "trace_guess", "amp", "fiberflat_dome"})
+        flavors = CALIBRATION_PRODUCTS.difference({"pixmask", "pixflat", "trace_guess", "amp", "fiberflat_dome"})
     else:
         raise ValueError(f"kind must be one of {flavors}")
 

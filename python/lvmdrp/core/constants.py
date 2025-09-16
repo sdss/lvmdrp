@@ -101,6 +101,17 @@ SKYCORR_PAR_MAP = {
     "PLOT_TYPE": "plotType",
 }
 
+# high-level calibration types
+CALIBRATION_TYPES = {"bias", "trace", "wave", "dome", "twilight"}
+# calibration products
+CALIBRATION_PRODUCTS = {"pixmask", "pixflat", "bias", "trace_guess", "centroids", "sigmas", "counts", "model", "wave", "lsf", "fiberflat_dome", "fiberflat_twilight"}
+# a map for high-level calibration types and their products
+CALIBRATION_MAPPINGS = {
+    "trace": ["centroids", "sigmas", "model"],
+    "wave": ["wave", "lsf"],
+    "dome": ["fiberflat_dome"],
+    "twilight": ["fiberflat_twilight"]}
+# calibration products needed depending on the type of frame
 CALIBRATION_NEEDS = {
     "bias": ["pixmask"],
     "pixflat": ["pixmask", "bias", "dark"],
@@ -110,12 +121,6 @@ CALIBRATION_NEEDS = {
     "twilight": ["pixmask", "pixflat", "bias", "centroids", "sigmas", "model", "wave", "lsf"],
     "object": ["pixmask", "pixflat", "bias", "centroids", "sigmas", "model", "wave", "lsf", "fiberflat_twilight"],
 }
-CALIBRATION_NAMES = {"pixmask", "pixflat", "bias", "trace_guess", "centroids", "sigmas", "counts", "model", "wave", "lsf", "fiberflat_dome", "fiberflat_twilight"}
-CALIBRATION_MATCH = {
-    "trace": ["centroids", "sigmas", "model"],
-    "wave": ["wave", "lsf"],
-    "dome": ["fiberflat_dome"],
-    "twilight": ["fiberflat_twilight"]}
 
 CAMERAS = ["b1", "b2", "b3", "r1", "r2", "r3", "z1", "z2", "z3"]
 

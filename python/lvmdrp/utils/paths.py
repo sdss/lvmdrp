@@ -5,7 +5,7 @@ import pandas as pd
 
 from typing import List, Union
 
-from lvmdrp.core.constants import CALIBRATION_NAMES, CAMERAS, MASTERS_DIR
+from lvmdrp.core.constants import CALIBRATION_PRODUCTS, CAMERAS, MASTERS_DIR
 from lvmdrp import path, __version__ as drpver
 from lvmdrp.utils.convert import tileid_grp
 from lvmdrp.utils import metadata as md
@@ -64,7 +64,7 @@ def mjd_from_expnum(expnum: Union[int, str, list, tuple]) -> List[int]:
     return [int(mjd)]
 
 
-def get_calib_paths(mjd, version=None, cameras="*", flavors=CALIBRATION_NAMES, longterm_cals=True, from_sandbox=False, return_mjd=False):
+def get_calib_paths(mjd, version=None, cameras="*", flavors=CALIBRATION_PRODUCTS, longterm_cals=True, from_sandbox=False, return_mjd=False):
     """Returns a dictionary containing paths for calibration frames
 
     Parameters
