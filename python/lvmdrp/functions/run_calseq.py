@@ -87,7 +87,7 @@ FIBER_SMOOTHING_CONFIG = {
     "sigmas": ("polynomial", {"deg": 8, "nsigmas": np.inf, "min_samples_frac": 0.7})}
 
 
-CALIBRATION_EPOCHS_PATH = os.path.join(os.getenv("LVMCORE_DIR"), "etc", "calibration-epochs.yaml")
+CALIBRATION_EPOCHS_PATH = os.path.join(os.getenv("LVMCORE_DIR"), "calibrations", "calibration-epochs.yaml")
 
 STRAYLIGHT_PARS = dict(
     select_nrows=(10,10), use_weights=True, aperture=11,
@@ -336,12 +336,30 @@ def get_exposed_std_fiber(mjd, expnums, camera, imagetyp="flat", ref_column=LVM_
     return exposed_stds, unexposed_stds
 
 
+def _parse_list(items_str):
+    # handle list
+    if isinstance(items_str, str) and "," in items_str:
+        items = [int(i) for i in items_str.split(",") if i]
+    # handle range
+    elif isinstance(items_str, str) and "-" in items_str:
+        item_i, item_f = items_str.split("-")
+        if not item_i or not item_f:
+            items = []
+        else:
+            items = list(range(int(item_i), int(item_f)+1))
+    # handle rest
+    else:
+        items = [int(items_str)]
+
+    return items
+
+
 def load_calibration_epochs(epochs_path=None, filter_by=None):
     epochs_path = epochs_path or CALIBRATION_EPOCHS_PATH
     with open(epochs_path) as f:
         epochs = yaml.safe_load(f)["epochs"]
 
-    log.info(f"found {len(epochs)}:")
+    log.info(f"found {len(epochs)} calibration epochs:")
     for mjd in epochs:
         log.info(f"  {mjd}: {epochs[mjd]}")
 
@@ -357,16 +375,11 @@ def load_calibration_epochs(epochs_path=None, filter_by=None):
     return epochs
 
 
-def parse_calibration_epochs(mjd, sources=None, trigger=None, comment=None):
-    if sources is None:
-        calibs_mjds = {}
-        for flavor in CAL_FLAVORS:
-            calibs_mjds[flavor] = mjd
-        return calibs_mjds
+def get_calibration_epoch(mjd, flavors=None, trigger=None, comment=None):
+    if flavors is None:
+        return {flavor: _parse_list(mjd) for flavor in CAL_FLAVORS}
 
-    calibs_mjds = {}
-    for source_mjd in sources:
-        calibs_mjds.update({flavor: source_mjd for flavor in sources[source_mjd]})
+    calibs_mjds = {flavor: _parse_list(source_mjd) for flavor, source_mjd in flavors.items()}
     return calibs_mjds
 
 
@@ -2052,7 +2065,7 @@ def reduce_longterm_sequence(mjd, calib_epoch=None, use_longterm_cals=True,
         raise ValueError(f"some chosen image types in 'only_cals' are not valid: {only_cals.difference(CAL_FLAVORS)}")
     log.info(f"going to produce long-term calibrations: {only_cals}")
 
-    source_mjds = parse_calibration_epochs(mjd, **(calib_epoch or {}))
+    source_mjds = get_calibration_epoch(mjd, **(calib_epoch or {}))
 
     if "bias" in only_cals:
         create_bias(mjd=source_mjds["bias"], cals_mjd=mjd, use_longterm_cals=use_longterm_cals, skip_done=skip_done, dry_run=dry_run)
