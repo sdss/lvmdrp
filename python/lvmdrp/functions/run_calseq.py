@@ -616,8 +616,8 @@ def _get_crosstalk(cent, fwhm, ifiber, jcolumn, ypixels=None, nfibers=1):
 
 
 def _log_dry_run(frames, calibs, settings, caller):
-    log.info(f"dry run of {caller} with frames:")
     records = frames.filter(["mjd", "tileid", "expnum", "imagetyp", "qaqual"]).drop_duplicates().to_string(index=None).split("\n")
+    log.info(f"dry run of '{caller}' with {len(records)} exposures:")
     for record in records:
         log.info(f"   {record}")
     log.info("with calibrations:")
@@ -1140,7 +1140,7 @@ def fix_raw_pixel_shifts(mjd, expnums=None, ref_expnums=None, use_longterm_cals=
                                          interactive=interactive, display_plots=display_plots)
 
 
-def create_bias(mjd, expnums=None, cals_mjd=None, use_longterm_cals=True, assume_imagetyp=None, skip_done=True, dry_run=False):
+def create_bias(mjd, epochs=None, expnums=None, cals_mjd=None, use_longterm_cals=True, skip_done=True, dry_run=False):
     """Reduce a sequence of bias frames to produce master frames for each camera
 
     Given a set of MJDs and (optionally) exposure numbers, reduce the
@@ -1156,20 +1156,21 @@ def create_bias(mjd, expnums=None, cals_mjd=None, use_longterm_cals=True, assume
         List of exposure numbers to reduce
     flavor : str
         The type of frame to reduce
-    assume_imagetyp : str
-        Assume the given imagetyp for all frames
     skip_done : bool
         Skip pipeline steps that have already been done
     dry_run : bool, optional
         Logs useful information abaut the current setup without actually reducing, by default False
     """
-    frames, found_cals = md.get_sequence_metadata(mjd, expnums=expnums)
-    if "bias" not in found_cals:
+    epoch = get_calibration_epoch(mjd=mjd, **(epochs or {}).get(mjd, {}))
+    frames_groups = md.get_sequence_metadata(from_epoch=epoch, mjds=mjd, expnums=expnums, for_cals="bias")
+    mjds = epoch["bias"]
+    if "bias" not in frames_groups:
         log.error("no bias frames found, skipping production of bias frames")
         return
 
+    frames = frames_groups.pop("bias")
     if expnums is None:
-        frames, expnums = choose_sequence(frames, flavor="bias", kind="longterm")
+        frames, expnums = choose_sequence(frames, flavor="bias", kind="longterm", truncate=False)
 
     # define master paths for target frames
     calibs = get_calib_paths(mjd=cals_mjd or mjd, version=drpver, longterm_cals=use_longterm_cals, flavors=CALIBRATION_NEEDS["bias"])
@@ -1179,33 +1180,22 @@ def create_bias(mjd, expnums=None, cals_mjd=None, use_longterm_cals=True, assume
         return
 
     # preprocess and detrend frames
-    reduce_2d(mjd=mjd, calibrations=calibs, expnums=set(frames.expnum), assume_imagetyp=assume_imagetyp, skip_done=skip_done)
-
-    # define image types to reduce
-    imagetypes = set(frames.imagetyp)
+    reduce_2d(mjds=mjds, calibrations=calibs, expnums=expnums, reject_cr=False, add_astro=False, sub_straylight=False, skip_done=skip_done)
 
     # reduce each image type
-    for imagetyp in imagetypes:
-        frames_analog = frames.query("imagetyp == @imagetyp").groupby(["imagetyp", "camera"])
+    frames_analog = frames.groupby(["camera"])
 
-        # hack the imagetyp for cases in which the imagetyp is not set or is incorrect (e.g., pixelflats)
-        if assume_imagetyp is not None:
-            imagetyp = assume_imagetyp
+    for camera in frames_analog.groups:
+        analogs = frames_analog.get_group((camera,))
 
-        for keys in frames_analog.groups:
-            analogs = frames_analog.get_group(keys)
-            frame = analogs.iloc[0].to_dict()
+        # combine into master frame
+        kwargs = get_config_options('reduction_steps.create_master_frame', "bias")
+        log.info(f'custom configuration parameters for create_master_frame: {repr(kwargs)}')
+        mframe_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, kind="mbias", camera=camera)
 
-            # combine into master frame
-            kwargs = get_config_options('reduction_steps.create_master_frame', imagetyp)
-            log.info(f'custom configuration parameters for create_master_frame: {repr(kwargs)}')
-            mframe_path = path.full("lvm_master", drpver=drpver, tileid=frame["tileid"], mjd=mjd, kind=f'm{imagetyp}', camera=frame["camera"])
-            if skip_done and os.path.isfile(mframe_path):
-                log.info(f"skipping {mframe_path}, file already exist")
-            else:
-                os.makedirs(os.path.dirname(mframe_path), exist_ok=True)
-                dframe_paths = [path.full("lvm_anc", drpver=drpver, kind="d" if imagetyp != "bias" else "p", imagetype=imagetyp, **frame) for frame in analogs.to_dict("records")]
-                image_tasks.create_master_frame(in_images=dframe_paths, out_image=mframe_path, **kwargs)
+        os.makedirs(os.path.dirname(mframe_path), exist_ok=True)
+        pframe_paths = [path.full("lvm_anc", drpver=drpver, kind="p", imagetype="bias", **frame) for frame in analogs.to_dict("records")]
+        image_tasks.create_master_frame(in_images=pframe_paths, out_image=mframe_path, batch_size=200, master_mjd=mjd, **kwargs)
 
 
 def create_nightly_traces(mjd, use_longterm_cals=False, expnums_ldls=None, expnums_qrtz=None,

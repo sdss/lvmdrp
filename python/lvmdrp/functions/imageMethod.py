@@ -4028,7 +4028,7 @@ def create_master_frame(in_images: List[str], out_image: str, batch_size: int = 
     # combine images
     log.info(f"combining {nexp} frames into master frame")
     if master_type == "bias":
-        master_img = combineImages(org_imgs, method="median", normalize=False)
+        master_img = combineImages(org_imgs, method="median", normalize=True, normalize_percentile=50)
     elif master_type == "dark":
         master_img = combineImages(org_imgs, method="median", normalize=False)
     elif master_type == "pixflat":
