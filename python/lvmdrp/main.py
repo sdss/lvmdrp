@@ -1346,7 +1346,7 @@ def update_error_file(tileid: int, mjd: int, expnum: int, error: str,
         f.write('\n')
 
 
-def reduce_2d(mjd, calibrations, expnums=None, exptime=None, cameras=CAMERAS,
+def reduce_2d(mjds, calibrations, expnums=None, exptime=None, cameras=CAMERAS,
               replace_with_nan=True, assume_imagetyp=None, reject_cr=True,
               add_astro=True, sub_straylight=True, parallel_run=1,
               skip_done=True, keep_ancillary=False, **cfg_straylight):
@@ -1360,8 +1360,8 @@ def reduce_2d(mjd, calibrations, expnums=None, exptime=None, cameras=CAMERAS,
 
     Parameters:
     ----------
-    mjd : int
-        MJD to reduce
+    mjds : int|list[int]
+        Single MJD or a list of MJDs
     calibrations : dict[str, dict[str, str]]
         Paths to calibrations to use, including bias and pixel masks and flats
     expnums : list
@@ -1392,7 +1392,15 @@ def reduce_2d(mjd, calibrations, expnums=None, exptime=None, cameras=CAMERAS,
         Keep ancillary files, by default False
     """
 
-    frames = get_frames_metadata(mjd)
+    if isinstance(mjds, (list, tuple, set)):
+        for mjd in mjds:
+            reduce_2d(mjds=mjd, calibrations=calibrations, expnums=expnums, exptime=exptime, cameras=CAMERAS,
+                      replace_with_nan=replace_with_nan, assume_imagetyp=assume_imagetyp, reject_cr=reject_cr,
+                      add_astro=add_astro, sub_straylight=sub_straylight, parallel_run=parallel_run,
+                      skip_done=skip_done, keep_ancillary=keep_ancillary, **cfg_straylight)
+        return
+
+    frames = get_frames_metadata(mjds)
     if expnums is not None:
         frames.query("expnum in @expnums", inplace=True)
     if exptime is not None:
@@ -1415,11 +1423,6 @@ def reduce_2d(mjd, calibrations, expnums=None, exptime=None, cameras=CAMERAS,
         lframe_path = path.full("lvm_anc", drpver=drpver, kind="l", imagetype=imagetyp, **frame)
         lstr_path = path.full("lvm_anc", drpver=drpver, kind="d", imagetype="stray", **frame)
 
-        # define agc coadd path
-        agcsci_path = path.full('lvm_agcam_coadd', mjd=mjd, specframe=frame["expnum"], tel='sci')
-        agcskye_path = path.full('lvm_agcam_coadd', mjd=mjd, specframe=frame["expnum"], tel='skye')
-        agcskyw_path = path.full('lvm_agcam_coadd', mjd=mjd, specframe=frame["expnum"], tel='skyw')
-
         # bypass creation of detrended frame in case of imagetyp=bias
         if imagetyp != "bias":
             dframe_path = path.full("lvm_anc", drpver=drpver, kind="d", imagetype=imagetyp, **frame)
@@ -1433,19 +1436,21 @@ def reduce_2d(mjd, calibrations, expnums=None, exptime=None, cameras=CAMERAS,
         else:
             with Timer(name='Preproc '+pframe_path, logger=log.info):
                 preproc_raw_frame(in_image=frame_path, out_image=pframe_path,
-                                  in_mask=calibrations["pixmask"][camera], replace_with_nan=replace_with_nan, assume_imagetyp=assume_imagetyp)
-            if imagetyp == "bias":
-                continue
+                                  in_mask=calibrations.get("pixmask", {}).get(camera), replace_with_nan=replace_with_nan, assume_imagetyp=assume_imagetyp)
             with Timer(name='Detrend '+dframe_path, logger=log.info):
                 detrend_frame(in_image=pframe_path, out_image=dframe_path,
-                            in_bias=calibrations["bias"][camera],
-                            in_pixelflat=calibrations["pixflat"][camera],
+                            in_bias=calibrations.get("bias", {}).get(camera),
+                            in_pixelflat=calibrations.get("pixflat", {}).get(camera),
                             replace_with_nan=replace_with_nan,
                             reject_cr=reject_cr,
                             in_slitmap=fibermap if imagetyp in {"flat", "arc", "object"} else None)
 
             # add astrometry to frame
             if add_astro:
+                # define agc coadd path
+                agcsci_path = path.full('lvm_agcam_coadd', mjd=mjds, specframe=frame["expnum"], tel='sci')
+                agcskye_path = path.full('lvm_agcam_coadd', mjd=mjds, specframe=frame["expnum"], tel='skye')
+                agcskyw_path = path.full('lvm_agcam_coadd', mjd=mjds, specframe=frame["expnum"], tel='skyw')
                 with Timer(name='Astrometry '+dframe_path, logger=log.info):
                     add_astrometry(in_image=dframe_path, out_image=dframe_path, in_agcsci_image=agcsci_path, in_agcskye_image=agcskye_path, in_agcskyw_image=agcskyw_path)
 
@@ -1459,7 +1464,7 @@ def reduce_2d(mjd, calibrations, expnums=None, exptime=None, cameras=CAMERAS,
                         nsigma=1.0, smoothing=40, median_box=None)
                     straylight_pars.update(cfg_straylight)
                     subtract_straylight(in_image=dframe_path, out_image=lframe_path, out_stray=lstr_path,
-                                        in_cent_trace=calibrations["centroids"][camera], parallel=parallel_run, **straylight_pars)
+                                        in_cent_trace=calibrations.get("centroids", {}).get(camera), parallel=parallel_run, **straylight_pars)
 
 
 def reduce_1d(mjd, calibrations, expnums=None, cameras=CAMERAS, replace_with_nan=True, sub_straylight=True, skip_done=True, keep_ancillary=False):
