@@ -355,8 +355,6 @@ def prepare_spec(in_rss, width=3):
         gaia_ids = []
         for s in stds:
             nn, fiber, gaia_id, exptime, secz = s  # unpack standard star tuple
-            gaia_ids.append(gaia_id)
-            fibers.append(fiber)
 
             # find the fiber with our spectrum of that Gaia star, if it is not in the current spectrograph, continue
             select = rss_tmp._slitmap["orig_ifulabel"] == fiber
@@ -372,6 +370,8 @@ def prepare_spec(in_rss, width=3):
                 log.warning(f"fiber {fiber} @ {fibidx[0]} has counts < 100 e-, skipping")
                 #rss.add_header_comment(f"fiber {fiber} @ {fibidx[0]} has counts < 100 e-, skipping")
                 continue
+            gaia_ids.append(gaia_id)
+            fibers.append(fiber)
 
             spec_tmp = (rss_tmp._data[fibidx[0],:] - master_sky._data[fibidx[0],:])/exptime
 
@@ -672,7 +672,6 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
                               mask_dict=mask_dict)
 
 
-
         # calculating sensitivity curves
     for n_chan, chan in enumerate('brz'):
         # load input RSS
@@ -686,7 +685,6 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
             colnames = [f"STD{i}SEN" for i in range(1, NSTD + 1)]
         res_mod = Table(np.full(w[n_chan].size, np.nan, dtype=list(zip(colnames, ["f8"] * len(colnames)))))
         # mean_mod, rms_mod = np.full(w.size, np.nan), np.full(w.size, np.nan)
-
         if plot:
             plt.subplot
             fig1 = plt.figure(1)
@@ -721,7 +719,6 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
             sens_coef = gaia_flux/lvmflux
             #print(f'lvmflux={lvmflux}, gaia_flux={gaia_flux}, converted to gaia flux = {lvmflux*sens_coef}')
 
-
             res_mod[f"STD{i}SEN"] = s(w[n_chan]).astype(np.float32)*sens_coef
             sens = sens0*sens_coef
 
@@ -730,7 +727,6 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
                 plt.plot(wgood, sgood*sens_coef, ".k", markersize=2, zorder=-999)
                 plt.plot(w[n_chan], sens, linewidth=1, zorder=-999, label = fibers[i])
                 plt.legend()
-
 
         res_mod_pd = res_mod.to_pandas().values
         rms_mod = biweight_scale(res_mod_pd, axis=1, ignore_nan=True)
@@ -1213,7 +1209,6 @@ def standard_sensitivity(stds, rss, GAIA_CACHE_DIR, ext, res, plot=False, width=
         if plot:
             plt.plot(wgood, sgood, ".k", markersize=2, zorder=-999)
             plt.plot(w, res[f"STD{nn}SEN"], linewidth=1)
-
     return rss, res
 
 
