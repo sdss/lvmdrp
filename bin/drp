@@ -12,7 +12,7 @@ import click
 import cloup
 from cloup.constraints import mutually_exclusive, RequireExactly, IsSet, If
 
-from lvmdrp.core.constants import CALIBRATION_MATCH
+from lvmdrp.core.constants import CALIBRATION_MAPPINGS
 from lvmdrp import __version__ as drpver
 from lvmdrp.main import run_drp, reduce_file, check_daily_mjd, parse_mjds, read_expfile, create_drpall, cache_gaia_spectra
 from lvmdrp.functions.skyMethod import configureSkyModel_drp
@@ -379,7 +379,7 @@ def create_tag(version, dry_run):
 
     for mjd in mjds:
         flavors = []
-        [flavors.extend(CALIBRATION_MATCH.get(calname, [calname])) for calname in only_cals]
+        [flavors.extend(CALIBRATION_MAPPINGS.get(calname, [calname])) for calname in only_cals]
         copy_longterm_calibrations(mjd=mjd, flavors=flavors, dry_run=dry_run)
 
 

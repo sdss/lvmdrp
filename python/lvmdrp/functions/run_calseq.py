@@ -1667,7 +1667,7 @@ def create_twilight_fiberflats(mjd: int, expnums: List[int] = None, cals_mjd: in
         return
 
     # 2D reduction of twilight sequence
-    reduce_2d(mjd=mjd, calibrations=calibs, expnums=frames.expnum.unique(), reject_cr=True,
+    reduce_2d(mjds=mjd, calibrations=calibs, expnums=frames.expnum.unique(), reject_cr=True,
               add_astro=False, sub_straylight=True, skip_done=skip_done, **STRAYLIGHT_PARS)
 
     for flat in frames.to_dict("records"):
@@ -1764,7 +1764,7 @@ def create_fiberflats_corrections(cals_mjd: int, science_mjds: Union[int, List[i
 
     # 2D and 1D reduction of science exposures
     for sci_mjd in science_mjds:
-        reduce_2d(mjd=sci_mjd, calibrations=calibs, expnums=science_expnums, reject_cr=True, add_astro=True, sub_straylight=True, skip_done=skip_done)
+        reduce_2d(mjds=sci_mjd, calibrations=calibs, expnums=science_expnums, reject_cr=True, add_astro=True, sub_straylight=True, skip_done=skip_done)
         reduce_1d(mjd=sci_mjd, calibrations=calibs, expnums=science_expnums, sub_straylight=True, skip_done=skip_done)
 
     for channel in "brz":

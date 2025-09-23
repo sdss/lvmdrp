@@ -829,6 +829,45 @@ def plot_flat_consistency(fflats, mflat, spec_wise=False, log_scale=False, label
     return axs
 
 
+def plot_exposed_std(image, snr_std, snr_all_stats, snr_std_stats, exposed_std, nsigmas, labels=False, ax=None):
+    if ax is None:
+        return
+
+    expnum = image._header["EXPOSURE"]
+    camera = image._header["CCD"]
+
+    slitmap = image._slitmap[image._slitmap["spectrographid"] == int(camera[1])]
+    spec_select = slitmap["telescope"] == "Spec"
+    ids_std = slitmap[spec_select]["orig_ifulabel"]
+    idx_std = np.arange(ids_std.size)
+
+    snr_all_mu, snr_all_sigma = snr_all_stats
+    snr_std_mu, snr_std_sigma = snr_std_stats
+    threshold = snr_std_mu + nsigmas * snr_std_sigma
+
+    ax.set_title(f"{expnum = } | {camera = }", loc="left")
+    ax.axhspan(snr_all_mu-snr_all_sigma, snr_all_mu+snr_all_sigma, lw=0, fc="0.7", alpha=0.5)
+    ax.axhline(snr_all_mu, lw=1, color="0.7")
+    ax.axhline(threshold, ls="--", lw=1, color="tab:red")
+    ax.axhline(snr_std_mu, lw=1, color="0.7")
+    ax.bar(idx_std, snr_std, hatch="///////", lw=0, ec="tab:blue", fc="none", zorder=999)
+    ax.set_xticks(idx_std)
+    ax.set_xticklabels(ids_std)
+    ax.text(-0.7, snr_all_mu, "Global mean SNR", ha="left", va="bottom")
+    ax.text(-0.7, snr_std_mu, "Stds. mean SNR", ha="left", va="bottom")
+    ax.text(-0.7, threshold, "Exposed threshold", ha="left", va="bottom", color="tab:red")
+
+    if labels:
+        ax.set_xlabel("Standard fibers")
+        ax.set_ylabel("SNR")
+
+    # highlight exposed fiber in plot
+    select_exposed = ids_std == exposed_std
+    ax.bar(idx_std[select_exposed], snr_std[select_exposed], hatch="///////", lw=0, ec="tab:red", fc="none", zorder=999)
+
+    return ax
+
+
 def ifu_view(slitmap=None, z=None, rss=None, cwave=None, dwave=None, comb_stat=None, telescope="Sci", use_world_coords=False,
              marker_size=50, norm_z=True, norm_cuts=None, norm_percents=None, cmap="coolwarm",
              hide_axis=True, ax=None, return_xyz=False):

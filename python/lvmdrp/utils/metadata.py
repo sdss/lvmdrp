@@ -1019,10 +1019,12 @@ def get_sequence_metadata(from_epoch=None, mjds=None, expnums=None, exptime=None
         raise ValueError(f"Invalid value(s) for `mjds` or `from_epoch`: {mjds = }, {from_epoch = }. Either `mjds` or `from_epoch` has to be given")
     if not isinstance(mjds, (tuple, list, set)):
         mjds = [mjds]
+    if not isinstance(for_cals, (tuple, list, set)):
+        for_cals = [for_cals]
 
     # if an epoch is given, it takes precedence
     if from_epoch is not None:
-        for_cals = list(from_epoch.keys())
+        for_cals = set(from_epoch.keys()).intersection(for_cals)
         mjds = []
         for cal in for_cals:
             mjds += from_epoch[cal]

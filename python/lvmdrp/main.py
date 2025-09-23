@@ -1394,7 +1394,7 @@ def reduce_2d(mjds, calibrations, expnums=None, exptime=None, cameras=CAMERAS,
 
     if isinstance(mjds, (list, tuple, set)):
         for mjd in mjds:
-            reduce_2d(mjds=mjd, calibrations=calibrations, expnums=expnums, exptime=exptime, cameras=CAMERAS,
+            reduce_2d(mjds=mjd, calibrations=calibrations, expnums=expnums, exptime=exptime, cameras=cameras,
                       replace_with_nan=replace_with_nan, assume_imagetyp=assume_imagetyp, reject_cr=reject_cr,
                       add_astro=add_astro, sub_straylight=sub_straylight, parallel_run=parallel_run,
                       skip_done=skip_done, keep_ancillary=keep_ancillary, **cfg_straylight)
@@ -1607,7 +1607,7 @@ def science_reduction(expnum: int,
         log.info("skipping 2D reduction")
     else:
         with Timer(name='Reduce2d', logger=log.info):
-            reduce_2d(mjd=sci_mjd, calibrations=calibs, expnums=[sci_expnum], reject_cr=reject_cr, skip_done=False)
+            reduce_2d(mjds=sci_mjd, calibrations=calibs, expnums=[sci_expnum], reject_cr=reject_cr, skip_done=False)
 
     # run reduction loop for each science camera exposure
     if skip_1d:
