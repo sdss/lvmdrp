@@ -295,8 +295,8 @@ def get_exposed_std_fiber(mjd, expnums, camera, imagetyp="flat", ref_column=LVM_
         log.info(f"measuring SNR of {len(images)} exposures:")
         for image, ax in zip(images, axs):
             expnum = image._header["EXPOSURE"]
-            exposed_std, _, snr_std, snr_std_med, snr_std_std = image.get_exposed_std(
-                ref_column=ref_column, fiber_pos=fiber_pos, snr_threshold=snr_threshold, trust_errors=False, ax=ax)
+            exposed_std, _, _, (snr_med, snr_std), (snr_std_med, snr_std_std) = image.get_exposed_std(
+                ref_column=ref_column, fiber_pos=fiber_pos, nsigmas=snr_threshold, trust_errors=False, ax=ax)
             log.info(f"  {expnum = } SNR for standards: {snr_std_med:.2f} +/- {snr_std_std:.2f}")
 
             if exposed_std is None:
