@@ -32,6 +32,7 @@ import numpy as np
 import bottleneck as bn
 import pandas as pd
 from glob import glob
+from itertools import product
 from pprint import pformat
 from copy import deepcopy as copy
 from datetime import datetime
@@ -41,12 +42,15 @@ from astropy.table import Table
 from scipy import interpolate
 from typing import Union, Tuple, List, Dict
 from collections.abc import Callable
+from matplotlib.gridspec import GridSpec
+import matplotlib.pyplot as plt
 
 from lvmdrp import log, path, __version__ as drpver
 from lvmdrp.utils import metadata as md
+from lvmdrp.utils import hdrfix
 from lvmdrp.utils.convert import tileid_grp
 from lvmdrp.utils.paths import get_master_mjd, get_calib_paths, group_calib_paths, get_frames_paths
-from lvmdrp.core.constants import CALIBRATION_PRODUCTS, SKYLINES_FIBERFLAT, CONTINUUM_FIBERFLAT, CALIBRATION_NEEDS
+from lvmdrp.core.constants import CALIBRATION_PRODUCTS, SKYLINES_FIBERFLAT, CONTINUUM_FIBERFLAT, CALIBRATION_NEEDS, STD_FIBER_LABELS
 from lvmdrp.core.constants import LVM_NFIBERS, LVM_NCOLS
 from lvmdrp.core.plot import create_subplots, save_fig
 from lvmdrp.core import dataproducts as dp
@@ -56,7 +60,8 @@ from lvmdrp.core.constants import (
     LVM_REFERENCE_COLUMN,
     LVM_NBLOCKS,
     MASTERS_DIR,
-    ARC_LAMPS)
+    ARC_LAMPS,
+    CALIBRATION_TYPES)
 from lvmdrp.core.tracemask import TraceMask
 from lvmdrp.core.image import loadImage
 from lvmdrp.core.rss import RSS, lvmFrame
@@ -76,7 +81,6 @@ MASK_BANDS = {
     "z": [(7570, 7700)]
 }
 COUNTS_THRESHOLDS = {"ldls": 1000, "quartz": 1000}
-CAL_FLAVORS = {"bias", "trace", "wave", "dome", "twilight"}
 FIBER_MEASURING_CONFIG = {
         "counts": {"mode": "lsq", "method": "dogbox", "loss": "linear", "xtol": 1e-3, "ftol": 1e-3},
         "centroids": {"mode": "lsq", "method": "dogbox", "loss": "linear", "xtol": 1e-3, "ftol": 1e-3},
@@ -123,8 +127,8 @@ def choose_sequence(frames, flavor, kind, truncate=True):
         "twilight": 12
     }
 
-    if not isinstance(flavor, str) or flavor not in CAL_FLAVORS:
-        raise ValueError(f"invalid flavor '{flavor}', available values are {CAL_FLAVORS}")
+    if not isinstance(flavor, str) or flavor not in CALIBRATION_TYPES:
+        raise ValueError(f"invalid flavor '{flavor}', available values are {CALIBRATION_TYPES}")
     if not isinstance(kind, str) or kind not in {"nightly", "longterm"}:
         raise ValueError(f"invalid kind '{kind}', available values are 'nightly' and 'longterm'")
 
@@ -221,7 +225,90 @@ def get_fibers_signal(mjd, camera, expnum, imagetyp="flat"):
     return fiberpos, img
 
 
-def get_exposed_std_fiber(mjd, expnums, camera, imagetyp="flat", ref_column=LVM_REFERENCE_COLUMN, snr_threshold=80, use_header=True, display_plots=False):
+def get_exposed_standards(expnums, camera, ref_column=LVM_REFERENCE_COLUMN, ncolumns=100, trust_header=True, axs={}):
+    """Determine standard fiber exposed on dome flats for a given calibration epoch
+
+    Parameters
+    ----------
+    expnums : list[int]
+        list of exposure numbers
+    camera : str
+        camera e.g., b1, r3
+    ref_column : int, optional
+        reference column used to locate fiber centroids, by default LVM_REFERENCE_COLUMN
+    ncolumns : int, optional
+        number of columns combined around `ref_column`, by default 100
+    trust_header : bool, optional
+        whether to trust CALIBFIB header
+
+    Returns
+    -------
+    pd.DataFrame
+        dataframe containing the analysed dome flats
+    dict[(int,int), str]
+        dictionary mapping MJD, exposure number to exposed standard fiber
+
+    Raises
+    ------
+    ValueError
+        if the value of camera does not match LVM's
+    """
+    if camera not in CAMERAS:
+        raise ValueError(f"Invalid value for `camera`: {camera}. Expected one of {', '.join(CAMERAS)}")
+
+    dframe_paths = [path.expand("lvm_anc", drpver=drpver, tileid=11111, mjd="*", kind="d", imagetype="*", camera=camera, expnum=expnum) for expnum in expnums]
+    dframe_paths = [dframe_path[0] for dframe_path in dframe_paths if dframe_path != []]
+
+    NIMAGES = 10
+    log.info(f"combining maximum {NIMAGES} frames: {expnums[:NIMAGES]}")
+    images = [image_tasks.loadImage(dframe_path) for dframe_path in dframe_paths[:NIMAGES]]
+    cimage = image_tasks.combineImages(images, normalize=False, background_subtract=False)
+    log.info(f"correcting reference fiber positions @ {ref_column} +/- {ncolumns//2} columns")
+    fiber_pos, profile, mhat, bhat = cimage.match_reference_column(ref_column, width=ncolumns, return_all=True)
+    log.info(f"stretch factor: {mhat:.3f}, shift: {bhat:.3f}")
+
+    axs = axs or {}
+    if "profile" in axs:
+        axs["profile"].set_title(f"Exposed standard fibers for expnums = {expnums.min()} - {expnums.max()} | {camera = }", fontsize="x-large")
+        axs["profile"].vlines(fiber_pos.round().astype("int"), 0, np.nanmax(profile._data), lw=1, color="tab:red")
+        axs["profile"].step(profile._pixels, profile._data, where="mid", lw=1, color="0.2")
+
+    log.info(f"detecting exposed standard fibers for {camera = }:")
+    exposed_stds = {}
+    axs_exposed = axs.get("exposed", [None] * len(dframe_paths))
+    for i, dframe_path in enumerate(dframe_paths):
+        if not os.path.isfile(dframe_path):
+            continue
+        dframe = image_tasks.loadImage(dframe_path)
+        camera = dframe._header["CCD"]
+        expnum = dframe._header["EXPOSURE"]
+
+        # skip exposed standard identification if header keyword exists
+        exposed_std = dframe._header.get("CALIBFIB")
+        if exposed_std is not None and exposed_std in dframe._slitmap["orig_ifulabel"] and trust_header:
+            log.info(f"    camera exposure {expnum}, skipping and using header value: {exposed_std.__str__():<5s}")
+            exposed_stds[expnum] = (exposed_std, np.inf)
+            continue
+
+        # NOTE: test the possibility to match the fiber positions for each image
+        # log.info(f"correcting reference fiber positions @ {ref_column}")
+        # fiber_pos, profile, mhat, bhat = dframe.match_reference_column(ref_column, width=ncolumns, return_all=True)
+        # log.info(f"stretch factor: {mhat:.3f}, shift: {bhat:.3f}")
+        # _, ax_profile = plt.subplots(figsize=(15,5), layout="tight")
+        # ax_profile.vlines(fiber_pos.round().astype("int"), 0, np.nanmax(profile._data), lw=1, color="tab:red")
+        # ax_profile.step(profile._pixels, profile._data, where="mid", lw=1, color="0.2")
+        # NOTE: test the possibility to measure the fiber positions to have a better estimate of the peak SNR
+
+        exposed_std, snr, fiber_pos, _, _ = dframe.get_exposed_std(ref_column=ref_column, width=ncolumns, nsigmas=50, fiber_pos=fiber_pos, trust_errors=True, ax=axs_exposed[i])
+        exposed_pos = fiber_pos[dframe._filter_slitmap()["orig_ifulabel"].data == exposed_std]
+        log.info(f"    camera exposure {expnum}, found exposed standard fiber: {exposed_std.__str__():<5s}")
+
+        exposed_stds[expnum] = (exposed_std, snr[exposed_pos][0] if exposed_std is not None else None)
+
+    return exposed_stds
+
+
+def get_standards_sequence(mjd, expnums, camera, imagetyp="flat", ref_column=LVM_REFERENCE_COLUMN, snr_threshold=80, use_header=True, display_plots=False):
     """Returns the exposed standard fiber IDs for a given exposure sequence and camera
 
     Parameters
@@ -337,6 +424,85 @@ def get_exposed_std_fiber(mjd, expnums, camera, imagetyp="flat", ref_column=LVM_
     return exposed_stds, unexposed_stds
 
 
+def create_calibfib_hdrfix(mjd, calibration, ref_column=LVM_REFERENCE_COLUMN, ncolumns=500, trust_header=True, skip_done=True, display_plots=False):
+    """Creates header fixes for CALIBFIB when it is missing in dome/twilight flats and arcs frames
+
+    NOTE: The implementation of CALIBFIB became live Nov 22nd, 2023
+
+    Parameters
+    ----------
+    mjd : int
+        MJD of the night to analyse
+    calibration : str
+        Type of calibration to analyse, either 'trace', 'wave' or 'twilight'
+    ref_column : int, optional
+        Reference column used approximate fiber centroids, by default LVM_REFERENCE_COLUMN
+    ncolumns : int, optional
+        Number of columns to combine around reference column, by default 500
+    skip_done : bool, optional
+        If frames are already detrended this step is skipped, by default True
+    display_plots : bool, optional
+        Display plots to screen, by default False
+    """
+    def choose_stds(exposed_stds):
+        df = pd.DataFrame.from_dict(exposed_stds)
+        fibers = df.map(lambda x: x[0] if hasattr(x, "__getitem__") else np.nan)
+        snrs = df.map(lambda x: x[1] if hasattr(x, "__getitem__") else np.nan)
+        chosen_stds = {expnum: fibers.loc[expnum, camera] if not pd.isnull(camera) else None for expnum, camera in snrs.idxmax(axis="columns").items()}
+        return chosen_stds
+
+    log.info(f"going to create CALIBFIB header fixes for '{calibration}' calibrations on {mjd = }")
+    frames = pd.concat([md.get_sequence_metadata(mjds=mjd, calibration=calibration, camera=camera) for camera in CAMERAS], ignore_index=True)
+    if frames.empty:
+        log.error(f"no calibration frames found for calibration = '{calibration}' | {mjd = }, skipping CALIBFIB header fix creation")
+        return
+    if trust_header:
+        frames = frames.loc[~frames.calibfib.isin(STD_FIBER_LABELS)]
+    if frames.empty:
+        log.info(f"all frames for calibration = '{calibration}' | {mjd = }, skipping CALIBFIB header fix creation")
+        return
+
+    expnums = frames.expnum.unique()
+    calibs = get_calib_paths(mjd=mjd, version=drpver, flavors=CALIBRATION_NEEDS[calibration], longterm_cals=True, from_sandbox=False)
+    reduce_2d(mjds=mjd, calibrations=calibs, expnums=expnums, cameras=CAMERAS, add_astro=False, reject_cr=False, sub_straylight=False, skip_done=skip_done)
+
+    exposed_stds = {}
+    for camera in CAMERAS:
+        ncols = 3
+        nrows = np.ceil(len(expnums) / ncols).astype("int")
+        fig = plt.figure(figsize=(15,1+4*nrows))
+        gs = GridSpec(nrows+1, ncols)
+        ax_profile = fig.add_subplot(gs[0, :])
+
+        axs = []
+        for i, j in product(range(nrows), range(ncols)):
+            if not axs:
+                ax = fig.add_subplot(gs[i+1, j])
+            else:
+                ax = fig.add_subplot(gs[i+1, j], sharex=axs[0], sharey=axs[0])
+            ax.label_outer()
+            axs.append(ax)
+
+        stds = get_exposed_standards(expnums=expnums, camera=camera, ref_column=ref_column, ncolumns=ncolumns, axs={"profile": ax_profile, "exposed": axs})
+        exposed_stds[camera] = stds
+
+        fig.tight_layout()
+        fig.align_xlabels(axs)
+        fig.align_ylabels(axs)
+        save_fig(fig,
+                 product_path=path.full("lvm_anc", drpver=drpver, tileid=11111,
+                                         mjd=mjd, camera=camera, expnum=0,
+                                         kind="d", imagetype=calibration),
+                 to_display=display_plots,
+                 figure_path="qa",
+                 label="exposed_std_fiber")
+
+    expnum_std = choose_stds(exposed_stds=exposed_stds)
+    log.info(f"going to write header fixes for {len(expnum_std.keys())} exposures")
+    for expnum, std in expnum_std.items():
+        hdrfix.write_hdrfix_file(mjd=mjd, fileroot=f"sdR-*-*-{expnum:>08d}", keyword="CALIBFIB", value=std)
+
+
 def _parse_list(items_str):
     # handle list
     if isinstance(items_str, str) and "," in items_str:
@@ -378,7 +544,7 @@ def load_calibration_epochs(epochs_path=None, filter_by=None):
 
 def get_calibration_epoch(mjd, flavors=None, trigger=None, comment=None):
     if flavors is None:
-        return {flavor: _parse_list(mjd) for flavor in CAL_FLAVORS}
+        return {flavor: _parse_list(mjd) for flavor in CALIBRATION_TYPES}
 
     calibs_mjds = {flavor: _parse_list(source_mjd) for flavor, source_mjd in flavors.items()}
     return calibs_mjds
@@ -751,7 +917,7 @@ def _create_wavelengths_60177(use_longterm_cals=True, skip_done=True, dry_run=Fa
     mjd = 60177
     expnums = range(3453, 3466+1)
 
-    frames = md.get_sequence_metadata(mjds=mjd, for_calibration="wave", expnums=expnums)
+    frames = md.get_sequence_metadata(mjds=mjd, calibration="wave", expnums=expnums)
 
     # define master paths for target frames
     calibs = get_calib_paths(mjd, version=drpver, longterm_cals=use_longterm_cals, flavors=CALIBRATION_NEEDS["wave"])
@@ -1162,7 +1328,7 @@ def create_bias(mjd, epochs=None, use_longterm_cals=True, skip_done=True, dry_ru
     epoch = get_calibration_epoch(mjd=mjd, **(epochs or {}).get(mjd, {}))
     mjds = epoch["bias"]
 
-    frames = md.get_sequence_metadata(mjds=mjds, for_calibration="bias")
+    frames = md.get_sequence_metadata(mjds=mjds, calibration="bias")
     if frames.empty:
         log.error("no bias frames found, skipping production of bias frames")
         return
@@ -1239,7 +1405,7 @@ def create_nightly_traces(mjd, use_longterm_cals=False, expnums_ldls=None, expnu
     else:
         expnums = None
 
-    frames = md.get_sequence_metadata(mjd, for_calibration="trace", expnums=expnums)
+    frames = md.get_sequence_metadata(mjd, calibration="trace", expnums=expnums)
     if frames.empty:
         log.error("no dome flat frames found, skipping production of fiber traces")
         return
@@ -1388,7 +1554,7 @@ def create_traces(mjd, cameras=CAMERAS, expnums_ldls=None, expnums_qrtz=None,
     else:
         expnums = None
 
-    frames = md.get_sequence_metadata(mjd, for_calibration="trace", expnums=expnums, cameras=cameras)
+    frames = md.get_sequence_metadata(mjd, calibration="trace", expnums=expnums, cameras=cameras)
     if frames.empty:
         log.error("no dome flat frames found, skipping production of fiber traces")
         return
@@ -1447,7 +1613,7 @@ def create_traces(mjd, cameras=CAMERAS, expnums_ldls=None, expnums_qrtz=None,
         fibermap = SLITMAP[SLITMAP["spectrographid"] == int(camera[1])]
 
         models = []
-        exposed_stds, unexposed_stds = get_exposed_std_fiber(mjd=mjd, expnums=expnums, camera=camera)
+        exposed_stds, unexposed_stds = get_standards_sequence(mjd=mjd, expnums=expnums, camera=camera)
         for expnum, (std_fiberid, block_idxs) in exposed_stds.items():
             # define paths
             dflat_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="d", imagetype="flat", camera=camera, expnum=expnum)
@@ -1526,7 +1692,7 @@ def create_dome_fiberflats(mjd, expnums_ldls=None, expnums_qrtz=None, cals_mjd=N
     else:
         expnums = None
 
-    frames = md.get_sequence_metadata(mjd, for_calibration="dome", expnums=expnums)
+    frames = md.get_sequence_metadata(mjd, calibration="dome", expnums=expnums)
     if frames.empty:
         log.error("no dome flat frames found, skipping production of dome fiberflats")
         return
@@ -1646,7 +1812,7 @@ def create_twilight_fiberflats(mjd: int, expnums: List[int] = None, cals_mjd: in
         Logs useful information abaut the current setup without actually reducing, by default False
     """
     # get metadata
-    frames = md.get_sequence_metadata(mjd, for_calibration="twilight", expnums=expnums)
+    frames = md.get_sequence_metadata(mjd, calibration="twilight", expnums=expnums)
     if frames.empty:
         log.error("no twilight frames found, skipping production of twilight fiberflats")
         return
@@ -1837,7 +2003,7 @@ def create_wavelengths(mjd, expnums=None, cals_mjd=None, use_longterm_cals=True,
         _create_wavelengths_60177(use_longterm_cals=use_longterm_cals, skip_done=skip_done, dry_run=dry_run)
         return
 
-    frames = md.get_sequence_metadata(mjd, for_calibration="wave", expnums=expnums)
+    frames = md.get_sequence_metadata(mjd, calibration="wave", expnums=expnums)
     if frames.empty:
         log.error("no arc frames found, skipping production of wavelength calibrations")
         return
@@ -1922,7 +2088,7 @@ def create_wavelengths(mjd, expnums=None, cals_mjd=None, use_longterm_cals=True,
         rss_tasks.resample_wavelength(in_rss=harc_path, out_rss=harc_path, method="linear", wave_range=SPEC_CHANNELS[channel], wave_disp=0.5)
 
 
-def reduce_nightly_sequence(mjd, use_longterm_cals=False, reject_cr=True, only_cals=CAL_FLAVORS,
+def reduce_nightly_sequence(mjd, use_longterm_cals=False, reject_cr=True, only_cals=CALIBRATION_TYPES,
                             counts_thresholds=COUNTS_THRESHOLDS, cent_guess_ncolumns=140, trace_full_ncolumns=40,
                             extract_metadata=False, skip_done=True, keep_ancillary=False,
                             fflats_from=None, link_pixelmasks=True, dry_run=False):
@@ -1971,8 +2137,8 @@ def reduce_nightly_sequence(mjd, use_longterm_cals=False, reject_cr=True, only_c
     if link_pixelmasks:
         _link_pixelmasks()
 
-    if not set(only_cals).issubset(CAL_FLAVORS):
-        raise ValueError(f"some chosen image types in 'only_cals' are not valid: {only_cals.difference(CAL_FLAVORS)}")
+    if not set(only_cals).issubset(CALIBRATION_TYPES):
+        raise ValueError(f"some chosen image types in 'only_cals' are not valid: {only_cals.difference(CALIBRATION_TYPES)}")
     log.info(f"going to produce nightly calibrations: {only_cals}")
 
     if "bias" in only_cals:
@@ -1999,7 +2165,7 @@ def reduce_nightly_sequence(mjd, use_longterm_cals=False, reject_cr=True, only_c
 
 
 def reduce_longterm_sequence(mjd, calib_epoch=None, use_longterm_cals=True,
-                             reject_cr=True, only_cals=CAL_FLAVORS,
+                             reject_cr=True, only_cals=CALIBRATION_TYPES,
                              counts_thresholds=COUNTS_THRESHOLDS,
                              cent_guess_ncolumns=140, trace_full_ncolumns=40,
                              extract_metadata=False,
@@ -2047,8 +2213,8 @@ def reduce_longterm_sequence(mjd, calib_epoch=None, use_longterm_cals=True,
     if link_pixelmasks:
         _link_pixelmasks()
 
-    if not set(only_cals).issubset(CAL_FLAVORS):
-        raise ValueError(f"some chosen image types in 'only_cals' are not valid: {only_cals.difference(CAL_FLAVORS)}")
+    if not set(only_cals).issubset(CALIBRATION_TYPES):
+        raise ValueError(f"some chosen image types in 'only_cals' are not valid: {only_cals.difference(CALIBRATION_TYPES)}")
     log.info(f"going to produce long-term calibrations: {only_cals}")
 
     source_mjds = get_calibration_epoch(mjd, **(calib_epoch or {}))

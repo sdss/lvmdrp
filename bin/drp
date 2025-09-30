@@ -12,7 +12,7 @@ import click
 import cloup
 from cloup.constraints import mutually_exclusive, RequireExactly, IsSet, If
 
-from lvmdrp.core.constants import CALIBRATION_MAPPINGS
+from lvmdrp.core.constants import CALIBRATION_MAPPINGS, CALIBRATION_TYPES, LVM_REFERENCE_COLUMN
 from lvmdrp import __version__ as drpver
 from lvmdrp.main import run_drp, reduce_file, check_daily_mjd, parse_mjds, read_expfile, create_drpall, cache_gaia_spectra
 from lvmdrp.functions.skyMethod import configureSkyModel_drp
@@ -25,10 +25,14 @@ from lvmdrp.functions.run_calseq import (
     reduce_nightly_sequence,
     reduce_longterm_sequence,
     fix_raw_pixel_shifts,
+    create_calibfib_hdrfix,
     copy_longterm_calibrations,
     create_fiberflats_corrections)
 
 from sdss_access import Access
+
+
+calibration_types = set(CALIBRATION_TYPES) - {"bias", "dome"}
 
 
 class StrListType(click.ParamType):
@@ -407,10 +411,36 @@ def fix_pixel_shifts(mjd, expnums, ref_expnums, img_types, custom_shift, wave_wi
                          interactive=interactive, skip_done=True)
 
 
+@click.command('calibfib-hdrfix', short_help='HdrFix for CALIBFIB header keyword in dome/twilight flats and arcs calibration')
+@click.option('-c', '--calibration', type=click.Choice(calibration_types), default=None, help='a calibration type')
+@click.option('-m', '--mjd', type=int, help='an MJD to reduce')
+@click.option('-l', '--mjd-list', type=IntListType(), help='a list of specific MJDs to reduce')
+@click.option('-r', '--mjd-range', type=str, help='a range of MJDs to reduce')
+def calibfib_hdrfix(calibration, mjd, mjd_list, mjd_range):
+
+    REF_COLUMNS = {"wave": 1000}
+    NCOLUMNS = {"wave": 1000}
+
+    mjds = parse_mjds(mjd=mjd or mjd_list or mjd_range or None)
+    if not isinstance(mjds, (list, tuple)):
+        mjds = [mjds]
+
+    calibrations = calibration_types if calibration is None else [calibration]
+
+    for mjd in mjds:
+       for calibration in calibrations:
+            create_calibfib_hdrfix(
+                mjd=mjd,
+                calibration=calibration,
+                ref_column=REF_COLUMNS.get(calibration, LVM_REFERENCE_COLUMN),
+                ncolumns=NCOLUMNS.get(calibration, 1000))
+
+
 @click.group('calibrations', short_help="Calibrations pipeline. Handles the creation, tagging and bookkeeping of calibration frames")
 def calibrations():
     pass
 
+calibrations.add_command(calibfib_hdrfix)
 calibrations.add_command(fix_pixel_shifts)
 calibrations.add_command(longterm)
 calibrations.add_command(nightly)

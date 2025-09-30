@@ -54,6 +54,7 @@ RAW_METADATA_COLUMNS = [
     ("argon", bool),
     ("ldls", bool),
     ("quartz", bool),
+    ("calibfib", str),
     ("hartmann", str),
     ("qaqual", str),
     ("stage", ReductionStage),
@@ -77,6 +78,7 @@ MASTER_METADATA_COLUMNS = [
     ("argon", bool),
     ("ldls", bool),
     ("quartz", bool),
+    ("calibfib", str),
     ("hartmann", str),
     ("qaqual", str),
     ("stage", ReductionStage),
@@ -617,6 +619,7 @@ def extract_metadata(frames_paths: list, kind: str = "raw") -> pd.DataFrame:
                 header.get("ARGON", "OFF") in onlamp,
                 header.get("LDLS", "OFF") in onlamp,
                 header.get("QUARTZ", "OFF") in onlamp,
+                header.get("CALIBFIB", "None") or "None",
                 header.get("HARTMANN", "0 0"),
                 # header.get("QUALITY", "excellent"),
                 # QC pipeline keywords
@@ -645,6 +648,7 @@ def extract_metadata(frames_paths: list, kind: str = "raw") -> pd.DataFrame:
                 header.get("ARGON", "OFF") in onlamp,
                 header.get("LDLS", "OFF") in onlamp,
                 header.get("QUARTZ", "OFF") in onlamp,
+                header.get("CALIBFIB", "None") or "None",
                 header.get("HARTMANN", "0 0"),
                 # TODO: QUALITY may be redundant, double check and remove if it is
                 # header.get("QUALITY", "excellent"),
@@ -965,21 +969,21 @@ def get_metadata(
     return metadata
 
 
-def get_calibration_selection(frames, for_calibration):
+def get_calibration_selection(frames, calibration):
     # definitions of calibration frames
-    if for_calibration == "bias":
+    if calibration == "bias":
         return frames.imagetyp.values == "bias"
-    elif for_calibration in ["trace", "dome"]:
+    elif calibration in ["trace", "dome"]:
         return ((frames.ldls|frames.quartz) & ~(frames.neon|frames.hgne|frames.argon|frames.xenon)).values
-    elif for_calibration == "wave":
+    elif calibration == "wave":
         return ((frames.neon|frames.hgne|frames.argon|frames.xenon) & ~(frames.ldls|frames.quartz)).values
-    elif for_calibration == "twilight":
+    elif calibration == "twilight":
         return ((frames.imagetyp == "flat") & ~(frames.ldls|frames.quartz) & ~(frames.neon|frames.hgne|frames.argon|frames.xenon)).values
     else:
         return np.zeros(len(frames), dtype="bool")
 
 
-def get_sequence_metadata(mjds, for_calibration, camera=None, expnums=None, exptime=None, extract_metadata=False):
+def get_sequence_metadata(mjds, calibration, camera=None, expnums=None, exptime=None, extract_metadata=False):
     """Get frames metadata for a given sequence
 
     Given a set of MJDs and (optionally) exposure numbers, get the frames
@@ -990,9 +994,9 @@ def get_sequence_metadata(mjds, for_calibration, camera=None, expnums=None, expt
     ----------
     mjds : int|list[int]
         Single MJD or a list of MJDs
-    for_calibration : str
+    calibration : str
         Only return frames meant to produce given calibrations, {'bias', 'trace', 'wave', 'dome', 'twilight'}
-    camera : list[str]
+    camera : str
         Camera (e.g., 'b1', 'r3', 'z2') to filter by
     expnums : list
         List of exposure numbers to reduce
@@ -1018,7 +1022,7 @@ def get_sequence_metadata(mjds, for_calibration, camera=None, expnums=None, expt
     # get frames metadata
     frames = pd.concat([get_frames_metadata(mjd=mjd, overwrite=extract_metadata) for mjd in mjds], ignore_index=True)
     # group calibrations according to their type
-    selection = get_calibration_selection(frames, for_calibration=for_calibration)
+    selection = get_calibration_selection(frames, calibration=calibration)
     frames = frames.loc[selection]
     if frames.empty:
         return pd.DataFrame(columns=list(zip(*RAW_METADATA_COLUMNS))[0])

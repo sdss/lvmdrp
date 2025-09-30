@@ -144,6 +144,33 @@ LVM_NFIBERS = LVM_NBLOCKS * LVM_BLOCKSIZE
 LVM_REFERENCE_COLUMN = 2000
 FIDUCIAL_PLATESCALE = 112.36748321030637 # Focal plane platescale in "/mm
 
+# standard fiber labels
+STD_FIBER_LABELS = [
+    'P1-1',
+    'P2-2',
+    'P1-4',
+    'P2-5',
+    'P2-8',
+    'P1-7',
+    'P2-11',
+    'P1-10',
+    'P1-3',
+    'P2-1',
+    'P1-6',
+    'P2-4',
+    'P2-7',
+    'P1-9',
+    'P2-10',
+    'P1-12',
+    'P1-2',
+    'P2-3',
+    'P1-5',
+    'P2-6',
+    'P2-9',
+    'P1-8',
+    'P2-12',
+    'P1-11']
+
 # GB hand picked isolated bright lines across each channel which are not doublest in UVES atlas
 # true wavelengths taken from UVES sky line atlas
 REF_SKYLINES = {
