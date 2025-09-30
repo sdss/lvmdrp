@@ -751,7 +751,7 @@ def _create_wavelengths_60177(use_longterm_cals=True, skip_done=True, dry_run=Fa
     mjd = 60177
     expnums = range(3453, 3466+1)
 
-    frames, _ = md.get_sequence_metadata(mjd=mjd, expnums=expnums, for_cals={"wave"})
+    frames = md.get_sequence_metadata(mjds=mjd, for_calibration="wave", expnums=expnums)
 
     # define master paths for target frames
     calibs = get_calib_paths(mjd, version=drpver, longterm_cals=use_longterm_cals, flavors=CALIBRATION_NEEDS["wave"])
@@ -1140,7 +1140,7 @@ def fix_raw_pixel_shifts(mjd, expnums=None, ref_expnums=None, use_longterm_cals=
                                          interactive=interactive, display_plots=display_plots)
 
 
-def create_bias(mjd, epochs=None, expnums=None, cals_mjd=None, use_longterm_cals=True, skip_done=True, dry_run=False):
+def create_bias(mjd, epochs=None, use_longterm_cals=True, skip_done=True, dry_run=False):
     """Reduce a sequence of bias frames to produce master frames for each camera
 
     Given a set of MJDs and (optionally) exposure numbers, reduce the
@@ -1152,8 +1152,6 @@ def create_bias(mjd, epochs=None, expnums=None, cals_mjd=None, use_longterm_cals
         MJD to reduce
     use_longterm_cals : bool
         Whether to use long-term calibration frames or not, defaults to True
-    expnums : list
-        List of exposure numbers to reduce
     flavor : str
         The type of frame to reduce
     skip_done : bool
@@ -1162,25 +1160,22 @@ def create_bias(mjd, epochs=None, expnums=None, cals_mjd=None, use_longterm_cals
         Logs useful information abaut the current setup without actually reducing, by default False
     """
     epoch = get_calibration_epoch(mjd=mjd, **(epochs or {}).get(mjd, {}))
-    frames_groups = md.get_sequence_metadata(from_epoch=epoch, mjds=mjd, expnums=expnums, for_cals="bias")
     mjds = epoch["bias"]
-    if "bias" not in frames_groups:
+
+    frames = md.get_sequence_metadata(mjds=mjds, for_calibration="bias")
+    if frames.empty:
         log.error("no bias frames found, skipping production of bias frames")
         return
 
-    frames = frames_groups.pop("bias")
-    if expnums is None:
-        frames, expnums = choose_sequence(frames, flavor="bias", kind="longterm", truncate=False)
-
     # define master paths for target frames
-    calibs = get_calib_paths(mjd=cals_mjd or mjd, version=drpver, longterm_cals=use_longterm_cals, flavors=CALIBRATION_NEEDS["bias"])
+    calibs = get_calib_paths(mjd=mjd, version=drpver, longterm_cals=use_longterm_cals, flavors=CALIBRATION_NEEDS["bias"])
 
     if dry_run:
         _log_dry_run(frames, calibs=calibs, settings=None, caller=create_bias.__name__)
         return
 
     # preprocess and detrend frames
-    reduce_2d(mjds=mjds, calibrations=calibs, expnums=expnums, reject_cr=False, add_astro=False, sub_straylight=False, skip_done=skip_done)
+    reduce_2d(mjds=mjds, calibrations=calibs, expnums=frames.expnum.unique(), assume_imagetyp="bias", reject_cr=False, add_astro=False, sub_straylight=False, skip_done=skip_done)
 
     # reduce each image type
     frames_analog = frames.groupby(["camera"])
@@ -1244,8 +1239,8 @@ def create_nightly_traces(mjd, use_longterm_cals=False, expnums_ldls=None, expnu
     else:
         expnums = None
 
-    frames, found_cals = md.get_sequence_metadata(mjd, expnums=expnums, for_cals={"trace"})
-    if "trace" not in found_cals:
+    frames = md.get_sequence_metadata(mjd, for_calibration="trace", expnums=expnums)
+    if frames.empty:
         log.error("no dome flat frames found, skipping production of fiber traces")
         return
 
@@ -1393,8 +1388,8 @@ def create_traces(mjd, cameras=CAMERAS, expnums_ldls=None, expnums_qrtz=None,
     else:
         expnums = None
 
-    frames, found_cals = md.get_sequence_metadata(mjd, expnums=expnums, cameras=cameras, for_cals={"trace"})
-    if "trace" not in found_cals:
+    frames = md.get_sequence_metadata(mjd, for_calibration="trace", expnums=expnums, cameras=cameras)
+    if frames.empty:
         log.error("no dome flat frames found, skipping production of fiber traces")
         return
 
@@ -1531,8 +1526,8 @@ def create_dome_fiberflats(mjd, expnums_ldls=None, expnums_qrtz=None, cals_mjd=N
     else:
         expnums = None
 
-    frames, found_cals = md.get_sequence_metadata(mjd, expnums=expnums, for_cals={"dome"})
-    if "dome" not in found_cals:
+    frames = md.get_sequence_metadata(mjd, for_calibration="dome", expnums=expnums)
+    if frames.empty:
         log.error("no dome flat frames found, skipping production of dome fiberflats")
         return
 
@@ -1651,8 +1646,8 @@ def create_twilight_fiberflats(mjd: int, expnums: List[int] = None, cals_mjd: in
         Logs useful information abaut the current setup without actually reducing, by default False
     """
     # get metadata
-    frames, found_cals = md.get_sequence_metadata(mjd, expnums=expnums, for_cals={"twilight"})
-    if "twilight" not in found_cals:
+    frames = md.get_sequence_metadata(mjd, for_calibration="twilight", expnums=expnums)
+    if frames.empty:
         log.error("no twilight frames found, skipping production of twilight fiberflats")
         return
 
@@ -1842,8 +1837,8 @@ def create_wavelengths(mjd, expnums=None, cals_mjd=None, use_longterm_cals=True,
         _create_wavelengths_60177(use_longterm_cals=use_longterm_cals, skip_done=skip_done, dry_run=dry_run)
         return
 
-    frames, found_cals = md.get_sequence_metadata(mjd, expnums=expnums, for_cals={"wave"})
-    if "wave" not in found_cals:
+    frames = md.get_sequence_metadata(mjd, for_calibration="wave", expnums=expnums)
+    if frames.empty:
         log.error("no arc frames found, skipping production of wavelength calibrations")
         return
 

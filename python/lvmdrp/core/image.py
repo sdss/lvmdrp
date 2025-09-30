@@ -492,7 +492,6 @@ class Image(Header):
 
     def __truediv__(self, other):
         return self._apply_operation(other, numpy.divide, 'div')
-        self.__mul__(other)
 
     def __lt__(self, other):
         return self._data < other
@@ -511,6 +510,15 @@ class Image(Header):
 
     def __ge__(self, other):
         return self._data >= other
+
+    def _filter_slitmap(self):
+        if self._slitmap is None:
+                raise ValueError(f"Attribute `_slitmap` needs to be set: {self._slitmap = }")
+        if self._header is None:
+            raise ValueError(f"Attribute `_header` needs to be set: {self._header = }")
+
+        slitmap = self._slitmap[self._slitmap["spectrographid"]==int(self._header["SPEC"][-1])]
+        return slitmap
 
     def add_header_comment(self, comstr):
         '''
@@ -1113,7 +1121,7 @@ class Image(Header):
         slitmap = self._slitmap[self._slitmap["spectrographid"] == int(self._header["SPEC"][-1])]
         spec_select = slitmap["telescope"] == "Spec"
 
-        ids_std = slitmap[spec_select]["orig_ifulabel"]
+        ids_std = slitmap[spec_select]["orig_ifulabel"].data
         pos_std = fiber_pos[spec_select]
 
         expnum = self._header["EXPOSURE"]
@@ -1137,12 +1145,11 @@ class Image(Header):
             exposed_std = exposed_std_
         elif select_std.sum() > 0:
             exposed_std = exposed_std[0]
-        else:
-            return None, snr, pos_std, snr_all_stats, snr_std_stats
+        exposed_std = str(exposed_std) if exposed_std else None
 
         plot_exposed_std(self, snr[pos_std], snr_all_stats, snr_std_stats, exposed_std, nsigmas=nsigmas, ax=ax)
 
-        return str(exposed_std), snr, pos_std, snr_all_stats, snr_std_stats
+        return exposed_std, snr, fiber_pos, snr_all_stats, snr_std_stats
 
     def loadFitsData(
         self,

@@ -18,7 +18,6 @@ from astropy.io import fits
 from astropy.table import Table
 from filelock import FileLock, Timeout
 from tqdm import tqdm
-import warnings
 
 from lvmdrp.core.constants import CALIBRATION_TYPES, CALIBRATION_NEEDS, CAMERAS
 from lvmdrp.utils.bitmask import (
@@ -966,24 +965,21 @@ def get_metadata(
     return metadata
 
 
-def get_calibration_groups(frames):
+def get_calibration_selection(frames, for_calibration):
     # definitions of calibration frames
-    bias = (frames.imagetyp == "bias")
-    dome = (frames.ldls|frames.quartz) & ~(frames.neon|frames.hgne|frames.argon|frames.xenon)
-    twilight = (frames.imagetyp == "flat") & ~(frames.ldls|frames.quartz) & ~(frames.neon|frames.hgne|frames.argon|frames.xenon)
-    arc = (frames.neon|frames.hgne|frames.argon|frames.xenon) & ~(frames.ldls|frames.quartz)
-
-    cals_selections = {
-        "bias": bias,
-        "trace": dome,
-        "wave": arc,
-        "dome": dome,
-        "twilight": twilight
-    }
-    return cals_selections
+    if for_calibration == "bias":
+        return frames.imagetyp.values == "bias"
+    elif for_calibration in ["trace", "dome"]:
+        return ((frames.ldls|frames.quartz) & ~(frames.neon|frames.hgne|frames.argon|frames.xenon)).values
+    elif for_calibration == "wave":
+        return ((frames.neon|frames.hgne|frames.argon|frames.xenon) & ~(frames.ldls|frames.quartz)).values
+    elif for_calibration == "twilight":
+        return ((frames.imagetyp == "flat") & ~(frames.ldls|frames.quartz) & ~(frames.neon|frames.hgne|frames.argon|frames.xenon)).values
+    else:
+        return np.zeros(len(frames), dtype="bool")
 
 
-def get_sequence_metadata(from_epoch=None, mjds=None, expnums=None, exptime=None, cameras=CAMERAS, for_cals=CALIBRATION_TYPES, extract_metadata=False):
+def get_sequence_metadata(mjds, for_calibration, camera=None, expnums=None, exptime=None, extract_metadata=False):
     """Get frames metadata for a given sequence
 
     Given a set of MJDs and (optionally) exposure numbers, get the frames
@@ -992,18 +988,16 @@ def get_sequence_metadata(from_epoch=None, mjds=None, expnums=None, exptime=None
 
     Parameters:
     ----------
-    from_epoch : dict[str, list[int]]
-        Dictionary specifying a calibration epoch
     mjds : int|list[int]
         Single MJD or a list of MJDs
+    for_calibration : str
+        Only return frames meant to produce given calibrations, {'bias', 'trace', 'wave', 'dome', 'twilight'}
+    camera : list[str]
+        Camera (e.g., 'b1', 'r3', 'z2') to filter by
     expnums : list
         List of exposure numbers to reduce
     exptime : int
         Filter frames metadata by exposure
-    cameras : list[str]
-        List of cameras (e.g., "b1", "r3") to filter by
-    for_cals : list, tuple or set, optional
-        Only return frames meant to produce given calibrations, {'bias', 'trace', 'wave', 'dome', 'twilight'}
     extract_metadata : bool
         Whether to extract metadata or not, by default False
 
@@ -1015,57 +1009,34 @@ def get_sequence_metadata(from_epoch=None, mjds=None, expnums=None, exptime=None
         MJD for master frames
     """
 
-    if mjds is None and from_epoch is None:
-        raise ValueError(f"Invalid value(s) for `mjds` or `from_epoch`: {mjds = }, {from_epoch = }. Either `mjds` or `from_epoch` has to be given")
     if not isinstance(mjds, (tuple, list, set)):
         mjds = [mjds]
-    if not isinstance(for_cals, (tuple, list, set)):
-        for_cals = [for_cals]
-
-    # if an epoch is given, it takes precedence
-    if from_epoch is not None:
-        for_cals = set(from_epoch.keys()).intersection(for_cals)
-        mjds = []
-        for cal in for_cals:
-            mjds += from_epoch[cal]
 
     # remove repeated MJDs and sort
     mjds = sorted(set(mjds))
 
     # get frames metadata
-    frames = [get_frames_metadata(mjd=mjd, overwrite=extract_metadata) for mjd in mjds]
-    frames = pd.concat(frames, ignore_index=True)
-    frames.query("imagetyp in ['bias', 'flat', 'arc']", inplace=True)
-    if len(frames) == 0:
-        log.error(f"no calibration frames found for MJD = {mjds}")
-        return {}
+    frames = pd.concat([get_frames_metadata(mjd=mjd, overwrite=extract_metadata) for mjd in mjds], ignore_index=True)
+    # group calibrations according to their type
+    selection = get_calibration_selection(frames, for_calibration=for_calibration)
+    frames = frames.loc[selection]
+    if frames.empty:
+        return pd.DataFrame(columns=list(zip(*RAW_METADATA_COLUMNS))[0])
 
     # filter by given expnums
     if expnums is not None:
         frames.query("expnum in @expnums", inplace=True)
-
     # filter by given exptime
     if exptime is not None:
         frames.query("exptime == @exptime", inplace=True)
+    # filter by given camera
+    if camera is not None:
+        frames.query("camera == @camera", inplace=True)
 
-    if cameras:
-        frames.query("camera in @cameras", inplace=True)
-
-    # group calibrations according to their type
-    cals_selections = get_calibration_groups(frames)
-    # group calibrations by the requested MJDs
-    mjds_selections = {cal: frames.mjd.isin(from_epoch[cal]) if from_epoch is not None else np.ones_like(cals_selections[cal], dtype="bool") for cal in cals_selections}
-
-    # manually fix image types to match their selection
-    frames.loc[cals_selections["bias"], "imagetyp"] = "bias"
-    frames.loc[cals_selections["dome"], "imagetyp"] = "flat"
-    frames.loc[cals_selections["wave"], "imagetyp"] = "arc"
-    frames.loc[cals_selections["twilight"], "imagetyp"] = "flat"
     frames.sort_values(["expnum", "camera"], inplace=True)
+    frames.reset_index(drop=True, inplace=True)
 
-    # filter requested calibrations
-    calibrations = {cal: frames.loc[cals_selections[cal] & mjds_selections[cal]] for cal in for_cals}
-    return calibrations
+    return frames
 
 
 # TODO: implement matching of analogs and calibration masters
