@@ -162,7 +162,7 @@ def apply_hdrfix(mjd: int, camera: str = None, expnum: int = None,
         hdr = fits.getheader(filename)
     elif hdr:
         # assume these are correct in the headers, may need to change this
-        mjd = hdr.get("MJD")
+        # mjd = hdr.get("MJD")
         expnum = hdr.get("EXPOSURE")
         camera = hdr.get("CCD")
     elif not (mjd and camera and expnum):
