@@ -316,9 +316,9 @@ def prepare_spec(in_rss, width=3):
     lsf_all_bands = []
     std_spectra_all_bands = [] ## contains original std spectra for all stars in ALL band
     fibers_all_bands = []
-    # gaia_ids_all_bands = []
-    keys = ['fiber_0', 'good_flux_0', 'fiber_1', 'good_flux_1', 'fiber_2', 'good_flux_2']
-    check_bad_fluxes = {key: [] for key in keys}
+    gaia_ids_all_bands = []
+    # keys = ['fiber_0', 'good_flux_0', 'fiber_1', 'good_flux_1', 'fiber_2', 'good_flux_2']
+    # check_bad_fluxes = {key: [] for key in keys}
 
     for b in range(len(in_rss)):
         #log.info(f"loading input RSS file '{os.path.basename(in_rss[b])}'")
@@ -371,25 +371,38 @@ def prepare_spec(in_rss, width=3):
             spec_tmp = rss_tmp._data[fibidx[0], :]
             error_tmp = rss_tmp._error[fibidx[0], :]
             lsf_tmp = rss_tmp._lsf[fibidx[0], :]
-            check_bad_fluxes[f'fiber_{b}'].append(fiber)
+            # check_bad_fluxes[f'fiber_{b}'].append(fiber)
             if np.nanmean(spec_tmp) < 100:
                 log.warning(f"fiber {fiber} @ {fibidx[0]} has counts < 100 e-, skipping")
-                check_bad_fluxes[f'good_flux_{b}'].append(False)
-                if (b==1) & (check_bad_fluxes['good_flux_0'][nn-1]==True):
-                    idx = fibers_all_bands[0].index(fiber)
-                    del normalized_spectra_all_bands[0][idx]
-                    del normalized_spectra_unconv_all_bands[0][idx]
-                    del std_errors_all_bands[0][idx]
-                    del lsf_all_bands[0][idx]
-                    del std_spectra_all_bands[0][idx]
+                # check_bad_fluxes[f'good_flux_{b}'].append(False)
+                if b > 0:
+                    for ind_b in range(b):
+                        try:
+                            idx = fibers_all_bands[ind_b].index(fiber)
+                        except ValueError:
+                            continue
+                        del fibers_all_bands[ind_b][idx]
+                        del normalized_spectra_all_bands[ind_b][idx]
+                        del normalized_spectra_unconv_all_bands[ind_b][idx]
+                        del std_errors_all_bands[ind_b][idx]
+                        del lsf_all_bands[ind_b][idx]
+                        del std_spectra_all_bands[ind_b][idx]
+                        del gaia_ids_all_bands[ind_b][idx]
                 # #rss.add_header_comment(f"fiber {fiber} @ {fibidx[0]} has counts < 100 e-, skipping")
                 continue
-            if (check_bad_fluxes[f'fiber_0'] == False) | (check_bad_fluxes[f'fiber_1'] == False):
-                check_bad_fluxes[f'good_flux_{b}'].append(False)
-                continue
+            if b > 0:
+                good_fiber = True
+                for ind_b in range(b):
+                    try:
+                        idx = fibers_all_bands[ind_b].index(fiber)
+                    except ValueError:
+                        good_fiber = False
+                        continue
+                if not good_fiber:
+                    continue
             gaia_ids.append(gaia_id)
             fibers.append(fiber)
-            check_bad_fluxes[f'good_flux_{b}'].append(True)
+            # check_bad_fluxes[f'good_flux_{b}'].append(True)
 
             spec_tmp = (rss_tmp._data[fibidx[0],:] - master_sky._data[fibidx[0],:])/exptime
 
@@ -430,7 +443,6 @@ def prepare_spec(in_rss, width=3):
             lsf.append(lsf_tmp) # initial std spec LSF for all standards in each channel
             std_spectra.append(spec_ext_corr)
 
-        # print(f'len(std_spectra) = {len(std_spectra)}')
         normalized_spectra_all_bands.append(normalized_spectra) # normalized std spectra degraded to 2.3A for all
                                                                         # standards and all channels together
         normalized_spectra_unconv_all_bands.append(normalized_spectra_unconv)
@@ -438,20 +450,9 @@ def prepare_spec(in_rss, width=3):
         lsf_all_bands.append(lsf) # initial std spec LSF for all standards and all channel together
         std_spectra_all_bands.append(std_spectra) # corrected for extinction
         fibers_all_bands.append(fibers)
-    # print(check_bad_fluxes)
-    # print(f'len(normalized_spectra_all_bands[0] = {len(normalized_spectra_all_bands[0])})')
-    # print(f'len(normalized_spectra_all_bands[1] = {len(normalized_spectra_all_bands[1])})')
-    # print(f'len(normalized_spectra_all_bands[2] = {len(normalized_spectra_all_bands[2])})')
-    # print(normalized_spectra_all_bands)
-    #     gaia_ids_all_bands.append(gaia_ids)
+        gaia_ids_all_bands.append(gaia_ids)
 
-    #
-    # # remove fibers failed in any channel
-    # unique_fibers = np.unique(fibers_all_bands)
-
-
-
-    return w, gaia_ids, fibers, std_spectra_all_bands, normalized_spectra_unconv_all_bands, normalized_spectra_all_bands, std_errors_all_bands, lsf_all_bands
+    return w, gaia_ids_all_bands[0], fibers, std_spectra_all_bands, normalized_spectra_unconv_all_bands, normalized_spectra_all_bands, std_errors_all_bands, lsf_all_bands
 
 def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
     """ Selection of the stellar atmosphere model spectra (POLLUX database, AMBRE library)
