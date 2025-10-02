@@ -1111,6 +1111,8 @@ class Image(Header):
             self.setHdrValue("NAXIS2", self._dim[0])
 
     def get_exposed_std(self, ref_column, width=100, fiber_pos=None, nsigmas=5, trust_errors=True, ax=None):
+        # TODO: this uses a global average of the SNR, use a per-block average instead to better
+        # capture the expected peak SNR across the fiber array
         if self._slitmap is None:
             raise ValueError(f"Slitmap attribute `self._slitmap` has to be defined: {self._slitmap = }")
 

@@ -19,7 +19,7 @@ from astropy.table import Table
 from filelock import FileLock, Timeout
 from tqdm import tqdm
 
-from lvmdrp.core.constants import CALIBRATION_TYPES, CALIBRATION_NEEDS, CAMERAS
+from lvmdrp.core.constants import CALIBRATION_NEEDS, ARC_LAMPS, CON_LAMPS
 from lvmdrp.utils.bitmask import (
     QualityFlag,
     ReductionStage,
@@ -983,7 +983,7 @@ def get_calibration_selection(frames, calibration):
         return np.zeros(len(frames), dtype="bool")
 
 
-def get_sequence_metadata(mjds, calibration, camera=None, expnums=None, exptime=None, extract_metadata=False):
+def get_sequence_metadata(mjds, calibration, camera=None, expnums=None, exptime=None, lamps=None, hartmann="0 0", extract_metadata=False):
     """Get frames metadata for a given sequence
 
     Given a set of MJDs and (optionally) exposure numbers, get the frames
@@ -1012,7 +1012,14 @@ def get_sequence_metadata(mjds, calibration, camera=None, expnums=None, exptime=
     masters_mjd : float
         MJD for master frames
     """
+    LAMPS = list(map(str.lower, ARC_LAMPS + CON_LAMPS))
+    if hartmann is not None and hartmann not in {"0 0", "1 0", "0 1", "1 1"}:
+        raise ValueError(f"Invalid value for `hartmann`: {hartmann}. Expected either '0 0', '1 0', '0 1' or '1 1'")
+    if lamps is not None and not np.isin(lamps, LAMPS).all():
+        raise ValueError(f"Invalid value for `lamps`: {lamps}. Expected values in {LAMPS}")
 
+    if lamps is not None and not isinstance(lamps, (tuple, list, set)):
+        lamps = [lamps]
     if not isinstance(mjds, (tuple, list, set)):
         mjds = [mjds]
 
@@ -1027,6 +1034,9 @@ def get_sequence_metadata(mjds, calibration, camera=None, expnums=None, exptime=
     if frames.empty:
         return pd.DataFrame(columns=list(zip(*RAW_METADATA_COLUMNS))[0])
 
+    # filter by hartmann door status
+    if hartmann is not None:
+        frames.query("hartmann == @hartmann", inplace=True)
     # filter by given expnums
     if expnums is not None:
         frames.query("expnum in @expnums", inplace=True)
@@ -1036,6 +1046,10 @@ def get_sequence_metadata(mjds, calibration, camera=None, expnums=None, exptime=
     # filter by given camera
     if camera is not None:
         frames.query("camera == @camera", inplace=True)
+    # filter by lamp ON status
+    if lamps is not None:
+        lamps_selection = np.logical_and.reduce([frames[lamp] for lamp in lamps], axis=0)
+        frames = frames.loc[lamps_selection]
 
     frames.sort_values(["expnum", "camera"], inplace=True)
     frames.reset_index(drop=True, inplace=True)
