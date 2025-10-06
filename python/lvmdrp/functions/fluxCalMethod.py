@@ -1301,13 +1301,28 @@ def science_sensitivity(rss, res_sci, ext, GAIA_CACHE_DIR, NSCI_MAX=15, r_spaxel
 
     master_sky = rss.eval_master_sky()
 
+    # filter the GAIA stars to avoid multiple stars in a single fiber
+    # locate the science ifu fibers the stars are in 
+    fibs = np.zeros(len(calibrated_spectra)) - 1
+    for i in range(len(calibrated_spectra)):
+        data = r[i]
+        d = np.sqrt((data['ra']-scifibs['ra'])**2 + (data['dec']-scifibs['dec'])**2) # in degrees
+        fib = np.where(d<r_spaxel)[0] # there can only be zero or one fiber with a distance cut smaller than a fiber diameter
+        if fib.size > 0:
+            fibs[i] = fib
+
     # locate the science ifu fibers the stars are in
     for i in range(len(calibrated_spectra)):
         data = r[i]
         d = np.sqrt((data['ra']-scifibs['ra'])**2 + (data['dec']-scifibs['dec'])**2) # in degrees
         fib = np.where(d<r_spaxel)[0] # there can only be zero or one fiber with a distance cut smaller than a fiber diameter
         if fib.size > 0:
-            # if we found a star in a fiber
+            # skip if the there are multiple stars in this fiber
+            assert(fibs[i] != -1)
+            if np.count_nonzero(fibs == fib) > 1:
+                log.info(f'dropping gaia star {data['source_id']} in fiber {fib}, multiple stars')
+                continue
+            # if we found a single star in a fiber
             gflux = calibrated_spectra.iloc[i].flux
 
             fibidx = scifibs['fiberid'][fib] - 1
