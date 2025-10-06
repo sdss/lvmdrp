@@ -50,18 +50,24 @@ from lvmdrp.utils import metadata as md
 from lvmdrp.utils import hdrfix
 from lvmdrp.utils.convert import tileid_grp
 from lvmdrp.utils.paths import get_master_mjd, get_calib_paths, group_calib_paths, get_frames_paths
-from lvmdrp.core.constants import CALIBRATION_PRODUCTS, SKYLINES_FIBERFLAT, CONTINUUM_FIBERFLAT, CALIBRATION_NEEDS, STD_FIBER_LABELS
-from lvmdrp.core.constants import LVM_NFIBERS, LVM_NCOLS
 from lvmdrp.core.plot import create_subplots, save_fig
 from lvmdrp.core import dataproducts as dp
 from lvmdrp.core.constants import (
+    LVM_NFIBERS,
+    LVM_NCOLS,
+    LVM_NBLOCKS,
     CAMERAS,
     SPEC_CHANNELS,
-    LVM_REFERENCE_COLUMN,
-    LVM_NBLOCKS,
-    MASTERS_DIR,
     ARC_LAMPS,
-    CALIBRATION_TYPES)
+    LVM_REFERENCE_COLUMN,
+    STD_FIBER_LABELS,
+    CALIBRATION_TYPES,
+    CALIBRATION_PRODUCTS,
+    CALIBRATION_NEEDS,
+    SKYLINES_FIBERFLAT,
+    CONTINUUM_FIBERFLAT,
+    MASTERS_DIR,
+    PIXELSHIFTS_PATH)
 from lvmdrp.core.tracemask import TraceMask
 from lvmdrp.core.image import loadImage
 from lvmdrp.core.rss import RSS, lvmFrame
@@ -100,108 +106,81 @@ STRAYLIGHT_PARS = dict(
     nsigma=1.0, smoothing=90, median_box=None)
 
 
-def choose_sequence(frames, flavor, kind, truncate=True):
-    """Returns exposure numbers splitted in different sequences
+def _reject_pixelshifted(frames, pixelshifts_path=PIXELSHIFTS_PATH):
+    pixelshifts = pd.read_parquet(pixelshifts_path)
 
-    Parameters:
+    # filter pixelshifts by exposure numbers in frames
+    expnums = frames.expnum.unique()
+    selection = pixelshifts.exp_no.isin(expnums)
+    pixelshifts = pixelshifts.loc[selection]
+
+    log.info(f"removing exposures affected by pixel shifts:")
+    log.info(f"{pixelshifts.to_string()}")
+
+    return frames.query("expnum not in @pixelshifts.exp_no")
+    # return frames.query("expnum not in @pixelshifts.exp_no and spec not in @pixelshifts.spec")
+
+
+def choose_sequence(frames, calibration, kind="longterm", nstandards=12):
+    """Chooses the right calibration frame sequence depending on the calibration type and length
+
+    Parameters
     ----------
     frames : pd.DataFrame
-        Pandas dataframe containing frames metadata
-    flavor : str
-        Flavor of calibration frame: 'bias', 'trace', 'wave', 'dome', 'twilight'
-    kind : str
-        Kind of calibration frame: 'nightly', 'longterm'
-    truncate : bool, optional
-        Truncate sequences to match the expected number of exposures, by default True
+        Data frame containing the calibrations metadata
+    calibration : str
+        Calibration type, either 'bias', 'trace', 'wave', 'dome' or 'twilight'
+    kind : str, optional
+        Calibration sequence length, either 'nightly' (short) or 'longterm' (long), by default "longterm"
+    nstandards : int, optional
+        Number of standards to choose, either 12 (first ring only) or 24 (both rings), by default 12
 
-    Return:
+    Returns
+    -------
+    pd.DataFrame
+        Data frame containing the selection of individual exposures
+
+    Raises
     ------
-    list
-        list containing arrays of exposure numbers for each sequence
+    ValueError
+        `nstandards` has the incorrect value (12 or 24)
+    ValueError
+        `calibration` has the incorrect value ('bias', 'trace', 'wave', 'dome' or 'twilight')
+    ValueError
+        `kind` has the incorrect value ('nightly', 'longterm')
     """
+
+    if nstandards not in {12, 24}:
+        raise ValueError(f"Invalid value for `nstandards`: {nstandards}. Expected either 12 or 24")
+    if not isinstance(calibration, str) or calibration not in CALIBRATION_TYPES:
+        raise ValueError(f"Invalid value for `calibration`: {calibration}. Expected one of {','.join(CALIBRATION_TYPES)}")
+    if not isinstance(kind, str) or kind not in {"nightly", "longterm"}:
+        raise ValueError(f"Invalid value for `kind`: {kind}. Expected either 'longterm' or 'nightly'")
+
     EXPECTED_SEQUENCE_LENGTH = {
         "bias": 7,
-        "trace": 2 if kind=="nightly" else 24,
-        "dome": 2 if kind=="nightly" else 24,
-        "wave": 2 if kind=="nightly" else 24,
-        "twilight": 12
-    }
+        "trace": 2 if kind == "nightly" else nstandards,
+        "dome": 2 if kind == "nightly" else nstandards,
+        "wave": 2 if kind == "nightly" else nstandards,
+        "twilight": nstandards}
 
-    if not isinstance(flavor, str) or flavor not in CALIBRATION_TYPES:
-        raise ValueError(f"invalid flavor '{flavor}', available values are {CALIBRATION_TYPES}")
-    if not isinstance(kind, str) or kind not in {"nightly", "longterm"}:
-        raise ValueError(f"invalid kind '{kind}', available values are 'nightly' and 'longterm'")
+    # reject frames affected by shifted/missing pixels
+    chosen_frames = _reject_pixelshifted(frames)
 
-    # filter out exposures with hartmann door wrong status
-    cleaned_frames = frames.query("hartmann == '0 0'")
+    if kind == "nightly" and calibration != "twilight":
+        chosen_frames = chosen_frames.head(EXPECTED_SEQUENCE_LENGTH[calibration])
+        return chosen_frames
 
-    if flavor == "twilight":
-        query = "imagetyp == 'flat' and not (ldls|quartz) and not (neon|hgne|argon|xenon)"
-    elif flavor == "bias":
-        query = "imagetyp == 'bias'"
-    elif flavor == "dome" or flavor == "trace":
-        query = "imagetyp == 'flat' and (ldls|quartz)"
-    elif flavor == "wave":
-        query = "imagetyp == 'arc' and not (ldls|quartz) and (neon|hgne|argon|xenon)"
-    expnums = np.sort(cleaned_frames.query(query).expnum.unique())
-    diff = np.diff(expnums)
-    div, = np.where(np.abs(diff) > 1)
-
-    sequences = np.split(expnums, div+1)
-    [seq.sort() for seq in sequences]
-    log.info(f"found sequences: {sequences}")
-
-    if len(sequences) == 0:
-        raise ValueError(f"no calibration frames of flavor '{flavor}' found using the query: '{query}'")
-
-    lengths = [len(seq) for seq in sequences]
-    if flavor == "twilight":
-        # chosen_expnums = np.concatenate(sequences)
-        chosen_expnums = sequences[0]
+    if nstandards == 12:
+        standards_sequence = (label for label in STD_FIBER_LABELS if label.startswith("P1"))
     else:
-        if len(sequences) > 1:
-            idx = lengths.index(min(lengths) if kind == "nightly" else max(lengths))
-            chosen_expnums = sequences[idx]
-        else:
-            chosen_expnums = sequences[0]
+        standards_sequence = STD_FIBER_LABELS.copy()
+    standards_sequence = sorted(standards_sequence, key=lambda s: int(s.split("-")[1]))
 
-    chosen_frames = cleaned_frames.query("expnum in @chosen_expnums")
-    expected_length = EXPECTED_SEQUENCE_LENGTH[flavor]
-    sequence_length = len(chosen_expnums)
-
-    # try selecting the best sequence
-    if sequence_length == expected_length:
-        chosen_frames.sort_values(["expnum", "camera"], inplace=True)
-        log.info(f"found matching sequence for {flavor = }: {chosen_expnums}")
-        return chosen_frames, chosen_expnums
-
-    # fall back to full set of frames and randomly select the best matching exposures
-    log.warning(f"chosen sequence for {flavor = } has the wrong length {sequence_length} != {expected_length = }")
-    chosen_expnums = expnums
-    sequence_length = len(chosen_expnums)
-    chosen_frames = cleaned_frames.query("expnum in @chosen_expnums")
-
-    # handle case of sequence longer than expected and truncate == True
-    if truncate and sequence_length > expected_length:
-        if flavor == "dome":
-            qrtz_expnums = chosen_frames.expnum[chosen_frames.quartz][:expected_length//2]
-            ldls_expnums = chosen_frames.expnum[chosen_frames.ldls][:expected_length//2]
-            chosen_expnums = np.concatenate([qrtz_expnums, ldls_expnums])
-        elif flavor == "arc":
-            short_expnums = chosen_frames.expnum[chosen_frames.exptime == 10][:expected_length//2]
-            long_expnums = chosen_frames.expnum[chosen_frames.exptime == 50][:expected_length//2]
-            chosen_expnums = np.concatenate([short_expnums, long_expnums])
-        else:
-            chosen_expnums = chosen_expnums[:expected_length]
-        log.info(f"selecting first {expected_length} exposures: {chosen_expnums}")
-        chosen_frames = cleaned_frames.query("expnum in @chosen_expnums")
-        chosen_frames.sort_values(["expnum", "camera"], inplace=True)
-    elif sequence_length < expected_length:
-        log.warning(f"chosen sequence for {flavor = } is shorter than expected {sequence_length} < {expected_length = }")
-    else:
-        log.info(f"selecting full set of frames with {sequence_length = } exposures")
-
-    return chosen_frames, chosen_expnums
+    chosen_frames.query("calibfib in @standards_sequence", inplace=True)
+    chosen_expnums = chosen_frames.groupby("calibfib").first().reset_index().sort_values("calibfib").expnum.unique()
+    chosen_frames.query("expnum in @chosen_expnums", inplace=True)
+    return chosen_frames.reset_index(drop=True), chosen_expnums
 
 
 def get_fibers_signal(mjd, camera, expnum, imagetyp="flat"):

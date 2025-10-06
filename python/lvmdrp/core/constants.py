@@ -66,6 +66,9 @@ EPHEMERIS_DIR = os.path.join(os.getenv("LVMCORE_DIR"), "etc")
 # fiducial calibrations directory
 MASTERS_DIR = os.getenv("LVM_MASTER_DIR")
 
+# path for pixel shifts table
+PIXELSHIFTS_PATH = os.path.join(os.getenv("LVMCORE_DIR"), "etc", "pixel_shifts.parquet")
+
 SKYCORR_PAR_MAP = {
     "INPUT_OBJECT_SPECTRUM": "objfile",
     "INPUT_SKY_SPECTRUM": "skyfile",
