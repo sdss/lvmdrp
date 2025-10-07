@@ -442,7 +442,7 @@ def create_calibfib_hdrfix(mjd, calibration, ref_column=LVM_REFERENCE_COLUMN, nc
         return
 
     expnums = frames.expnum.unique()
-    calibs = get_calib_paths(mjd=mjd, version=drpver, flavors=CALIBRATION_NEEDS[calibration], longterm_cals=True, from_sandbox=False)
+    calibs = get_calib_paths(mjd=mjd, version=drpver, flavors=CALIBRATION_NEEDS[calibration], from_sandbox=True)
     reduce_2d(mjds=mjd, calibrations=calibs, expnums=expnums, cameras=CAMERAS, add_astro=False, reject_cr=False, sub_straylight=False, skip_done=skip_done)
 
     exposed_stds = {}
