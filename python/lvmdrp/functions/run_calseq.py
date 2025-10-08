@@ -278,9 +278,14 @@ def get_exposed_standards(expnums, camera, ref_column=LVM_REFERENCE_COLUMN, ncol
         # ax_profile.step(profile._pixels, profile._data, where="mid", lw=1, color="0.2")
         # NOTE: test the possibility to measure the fiber positions to have a better estimate of the peak SNR
 
-        exposed_std, snr, fiber_pos, _, _ = dframe.get_exposed_std(ref_column=ref_column, width=ncolumns, nsigmas=50, fiber_pos=fiber_pos, trust_errors=True, ax=axs_exposed[i])
-        exposed_pos = fiber_pos[dframe._filter_slitmap()["orig_ifulabel"].data == exposed_std]
-        log.info(f"    camera exposure {expnum}, found exposed standard fiber: {exposed_std.__str__():<5s}")
+        try:
+            exposed_std, snr, fiber_pos, _, _ = dframe.get_exposed_std(ref_column=ref_column, width=ncolumns, nsigmas=50, fiber_pos=fiber_pos, trust_errors=True, ax=axs_exposed[i])
+            exposed_pos = fiber_pos[dframe._filter_slitmap()["orig_ifulabel"].data == exposed_std]
+            log.info(f"    camera exposure {expnum}, found exposed standard fiber: {exposed_std.__str__():<5s}")
+        except Exception as e:
+            log.error(f"while analysing frame at {dframe_path}: {e}")
+            exposed_stds[expnum] = (exposed_std, np.inf)
+            continue
 
         exposed_stds[expnum] = (exposed_std, snr[exposed_pos][0] if exposed_std is not None else None)
 
