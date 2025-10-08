@@ -1028,6 +1028,8 @@ def get_sequence_metadata(mjds, calibration, camera=None, expnums=None, exptime=
 
     # get frames metadata
     frames = pd.concat([get_frames_metadata(mjd=mjd, overwrite=extract_metadata) for mjd in mjds], ignore_index=True)
+    # remove bad exposures
+    frames.query("qaqual == 'GOOD'", inplace=True)
     # group calibrations according to their type
     selection = get_calibration_selection(frames, calibration=calibration)
     frames = frames.loc[selection]
