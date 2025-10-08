@@ -282,7 +282,7 @@ def logscale_to_linear(wl_regular, wl_log, flux_log, shift=0):
 
 def prepare_spec(in_rss, width=3):
     '''
-    Preparation of the staddard star spectra for subsequent model matching.
+    Preparation of the standard star spectra for subsequent model matching.
     Read the standard star spectra and errors
     Subtract the master sky, divide by exptime
     Correct for atmospheric extinction
@@ -315,6 +315,10 @@ def prepare_spec(in_rss, width=3):
     std_errors_all_bands = []
     lsf_all_bands = []
     std_spectra_all_bands = [] ## contains original std spectra for all stars in ALL band
+    fibers_all_bands = []
+    gaia_ids_all_bands = []
+    # keys = ['fiber_0', 'good_flux_0', 'fiber_1', 'good_flux_1', 'fiber_2', 'good_flux_2']
+    # check_bad_fluxes = {key: [] for key in keys}
 
     for b in range(len(in_rss)):
         #log.info(f"loading input RSS file '{os.path.basename(in_rss[b])}'")
@@ -353,10 +357,9 @@ def prepare_spec(in_rss, width=3):
         lsf = []
         fibers = []
         gaia_ids = []
+
         for s in stds:
             nn, fiber, gaia_id, exptime, secz = s  # unpack standard star tuple
-            gaia_ids.append(gaia_id)
-            fibers.append(fiber)
 
             # find the fiber with our spectrum of that Gaia star, if it is not in the current spectrograph, continue
             select = rss_tmp._slitmap["orig_ifulabel"] == fiber
@@ -368,10 +371,38 @@ def prepare_spec(in_rss, width=3):
             spec_tmp = rss_tmp._data[fibidx[0], :]
             error_tmp = rss_tmp._error[fibidx[0], :]
             lsf_tmp = rss_tmp._lsf[fibidx[0], :]
+            # check_bad_fluxes[f'fiber_{b}'].append(fiber)
             if np.nanmean(spec_tmp) < 100:
                 log.warning(f"fiber {fiber} @ {fibidx[0]} has counts < 100 e-, skipping")
-                #rss.add_header_comment(f"fiber {fiber} @ {fibidx[0]} has counts < 100 e-, skipping")
+                # check_bad_fluxes[f'good_flux_{b}'].append(False)
+                if b > 0:
+                    for ind_b in range(b):
+                        try:
+                            idx = fibers_all_bands[ind_b].index(fiber)
+                        except ValueError:
+                            continue
+                        del fibers_all_bands[ind_b][idx]
+                        del normalized_spectra_all_bands[ind_b][idx]
+                        del normalized_spectra_unconv_all_bands[ind_b][idx]
+                        del std_errors_all_bands[ind_b][idx]
+                        del lsf_all_bands[ind_b][idx]
+                        del std_spectra_all_bands[ind_b][idx]
+                        del gaia_ids_all_bands[ind_b][idx]
+                # #rss.add_header_comment(f"fiber {fiber} @ {fibidx[0]} has counts < 100 e-, skipping")
                 continue
+            if b > 0:
+                good_fiber = True
+                for ind_b in range(b):
+                    try:
+                        idx = fibers_all_bands[ind_b].index(fiber)
+                    except ValueError:
+                        good_fiber = False
+                        continue
+                if not good_fiber:
+                    continue
+            gaia_ids.append(gaia_id)
+            fibers.append(fiber)
+            # check_bad_fluxes[f'good_flux_{b}'].append(True)
 
             spec_tmp = (rss_tmp._data[fibidx[0],:] - master_sky._data[fibidx[0],:])/exptime
 
@@ -418,8 +449,10 @@ def prepare_spec(in_rss, width=3):
         std_errors_all_bands.append(std_errors)
         lsf_all_bands.append(lsf) # initial std spec LSF for all standards and all channel together
         std_spectra_all_bands.append(std_spectra) # corrected for extinction
+        fibers_all_bands.append(fibers)
+        gaia_ids_all_bands.append(gaia_ids)
 
-    return w, gaia_ids, fibers, std_spectra_all_bands, normalized_spectra_unconv_all_bands, normalized_spectra_all_bands, std_errors_all_bands, lsf_all_bands
+    return w, gaia_ids_all_bands[0], fibers, std_spectra_all_bands, normalized_spectra_unconv_all_bands, normalized_spectra_all_bands, std_errors_all_bands, lsf_all_bands
 
 def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
     """ Selection of the stellar atmosphere model spectra (POLLUX database, AMBRE library)
@@ -672,7 +705,6 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
                               mask_dict=mask_dict)
 
 
-
         # calculating sensitivity curves
     for n_chan, chan in enumerate('brz'):
         # load input RSS
@@ -686,7 +718,6 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
             colnames = [f"STD{i}SEN" for i in range(1, NSTD + 1)]
         res_mod = Table(np.full(w[n_chan].size, np.nan, dtype=list(zip(colnames, ["f8"] * len(colnames)))))
         # mean_mod, rms_mod = np.full(w.size, np.nan), np.full(w.size, np.nan)
-
         if plot:
             plt.subplot
             fig1 = plt.figure(1)
@@ -721,7 +752,6 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
             sens_coef = gaia_flux/lvmflux
             #print(f'lvmflux={lvmflux}, gaia_flux={gaia_flux}, converted to gaia flux = {lvmflux*sens_coef}')
 
-
             res_mod[f"STD{i}SEN"] = s(w[n_chan]).astype(np.float32)*sens_coef
             sens = sens0*sens_coef
 
@@ -729,8 +759,8 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
             if plot:
                 plt.plot(wgood, sgood*sens_coef, ".k", markersize=2, zorder=-999)
                 plt.plot(w[n_chan], sens, linewidth=1, zorder=-999, label = fibers[i])
-                plt.legend()
 
+                plt.legend()
 
         res_mod_pd = res_mod.to_pandas().values
         rms_mod = biweight_scale(res_mod_pd, axis=1, ignore_nan=True)
@@ -919,11 +949,12 @@ def qa_model_matching(fig_path, fiber_params = None, gaia_params = None, model_p
              matching_params["chi2_wave_bestfit"] / 100, label='chi2/100', linewidth=1)
 
     # xlim = [np.min(log_std_wave_all), 8.2]
-    xlim = [8.24, 8.38]
-    # xlim = [8.2, 8.38]
+    # xlim = [8.24, 8.38]
+    xlim = [np.log(3900),np.log(4200)]
     # ylim = [0.1,1.6]
     ylim = [-0.1, 1.6]
-    show_wl = np.arange(3700, 4400, 100)
+    # show_wl = np.arange(3700, 4400, 100)
+    show_wl = np.arange(3900, 4200, 100)
 
     for peak in matching_params["peaks"]:
         width = int(matching_params["properties"]["widths"][np.where(matching_params["peaks"] == peak)][0])  # Use detected width
@@ -960,13 +991,15 @@ def qa_model_matching(fig_path, fiber_params = None, gaia_params = None, model_p
         plt.axvspan(np.log(mask_box[0]), np.log(mask_box[1]), alpha=0.2, color='grey')
     plt.plot(wave_arrays['log_std_wave_all'][mask_dict['mask_good']][mask_dict['mask_chi2']] + matching_params["log_vel_shift"],
              matching_params["chi2_wave_bestfit"] / 100, label='chi2/100', linewidth=1)
+    # plt.axvline(x=np.log(6563), color='grey', linewidth=0.5, linestyle='--')
     # plt.legend()
-    # xlim = [8.78, 8.82]
     # xlim = [8.66, 8.92] #~whole channel
-    xlim = [8.69, 8.8]
+    # xlim = [8.69, 8.8]
+    xlim = [np.log(6400), np.log(6600)]
     # ylim = [0.2, 1.5]
     ylim = [-0.1, 1.5]
-    show_wl = np.arange(5700, 6700, 100)
+    # show_wl = np.arange(5700, 6700, 100)
+    show_wl = np.arange(6400, 6600, 100)
 
     for peak in matching_params["peaks"]:
         width = int(matching_params["properties"]["widths"][np.where(matching_params["peaks"] == peak)][0])  # Use detected width
@@ -1006,9 +1039,11 @@ def qa_model_matching(fig_path, fiber_params = None, gaia_params = None, model_p
     #                  alpha=0.2,
     #                  label="Masked Region")
     # plt.legend()
-    xlim = [9.035, 9.1]
+    # xlim = [9.035, 9.1]
+    xlim = [np.log(8400), np.log(8650)]
     ylim = [-0.1, 1.5]
-    show_wl = np.arange(8300, 9500, 100)
+    # show_wl = np.arange(8300, 9500, 100)
+    show_wl = np.arange(8400, 8650, 100)
 
     for peak in matching_params["peaks"]:
         width = int(matching_params["properties"]["widths"][np.where(matching_params["peaks"] == peak)][0])  # Use detected width
@@ -1213,7 +1248,6 @@ def standard_sensitivity(stds, rss, GAIA_CACHE_DIR, ext, res, plot=False, width=
         if plot:
             plt.plot(wgood, sgood, ".k", markersize=2, zorder=-999)
             plt.plot(w, res[f"STD{nn}SEN"], linewidth=1)
-
     return rss, res
 
 

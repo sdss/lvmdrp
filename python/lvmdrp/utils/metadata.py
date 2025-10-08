@@ -359,7 +359,6 @@ def _load_or_create_store(drpver=None, tileid=None, mjd=None, kind="raw", mode="
     )
 
     stores = []
-    log.info(f"loading/creating metadata store with parameters {tileid = }, {mjd = } and {kind = }")
     for metadata_path in metadata_paths:
         # create the directory if needed
         metadata_path.parent.mkdir(parents=True, exist_ok=True)
@@ -526,13 +525,13 @@ def get_frames_metadata(
 
     metadata_paths = _get_metadata_paths(tileid="*", mjd=mjd, kind="raw", filter_exist=True)
     if any(metadata_paths) and not overwrite:
-        log.info("Loading existing metadata store.")
+        log.info(f"Loading existing metadata store for MJD = {mjd}.")
         meta = get_metadata(mjd=mjd, tileid="*")
     else:
         if overwrite:
             _del_store(mjd=mjd, tileid="*")
 
-        log.info("Creating new metadata store.")
+        log.info(f"Creating new metadata store for MJD = {mjd}.")
         meta = extract_metadata(frames, kind="raw")
 
     return meta
@@ -942,7 +941,6 @@ def get_metadata(
         return
 
     metadata = pd.concat(metadatas, axis="index", ignore_index=True)
-    log.info(f"found {len(metadata)} frames in stores")
     # filter by exposure number, spectrograph and/or camera
     metadata = _filter_metadata(
         metadata=metadata,
@@ -964,9 +962,23 @@ def get_metadata(
         status=status,
         drpqual=drpqual,
     )
-    log.info(f"number of frames after filtering {len(metadata)}")
 
     return metadata
+
+
+def update_metadata(mjd):
+
+    paths = np.asarray(sorted(path.expand("lvm_raw", hemi="s", camspec="*", mjd=mjd, expnum="????????")))
+    names = np.asarray([os.path.basename(p).replace(".gz", "") for p in paths])
+    old_names = np.asarray(sorted(get_metadata(mjd=mjd, tileid="*")["name"].tolist()))
+
+    new_selection = ~np.isin(names, old_names)
+    npaths = new_selection.sum()
+    if npaths > 0:
+        log.info(f"going to update metadata stores for MJD = {mjd}. Found {npaths} new paths")
+
+        new_paths = paths[new_selection]
+        extract_metadata(new_paths)
 
 
 def get_calibration_selection(frames, calibration):

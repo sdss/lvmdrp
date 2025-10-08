@@ -91,7 +91,15 @@ drp get-calibs -m 60255
 
 This command will download the files using `sdss-access` and place them in `$LVM_MASTER_DIR`, which is defined by the
 pipeline as `$LVM_SANDBOX/calib`, mirroring the SAS.  These are defined automatically relative to your root `$SAS_BASE_DIR`.
-You would find the files at `$SAS_BASE_DIR/sdsswork/lvm/sandbox/calib/`
+You would find the files at `$SAS_BASE_DIR/sdsswork/lvm/sandbox/calib/`.
+
+You can download all calibration epochs by running
+
+```bash
+drp get-calibs
+```
+
+**NOTE:** If you want to know what calibration epoch is needed for a specific exposure, always choose the epoch that is closest and earlier than your exposure's MJD.
 
 
 ## Running the DRP
