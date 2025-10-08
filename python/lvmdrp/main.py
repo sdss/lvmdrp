@@ -34,7 +34,7 @@ from lvmdrp.functions.rssMethod import (determine_wavelength_solution, create_pi
 from lvmdrp.functions.skyMethod import interpolate_sky, combine_skies, quick_sky_subtraction
 from lvmdrp.core import fluxcal
 from lvmdrp.functions.fluxCalMethod import fluxcal_standard_stars, fluxcal_sci_ifu_stars, apply_fluxcal, model_selection
-from lvmdrp.utils.metadata import (get_frames_metadata, get_master_metadata, extract_metadata,
+from lvmdrp.utils.metadata import (get_frames_metadata, update_metadata, get_master_metadata, extract_metadata,
                                    get_analog_groups, match_master_metadata, create_master_path,
                                    update_summary_file, convert_h5_to_fits)
 from lvmdrp.utils.convert import tileid_grp
@@ -1557,8 +1557,12 @@ def science_reduction(expnum: int,
 
     # get target frames metadata or extract if it doesn't exist
     sci_mjd = mjd_from_expnum(expnum)[0]
+    # update metadata if there are new paths to cache
+    update_metadata(mjd=sci_mjd)
     sci_metadata = get_frames_metadata(mjd=sci_mjd)
     sci_metadata.query("expnum == @expnum", inplace=True)
+    if sci_metadata.empty:
+        log.error(f"exposure {expnum = } not found in metadata for MJD = {sci_mjd}")
     sci_metadata.sort_values("expnum", ascending=False, inplace=True)
     if not force_run:
         try:
@@ -1811,6 +1815,10 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
     # # write the drp parameter configuration
     # write_config_file()
 
+    if mjd is None and expnum is None:
+        log.error(f"you must provide either an exposure number `expnum` or an MJD `mjd`. None was given")
+        return
+
     if mjd is None:
         # parse expnums and get MJDs
         mjds = mjd_from_expnum(expnum)
@@ -1850,6 +1858,9 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
         log.info(f"MJD {mjd} falls within excluded period in {exclude_file}, skipping ...")
         return
 
+    # update metadata if there are new paths to cache
+    update_metadata(mjd=mjd)
+
     # generate the MJD metadata
     frames = get_frames_metadata(mjd=mjd)
     sub = frames.copy()
@@ -1873,8 +1884,11 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
 
     # filter on exposure number
     if expnum:
-        log.info(f'Filtering on exposure numbers {expnum}.')
+        log.info(f'Filtering on exposure number {expnum}.')
         sub = filter_expnum(sub, expnum)
+        if sub.empty:
+            log.error(f"exposure {expnum = } not found in metadata for MJD = {mjd}")
+            return
 
     # sort the frames
     sub = sub.sort_values(['expnum', 'camera'])
