@@ -121,7 +121,32 @@ def _reject_pixelshifted(frames, pixelshifts_path=PIXELSHIFTS_PATH):
     # return frames.query("expnum not in @pixelshifts.exp_no and spec not in @pixelshifts.spec")
 
 
-def choose_sequence(frames, calibration, kind="longterm", nstandards=12):
+def _get_standards_ring(ring):
+    if ring == "primary":
+        standards_sequence = (label for label in STD_FIBER_LABELS if label.startswith("P1"))
+    elif ring == "secondary":
+        standards_sequence = (label for label in STD_FIBER_LABELS if label.startswith("P2"))
+    else:
+        standards_sequence = STD_FIBER_LABELS.copy()
+    return sorted(standards_sequence, key=lambda s: int(s.split("-")[1]))
+
+
+def get_standards_sequence(frames, camera, ring="primary"):
+
+    slitmap = SLITMAP.copy()
+    slitmap = slitmap[slitmap["spectrographid"] == int(camera[1])]
+
+    # all standards
+    standards = set(slitmap[slitmap["telescope"] == "Spec"]["orig_ifulabel"])
+    # targeted standards in all spectrographs (i.e., all standards in a given ring or both rings)
+    standards_ring = set(_get_standards_ring(ring=ring))
+    # selection of standards present in the current camera spectrograph
+    standards_selection = standards.intersection(standards_ring)
+
+    return frames.query("camera == @camera and calibfib in @standards_selection")
+
+
+def choose_sequence(frames, calibration, kind="longterm", ring="primary"):
     """Chooses the right calibration frame sequence depending on the calibration type and length
 
     Parameters
@@ -132,8 +157,8 @@ def choose_sequence(frames, calibration, kind="longterm", nstandards=12):
         Calibration type, either 'bias', 'trace', 'wave', 'dome' or 'twilight'
     kind : str, optional
         Calibration sequence length, either 'nightly' (short) or 'longterm' (long), by default "longterm"
-    nstandards : int, optional
-        Number of standards to choose, either 12 (first ring only) or 24 (both rings), by default 12
+    ring : str, optional
+        Standard fibers ring to select, either 'primary', 'secondary', 'both'. By default 'primary'
 
     Returns
     -------
@@ -143,20 +168,21 @@ def choose_sequence(frames, calibration, kind="longterm", nstandards=12):
     Raises
     ------
     ValueError
-        `nstandards` has the incorrect value (12 or 24)
+        `ring` has the incorrect value ('primary', 'secondary' or 'both')
     ValueError
         `calibration` has the incorrect value ('bias', 'trace', 'wave', 'dome' or 'twilight')
     ValueError
         `kind` has the incorrect value ('nightly', 'longterm')
     """
 
-    if nstandards not in {12, 24}:
-        raise ValueError(f"Invalid value for `nstandards`: {nstandards}. Expected either 12 or 24")
+    if ring not in {"primary", "secondary", "both"}:
+        raise ValueError(f"Invalid value for `ring`: {ring}. Expected either 'primary', 'secondary' or 'both'")
     if not isinstance(calibration, str) or calibration not in CALIBRATION_TYPES:
         raise ValueError(f"Invalid value for `calibration`: {calibration}. Expected one of {','.join(CALIBRATION_TYPES)}")
     if not isinstance(kind, str) or kind not in {"nightly", "longterm"}:
         raise ValueError(f"Invalid value for `kind`: {kind}. Expected either 'longterm' or 'nightly'")
 
+    nstandards = 12 if ring in {"primary", "secondary"} else 24
     EXPECTED_SEQUENCE_LENGTH = {
         "bias": 7,
         "trace": 2 if kind == "nightly" else nstandards,
@@ -171,16 +197,58 @@ def choose_sequence(frames, calibration, kind="longterm", nstandards=12):
         chosen_frames = chosen_frames.head(EXPECTED_SEQUENCE_LENGTH[calibration])
         return chosen_frames
 
-    if nstandards == 12:
-        standards_sequence = (label for label in STD_FIBER_LABELS if label.startswith("P1"))
-    else:
-        standards_sequence = STD_FIBER_LABELS.copy()
-    standards_sequence = sorted(standards_sequence, key=lambda s: int(s.split("-")[1]))
-
+    standards_sequence = _get_standards_ring(ring=ring)
     chosen_frames.query("calibfib in @standards_sequence", inplace=True)
     chosen_expnums = chosen_frames.groupby("calibfib").first().reset_index().sort_values("calibfib").expnum.unique()
     chosen_frames.query("expnum in @chosen_expnums", inplace=True)
     return chosen_frames.reset_index(drop=True), chosen_expnums
+
+
+def get_sequence_iterator(frames, camera):
+    """Returns standards sequence dictionary with exposed fiber and block IDs
+
+    Parameters
+    ----------
+    expnums : list
+        List of exposure numbers in the sequence
+    camera : str
+        Camera name (e.g. "b1")
+
+    Returns
+    -------
+    dict
+        Dictionary with the exposed standard fiber IDs for each exposure in the sequence
+    """
+
+    slitmap = SLITMAP.copy()
+    slitmap = slitmap[slitmap["spectrographid"] == int(camera[1])]
+    spec_select = slitmap["telescope"] == "Spec"
+    ids_std = slitmap[spec_select]["orig_ifulabel"]
+
+    exposed_stds, block_idxs = {}, np.arange(LVM_NBLOCKS).tolist()
+    for _, frame in frames.iterrows():
+        # get block ID for exposed standard fiber
+        fiber_par = slitmap[slitmap["orig_ifulabel"] == frame.calibfib]
+        block_idx = int(fiber_par["blockid"][0][1:])-1
+        if block_idx in block_idxs:
+            block_idxs.remove(block_idx)
+
+        exposed_stds[frame.expnum] = (frame.calibfib, [block_idx])
+
+    # handle case of no standard fiber exposed
+    if len(exposed_stds) == 0:
+        block_idxs = []
+        exposed_stds[frames.expnums[0]] = (None, block_idxs)
+
+    # add missing blocks for first exposure
+    if len(block_idxs) > 0:
+        expnum = list(exposed_stds.keys())[0]
+        exposed_stds[expnum] = (exposed_stds[expnum][0], sorted(exposed_stds[expnum][1]+block_idxs))
+
+    # list unexposed standard fibers
+    unexposed_stds = [fiber for fiber in ids_std if fiber not in list(zip(*exposed_stds.values()))[0]]
+
+    return exposed_stds, unexposed_stds
 
 
 def get_fibers_signal(mjd, camera, expnum, imagetyp="flat"):
@@ -292,122 +360,6 @@ def get_exposed_standards(expnums, camera, ref_column=LVM_REFERENCE_COLUMN, ncol
     return exposed_stds
 
 
-def get_standards_sequence(mjd, expnums, camera, imagetyp="flat", ref_column=LVM_REFERENCE_COLUMN, snr_threshold=80, use_header=True, display_plots=False):
-    """Returns the exposed standard fiber IDs for a given exposure sequence and camera
-
-    Parameters
-    ----------
-    mjd : int
-        MJD of the exposure sequence
-    expnums : list
-        List of exposure numbers in the sequence
-    camera : str
-        Camera name (e.g. "b1")
-    ref_column : int
-        Reference column for the fiber trace
-    snr_threshold : float
-        SNR threshold above which a fiber is considered to be exposed, by default 80
-    use_header : bool
-        Use CALIBFIB header keyword if available, defaults to True
-    display_plots : bool
-        If True, display plots
-
-    Returns
-    -------
-    dict
-        Dictionary with the exposed standard fiber IDs for each exposure in the sequence
-    """
-    log.info(f"loading detrended frames for {camera = }, exposures = {expnums}")
-    rframe_paths = sorted([path.expand("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, camera=camera, expnum=expnum, kind="d", imagetype=imagetyp)[0] for expnum in expnums])
-    images = [image_tasks.loadImage(rframe_path) for rframe_path in rframe_paths]
-
-    # define fibermap for camera & std fibers parameters
-    fibermap = images[0]._slitmap[images[0]._slitmap["spectrographid"]==int(camera[1])]
-    spec_select = fibermap["telescope"] == "Spec"
-    ids_std = fibermap[spec_select]["orig_ifulabel"]
-    log.info(f"possible standard fibers in {camera = }: {','.join(ids_std)}")
-
-    # get exposed standard fibers from header if present
-    exposed_stds = {image._header["EXPOSURE"]: image._header.get("CALIBFIB", None) for image in images}
-    block_idxs = np.arange(LVM_NBLOCKS).tolist()
-    if use_header and all([exposed_std is not None for exposed_std in exposed_stds.values()]):
-        log.info(f"extracting standard fibers information of {len(exposed_stds)} exposures:")
-        for expnum, exposed_std in list(exposed_stds.items()):
-            if exposed_std not in fibermap["orig_ifulabel"]:
-                exposed_stds.pop(expnum)
-                continue
-            fiber_par = fibermap[fibermap["orig_ifulabel"] == exposed_std]
-            block_idx = int(fiber_par["blockid"][0][1:])-1
-            exposed_stds[expnum] = (exposed_std, [block_idx])
-            log.info(f"  {expnum = } exposed standard fiber: '{exposed_std}' ({block_idx = })")
-    else:
-        if use_header:
-            log.warning(f"exposed standard fibers not found in header for {camera = }, going to infer exposed fibers from SNR")
-        else:
-            log.info(f"inferring exposed standard fiber for {camera = } from SNR")
-
-        # combine frames for given camera
-        log.info(f"combining {len(images)} exposures")
-        cimage = image_tasks.combineImages(images, normalize=False, background_subtract=False)
-        cimage.setData(data=np.nan_to_num(cimage._data), error=np.nan_to_num(cimage._error, nan=np.inf))
-        fiber_pos = cimage.match_reference_column(ref_column)
-
-        # calculate SNR along colummn
-        nrows = max(len(images)//3, 1)
-        fig, axs = create_subplots(to_display=display_plots,
-                                nrows=nrows, ncols=3,
-                                figsize=(15,5*nrows),
-                                sharex=True, sharey=True,
-                                layout="constrained")
-        fig.supxlabel("standard fiber ID")
-        fig.supylabel("SNR at fiber centroid")
-        fig.suptitle(f"exposed standard fibers in sequence {expnums[0]} - {expnums[-1]} in camera '{camera}'")
-        exposed_stds, block_idxs = {}, np.arange(LVM_NBLOCKS).tolist()
-        log.info(f"measuring SNR of {len(images)} exposures:")
-        for image, ax in zip(images, axs):
-            expnum = image._header["EXPOSURE"]
-            exposed_std, _, _, (snr_med, snr_std), (snr_std_med, snr_std_std) = image.get_exposed_std(
-                ref_column=ref_column, fiber_pos=fiber_pos, nsigmas=snr_threshold, trust_errors=False, ax=ax)
-            log.info(f"  {expnum = } SNR for standards: {snr_std_med:.2f} +/- {snr_std_std:.2f}")
-
-            if exposed_std is None:
-                continue
-
-            # get block ID for exposed standard fiber
-            fiber_par = image._slitmap[image._slitmap["orig_ifulabel"] == exposed_std]
-            block_idx = int(fiber_par["blockid"][0][1:])-1
-            if block_idx in block_idxs:
-                block_idxs.remove(block_idx)
-            log.info(f"  {expnum = } exposed standard fiber: '{exposed_std}' ({block_idx = })")
-
-            exposed_stds[expnum] = (exposed_std, [block_idx])
-
-        # handle case of no standard fiber exposed
-        if len(exposed_stds) == 0:
-            exposed_stds[expnums[0]] = (None, block_idxs)
-            block_idxs = []
-
-        # save figure
-        save_fig(fig,
-                product_path=path.full("lvm_anc", drpver=drpver, tileid=11111,
-                                        mjd=mjd, camera=camera, expnum=f"{expnums[0]}_{expnums[-1]}",
-                                        kind="d", imagetype=imagetyp),
-                to_display=display_plots,
-                figure_path="qa",
-                label="exposed_std_fiber")
-
-    # add missing blocks for first exposure
-    if len(block_idxs) > 0:
-        log.info(f"remaining blocks without exposed standard fibers: {block_idxs}, adding to first exposure")
-        expnum = list(exposed_stds.keys())[0]
-        exposed_stds[expnum] = (exposed_stds[expnum][0], sorted(exposed_stds[expnum][1]+block_idxs))
-
-    # list unexposed standard fibers
-    unexposed_stds = [fiber for fiber in ids_std if fiber not in list(zip(*exposed_stds.values()))[0]]
-
-    return exposed_stds, unexposed_stds
-
-
 def create_calibfib_hdrfix(mjd, calibration, ref_column=LVM_REFERENCE_COLUMN, ncolumns=500, trust_header=True, skip_done=True, display_plots=False):
     """Creates header fixes for CALIBFIB when it is missing in dome/twilight flats and arcs frames
 
@@ -436,7 +388,7 @@ def create_calibfib_hdrfix(mjd, calibration, ref_column=LVM_REFERENCE_COLUMN, nc
         return chosen_stds
 
     log.info(f"going to create CALIBFIB header fixes for '{calibration}' calibrations on {mjd = }")
-    frames = pd.concat([md.get_sequence_metadata(mjds=mjd, calibration=calibration, camera=camera) for camera in CAMERAS], ignore_index=True)
+    frames = pd.concat([md.get_calibrations_metadata(mjds=mjd, calibration=calibration, camera=camera) for camera in CAMERAS], ignore_index=True)
     if frames.empty:
         log.error(f"no calibration frames found for calibration = '{calibration}' | {mjd = }, skipping CALIBFIB header fix creation")
         return
@@ -901,7 +853,7 @@ def _create_wavelengths_60177(use_longterm_cals=True, skip_done=True, dry_run=Fa
     mjd = 60177
     expnums = range(3453, 3466+1)
 
-    frames = md.get_sequence_metadata(mjds=mjd, calibration="wave", expnums=expnums)
+    frames = md.get_calibrations_metadata(mjds=mjd, calibration="wave", expnums=expnums)
 
     # define master paths for target frames
     calibs = get_calib_paths(mjd, version=drpver, longterm_cals=use_longterm_cals, flavors=CALIBRATION_NEEDS["wave"])
@@ -1312,7 +1264,7 @@ def create_bias(mjd, epochs=None, use_longterm_cals=True, skip_done=True, dry_ru
     epoch = get_calibration_epoch(mjd=mjd, **(epochs or {}).get(mjd, {}))
     mjds = epoch["bias"]
 
-    frames = md.get_sequence_metadata(mjds=mjds, calibration="bias")
+    frames = md.get_calibrations_metadata(mjds=mjds, calibration="bias")
     if frames.empty:
         log.error("no bias frames found, skipping production of bias frames")
         return
@@ -1389,7 +1341,7 @@ def create_nightly_traces(mjd, use_longterm_cals=False, expnums_ldls=None, expnu
     else:
         expnums = None
 
-    frames = md.get_sequence_metadata(mjd, calibration="trace", expnums=expnums)
+    frames = md.get_calibrations_metadata(mjd, calibration="trace", expnums=expnums)
     if frames.empty:
         log.error("no dome flat frames found, skipping production of fiber traces")
         return
@@ -1492,11 +1444,10 @@ def create_nightly_traces(mjd, use_longterm_cals=False, expnums_ldls=None, expnu
                 ratio.writeFitsData(dratio_path)
 
 
-def create_traces(mjd, cameras=CAMERAS, expnums_ldls=None, expnums_qrtz=None,
+def create_traces(mjd, epochs=None, cameras=CAMERAS, ring="primary",
                   cals_mjd=None, use_longterm_cals=True,
-                  counts_thresholds=COUNTS_THRESHOLDS, cent_guess_ncolumns=140,
+                  cent_guess_ncolumns=140,
                   trace_full_ncolumns=40,
-                  fit_poly=True, poly_deg_amp=5, poly_deg_cent=4, poly_deg_width=5,
                   skip_done=True, dry_run=False):
     """Create traces from master dome flats
 
@@ -1514,10 +1465,6 @@ def create_traces(mjd, cameras=CAMERAS, expnums_ldls=None, expnums_qrtz=None,
         MJD to reduce
     cameras : list or tuple, optional
         List of cameras (e.g., b2, z3) to create traces for
-    expnums_ldls : list
-        List of exposure numbers for LDLS dome flats
-    expnums_qrtz : list
-        List of exposure numbers for quartz dome flats
     cals_mjd : int, optional
         MJD from which calibrations will be sourced, by default None (calibrations taken from `mjd`)
     use_longterm_cals : bool
@@ -1533,20 +1480,24 @@ def create_traces(mjd, cameras=CAMERAS, expnums_ldls=None, expnums_qrtz=None,
     skip_done : bool, optional
         Skip pipeline steps that have already been done, by default True
     """
-    if expnums_ldls is not None and expnums_qrtz is not None:
-        expnums = np.concatenate([expnums_ldls, expnums_qrtz])
-    else:
-        expnums = None
 
-    frames = md.get_sequence_metadata(mjd, calibration="trace", expnums=expnums, cameras=cameras)
+    epoch = get_calibration_epoch(mjd=mjd, **(epochs or {}).get(mjd, {}))
+    mjds = epoch["trace"]
+
+    frames = md.get_calibrations_metadata(mjds=mjds, calibration="trace")
+    camera_frames = {}
+    for camera in cameras:
+        lamp = MASTER_CON_LAMPS[camera[0]]
+        frames_lamp = frames.loc[frames[lamp]]
+        frames_lamp, _ = choose_sequence(frames=frames_lamp, calibration="trace", kind="longterm", ring=ring)
+        camera_frames[camera] = get_standards_sequence(frames_lamp, camera=camera, ring=ring)
+
+    frames = pd.concat([sequence for sequence in camera_frames.values()])
+    expnums = sorted(frames.expnum.unique())
+
     if frames.empty:
         log.error("no dome flat frames found, skipping production of fiber traces")
         return
-
-    if expnums_ldls is None or expnums_qrtz is None:
-        frames, expnums = choose_sequence(frames, flavor="trace", kind="longterm")
-        expnums_ldls = np.sort(frames.query("ldls").expnum.unique())
-        expnums_qrtz = np.sort(frames.query("quartz").expnum.unique())
 
     # define master paths for target frames
     calibs = get_calib_paths(mjd=cals_mjd or mjd, version=drpver, longterm_cals=use_longterm_cals, flavors=CALIBRATION_NEEDS["trace"])
@@ -1569,9 +1520,7 @@ def create_traces(mjd, cameras=CAMERAS, expnums_ldls=None, expnums_qrtz=None,
             "sigmas": TraceMask.create_empty(data_dim=(LVM_NFIBERS, LVM_NCOLS), slitmap=SLITMAP, samples_columns=columns)
         }
 
-        expnums = expnums_qrtz if camera[0] == "z" else expnums_ldls
-        # select_lamp = MASTER_CON_LAMPS[camera[0]]
-        # counts_threshold = counts_thresholds[select_lamp]
+        expnums = camera_frames.get(camera).expnum.unique()
 
         # first fibers fitting (guess using pure Gaussian profiles) using first exposure in sequence
         dflat_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="d", imagetype="flat", camera=camera, expnum=expnums[0])
@@ -1597,7 +1546,7 @@ def create_traces(mjd, cameras=CAMERAS, expnums_ldls=None, expnums_qrtz=None,
         fibermap = SLITMAP[SLITMAP["spectrographid"] == int(camera[1])]
 
         models = []
-        exposed_stds, unexposed_stds = get_standards_sequence(mjd=mjd, expnums=expnums, camera=camera)
+        exposed_stds, unexposed_stds = get_sequence_iterator(camera_frames[camera], camera)
         for expnum, (std_fiberid, block_idxs) in exposed_stds.items():
             # define paths
             dflat_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="d", imagetype="flat", camera=camera, expnum=expnum)
@@ -1676,7 +1625,7 @@ def create_dome_fiberflats(mjd, expnums_ldls=None, expnums_qrtz=None, cals_mjd=N
     else:
         expnums = None
 
-    frames = md.get_sequence_metadata(mjd, calibration="dome", expnums=expnums)
+    frames = md.get_calibrations_metadata(mjd, calibration="dome", expnums=expnums)
     if frames.empty:
         log.error("no dome flat frames found, skipping production of dome fiberflats")
         return
@@ -1796,7 +1745,7 @@ def create_twilight_fiberflats(mjd: int, expnums: List[int] = None, cals_mjd: in
         Logs useful information abaut the current setup without actually reducing, by default False
     """
     # get metadata
-    frames = md.get_sequence_metadata(mjd, calibration="twilight", expnums=expnums)
+    frames = md.get_calibrations_metadata(mjd, calibration="twilight", expnums=expnums)
     if frames.empty:
         log.error("no twilight frames found, skipping production of twilight fiberflats")
         return
@@ -1987,7 +1936,7 @@ def create_wavelengths(mjd, expnums=None, cals_mjd=None, use_longterm_cals=True,
         _create_wavelengths_60177(use_longterm_cals=use_longterm_cals, skip_done=skip_done, dry_run=dry_run)
         return
 
-    frames = md.get_sequence_metadata(mjd, calibration="wave", expnums=expnums)
+    frames = md.get_calibrations_metadata(mjd, calibration="wave", expnums=expnums)
     if frames.empty:
         log.error("no arc frames found, skipping production of wavelength calibrations")
         return

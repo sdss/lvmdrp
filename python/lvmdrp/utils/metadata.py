@@ -995,7 +995,7 @@ def get_calibration_selection(frames, calibration):
         return np.zeros(len(frames), dtype="bool")
 
 
-def get_sequence_metadata(mjds, calibration, camera=None, expnums=None, exptime=None, lamps=None, hartmann="0 0", extract_metadata=False):
+def get_calibrations_metadata(mjds, calibration, camera=None, expnums=None, exptime=None, lamps=None, hartmann="0 0", extract_metadata=False):
     """Get frames metadata for a given sequence
 
     Given a set of MJDs and (optionally) exposure numbers, get the frames
