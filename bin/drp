@@ -26,6 +26,8 @@ from lvmdrp.functions.run_calseq import (
     reduce_longterm_sequence,
     fix_raw_pixel_shifts,
     create_calibfib_hdrfix,
+    create_imagetyp_hdrfix,
+    create_qaqual_bad_hdrfix,
     copy_longterm_calibrations,
     create_fiberflats_corrections)
 
@@ -72,7 +74,7 @@ class IntRangeType(click.ParamType):
         try:
             # Split the input value by commas
             if isinstance(value, str):
-                parts = value.split(',')
+                parts = value.split('-')
             else:
                 parts = value
 
@@ -412,11 +414,13 @@ def fix_pixel_shifts(mjd, expnums, ref_expnums, img_types, custom_shift, wave_wi
 
 
 @click.command('calibfib-hdrfix', short_help='HdrFix for CALIBFIB header keyword in dome/twilight flats and arcs calibration')
+@click.option('-m', '--mjd', type=int, help='an MJD to analyze')
+@click.option('-l', '--mjd-list', type=IntListType(), help='a list of specific MJDs to analyze')
+@click.option('-r', '--mjd-range', type=str, help='a range of MJDs to analyze')
 @click.option('-c', '--calibration', type=click.Choice(calibration_types), default=None, help='a calibration type')
-@click.option('-m', '--mjd', type=int, help='an MJD to reduce')
-@click.option('-l', '--mjd-list', type=IntListType(), help='a list of specific MJDs to reduce')
-@click.option('-r', '--mjd-range', type=str, help='a range of MJDs to reduce')
-def calibfib_hdrfix(calibration, mjd, mjd_list, mjd_range):
+@cloup.constraint(mutually_exclusive, ['mjd', 'mjd_list', 'mjd_range'])
+@cloup.constraint(RequireExactly(1), ['mjd', 'mjd_list', 'mjd_range'])
+def calibfib_hdrfix(mjd, mjd_list, mjd_range, calibration):
 
     REF_COLUMNS = {"wave": 1000}
     NCOLUMNS = {"wave": 1000}
@@ -436,11 +440,56 @@ def calibfib_hdrfix(calibration, mjd, mjd_list, mjd_range):
                 ncolumns=NCOLUMNS.get(calibration, 1000))
 
 
+@click.command('imagetyp-hdrfix', short_help='HdrFix for IMAGETYP header keyword in dome/twilight flats and arcs calibration')
+@click.option('-m', '--mjd', type=int, help='an MJD to analyze')
+@click.option('-l', '--mjd-list', type=IntListType(), help='a list of specific MJDs to analyze')
+@click.option('-r', '--mjd-range', type=str, help='a range of MJDs to analyze')
+@click.option('-c', '--calibration', type=click.Choice(calibration_types), default=None, help='a calibration type')
+@cloup.constraint(mutually_exclusive, ['mjd', 'mjd_list', 'mjd_range'])
+@cloup.constraint(RequireExactly(1), ['mjd', 'mjd_list', 'mjd_range'])
+def imagetyp_hdrfix(mjd, mjd_list, mjd_range, calibration):
+    mjds = parse_mjds(mjd=mjd or mjd_list or mjd_range or None)
+    if not isinstance(mjds, (list, tuple)):
+        mjds = [mjds]
+
+    calibrations = calibration_types if calibration is None else [calibration]
+
+    for mjd in mjds:
+       for calibration in calibrations:
+            create_imagetyp_hdrfix(mjd=mjd, calibration=calibration)
+
+
+@click.command('qaqual-bad-hdrfix', short_help='HdrFix for QAQUAL header keyword in dome/twilight flats and arcs calibration')
+@click.option('-m', '--mjd', type=int, help='an MJD to analyze')
+@click.option('-l', '--mjd-list', type=IntListType(), help='a list of specific MJDs to analyze')
+@click.option('-r', '--mjd-range', type=str, help='a range of MJDs to analyze')
+@click.option('-e', '--expnum', type=int, help='a exposure number to analyze')
+@click.option('-el', '--expnum-list', type=IntListType(), help='a list of specific exposure numbers to analyze')
+@click.option('-er', '--expnum-range', type=IntRangeType(), help='a range of exposure numbers to analyze')
+@cloup.constraint(mutually_exclusive, ['mjd', 'mjd_list', 'mjd_range'])
+@cloup.constraint(mutually_exclusive, ['expnum', 'expnum_list', 'expnum_range'])
+@cloup.constraint(RequireExactly(1), ['mjd', 'mjd_list', 'mjd_range'])
+@cloup.constraint(RequireExactly(1), ['expnum', 'expnum_list', 'expnum_range'])
+def qaqual_bad_hdrfix(mjd, mjd_list, mjd_range, expnum, expnum_list, expnum_range):
+    mjds = parse_mjds(mjd=mjd or mjd_list or mjd_range or None)
+    if not isinstance(mjds, (list, tuple)):
+        mjds = [mjds]
+
+    expnums = expnum or expnum_list or expnum_range or None
+    if not isinstance(expnums, (list, tuple)):
+        expnums = [expnums]
+
+    for mjd in mjds:
+        create_qaqual_bad_hdrfix(mjd=mjd, expnums=expnums)
+
+
 @click.group('calibrations', short_help="Calibrations pipeline. Handles the creation, tagging and bookkeeping of calibration frames")
 def calibrations():
     pass
 
 calibrations.add_command(calibfib_hdrfix)
+calibrations.add_command(imagetyp_hdrfix)
+calibrations.add_command(qaqual_bad_hdrfix)
 calibrations.add_command(fix_pixel_shifts)
 calibrations.add_command(longterm)
 calibrations.add_command(nightly)

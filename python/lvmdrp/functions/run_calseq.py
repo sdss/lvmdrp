@@ -437,9 +437,39 @@ def create_calibfib_hdrfix(mjd, calibration, ref_column=LVM_REFERENCE_COLUMN, nc
                  label="exposed_std_fiber")
 
     expnum_std = choose_stds(exposed_stds=exposed_stds)
-    log.info(f"going to write header fixes for {len(expnum_std.keys())} exposures")
+    log.info(f"going to write header fixes for CALIBFIB on {len(expnum_std.keys())} exposures")
     for expnum, std in expnum_std.items():
         hdrfix.write_hdrfix_file(mjd=mjd, fileroot=f"sdR-*-*-{expnum:>08d}", keyword="CALIBFIB", value=std)
+
+
+def create_imagetyp_hdrfix(mjd, calibration):
+    IMAGETYPES_MAPPING = {"bias": "bias", "trace": "flat", "wave": "arc", "twilight": "flat", "dome": "flat"}
+    imagetyp = IMAGETYPES_MAPPING[calibration]
+
+    frames = md.get_calibrations_metadata(mjds=mjd, calibration=calibration)
+    frames.query("imagetyp != @imagetyp", inplace=True)
+    expnums = frames.expnum.unique()
+    nexpnums = len(expnums)
+    if nexpnums == 0:
+        log.info(f"no need to apply header fixes for {calibration = }, IMAGETYP = '{imagetyp}', on MJD = {mjd}")
+        return
+    log.info(f"going to write header fixes for {calibration = }, IMAGETYP = '{imagetyp}', on {nexpnums} exposures")
+    for expnum in expnums:
+        hdrfix.write_hdrfix_file(mjd=mjd, fileroot=f"sdR-*-*-{expnum:>08d}", keyword="IMAGETYP", value=IMAGETYPES_MAPPING[calibration])
+
+
+def create_qaqual_bad_hdrfix(mjd, expnums):
+
+    frames = [md.get_calibrations_metadata(mjds=mjd, expnums=expnums, calibration=calibration) for calibration in CALIBRATION_TYPES]
+    frames = pd.concat(frames, ignore_index=True)
+    expnums = frames.expnum.unique()
+    nexpnums = len(expnums)
+    if nexpnums == 0:
+        log.info(f"no need to apply header fixes QAQUAL = 'BAD' on MJD = {mjd}")
+        return
+    log.info(f"going to write header fixes QAQUAL = 'BAD' on {nexpnums} exposures")
+    for expnum in expnums:
+        hdrfix.write_hdrfix_file(mjd=mjd, fileroot=f"sdR-*-*-{expnum:>08d}", keyword="QAQUAL", value="BAD")
 
 
 def _parse_list(items_str):
