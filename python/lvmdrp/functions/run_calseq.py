@@ -175,6 +175,9 @@ def choose_sequence(frames, calibration, kind="longterm", ring="primary"):
         `kind` has the incorrect value ('nightly', 'longterm')
     """
 
+    # TODO: merge per camera iterator output (get_standards_sequence)
+    # TODO: implement possibility to give a selection of exposure numbers
+
     if ring not in {"primary", "secondary", "both"}:
         raise ValueError(f"Invalid value for `ring`: {ring}. Expected either 'primary', 'secondary' or 'both'")
     if not isinstance(calibration, str) or calibration not in CALIBRATION_TYPES:
@@ -718,7 +721,7 @@ def _get_crosstalk(cent, fwhm, ifiber, jcolumn, ypixels=None, nfibers=1):
 
 
 def _log_dry_run(frames, calibs, settings, caller):
-    records = frames.filter(["mjd", "tileid", "expnum", "imagetyp", "qaqual"]).drop_duplicates().to_string(index=None).split("\n")
+    records = frames.filter(["mjd", "tileid", "expnum", "imagetyp", "qaqual", "calibfib"]).drop_duplicates().to_string(index=None).split("\n")
     log.info(f"dry run of '{caller}' with {len(records)} exposures:")
     for record in records:
         log.info(f"   {record}")
@@ -1697,7 +1700,7 @@ def create_dome_fiberflats(mjd, expnums_ldls=None, expnums_qrtz=None, cals_mjd=N
         lvmflat.writeFitsData(path.full("lvm_frame", mjd=mjd, tileid=11111, drpver=drpver, expnum=expnum_str, kind=f'DFlat-{channel}'))
 
 
-def create_twilight_fiberflats(mjd: int, expnums: List[int] = None, cals_mjd: int = None, use_longterm_cals: bool = True,
+def create_twilight_fiberflats(mjd: int, epochs: dict[int, dict] = None, cals_mjd: int = None, use_longterm_cals: bool = True,
                       ref_kind: Union[int, Callable[[np.ndarray, int], np.ndarray]] = bn.nanmedian,
                       groupby: str = "spec", guess_coeffs: List[int] = [1,0,0,0], fixed_coeffs: List[int] = [0,1,2,3],
                       cnorms: Dict[str, float] = SKYLINES_FIBERFLAT, dwave: float = 20.0,
@@ -1744,14 +1747,14 @@ def create_twilight_fiberflats(mjd: int, expnums: List[int] = None, cals_mjd: in
     dry_run : bool, optional
         Logs useful information abaut the current setup without actually reducing, by default False
     """
-    # get metadata
-    frames = md.get_calibrations_metadata(mjd, calibration="twilight", expnums=expnums)
+    epoch = get_calibration_epoch(mjd=mjd, **(epochs or {}).get(mjd, {}))
+    mjds = epoch["twilight"]
+
+    frames = md.get_calibrations_metadata(mjds=mjds, calibration="twilight")
+    frames, expnums = choose_sequence(frames, calibration="twilight", kind="longterm")
     if frames.empty:
         log.error("no twilight frames found, skipping production of twilight fiberflats")
         return
-
-    if expnums is None:
-        frames, expnums = choose_sequence(frames, flavor="twilight", kind="longterm")
 
     # define master paths for target frames
     calibs = get_calib_paths(mjd=cals_mjd or mjd, version=drpver, longterm_cals=use_longterm_cals, flavors=CALIBRATION_NEEDS["twilight"])
@@ -1761,7 +1764,7 @@ def create_twilight_fiberflats(mjd: int, expnums: List[int] = None, cals_mjd: in
         return
 
     # 2D reduction of twilight sequence
-    reduce_2d(mjds=mjd, calibrations=calibs, expnums=frames.expnum.unique(), reject_cr=True,
+    reduce_2d(mjds=mjd, calibrations=calibs, expnums=expnums, reject_cr=True,
               add_astro=False, sub_straylight=True, skip_done=skip_done, **STRAYLIGHT_PARS)
 
     for flat in frames.to_dict("records"):
@@ -1904,7 +1907,7 @@ def create_illumination_corrections(mjd, use_longterm_cals=True, expnums=None):
     raise NotImplementedError("create_illumination_corrections")
 
 
-def create_wavelengths(mjd, expnums=None, cals_mjd=None, use_longterm_cals=True, kind="longterm", skip_done=True, dry_run=False):
+def create_wavelengths(mjd, epochs=None, cals_mjd=None, use_longterm_cals=True, kind="longterm", skip_done=True, dry_run=False):
     """Reduces an arc sequence to create master wavelength solutions
 
     Given a set of MJDs and (optionally) exposure numbers, create wavelength
@@ -1936,13 +1939,14 @@ def create_wavelengths(mjd, expnums=None, cals_mjd=None, use_longterm_cals=True,
         _create_wavelengths_60177(use_longterm_cals=use_longterm_cals, skip_done=skip_done, dry_run=dry_run)
         return
 
-    frames = md.get_calibrations_metadata(mjd, calibration="wave", expnums=expnums)
+    epoch = get_calibration_epoch(mjd=mjd, **(epochs or {}).get(mjd, {}))
+    mjds = epoch["wave"]
+
+    frames = md.get_calibrations_metadata(mjds=mjds, calibration="wave")
+    frames, expnums = choose_sequence(frames, calibration="wave", kind=kind)
     if frames.empty:
         log.error("no arc frames found, skipping production of wavelength calibrations")
         return
-
-    if expnums is None:
-        frames, expnums = choose_sequence(frames, flavor="wave", kind=kind)
 
     # define master paths for target frames
     calibs = get_calib_paths(mjd=cals_mjd or mjd, version=drpver, longterm_cals=use_longterm_cals, flavors=CALIBRATION_NEEDS["wave"])
