@@ -94,7 +94,7 @@ def run_cluster(mjds: list = None, expnums: Union[list, str] = None, nodes: int 
     else:
         # get a list of mjds
         mjds = mjds or sorted(os.listdir(os.getenv('LVM_DATA_S')))
-        mjds = list(filter(lambda mjd: mjd.isdigit(), mjds))
+        mjds = list(filter(lambda mjd: mjd.isdigit() if isinstance(mjd, str) else True, mjds))
 
         for mjd in mjds:
             script = f"umask 002 && drp {cmd} -m {mjd} {drp_options}"
