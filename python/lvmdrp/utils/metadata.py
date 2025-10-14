@@ -1039,7 +1039,8 @@ def get_calibrations_metadata(mjds, calibration, camera=None, expnums=None, expt
     mjds = sorted(set(mjds))
 
     # get frames metadata
-    frames = pd.concat([get_frames_metadata(mjd=mjd, overwrite=extract_metadata) for mjd in mjds], ignore_index=True)
+    frames = [get_frames_metadata(mjd=mjd, overwrite=extract_metadata) for mjd in mjds]
+    frames = pd.concat([f for f in frames if not f.empty], ignore_index=True)
     # remove bad exposures
     frames.query("qaqual == 'GOOD'", inplace=True)
     # group calibrations according to their type

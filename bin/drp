@@ -22,6 +22,7 @@ from lvmdrp.utils.cluster import run_cluster
 from lvmdrp.functions.run_calseq import (
     COUNTS_THRESHOLDS,
     load_calibration_epochs,
+    detrend_calibrations,
     reduce_nightly_sequence,
     reduce_longterm_sequence,
     fix_raw_pixel_shifts,
@@ -248,6 +249,27 @@ metacli.add_command(regen)
 cli.add_command(metacli)
 
 # CALIBRATIONS CLI ------------------------------------------------------------------------------------------------------------------------
+
+@cli.command('detrend', short_help='Run detrending of calibrations', context_settings=dict(show_default=True))
+@click.option('-m', '--mjd', type=int, help='an MJD to reduce')
+@click.option('-l', '--mjd-list', type=IntListType(), help='a list of specific MJDs to reduce')
+@click.option('-r', '--mjd-range', type=str, help='a range of MJDs to reduce')
+@click.option('-c', '--calibration', type=click.Choice(calibration_types), default=None, help='a calibration type')
+@click.option('-s', '--skip-done', is_flag=True, default=False, help='flag to skip reduction steps that have already been done')
+@click.option("--dry-run", is_flag=True, default=False, help="Shows useful information about the current setup without actually running reductions")
+@cloup.constraint(mutually_exclusive, ['mjd', 'mjd_list', 'mjd_range'])
+@cloup.constraint(RequireExactly(1), ['mjd', 'mjd_list', 'mjd_range'])
+def detrend(mjd, mjd_list, mjd_range, calibration, dry_run, skip_done):
+    mjds = parse_mjds(mjd=mjd or mjd_list or mjd_range or None)
+    if not isinstance(mjds, (list, tuple)):
+        mjds = [mjds]
+
+    calibrations = calibration_types if calibration is None else [calibration]
+
+    for mjd in mjds:
+        for calibration in calibrations:
+            detrend_calibrations(mjd, calibration, dry_run, skip_done)
+
 
 @cli.command('long-term', short_help='Run long-term calibrations', context_settings=dict(show_default=True))
 @click.option('-m', '--mjd', type=int, help='an MJD to reduce')
@@ -491,6 +513,7 @@ calibrations.add_command(calibfib_hdrfix)
 calibrations.add_command(imagetyp_hdrfix)
 calibrations.add_command(qaqual_bad_hdrfix)
 calibrations.add_command(fix_pixel_shifts)
+calibrations.add_command(detrend)
 calibrations.add_command(longterm)
 calibrations.add_command(nightly)
 calibrations.add_command(fiberflat_corrections)
@@ -549,7 +572,7 @@ def get_calibs(kind, mjd, camera):
 @click.option('-w', '--walltime', type=str, default="24:00:00", help='the time for which the job is allowed to run')
 @click.option('-a', '--alloc', type=click.Choice(['sdss-np', 'sdss-kp']), default='sdss-np', help='which partition to use')
 @click.option('-s', '--submit', is_flag=True, type=bool, default=True, help='flag to submit the job or not')
-@click.option('--run-calibs', type=click.Choice(["long-term", "nightly"]), help="run long-term or nightly calibrations only")
+@click.option('--run-calibs', type=click.Choice(["detrend", "long-term", "nightly"]), help="run detrend, long-term or nightly calibrations only")
 @click.option('--drp-options', type=str, default="", help="pass options to drp run command")
 @click.option("--dry-run", is_flag=True, default=False, help="Logs useful information abaut the current setup without actually reducing, by default False")
 def cluster(mjd_list, mjd_range, expnum, exp_list, exp_range, exp_file, nodes, ppn, walltime,

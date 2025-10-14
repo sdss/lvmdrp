@@ -2131,6 +2131,23 @@ def reduce_nightly_sequence(mjd, use_longterm_cals=False, reject_cr=True, only_c
     #     _clean_ancillary(mjd)
 
 
+def detrend_calibrations(mjd, calibration, dry_run=False, skip_done=True):
+    frames = md.get_calibrations_metadata(mjds=mjd, calibration=calibration)
+    if frames.empty:
+        log.error("no bias frames found, skipping production of bias frames")
+        return
+
+    # define master paths for target frames
+    calibs = get_calib_paths(mjd=mjd, flavors=CALIBRATION_NEEDS[calibration], from_sandbox=True)
+
+    if dry_run:
+        _log_dry_run(frames, calibs=calibs, settings=None, caller=create_bias.__name__)
+        return
+
+    # preprocess and detrend frames
+    reduce_2d(mjds=mjd, calibrations=calibs, expnums=frames.expnum.unique(), reject_cr=False, add_astro=False, sub_straylight=False, skip_done=skip_done)
+
+
 def reduce_longterm_sequence(mjd, calib_epoch=None, use_longterm_cals=True,
                              reject_cr=True, only_cals=CALIBRATION_TYPES,
                              counts_thresholds=COUNTS_THRESHOLDS,
