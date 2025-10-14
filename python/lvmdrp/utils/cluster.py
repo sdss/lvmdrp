@@ -18,6 +18,8 @@ except ImportError:
     queue = None
 
 
+# TODO: separate cluster run routine for calibrations
+
 
 def run_cluster(mjds: list = None, expnums: Union[list, str] = None, nodes: int = 2, ppn: int = 64, walltime: str = '24:00:00',
                 alloc: str = 'sdss-np', submit: bool = True, run_calibs: str = None, drp_options: str = None, dry_run: bool = False):
@@ -92,6 +94,7 @@ def run_cluster(mjds: list = None, expnums: Union[list, str] = None, nodes: int 
     else:
         # get a list of mjds
         mjds = mjds or sorted(os.listdir(os.getenv('LVM_DATA_S')))
+        mjds = list(filter(lambda mjd: mjd.isdigit(), mjds))
 
         for mjd in mjds:
             script = f"umask 002 && drp {cmd} -m {mjd} {drp_options}"
@@ -101,6 +104,6 @@ def run_cluster(mjds: list = None, expnums: Union[list, str] = None, nodes: int 
     if not dry_run:
         q.commit(hard=True, submit=submit)
     else:
-        log.info("queue for cluster run:")
+        log.info(f"queue for cluster run with {len(q)} nights:")
         for run_ in q:
             log.info(f"   {run_}")
