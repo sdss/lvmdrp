@@ -58,6 +58,7 @@ from lvmdrp.core.constants import (
     LVM_NBLOCKS,
     CAMERAS,
     SPEC_CHANNELS,
+    CON_LAMPS,
     ARC_LAMPS,
     LVM_REFERENCE_COLUMN,
     STD_FIBER_LABELS,
@@ -114,8 +115,7 @@ def _reject_pixelshifted(frames, pixelshifts_path=PIXELSHIFTS_PATH):
     selection = pixelshifts.exp_no.isin(expnums)
     pixelshifts = pixelshifts.loc[selection]
 
-    log.info(f"removing exposures affected by pixel shifts:")
-    log.info(f"{pixelshifts.to_string()}")
+    log.info(f"removing {len(pixelshifts)} exposures affected by pixel shifts: {pixelshifts.exp_no.values}")
 
     return frames.query("expnum not in @pixelshifts.exp_no")
     # return frames.query("expnum not in @pixelshifts.exp_no and spec not in @pixelshifts.spec")
@@ -750,14 +750,21 @@ def _get_crosstalk(cent, fwhm, ifiber, jcolumn, ypixels=None, nfibers=1):
     return crosstalk
 
 
-def _log_dry_run(frames, calibs, settings, caller):
-    records = frames.filter(["mjd", "tileid", "expnum", "imagetyp", "qaqual", "calibfib"]).drop_duplicates().to_string(index=None).split("\n")
-    log.info(f"dry run of '{caller}' with {len(records)} exposures:")
+def _log_dry_run(frames, calibs, settings, caller, show_calibrations=False):
+    lamps = list(map(lambda s: s.lower(), CON_LAMPS + ARC_LAMPS))
+    df = frames.copy()
+    df["lamps"] = df.filter(items=lamps).apply(lambda r: ','.join(r.index[r.values].tolist()) or None, axis="columns")
+    df.sort_values(["lamps", "expnum"], inplace=True)
+    df.sort_values("calibfib", key=lambda s: s.str.split("-").str[-1].astype(int, errors="ignore"), inplace=True)
+    df = df.filter(["mjd", "tileid", "expnum", "imagetyp", "qaqual", "calibfib", "lamps"]).drop_duplicates()
+    records = df.to_string(index=None).split("\n")
+    log.info(f"dry run of '{caller}' with {len(df)} exposures:")
     for record in records:
         log.info(f"   {record}")
-    log.info("with calibrations:")
-    for r in pformat(calibs).split("\n"):
-        log.info(r)
+    if show_calibrations:
+        log.info("with calibrations:")
+        for r in pformat(calibs).split("\n"):
+            log.info(r)
 
 
 def _create_wavelengths_60177(use_longterm_cals=True, skip_done=True, dry_run=False):
@@ -2055,6 +2062,24 @@ def create_wavelengths(mjd, epochs=None, cals_mjd=None, use_longterm_cals=True, 
         rss_tasks.resample_wavelength(in_rss=harc_path, out_rss=harc_path, method="linear", wave_range=SPEC_CHANNELS[channel], wave_disp=0.5)
 
 
+def detrend_calibrations(mjd, calibration, dry_run=False, skip_done=True):
+    frames = md.get_calibrations_metadata(mjds=mjd, calibration=calibration)
+    frames = frames.loc[~frames.calibfib.isin(STD_FIBER_LABELS)]
+    if frames.empty:
+        log.error("no bias frames found, skipping production of bias frames")
+        return
+
+    # define master paths for target frames
+    calibs = get_calib_paths(mjd=mjd, flavors=CALIBRATION_NEEDS[calibration], from_sandbox=True)
+
+    if dry_run:
+        _log_dry_run(frames, calibs=calibs, settings=None, caller=detrend_calibrations.__name__)
+        return
+
+    # preprocess and detrend frames
+    reduce_2d(mjds=mjd, calibrations=calibs, expnums=frames.expnum.unique(), reject_cr=False, add_astro=False, sub_straylight=False, skip_done=skip_done)
+
+
 def reduce_nightly_sequence(mjd, use_longterm_cals=False, reject_cr=True, only_cals=CALIBRATION_TYPES,
                             counts_thresholds=COUNTS_THRESHOLDS, cent_guess_ncolumns=140, trace_full_ncolumns=40,
                             extract_metadata=False, skip_done=True, keep_ancillary=False,
@@ -2131,25 +2156,7 @@ def reduce_nightly_sequence(mjd, use_longterm_cals=False, reject_cr=True, only_c
     #     _clean_ancillary(mjd)
 
 
-def detrend_calibrations(mjd, calibration, dry_run=False, skip_done=True):
-    frames = md.get_calibrations_metadata(mjds=mjd, calibration=calibration)
-    frames = frames.loc[~frames.calibfib.isin(STD_FIBER_LABELS)]
-    if frames.empty:
-        log.error("no bias frames found, skipping production of bias frames")
-        return
-
-    # define master paths for target frames
-    calibs = get_calib_paths(mjd=mjd, flavors=CALIBRATION_NEEDS[calibration], from_sandbox=True)
-
-    if dry_run:
-        _log_dry_run(frames, calibs=calibs, settings=None, caller=create_bias.__name__)
-        return
-
-    # preprocess and detrend frames
-    reduce_2d(mjds=mjd, calibrations=calibs, expnums=frames.expnum.unique(), reject_cr=False, add_astro=False, sub_straylight=False, skip_done=skip_done)
-
-
-def reduce_longterm_sequence(mjd, calib_epoch=None, use_longterm_cals=True,
+def reduce_longterm_sequence(mjd, epochs=None, use_longterm_cals=True,
                              reject_cr=True, only_cals=CALIBRATION_TYPES,
                              counts_thresholds=COUNTS_THRESHOLDS,
                              cent_guess_ncolumns=140, trace_full_ncolumns=40,
@@ -2172,7 +2179,7 @@ def reduce_longterm_sequence(mjd, calib_epoch=None, use_longterm_cals=True,
     ----------
     mjd : int
         MJD to reduce
-    calib_epoch : dict[int, list[str]], optional
+    epochs : dict[int, dict[str,dict]] | None, optional
         A dictionary with specifications of the calibration epoch, by default None
     use_longterm_cals : bool
         Whether to use long-term calibration frames or not, defaults to True
@@ -2202,30 +2209,28 @@ def reduce_longterm_sequence(mjd, calib_epoch=None, use_longterm_cals=True,
         raise ValueError(f"some chosen image types in 'only_cals' are not valid: {only_cals.difference(CALIBRATION_TYPES)}")
     log.info(f"going to produce long-term calibrations: {only_cals}")
 
-    source_mjds = get_calibration_epoch(mjd, **(calib_epoch or {}))
-
     if "bias" in only_cals:
-        create_bias(mjd=source_mjds["bias"], cals_mjd=mjd, use_longterm_cals=use_longterm_cals, skip_done=skip_done, dry_run=dry_run)
+        create_bias(mjd=mjd, epochs=epochs, use_longterm_cals=use_longterm_cals, skip_done=skip_done, dry_run=dry_run)
 
     if "trace" in only_cals:
         create_traces(
-            mjd=source_mjds["trace"],
+            mjd=mjd,
+            epochs=epochs,
             cals_mjd=mjd,
             use_longterm_cals=use_longterm_cals,
-            counts_thresholds=counts_thresholds,
             cent_guess_ncolumns=cent_guess_ncolumns,
             trace_full_ncolumns=trace_full_ncolumns,
             skip_done=skip_done,
             dry_run=dry_run)
 
     if "wave" in only_cals:
-        create_wavelengths(mjd=source_mjds["wave"], cals_mjd=mjd, use_longterm_cals=use_longterm_cals, skip_done=skip_done, dry_run=dry_run)
+        create_wavelengths(mjd=mjd, epochs=epochs, cals_mjd=mjd, use_longterm_cals=use_longterm_cals, skip_done=skip_done, dry_run=dry_run)
 
     if "dome" in only_cals:
-        create_dome_fiberflats(mjd=source_mjds["dome"], cals_mjd=mjd, use_longterm_cals=use_longterm_cals, kind="longterm", skip_done=skip_done, dry_run=dry_run)
+        create_dome_fiberflats(mjd=mjd, cals_mjd=mjd, use_longterm_cals=use_longterm_cals, kind="longterm", skip_done=skip_done, dry_run=dry_run)
 
     if "twilight" in only_cals:
-        create_twilight_fiberflats(mjd=source_mjds["twilight"], cals_mjd=mjd, use_longterm_cals=use_longterm_cals, skip_done=skip_done, dry_run=dry_run)
+        create_twilight_fiberflats(mjd=mjd, epochs=epochs, cals_mjd=mjd, use_longterm_cals=use_longterm_cals, skip_done=skip_done, dry_run=dry_run)
 
     # if not keep_ancillary:
     #     _clean_ancillary(mjd)
