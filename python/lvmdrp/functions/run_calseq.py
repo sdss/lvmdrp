@@ -308,9 +308,12 @@ def get_exposed_standards(expnums, camera, ref_column=LVM_REFERENCE_COLUMN, ncol
 
     dframe_paths = [path.expand("lvm_anc", drpver=drpver, tileid=11111, mjd="*", kind="d", imagetype="*", camera=camera, expnum=expnum) for expnum in expnums]
     dframe_paths = [dframe_path[0] for dframe_path in dframe_paths if dframe_path != []]
+    if len(dframe_paths) == 0:
+        log.error(f"no detrended frames found for {camera = }, {expnums = }, skipping exposed standard detection")
+        return {expnum: (None, np.inf) for expnum in expnums}
 
     NIMAGES = 10
-    log.info(f"combining maximum {NIMAGES} frames: {expnums[:NIMAGES]}")
+    log.info(f"combining a maximum of {NIMAGES} exposures: {expnums[:NIMAGES]}")
     images = [image_tasks.loadImage(dframe_path) for dframe_path in dframe_paths[:NIMAGES]]
     cimage = image_tasks.combineImages(images, normalize=False, background_subtract=False)
     log.info(f"correcting reference fiber positions @ {ref_column} +/- {ncolumns//2} columns")
@@ -490,24 +493,29 @@ def _parse_list(items_str):
     return items
 
 
-def load_calibration_epochs(epochs_path=None, filter_by=None):
+def load_calibration_epochs(epochs_path=None, filter_by=None, verbose=True):
     epochs_path = epochs_path or CALIBRATION_EPOCHS_PATH
+    if not os.path.exists(epochs_path):
+        log.error(f"calibration epochs file not found: {epochs_path}")
+        return
+
     with open(epochs_path) as f:
         epochs = yaml.safe_load(f)["epochs"]
 
-    log.info(f"found {len(epochs)} calibration epochs:")
-    for mjd in epochs:
-        log.info(f"  {mjd}: {epochs[mjd]}")
+    if verbose:
+        log.info(f"found {len(epochs)} calibration epochs:")
+        for mjd in epochs:
+            log.info(f"  {mjd}: {epochs[mjd]}")
 
     if filter_by is not None and isinstance(filter_by, (list, tuple)):
-        log.info(f"filtering by {filter_by}")
         epochs = {mjd: epochs[mjd] for mjd in filter_by if mjd in epochs}
         if len(epochs) == 0:
             log.error(f"epoch(s) {filter_by} not found in calibration epochs file: '{epochs_path}'")
             return epochs
-        log.info(f"after filtering {len(epochs)} epoch(s):")
-        for mjd in epochs:
-            log.info(f"  {mjd}: {epochs[mjd]}")
+        if verbose:
+            log.info(f"after filtering by MJD = {filter_by}, {len(epochs)} remaining epoch(s):")
+            for mjd in epochs:
+                log.info(f"  {mjd}: {epochs[mjd]}")
     return epochs
 
 
@@ -750,7 +758,10 @@ def _get_crosstalk(cent, fwhm, ifiber, jcolumn, ypixels=None, nfibers=1):
     return crosstalk
 
 
-def _log_dry_run(frames, calibs, settings, caller, show_calibrations=False):
+def _log_dry_run(frames, calibs=None, settings=None, caller=None, show_calibrations=False):
+    if frames.empty:
+        log.error("empty list of frames")
+        return
     lamps = list(map(lambda s: s.lower(), CON_LAMPS + ARC_LAMPS))
     df = frames.copy()
     df["lamps"] = df.filter(items=lamps).apply(lambda r: ','.join(r.index[r.values].tolist()) or None, axis="columns")
@@ -758,10 +769,11 @@ def _log_dry_run(frames, calibs, settings, caller, show_calibrations=False):
     df.sort_values("calibfib", key=lambda s: s.str.split("-").str[-1].astype(int, errors="ignore"), inplace=True)
     df = df.filter(["mjd", "tileid", "expnum", "imagetyp", "qaqual", "calibfib", "lamps"]).drop_duplicates()
     records = df.to_string(index=None).split("\n")
-    log.info(f"dry run of '{caller}' with {len(df)} exposures:")
+    if caller is not None:
+        log.info(f"dry run of '{caller}' with {len(df)} exposures:")
     for record in records:
         log.info(f"   {record}")
-    if show_calibrations:
+    if show_calibrations and calibs is not None:
         log.info("with calibrations:")
         for r in pformat(calibs).split("\n"):
             log.info(r)
@@ -1280,6 +1292,52 @@ def fix_raw_pixel_shifts(mjd, expnums=None, ref_expnums=None, use_longterm_cals=
                                          flat_spikes=flat_spikes, threshold_spikes=threshold_spikes,
                                          max_shift=max_shift, shift_rows=shift_rows.get((spec, expnum), None),
                                          interactive=interactive, display_plots=display_plots)
+
+
+def validate_calibration_epochs(mjd=None, calibrations=CALIBRATION_TYPES, epochs_path=CALIBRATION_EPOCHS_PATH, ring="primary"):
+    def _report_standards(sequence, nstandards):
+        stds = sorted(sequence.calibfib.unique().tolist(), key=lambda s: int(s.split("-")[-1]))
+        nstds = len(stds)
+        if nstds != nstandards:
+            log.error(f"{nstds} exposed standards: {','.join(stds)}")
+        elif nstds == nstandards:
+            log.info(f"{nstds} exposed standards: {','.join(stds)}")
+
+
+    epochs = load_calibration_epochs(epochs_path=epochs_path, verbose=False)
+    if mjd is not None and mjd not in epochs:
+        log.error(f"no calibrations epoch found for {mjd} in file {epochs_path}")
+        return
+
+    if not isinstance(calibrations, (tuple, list, set)):
+        calibrations = [calibrations]
+
+    epoch_mjds = [mjd] if mjd is not None else list(epochs.keys())
+
+    nstandards = 12 if ring in {"primary", "secondary"} else 24
+
+    for mjd in epoch_mjds:
+        log.info(f"validating {calibrations = } for epoch = {mjd}")
+        epoch = get_calibration_epoch(mjd, **epochs[mjd])
+        for calibration in calibrations:
+            source_mjds = epoch.get(calibration, [])
+            log.info(f"MJDs for {calibration = }: {source_mjds}")
+
+            frames = md.get_calibrations_metadata(mjds=source_mjds, calibration=calibration)
+            if calibration == "trace":
+                sequence_ldls, _ = choose_sequence(frames.loc[frames.ldls], calibration=calibration, ring=ring)
+                sequence_qrtz, _ = choose_sequence(frames.loc[frames.quartz], calibration=calibration, ring=ring)
+                sequence = pd.concat((sequence_ldls, sequence_qrtz), ignore_index=True)
+            else:
+                sequence, _ = choose_sequence(frames, calibration=calibration, ring=ring)
+            _log_dry_run(sequence)
+
+            log.info(f"unique MJDs = {sequence.mjd.unique()}")
+            if calibration == "trace":
+                _report_standards(sequence_ldls, nstandards)
+                _report_standards(sequence_qrtz, nstandards)
+            elif calibration in {"wave", "dome", "twilight"}:
+                _report_standards(sequence, nstandards)
 
 
 def create_bias(mjd, epochs=None, use_longterm_cals=True, skip_done=True, dry_run=False):

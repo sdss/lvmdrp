@@ -20,8 +20,10 @@ from lvmdrp.utils.metadata import get_frames_metadata, get_master_metadata
 from lvmdrp.utils.cluster import run_cluster
 
 from lvmdrp.functions.run_calseq import (
+    CALIBRATION_EPOCHS_PATH,
     COUNTS_THRESHOLDS,
     load_calibration_epochs,
+    validate_calibration_epochs,
     detrend_calibrations,
     reduce_nightly_sequence,
     reduce_longterm_sequence,
@@ -250,11 +252,33 @@ cli.add_command(metacli)
 
 # CALIBRATIONS CLI ------------------------------------------------------------------------------------------------------------------------
 
+
+@cli.command('validate-epochs', short_help='Validates calibration epochs file', context_settings=dict(show_default=True))
+@click.option('-m', '--mjd', type=int, help='an MJD to reduce')
+@click.option('-l', '--mjd-list', type=IntListType(), help='a list of specific MJDs to reduce')
+@click.option('-r', '--mjd-range', type=str, help='a range of MJDs to reduce')
+@click.option('-c', '--calibration', type=click.Choice(CALIBRATION_TYPES), default=None, help='a calibration type')
+@click.option('--epochs-path', type=str, default=CALIBRATION_EPOCHS_PATH, help='a path to a calibration epochs YAML file')
+@click.option('--ring', type=click.Choice(["primary", "secondary", "both"]), default="primary", help='calibration types with exposed fibers, select the standard fibers ring')
+@cloup.constraint(mutually_exclusive, ['mjd', 'mjd_list', 'mjd_range'])
+@cloup.constraint(RequireExactly(1), ['mjd', 'mjd_list', 'mjd_range'])
+def validate_epochs(mjd, mjd_list, mjd_range, calibration, epochs_path, ring):
+    mjds = parse_mjds(mjd=mjd or mjd_list or mjd_range or None)
+    if not isinstance(mjds, (list, tuple)):
+        mjds = [mjds]
+
+    calibrations = calibration_types if calibration is None else [calibration]
+
+    for mjd in mjds:
+        for calibration in calibrations:
+            validate_calibration_epochs(mjd, calibrations, epochs_path, ring)
+
+
 @cli.command('detrend', short_help='Run detrending of calibrations', context_settings=dict(show_default=True))
 @click.option('-m', '--mjd', type=int, help='an MJD to reduce')
 @click.option('-l', '--mjd-list', type=IntListType(), help='a list of specific MJDs to reduce')
 @click.option('-r', '--mjd-range', type=str, help='a range of MJDs to reduce')
-@click.option('-c', '--calibration', type=click.Choice(calibration_types), default=None, help='a calibration type')
+@click.option('-c', '--calibration', type=click.Choice(CALIBRATION_TYPES), default=None, help='a calibration type')
 @click.option('-s', '--skip-done', is_flag=True, default=False, help='flag to skip reduction steps that have already been done')
 @click.option("--dry-run", is_flag=True, default=False, help="Shows useful information about the current setup without actually running reductions")
 @cloup.constraint(mutually_exclusive, ['mjd', 'mjd_list', 'mjd_range'])
@@ -466,7 +490,7 @@ def calibfib_hdrfix(mjd, mjd_list, mjd_range, calibration):
 @click.option('-m', '--mjd', type=int, help='an MJD to analyze')
 @click.option('-l', '--mjd-list', type=IntListType(), help='a list of specific MJDs to analyze')
 @click.option('-r', '--mjd-range', type=str, help='a range of MJDs to analyze')
-@click.option('-c', '--calibration', type=click.Choice(calibration_types), default=None, help='a calibration type')
+@click.option('-c', '--calibration', type=click.Choice(CALIBRATION_TYPES), default=None, help='a calibration type')
 @cloup.constraint(mutually_exclusive, ['mjd', 'mjd_list', 'mjd_range'])
 @cloup.constraint(RequireExactly(1), ['mjd', 'mjd_list', 'mjd_range'])
 def imagetyp_hdrfix(mjd, mjd_list, mjd_range, calibration):
@@ -509,6 +533,8 @@ def qaqual_bad_hdrfix(mjd, mjd_list, mjd_range, expnum, expnum_list, expnum_rang
 def calibrations():
     pass
 
+
+calibrations.add_command(validate_epochs)
 calibrations.add_command(calibfib_hdrfix)
 calibrations.add_command(imagetyp_hdrfix)
 calibrations.add_command(qaqual_bad_hdrfix)
