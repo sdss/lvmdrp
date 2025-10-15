@@ -121,7 +121,7 @@ def _reject_pixelshifted(frames, pixelshifts_path=PIXELSHIFTS_PATH):
     # return frames.query("expnum not in @pixelshifts.exp_no and spec not in @pixelshifts.spec")
 
 
-def refresh_pixelshifts_file(mjd, drpver=drpver, pixelshifts_path=PIXELSHIFTS_PATH):
+def refresh_pixelshifts_file(mjd, drpver=drpver, pixelshifts_path=PIXELSHIFTS_PATH, dry_run=False):
     if not os.path.exists(pixelshifts_path):
         log.error(f"pixel shifts file not found: {pixelshifts_path}")
         return
@@ -150,7 +150,8 @@ def refresh_pixelshifts_file(mjd, drpver=drpver, pixelshifts_path=PIXELSHIFTS_PA
     nadded = npixelshifts - len(pixelshifts)
 
     log.info(f"added {nadded} pixel shift detections to {pixelshifts_path}")
-    pixelshifts.to_parquet(pixelshifts_path)
+    if not dry_run:
+        pixelshifts.to_parquet(pixelshifts_path)
 
 
 def _get_standards_ring(ring):
