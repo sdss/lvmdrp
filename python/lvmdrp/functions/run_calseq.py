@@ -129,7 +129,7 @@ def refresh_pixelshifts_file(mjd, drpver=drpver, pixelshifts_path=PIXELSHIFTS_PA
     pixelshifts = pd.read_parquet(pixelshifts_path)
     npixelshifts = len(pixelshifts)
 
-    paths = path.expand("lvm_anc", drpver=drpver, tileid=11111, mjd=60255, kind="e", imagetype="*", expnum="????????", camera="*")
+    paths = path.expand("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="e", imagetype="*", expnum="????????", camera="*")
     if len(paths) == 0:
         log.info(f"no pixel shifts detected for {mjd = } with DRP {drpver}")
         return
