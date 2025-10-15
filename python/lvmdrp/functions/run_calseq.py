@@ -121,6 +121,38 @@ def _reject_pixelshifted(frames, pixelshifts_path=PIXELSHIFTS_PATH):
     # return frames.query("expnum not in @pixelshifts.exp_no and spec not in @pixelshifts.spec")
 
 
+def refresh_pixelshifts_file(mjd, drpver=drpver, pixelshifts_path=PIXELSHIFTS_PATH):
+    if not os.path.exists(pixelshifts_path):
+        log.error(f"pixel shifts file not found: {pixelshifts_path}")
+        return
+
+    pixelshifts = pd.read_parquet(pixelshifts_path)
+    npixelshifts = len(pixelshifts)
+
+    paths = path.expand("lvm_anc", drpver=drpver, tileid=11111, mjd=60255, kind="e", imagetype="*", expnum="????????", camera="*")
+    if len(paths) == 0:
+        log.info(f"no pixel shifts detected for {mjd = } with DRP {drpver}")
+        return
+
+    params = []
+    log.info(f"found {len(paths) // 3} spectrograph frames with shifted pixels")
+    for p in paths:
+        parts = p.replace(os.environ["LVM_SPECTRO_REDUX"]+"/", "").replace(".fits", "").split("/")
+        image_params = parts[-1].split("-")
+        params.append({"MJD": parts[3], "exp_no": int(image_params[-1]), "spec": f"sp{image_params[2][-1]}", "exp_type": image_params[1][1:], "exp_time": np.nan, "n_shifts": np.nan})
+
+    new_pixelshifts = pd.DataFrame(params)
+    pixelshifts = pd.concat((pixelshifts, new_pixelshifts), ignore_index=True)
+    pixelshifts.drop_duplicates(inplace=True, ignore_index=True)
+    pixelshifts.sort_values("MJD", inplace=True)
+    pixelshifts.reset_index(drop=True, inplace=True)
+
+    nadded = npixelshifts - len(pixelshifts)
+
+    log.info(f"added {nadded} pixel shift detections to {pixelshifts_path}")
+    pixelshifts.to_parquet(pixelshifts_path)
+
+
 def _get_standards_ring(ring):
     if ring == "primary":
         standards_sequence = (label for label in STD_FIBER_LABELS if label.startswith("P1"))
@@ -1295,13 +1327,14 @@ def fix_raw_pixel_shifts(mjd, expnums=None, ref_expnums=None, use_longterm_cals=
 
 
 def validate_calibration_epochs(mjd=None, calibrations=CALIBRATION_TYPES, epochs_path=CALIBRATION_EPOCHS_PATH, ring="primary"):
-    def _report_standards(sequence, nstandards):
+    def _report_standards(sequence, nstandards, label=None):
+        label = f" for {label}" if label is not None else ""
         stds = sorted(sequence.calibfib.unique().tolist(), key=lambda s: int(s.split("-")[-1]))
         nstds = len(stds)
         if nstds != nstandards:
-            log.error(f"{nstds} exposed standards: {','.join(stds)}")
+            log.error(f"{nstds} exposed standards{label}: {','.join(stds)}")
         elif nstds == nstandards:
-            log.info(f"{nstds} exposed standards: {','.join(stds)}")
+            log.info(f"{nstds} exposed standards{label}: {','.join(stds)}")
 
 
     epochs = load_calibration_epochs(epochs_path=epochs_path, verbose=False)
@@ -1334,8 +1367,8 @@ def validate_calibration_epochs(mjd=None, calibrations=CALIBRATION_TYPES, epochs
 
             log.info(f"unique MJDs = {sequence.mjd.unique()}")
             if calibration == "trace":
-                _report_standards(sequence_ldls, nstandards)
-                _report_standards(sequence_qrtz, nstandards)
+                _report_standards(sequence_ldls, nstandards, label="ldls")
+                _report_standards(sequence_qrtz, nstandards, label="quartz")
             elif calibration in {"wave", "dome", "twilight"}:
                 _report_standards(sequence, nstandards)
 
