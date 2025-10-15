@@ -131,7 +131,7 @@ def refresh_pixelshifts_file(mjd, drpver=drpver, pixelshifts_path=PIXELSHIFTS_PA
 
     paths = path.expand("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="e", imagetype="*", expnum="????????", camera="*")
     if len(paths) == 0:
-        log.info(f"no pixel shifts detected for {mjd = } with DRP {drpver}")
+        log.info(f"no pixel shifts detected for {mjd = } with DRP '{drpver}'")
         return
 
     params = []
@@ -139,15 +139,18 @@ def refresh_pixelshifts_file(mjd, drpver=drpver, pixelshifts_path=PIXELSHIFTS_PA
     for p in paths:
         parts = p.replace(os.environ["LVM_SPECTRO_REDUX"]+"/", "").replace(".fits", "").split("/")
         image_params = parts[-1].split("-")
-        params.append({"MJD": parts[3], "exp_no": int(image_params[-1]), "spec": f"sp{image_params[2][-1]}", "exp_type": image_params[1][1:], "exp_time": np.nan, "n_shifts": np.nan})
+        params.append({"MJD": int(parts[3]), "exp_no": int(image_params[-1]), "spec": f"sp{image_params[2][-1]}", "exp_type": image_params[1][1:]})
 
-    new_pixelshifts = pd.DataFrame(params)
-    pixelshifts = pd.concat((pixelshifts, new_pixelshifts), ignore_index=True)
-    pixelshifts.drop_duplicates(inplace=True, ignore_index=True)
+    new_pixelshifts = pd.DataFrame(params).drop_duplicates()
+    records = new_pixelshifts.to_string(index=None).split("\n")
+    for record in records:
+        log.info(f"   {record}")
+
+    pixelshifts = pd.concat((pixelshifts, new_pixelshifts), axis="index", ignore_index=True)
     pixelshifts.sort_values("MJD", inplace=True)
     pixelshifts.reset_index(drop=True, inplace=True)
 
-    nadded = npixelshifts - len(pixelshifts)
+    nadded = len(pixelshifts) - npixelshifts
 
     log.info(f"added {nadded} pixel shift detections to {pixelshifts_path}")
     if not dry_run:
