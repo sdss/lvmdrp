@@ -1338,7 +1338,14 @@ def science_sensitivity(rss, res_sci, ext, GAIA_CACHE_DIR, NSCI_MAX=15, r_spaxel
             # calculate the normalization of the average (known) sensitivity curve in a broad band
             lvmflux = fluxcal.spec_to_LVM_flux(channel, obswave, obsflux)
             sens = fluxcal.spec_to_LVM_flux(channel, gwave, gflux) / lvmflux
-            sens *= np.interp(obswave, mean_sens[channel]['wavelength'], mean_sens[channel]['sens'])
+
+            average_sens = np.interp(obswave, mean_sens[channel]['wavelength'], mean_sens[channel]['sens'])
+            # compute the average transmission in the same broad band as for the normalization above
+            avg_trans = (fluxcal.spec_to_LVM_flux(channel, obswave, average_sens) /
+                         fluxcal.spec_to_LVM_flux(channel, obswave, np.ones_like(average_sens)))
+
+            # apply average sensitivity curve corrected for the average transmission
+            sens *= (average_sens * avg_trans)
             res_sci[f"SCI{i+1}SEN"] = sens.astype(np.float32) * u.Unit("erg / (ct cm2)")
             # reject sensitivity that yield negative instrumental magnitude
             if lvmflux <= 0:
