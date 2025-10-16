@@ -235,7 +235,10 @@ def choose_sequence(frames, calibration, kind="longterm", ring="primary"):
 
     if kind == "nightly" and calibration != "twilight":
         chosen_frames = chosen_frames.head(EXPECTED_SEQUENCE_LENGTH[calibration])
-        return chosen_frames
+        return chosen_frames, chosen_frames.expnum.unique()
+
+    if calibration == "bias":
+        return chosen_frames, chosen_frames.expnum.unique()
 
     standards_sequence = _get_standards_ring(ring=ring)
     chosen_frames.query("calibfib in @standards_sequence", inplace=True)
