@@ -141,12 +141,13 @@ def refresh_pixelshifts_file(mjd, drpver=drpver, pixelshifts_path=PIXELSHIFTS_PA
         image_params = parts[-1].split("-")
         params.append({"MJD": int(parts[3]), "exp_no": int(image_params[-1]), "spec": f"sp{image_params[2][-1]}", "exp_type": image_params[1][1:]})
 
-    new_pixelshifts = pd.DataFrame(params).drop_duplicates()
+    new_pixelshifts = pd.DataFrame(params)
     records = new_pixelshifts.to_string(index=None).split("\n")
     for record in records:
         log.info(f"   {record}")
 
     pixelshifts = pd.concat((pixelshifts, new_pixelshifts), axis="index", ignore_index=True)
+    pixelshifts.drop_duplicates(subset=["MJD", "exp_no", "spec"], ignore_index=True, inplace=True)
     pixelshifts.sort_values("MJD", inplace=True)
     pixelshifts.reset_index(drop=True, inplace=True)
 
@@ -1336,9 +1337,9 @@ def validate_calibration_epochs(mjd=None, calibrations=CALIBRATION_TYPES, epochs
         stds = sorted(sequence.calibfib.unique().tolist(), key=lambda s: int(s.split("-")[-1]))
         nstds = len(stds)
         if nstds != nstandards:
-            log.error(f"{nstds} exposed standards{label}: {','.join(stds)}")
+            log.error(f"{nstds} exposed standards{label}: {', '.join(stds)}")
         elif nstds == nstandards:
-            log.info(f"{nstds} exposed standards{label}: {','.join(stds)}")
+            log.info(f"{nstds} exposed standards{label}: {', '.join(stds)}")
 
 
     epochs = load_calibration_epochs(epochs_path=epochs_path, verbose=False)
@@ -1358,7 +1359,7 @@ def validate_calibration_epochs(mjd=None, calibrations=CALIBRATION_TYPES, epochs
         epoch = get_calibration_epoch(mjd, **epochs[mjd])
         for calibration in calibrations:
             source_mjds = epoch.get(calibration, [])
-            log.info(f"MJDs for {calibration = }: {source_mjds}")
+            log.info(f"MJDs for {calibration = }: {', '.join(map(str, source_mjds))}")
 
             frames = md.get_calibrations_metadata(mjds=source_mjds, calibration=calibration)
             if calibration == "trace":
@@ -1369,7 +1370,7 @@ def validate_calibration_epochs(mjd=None, calibrations=CALIBRATION_TYPES, epochs
                 sequence, _ = choose_sequence(frames, calibration=calibration, ring=ring)
             _log_dry_run(sequence)
 
-            log.info(f"unique MJDs = {sequence.mjd.unique()}")
+            log.info(f"unique MJDs = {', '.join(sequence.mjd.unique().astype(str))}")
             if calibration == "trace":
                 _report_standards(sequence_ldls, nstandards, label="ldls")
                 _report_standards(sequence_qrtz, nstandards, label="quartz")
