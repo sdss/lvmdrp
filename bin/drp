@@ -267,11 +267,11 @@ def validate_epochs(mjd, mjd_list, mjd_range, calibration, epochs_path, ring):
     if not isinstance(mjds, (list, tuple)):
         mjds = [mjds]
 
-    calibrations = calibration_types if calibration is None else [calibration]
+    calibrations = CALIBRATION_TYPES if calibration is None else [calibration]
 
     for mjd in mjds:
         for calibration in calibrations:
-            validate_calibration_epochs(mjd, calibrations, epochs_path, ring)
+            validate_calibration_epochs(mjd, calibration, epochs_path, ring)
 
 
 @cli.command('detrend', short_help='Run detrending of calibrations', context_settings=dict(show_default=True))
@@ -288,7 +288,7 @@ def detrend(mjd, mjd_list, mjd_range, calibration, dry_run, skip_done):
     if not isinstance(mjds, (list, tuple)):
         mjds = [mjds]
 
-    calibrations = calibration_types if calibration is None else [calibration]
+    calibrations = CALIBRATION_TYPES if calibration is None else [calibration]
 
     for mjd in mjds:
         for calibration in calibrations:
@@ -498,7 +498,7 @@ def imagetyp_hdrfix(mjd, mjd_list, mjd_range, calibration):
     if not isinstance(mjds, (list, tuple)):
         mjds = [mjds]
 
-    calibrations = calibration_types if calibration is None else [calibration]
+    calibrations = CALIBRATION_TYPES if calibration is None else [calibration]
 
     for mjd in mjds:
        for calibration in calibrations:

@@ -141,7 +141,7 @@ def refresh_pixelshifts_file(mjd, drpver=drpver, pixelshifts_path=PIXELSHIFTS_PA
         image_params = parts[-1].split("-")
         params.append({"MJD": int(parts[3]), "exp_no": int(image_params[-1]), "spec": f"sp{image_params[2][-1]}", "exp_type": image_params[1][1:]})
 
-    new_pixelshifts = pd.DataFrame(params)
+    new_pixelshifts = pd.DataFrame(params).drop_duplicates(subset=["MJD", "exp_no", "spec"], ignore_index=True)
     records = new_pixelshifts.to_string(index=None).split("\n")
     for record in records:
         log.info(f"   {record}")
