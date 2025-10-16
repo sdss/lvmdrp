@@ -23,6 +23,7 @@ from astropy.stats import biweight_location, biweight_scale
 from astropy.table import Table
 from astropy.io import fits
 from astroquery.gaia import Gaia
+from astropy.coordinates import SkyCoord
 
 from lvmdrp.core.rss import RSS, loadRSS, lvmFFrame
 from lvmdrp.core.spectrum1d import Spectrum1D
@@ -1287,6 +1288,32 @@ def science_sensitivity(rss, res_sci, ext, GAIA_CACHE_DIR, NSCI_MAX=15, r_spaxel
     # get GAIA data, potentially cached
     r, calibrated_spectra, sampling = fluxcal.get_XP_spectra(expnum, ra, dec, plot=False, lim_mag=13.5,
                                                              n_spec=NSCI_MAX, GAIA_CACHE_DIR=GAIA_CACHE_DIR)
+
+    # select only stars that do not have neighbors within fiber size
+
+    coords = SkyCoord(ra=r['ra'] * u.deg, dec=dec['dec'] * u.deg)
+
+    # Define isolation radius (e.g., 10 arcsec)
+    r_iso = 35.3 / 2 * u.arcsec
+
+    # Find all pairs of objects within r_iso
+    idx1, idx2, sep2d, _ = coords.search_around_sky(coords, r_iso)
+
+    # Remove self-matches
+    mask_not_self = idx1 != idx2
+    idx1, idx2 = idx1[mask_not_self], idx2[mask_not_self]
+
+    # Now find which stars have at least one neighbor
+    has_neighbor = np.zeros(len(coords), dtype=bool)
+    has_neighbor[np.unique(idx1)] = True
+
+    # Keep only isolated stars
+    isolated_mask = ~has_neighbor
+    r = r[isolated_mask]
+    calibrated_spectra = calibrated_spectra[isolated_mask]
+
+    log.info(f"Selected {len(r)} isolated GAIA stars out of {len(coords)}")
+
     gwave = sampling*10 # to A
     for i in range(len(calibrated_spectra)):
         # W/micron/m^2 -> in erg/s/cm^2/A
@@ -1341,11 +1368,12 @@ def science_sensitivity(rss, res_sci, ext, GAIA_CACHE_DIR, NSCI_MAX=15, r_spaxel
 
             average_sens = np.interp(obswave, mean_sens[channel]['wavelength'], mean_sens[channel]['sens'])
             # compute the average transmission in the same broad band as for the normalization above
+            # seems to be very close to 1.0 in most cases, so not really necessary
             avg_trans = (fluxcal.spec_to_LVM_flux(channel, obswave, average_sens) /
                          fluxcal.spec_to_LVM_flux(channel, obswave, np.ones_like(average_sens)))
 
             # apply average sensitivity curve corrected for the average transmission
-            sens *= (average_sens * avg_trans)
+            sens *= (average_sens / avg_trans)
             res_sci[f"SCI{i+1}SEN"] = sens.astype(np.float32) * u.Unit("erg / (ct cm2)")
             # reject sensitivity that yield negative instrumental magnitude
             if lvmflux <= 0:
