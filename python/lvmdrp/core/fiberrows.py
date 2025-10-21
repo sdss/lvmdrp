@@ -10,6 +10,7 @@ import pandas as pd
 from lvmdrp import log
 from astropy.table import Table
 from astropy.stats import biweight_location, biweight_scale
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 from lvmdrp.core.constants import LVM_NBLOCKS, LVM_BLOCKSIZE, LVM_NFIBERS
 from lvmdrp.core.header import Header, combineHdr
@@ -1522,7 +1523,7 @@ class FiberRows(Header, PositionTable):
             if "res" not in axs:
                 axs["mod"].tick_params(labelbottom=False)
 
-                ax_divider = plot.make_axes_locatable(axs["mod"])
+                ax_divider = make_axes_locatable(axs["mod"])
                 ax_res = ax_divider.append_axes("bottom", size="30%", pad="5%")
                 ax_res.sharex(axs["mod"])
 
