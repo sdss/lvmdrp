@@ -39,7 +39,7 @@ def get_hdrfix_path(mjd: int) -> str:
         raise ValueError('LVMCORE_DIR environment variable not found.  Please set up the repo.')
 
 
-@functools.lru_cache(maxsize=256)
+# @functools.lru_cache(maxsize=256)
 def read_hdrfix_file(mjd: int) -> pd.DataFrame:
     """ Read a header fix file
 
