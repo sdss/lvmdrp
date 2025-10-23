@@ -1284,7 +1284,7 @@ def fix_raw_pixel_shifts(mjd, expnums=None, ref_expnums=None, use_longterm_cals=
     expnums_grp = frames.groupby("expnum")
     for spec in specs:
         for expnum in expnums_grp.groups:
-            frame = expnums_grp.get_group((expnum,)).iloc[0]
+            frame = expnums_grp.get_group(expnum).iloc[0]
 
             # find suitable reference frame for current frame
             ref_expnum = _get_reference_expnum(frame, ref_frames)
@@ -1922,10 +1922,10 @@ def create_twilight_fiberflats(mjd: int, epochs: dict[int, dict] = None, cals_mj
     channels = "brz"
     flat_channels = frames.groupby(frames.camera.str.__getitem__(0))
     for channel in channels:
-        flat_expnums = flat_channels.get_group((channel,)).groupby("expnum")
+        flat_expnums = flat_channels.get_group(channel).groupby("expnum")
         xtwi_paths, fflat_paths, lvmflat_paths = [], [], []
         for expnum in flat_expnums.groups:
-            flat = flat_expnums.get_group((expnum,)).iloc[0]
+            flat = flat_expnums.get_group(expnum).iloc[0]
 
             xflat_paths = sorted(path.expand("lvm_anc", drpver=drpver, kind="x", imagetype=flat.imagetyp, tileid=11111, mjd=flat.mjd, camera=f"{channel}?", expnum=expnum))
             fflat_flatfielded_path = path.full("lvm_anc", drpver=drpver, kind="flatfielded_",
