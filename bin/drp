@@ -17,7 +17,7 @@ from lvmdrp import __version__ as drpver
 from lvmdrp.main import run_drp, reduce_file, check_daily_mjd, parse_mjds, read_expfile, create_drpall, cache_gaia_spectra
 from lvmdrp.functions.skyMethod import configureSkyModel_drp
 from lvmdrp.utils.metadata import get_frames_metadata, get_master_metadata
-from lvmdrp.utils.cluster import run_cluster
+from lvmdrp.utils.cluster import run_cluster, run_cluster_cals
 
 from lvmdrp.functions.run_calseq import (
     CALIBRATION_EPOCHS_PATH,
@@ -529,6 +529,32 @@ def qaqual_bad_hdrfix(mjd, mjd_list, mjd_range, expnum, expnum_list, expnum_rang
         create_qaqual_bad_hdrfix(mjd=mjd, expnums=expnums)
 
 
+@cli.command('cluster', short_help='Submit a Utah cluster run', context_settings=dict(show_default=True))
+@click.option('-l', '--mjd-list', type=int, default=None, multiple=True, help='a list of specific MJDs to reduce')
+@click.option('-r', '--mjd-range', type=str, default=None, help='a range of MJDs to reduce')
+@click.option('--from-epochs', is_flag=True, default=False, help="Use fiducial or given epochs file to produce long-term calibrations")
+@click.option('--epochs-file', type=str, default=None, help="Path to a calibrations epoch file")
+@click.option('--routine', type=click.Choice(["detrend", "long-term", "nightly"]), default="long-term", help="run detrend, long-term or nightly calibrations only")
+@click.option('-n', '--nodes', type=int, default=2, help='the number of nodes to use')
+@click.option('-p', '--ppn', type=int, default=64, help='the number of CPU cores to use per node')
+@click.option('-w', '--walltime', type=str, default="24:00:00", help='the time for which the job is allowed to run')
+@click.option('-a', '--alloc', type=click.Choice(['sdss-np', 'sdss-kp']), default='sdss-np', help='which partition to use')
+@click.option('-s', '--submit', is_flag=True, type=bool, default=True, help='flag to submit the job or not')
+@click.option('-v', '--verbose', is_flag=True, type=bool, default=False, help='flag to display full epochs file at the start of the run')
+@click.option('--drp-options', type=str, default="", help="pass options to drp run command")
+@click.option("--dry-run", is_flag=True, default=False, help="Logs useful information abaut the current setup without actually reducing, by default False")
+def cluster_calibs(mjd_list, mjd_range, from_epochs, epochs_file, routine, nodes, ppn, walltime, alloc, submit, verbose, drp_options, dry_run):
+
+    mjds = parse_mjds(mjd=mjd_list or mjd_range or None)
+    # if no MJD, get fiducial calibration epochs
+    if from_epochs or mjds is None:
+        epochs = load_calibration_epochs(epochs_path=epochs_file, filter_by=mjds, verbose=verbose)
+        mjds = sorted(list(epochs.keys()))
+
+    run_cluster_cals(mjds, nodes=nodes, ppn=ppn, walltime=walltime, alloc=alloc, submit=submit,
+                     routine=routine, drp_options=drp_options, dry_run=dry_run)
+
+
 @click.group('calibrations', short_help="Calibrations pipeline. Handles the creation, tagging and bookkeeping of calibration frames")
 def calibrations():
     pass
@@ -543,6 +569,7 @@ calibrations.add_command(detrend)
 calibrations.add_command(longterm)
 calibrations.add_command(nightly)
 calibrations.add_command(fiberflat_corrections)
+calibrations.add_command(cluster_calibs)
 calibrations.add_command(create_tag)
 cli.add_command(calibrations)
 
@@ -586,7 +613,7 @@ def get_calibs(kind, mjd, camera):
     a.commit()
 
 
-@cli.command('cluster', short_help='Submit a Utah cluster run')
+@cli.command('cluster', short_help='Submit a Utah cluster run', context_settings=dict(show_default=True))
 @click.option('-l', '--mjd-list', type=int, default=None, multiple=True, help='a list of specific MJDs to reduce')
 @click.option('-r', '--mjd-range', type=str, default=None, help='a range of MJDs to reduce')
 @click.option('-e', '--expnum', type=int, help='an exposure number to reduce')
@@ -598,11 +625,9 @@ def get_calibs(kind, mjd, camera):
 @click.option('-w', '--walltime', type=str, default="24:00:00", help='the time for which the job is allowed to run')
 @click.option('-a', '--alloc', type=click.Choice(['sdss-np', 'sdss-kp']), default='sdss-np', help='which partition to use')
 @click.option('-s', '--submit', is_flag=True, type=bool, default=True, help='flag to submit the job or not')
-@click.option('--run-calibs', type=click.Choice(["detrend", "long-term", "nightly"]), help="run detrend, long-term or nightly calibrations only")
 @click.option('--drp-options', type=str, default="", help="pass options to drp run command")
 @click.option("--dry-run", is_flag=True, default=False, help="Logs useful information abaut the current setup without actually reducing, by default False")
-def cluster(mjd_list, mjd_range, expnum, exp_list, exp_range, exp_file, nodes, ppn, walltime,
-            alloc, submit, run_calibs, drp_options, dry_run):
+def cluster(mjd_list, mjd_range, expnum, exp_list, exp_range, exp_file, nodes, ppn, walltime, alloc, submit, drp_options, dry_run):
     """ Submit a Utah cluster job to batch run the DRP by MJD """
 
     # filter the mjds
@@ -613,7 +638,7 @@ def cluster(mjd_list, mjd_range, expnum, exp_list, exp_range, exp_file, nodes, p
 
     # submit the cluster job
     run_cluster(mjds=mjds, expnums=expnums, nodes=nodes, ppn=ppn, walltime=walltime, alloc=alloc, submit=submit,
-                run_calibs=run_calibs, drp_options=drp_options, dry_run=dry_run)
+                drp_options=drp_options, dry_run=dry_run)
 
 
 @cli.command('summary', short_help='Creates the drpall summary file for the given version of the pipeline')
