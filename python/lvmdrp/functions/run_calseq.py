@@ -1836,7 +1836,7 @@ def create_twilight_fiberflats(mjd: int, epochs: dict[int, dict] = None, cals_mj
                       ref_kind: Union[int, Callable[[np.ndarray, int], np.ndarray]] = bn.nanmedian,
                       groupby: str = "spec", guess_coeffs: List[int] = [1,0,0,0], fixed_coeffs: List[int] = [0,1,2,3],
                       cnorms: Dict[str, float] = SKYLINES_FIBERFLAT, dwave: float = 20.0,
-                      smoothing: float = 0.0,
+                      smoothing: float = 0.2,
                       interpolate_invalid: bool = True,
                       skip_done: bool = False,
                       display_plots: bool = False,
