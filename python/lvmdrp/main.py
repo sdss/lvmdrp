@@ -677,7 +677,7 @@ def reduce_masters(mjd: int):
         reduce_frame(path, master=True, **row)
 
 
-def start_logging(mjd: int, tileid: int):
+def start_logging(mjd: int, tileid: int, for_calibrations=False):
     """ Starts a file logger
 
     Starts a file logger for a given MJD and tile ID.
@@ -688,10 +688,13 @@ def start_logging(mjd: int, tileid: int):
         The MJD of the observations
     tileid : int
         The tile ID of the observations
+    for_calibrations : bool, optional
+        Whether the run will be for calibrations or not, by default False
     """
     tilegrp = tileid_grp(tileid)
-    lpath = (os.path.join(os.getenv('LVM_SPECTRO_REDUX'),
-             "{drpver}/{tilegrp}/{tileid}/{mjd}/lvm-drp-{tileid}-{mjd}.log"))
+    lpath = os.path.join(os.getenv('LVM_SPECTRO_REDUX'),
+                         "{drpver}", "{tilegrp}", "{tileid}", "{mjd}",
+                         "lvm-calibrations-{tileid}-{mjd}.log" if for_calibrations else "lvm-drp-{tileid}-{mjd}.log")
     logpath = lpath.format(drpver=drpver, mjd=mjd, tileid=tileid, tilegrp=tilegrp)
     logpath = pathlib.Path(logpath)
 

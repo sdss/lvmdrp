@@ -2213,12 +2213,12 @@ def reduce_nightly_sequence(mjd, use_longterm_cals=False, reject_cr=True, only_c
     dry_run : bool, optional
         Logs useful information abaut the current setup without actually reducing, by default False
     """
-    # start logging to file
-    start_logging(mjd, tileid=11111)
-
     if mjd is None:
         log.error(f"nothing to reduce, MJD = {mjd}")
         return
+
+    # start logging to file
+    start_logging(mjd, tileid=11111, for_calibrations=True)
 
     # create symbolic link to pixel flats and masks
     if link_pixelmasks:
@@ -2293,8 +2293,12 @@ def reduce_longterm_sequence(mjd, epochs=None, use_longterm_cals=True,
     dry_run : bool, optional
         Logs useful information abaut the current setup without actually reducing, by default False
     """
+    if mjd is None:
+        log.error(f"nothing to reduce, MJD = {mjd}")
+        return
+
     # start logging to file
-    start_logging(mjd, tileid=11111)
+    start_logging(mjd, tileid=11111, for_calibrations=True)
 
     # create symbolic link to pixel flats and masks
     if link_pixelmasks:
