@@ -658,3 +658,47 @@ def galExtinct(wave, Rv):
     Arat = (ax + (bx / Rv)).astype(np.float32)
     spec = Spectrum1D(wave=wave, data=Arat)
     return spec
+
+
+def edges_from_centers(centers):
+    """
+    Ancillary function for fluxconserve_rebin to calculate bin edges from bin centers.
+    """
+    centers = np.asarray(centers, dtype=float)
+    edges = np.empty(centers.size + 1, dtype=float)
+    edges[1:-1] = 0.5*(centers[1:] + centers[:-1])
+    edges[0]  = centers[0]  - 0.5*(centers[1] - centers[0])
+    edges[-1] = centers[-1] + 0.5*(centers[-1] - centers[-2])
+    return edges
+
+
+def fluxconserve_rebin(output_wave, input_wave, input_flux, normalize=True):
+    """
+    Flux-conserving rebin using linear inteprolation of the commulative function.
+    Preserves input data type while performing calculations in float64.
+    Returns np.nan if output_wave is outside the range of input_wave.
+    """
+    # Store original dtype
+    original_dtype = input_flux.dtype
+
+    # Convert to float64 for calculations
+    input_flux_f64 = input_flux.astype(np.float64)
+
+    edges_out = edges_from_centers(output_wave)
+    edges_in = edges_from_centers(input_wave)
+    cdf_in = np.r_[0.0, np.cumsum(input_flux_f64, dtype=np.float64)]
+    cdf_out = np.interp(edges_out, edges_in, cdf_in)
+
+    if normalize:
+        # in this case output spectrum will be on the same level of the input
+        x_edges_in = np.arange(len(edges_in))
+        x_edges_out = np.interp(edges_out, edges_in, x_edges_in, left=np.nan, right=np.nan)
+        norm_factors = np.diff(x_edges_out)
+    else:
+        # spectrum level will be higer because of integration over pixels
+        norm_factors = np.diff(edges_out)
+
+    output = np.diff(cdf_out) / norm_factors
+
+    # Convert back to original dtype
+    return output.astype(original_dtype)

@@ -490,10 +490,11 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
     # https://github.com/desihub/desispec/blob/main/py/desispec/data/arc_lines/telluric_lines.txt
     telluric_tab = Table.read(telluric_file, format='ascii.fixed_width_two_line')
 
-    with fits.open(name=models_dir + '/lvm-models_ambre-all.fits') as model:
-        model_good = model[0].data
-        model_norm = model[1].data
-        model_info = pd.DataFrame(model[2].data)
+    with fits.open(name=models_dir + '/AMBRE_for_LVM_3000_11000.fits') as model:
+        model_good = model['PRIMARY'].data
+        model_norm = model['NORM'].data
+        model_info = pd.DataFrame(model['MODEL_INFO'].data)
+        model_wave = model['WAVE'].data
     model_names = model_info['Model_name'].to_list()
     n_models = len(model_names)
     log.info(f'Number of models: {n_models}')
@@ -542,8 +543,9 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
     gaia_logg = []
     gaia_z = []
 
-    # Stitch normalized spectra in brz together
+    # Loop over standard stars
     for i in range(len(lsf_all_bands[0])):
+        # Stitch normalized spectra in brz together
         std_norm_unconv = np.concatenate((normalized_spectra_unconv_all_bands[0][i][mask_b_norm],
                                           normalized_spectra_unconv_all_bands[1][i][mask_r_norm],
                                           normalized_spectra_unconv_all_bands[2][i][mask_z_norm]))
@@ -613,17 +615,12 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
 
         # Conversion coefficient model to gaia units
         model_flux = model_good[best_id]
-        n_steps = int((9850 - 3550) / 0.05) + 1
-        model_wave = np.linspace(3550, 9850, n_steps)
-
-        mask_model = (model_wave >= min(std_wave_all)) & (model_wave <= max(std_wave_all))
-        model_wave = model_wave[mask_model]
-        model_flux = model_flux[mask_model]
 
         # resample model to the same step
         model_flux_resampled = np.interp(std_wave_all, model_wave, model_flux)
         good_model_to_std_lsf = np.sqrt(lsf_all ** 2 - 0.3 ** 2) # to degrade good resolution model to std lsf for plots
-        model_convolved_spec_lsf = fluxcal.lsf_convolve(model_flux_resampled, good_model_to_std_lsf, std_wave_all)
+        good_model_to_std_lsf_pix = good_model_to_std_lsf / np.diff(fluxcal.edges_from_centers(std_wave_all))
+        model_convolved_spec_lsf = fluxcal.lsf_convolve(model_flux_resampled, good_model_to_std_lsf_pix, std_wave_all)
         best_continuum = ndimage.filters.median_filter(model_convolved_spec_lsf, int(160/0.5), mode="nearest")
         model_norm_convolved_spec_lsf = model_convolved_spec_lsf / best_continuum
         log_std_wave_all_tmp, log_model_norm_convolved_spec_lsf = linear_to_logscale(std_wave_all, model_norm_convolved_spec_lsf)
@@ -670,24 +667,86 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
             # rss_tmp.add_header_comment(f"Gaia star {gaia_ids[i]} not found")
             continue
 
-        # convolve model to gaia lsf
-        model_convolved_to_gaia = fluxcal.lsf_convolve(model_flux_resampled, gaia_lsf, std_wave_all)
-        model_to_gaia = stdflux/model_convolved_to_gaia
-        model_to_gaia_median.append(np.median(model_to_gaia))
+        # Keep Eugenia's implementation for a reference after a minor bug fix
+        # (missing GAIA LSF conversion to pixels).
+        # gaia_lsf_pix = gaia_lsf / np.diff(fluxcal.edges_from_centers(std_wave_all))
+        # model_convolved_to_gaia = fluxcal.lsf_convolve(model_flux_resampled, gaia_lsf_pix, gw)
+        # model_to_gaia = stdflux / model_convolved_to_gaia
+        # model_to_gaia_median.append(np.median(model_to_gaia))
+
+
+        # In the block below, we rebin the stellar template spectrum to the GAIA
+        # wavelength grid, then convolve it with the GAIA LSF.
+
+        # Rebin the model spectrum to the GAIA wavelength grid.
+        # The GAIA grid (gw) extends beyond the model range, the extended parts are filled with np.nan.
+        model_flux_gaia_rebinned = fluxcal.fluxconserve_rebin(gw, model_wave, model_flux)
+
+        # Replace nan by 0.0 to make possible convolution
+        # TODO: must be fixed when stellar templates grid will be extended
+        model_flux_gaia_rebinned[~np.isfinite(model_flux_gaia_rebinned)] = 0.0
+
+        # Interpolate GAIA LSF to the extended grid
+        gaia_lsf_gw_ang = np.interp(gw, gaia_lsf_table_tmp['wavelength'], gaia_lsf_table_tmp['linewidth'])
+
+        # Convert GAIA LSF in Angstroms to pixels of GAIA spectrum
+        gaia_lsf_gw_pix = gaia_lsf_gw_ang / np.diff( fluxcal.edges_from_centers(gw) )
+        model_flux_gaia_convolved = fluxcal.lsf_convolve(model_flux_gaia_rebinned, gaia_lsf_gw_pix, gw)
+
+        model2gaia_factor = np.median(gf / model_flux_gaia_convolved)
+        model_to_gaia_median.append(model2gaia_factor)
+
+        # Temporary plots TO BE REMOVED =======================================
+        # plt.close('all')
+        # plt.plot(std_wave_all, model_flux_resampled * model2gaia_factor, lw=0.1, alpha=0.3, label='model')
+        # plt.plot(gw, gf, lw=1, label='GAIA spectrum', color='red')
+        # plt.plot(std_wave_all, model_convolved_to_gaia * model2gaia_factor, lw=2.0, label='model convolved to GAIA lsf (orig)')
+        # plt.plot(gw, model_flux_gaia_rebinned * model2gaia_factor, lw=2.0, label='model rebinned to GAIA')
+        # plt.plot(gw, model_flux_gaia_convolved * model2gaia_factor, lw=2.0, label='model rebinned and convolved to GAIA')
+        
+        # plt.legend()
+        # plt.show()
+        # =====================================================================
 
         # prepare dictionaries to plot QA plots for model matching
         fig_path = in_rss[0]
-        fiber_params = {'i':i,'fiber_id':fibers[i]}
-        gaia_params = {'gaia_id':gaia_ids[i],'gaia_Teff':gaia_Teff[i][0],'gaia_logg':gaia_logg[i][0],'gaia_z':gaia_z[i][0]}
-        model_params = {'model_name':model_names[best_id], 'model_Teff':model_info['Teff'][best_id],
-                        'model_logg': model_info['logg'][best_id],'model_z':model_info['Z'][best_id]}
-        matching_params = {'vel_shift':vel_shift_full, 'log_vel_shift':log_shift_full, 'npix_masked':npix_masked,
-                           'peaks':peaks, 'properties':properties, 'chi2_threshold':chi2_threshold,
-                           'chi2_bestfit':chi2_bestfit, 'chi2_wave_bestfit':chi2_wave_bestfit,
-                           'chi2_wave_bestfit_0':chi2_wave_bestfit_0, 'model_to_gaia':model_to_gaia}
-        mask_dict = {'mask_for_fit':mask_for_fit, 'mask_good':mask_good, 'mask_chi2':mask_chi2}
-        wave_arrays = {'std_wave_all':std_wave_all, 'log_std_wave_all':log_std_wave_all,
-                       'log_model_wave_shifted':log_model_wave_all + log_shift_full}
+        fiber_params = {'i': i, 'fiber_id': fibers[i]}
+        gaia_params = {
+            'gaia_id': gaia_ids[i],
+            'gaia_Teff': gaia_Teff[i][0],
+            'gaia_logg': gaia_logg[i][0],
+            'gaia_z': gaia_z[i][0]
+        }
+        model_params = {
+            'model_name': model_names[best_id],
+            'model_Teff': model_info['Teff'][best_id],
+            'model_logg': model_info['logg'][best_id],
+            'model_z': model_info['Z'][best_id]
+        }
+        matching_params = {
+            'vel_shift': vel_shift_full,
+            'log_vel_shift': log_shift_full,
+            'npix_masked': npix_masked,
+            'peaks': peaks,
+            'properties': properties,
+            'chi2_threshold': chi2_threshold,
+            'chi2_bestfit': chi2_bestfit,
+            'chi2_wave_bestfit': chi2_wave_bestfit,
+            'chi2_wave_bestfit_0': chi2_wave_bestfit_0,
+            'model_flux_gaia_convolved': model_flux_gaia_convolved,
+            'model2gaia_factor': model2gaia_factor
+        }
+        mask_dict = {
+            'mask_for_fit': mask_for_fit,
+            'mask_good': mask_good,
+            'mask_chi2': mask_chi2
+        }
+        wave_arrays = {
+            'std_wave_all': std_wave_all,
+            'log_std_wave_all': log_std_wave_all,
+            'log_model_wave_shifted': log_model_wave_all + log_shift_full,
+            'gaia_wave': gw
+        }
 
         if plot:
             qa_model_matching(fig_path,
@@ -701,11 +760,10 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
                               log_std_errors_normalized_all=log_std_errors_normalized_all,
                               model_flux_resampled=model_flux_resampled,
                               log_model_norm_convolved_spec_lsf = log_model_norm_convolved_spec_lsf,
-                              model_convolved_to_gaia=model_convolved_to_gaia,
+                              model_flux_gaia_convolved=model_flux_gaia_convolved,
                               mask_dict=mask_dict)
 
-
-        # calculating sensitivity curves
+    # calculating sensitivity curves by channels
     for n_chan, chan in enumerate('brz'):
         # load input RSS
         log.info(f"loading input RSS file '{os.path.basename(in_rss[n_chan])}'")
@@ -730,7 +788,7 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
             # !now telluric correction does not work!
             std_telluric_corrected = correct_tellurics(w[n_chan], std_spectra_all_bands[n_chan][i], lsf_all_bands[n_chan][i], in_rss[n_chan], chan)
             sens_tmp = calc_sensitivity_from_model(w[n_chan], std_telluric_corrected, lsf_all_bands[n_chan][i],
-                                                   model_good[best_id], model_to_gaia_median[i], log_shift_full) #model_names[best_id]
+                                                   model_wave, model_good[best_id], model_to_gaia_median[i], log_shift_full) #model_names[best_id]
             wgood, sgood = fluxcal.filter_channel(w[n_chan], sens_tmp, 3, method='savgol')
             # if chan == 'b':
             #     win = 150
@@ -824,10 +882,10 @@ def chi2_model_matching(std_spectra, std_errors, model_norm, mask):
                                                             model_norm[best_id][mask]) ** 2)
     return best_id, chi2_bestfit, chi2_wave_bestfit
 
-def qa_model_matching(fig_path, fiber_params = None, gaia_params = None, model_params = None, matching_params = None,
-                      wave_arrays = None, stdflux = None, flux_std_unconv_logscale = None,
-                      log_std_errors_normalized_all = None, model_flux_resampled = None,
-                      log_model_norm_convolved_spec_lsf = None, model_convolved_to_gaia = None, mask_dict = None):
+def qa_model_matching(fig_path, fiber_params=None, gaia_params=None, model_params=None, matching_params=None,
+                      wave_arrays=None, stdflux=None, flux_std_unconv_logscale=None,
+                      log_std_errors_normalized_all=None, model_flux_resampled=None,
+                      log_model_norm_convolved_spec_lsf=None, model_flux_gaia_convolved=None, mask_dict=None):
 
     plt.figure(figsize=(14, 27))
 
@@ -1070,8 +1128,8 @@ def qa_model_matching(fig_path, fiber_params = None, gaia_params = None, model_p
     # plt.plot(std_wave_all, std_norm_unconv)
     # plt.plot(std_wave_all, model_shifted_norm_convolved_spec_lsf)
     # plt.plot(std_wave_all, std_norm_unconv/model_shifted_norm_convolved_spec_lsf, label='Observed normalised/model normalised')
-    plt.plot(wave_arrays['std_wave_all'], model_flux_resampled * np.mean(matching_params["model_to_gaia"]), label='Model', linewidth=1)
-    plt.plot(wave_arrays['std_wave_all'], model_convolved_to_gaia * np.mean(matching_params["model_to_gaia"]), label='Model, convolved with Gaia LSF',
+    plt.plot(wave_arrays['std_wave_all'], model_flux_resampled * matching_params["model2gaia_factor"], label='Model', linewidth=1)
+    plt.plot(wave_arrays['gaia_wave'], model_flux_gaia_convolved * matching_params["model2gaia_factor"], label='Model, convolved with Gaia LSF',
              linewidth=1)
     plt.plot(wave_arrays['std_wave_all'], stdflux,
              label=f'Gaia, Teff={gaia_params["gaia_Teff"]:.0f}, logg={gaia_params["gaia_logg"]:.1f}, [Fe/H]={gaia_params["gaia_z"]:.1f}',
@@ -1097,7 +1155,7 @@ def qa_model_matching(fig_path, fiber_params = None, gaia_params = None, model_p
 
     return
 
-def calc_sensitivity_from_model(wl, obs_spec, spec_lsf, model_flux=[], model_to_gaia_median=1, model_log_shift=0):
+def calc_sensitivity_from_model(wl, obs_spec, spec_lsf, model_wave, model_flux=[], model_to_gaia_median=1, model_log_shift=0):
     """
     Calculate the sensitivity curves using the model spectra
     First convert model spectra to log scale, apply the "velocity shift" found in the model_selection function in log
@@ -1114,9 +1172,6 @@ def calc_sensitivity_from_model(wl, obs_spec, spec_lsf, model_flux=[], model_to_
     # read the best-fit model and convolve with spectrograph LSF
     # model_dir = '/Users/amejia/Downloads/stellar_models/'
     # models_dir = os.path.join(MASTERS_DIR, "stellar_models")
-
-    n_steps = int((9850-3550) / 0.05) + 1
-    model_wave = np.linspace(3550, 9850, n_steps)
 
     # apply the model shift relative to observed spectra in log space
     log_model_wave, flux_model_logscale = linear_to_logscale(model_wave, model_flux)
