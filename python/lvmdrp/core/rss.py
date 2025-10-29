@@ -1112,7 +1112,7 @@ class RSS(FiberRows):
             error = numpy.zeros(wave.shape)
             for i in range(self._fibers):
                 sky[i] = interpolate.splev(wave[i], tck) * dlambda[i]
-                error[i] = interpolate.splev(wave[i], tck_error) * dlambda[i]
+                error[i] = numpy.sqrt(interpolate.splev(wave[i], tck_error)) * dlambda[i]
 
             # store supersky in dictionary
             waves[telescope] = wave
