@@ -1107,13 +1107,12 @@ class RSS(FiberRows):
             tck_error = tcks_error[1:]
 
             # evaluate supersky
-            dlambda = numpy.diff(wave, axis=1)
-            dlambda = numpy.column_stack((dlambda, dlambda[:, -1]))
+            dlambda = numpy.ones(wave.shape) if self._header["BUNIT"].endswith("/Angstrom") else numpy.gradient(wave, axis=1)
             sky = numpy.zeros(wave.shape)
             error = numpy.zeros(wave.shape)
             for i in range(self._fibers):
-                sky[i, :] = interpolate.splev(wave[i, :], tck)
-                error[i, :] = interpolate.splev(wave[i, :], tck_error)
+                sky[i] = interpolate.splev(wave[i], tck) * dlambda[i]
+                error[i] = interpolate.splev(wave[i], tck_error) * dlambda[i]
 
             # store supersky in dictionary
             waves[telescope] = wave
