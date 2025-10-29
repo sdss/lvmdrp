@@ -587,17 +587,17 @@ def plot_wavesol_wave(xpix, ref_waves, lines_pixels, wave_poly, wave_coeffs, ax=
         wave_sol[i] = wave_poly(wave_coeffs[i])(xpix)
         wave_lin[i] = wave_poly(wave_coeffs[i]).truncate(2)(xpix)
         wave_lin_ref = wave_poly(wave_coeffs[i]).truncate(2)(lines_pixels)
-        ax.plot(xpix, (wave_lin - wave_sol)[i], color="tab:blue", alpha=0.3, lw=1)
+        ax.plot(xpix, (wave_sol - wave_lin)[i], color="tab:blue", alpha=0.3, lw=1)
 
         ax.plot(
             lines_pixels[i],
-            wave_lin_ref[i] - ref_waves,
+            ref_waves - wave_lin_ref[i],
             ".",
             ms=4,
             color="k",
             zorder=999
         )
-    ax.plot(xpix, wave_lin.mean(0) - wave_sol.mean(0), lw=1, color="tab:blue")
+    ax.plot(xpix, wave_sol.mean(0) - wave_lin.mean(0), lw=1, color="tab:blue")
     if labels:
         ax.set_xlabel("X (pixel)")
         ax.set_ylabel("Wavelength model - linear terms (Angstrom)")
@@ -655,20 +655,20 @@ def plot_wavesol_lsf(xpix, lsf, lines_pixels, wave_poly, wave_coeffs, lsf_poly, 
         lsf_sol[i] = lsf_poly(lsf_coeffs[i])(xpix)
         lsf_lin[i] = lsf_poly(lsf_coeffs[i]).truncate(2)(xpix)
         lsf_lin_ref = lsf_poly(lsf_coeffs[i]).truncate(2)(lines_pixels)
-        ax.plot(xpix, (lsf_lin - lsf_sol)[i], color="tab:red", alpha=0.3, lw=1)
+        ax.plot(xpix, (lsf_sol - lsf_lin)[i], color="tab:red", alpha=0.3, lw=1)
 
         dwave[i] = np.abs(np.gradient(wave_sol[i]))
         dw = np.interp(lines_pixels[i], xpix, dwave[i])
 
         ax.plot(
             lines_pixels[i],
-            lsf_lin_ref[i] - dw * lsf[i],
+            dw * lsf[i] - lsf_lin_ref[i],
             ".",
             ms=4,
             color="k",
             zorder=999
         )
-    ax.plot(xpix, lsf_lin.mean(0) - lsf_sol.mean(0), lw=1, color="tab:red")
+    ax.plot(xpix, lsf_sol.mean(0) - lsf_lin.mean(0), lw=1, color="tab:red")
     if labels:
         ax.set_xlabel("X (pixel)")
         ax.set_ylabel("LSF model - linear term (Angstrom)")

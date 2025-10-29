@@ -50,7 +50,7 @@ from lvmdrp.utils import metadata as md
 from lvmdrp.utils import hdrfix
 from lvmdrp.utils.convert import tileid_grp
 from lvmdrp.utils.paths import get_master_mjd, get_calib_paths, group_calib_paths, get_frames_paths
-from lvmdrp.core.plot import create_subplots, save_fig
+from lvmdrp.core.plot import save_fig
 from lvmdrp.core import dataproducts as dp
 from lvmdrp.core.constants import (
     LVM_NFIBERS,

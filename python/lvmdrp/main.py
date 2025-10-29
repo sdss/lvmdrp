@@ -1824,7 +1824,7 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
     # write_config_file()
 
     if mjd is None and expnum is None:
-        log.error(f"you must provide either an exposure number `expnum` or an MJD `mjd`. None was given")
+        log.error("you must provide either an exposure number `expnum` or an MJD `mjd`. None was given")
         return
 
     if mjd is None:
