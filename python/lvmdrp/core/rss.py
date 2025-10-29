@@ -1651,6 +1651,14 @@ class RSS(FiberRows):
                 rss._sky /= dlambda
             if rss._sky_error is not None:
                 rss._sky_error /= dlambda
+            if rss._sky_east is not None:
+                rss._sky_east /= dlambda
+            if rss._sky_east_error is not None:
+                rss._sky_east_error /= dlambda
+            if rss._sky_west is not None:
+                rss._sky_west /= dlambda
+            if rss._sky_west_error is not None:
+                rss._sky_west_error /= dlambda
             unit = unit + "/Angstrom"
 
         rss._header["BUNIT"] = unit
@@ -1702,6 +1710,18 @@ class RSS(FiberRows):
             if rss._sky_error is not None:
                 f = interpolate.interp1d(rss._wave[ifiber][sel], rss._sky_error[ifiber][sel], kind=method, bounds_error=False, fill_value=numpy.nan, assume_sorted=True)
                 new_rss._sky_error[ifiber] = f(wave).astype("float32")
+            if rss._sky_east is not None:
+                f = interpolate.interp1d(rss._wave[ifiber][sel], rss._sky_east[ifiber][sel], kind=method, bounds_error=False, fill_value=numpy.nan, assume_sorted=True)
+                new_rss._sky_east[ifiber] = f(wave).astype("float32")
+            if rss._sky_east_error is not None:
+                f = interpolate.interp1d(rss._wave[ifiber][sel], rss._sky_east_error[ifiber][sel], kind=method, bounds_error=False, fill_value=numpy.nan, assume_sorted=True)
+                new_rss._sky_east_error[ifiber] = f(wave).astype("float32")
+            if rss._sky_west is not None:
+                f = interpolate.interp1d(rss._wave[ifiber][sel], rss._sky_west[ifiber][sel], kind=method, bounds_error=False, fill_value=numpy.nan, assume_sorted=True)
+                new_rss._sky_west[ifiber] = f(wave).astype("float32")
+            if rss._sky_west_error is not None:
+                f = interpolate.interp1d(rss._wave[ifiber][sel], rss._sky_west_error[ifiber][sel], kind=method, bounds_error=False, fill_value=numpy.nan, assume_sorted=True)
+                new_rss._sky_west_error[ifiber] = f(wave).astype("float32")
 
         if not return_density:
             dlambda = numpy.gradient(wave)
@@ -1711,6 +1731,14 @@ class RSS(FiberRows):
                 new_rss._sky *= dlambda
             if new_rss._sky_error is not None:
                 new_rss._sky_error *= dlambda
+            if new_rss._sky_east is not None:
+                new_rss._sky_east *= dlambda
+            if new_rss._sky_east_error is not None:
+                new_rss._sky_east_error *= dlambda
+            if new_rss._sky_west is not None:
+                new_rss._sky_west *= dlambda
+            if new_rss._sky_west_error is not None:
+                new_rss._sky_west_error *= dlambda
             new_rss._header["BUNIT"] = unit.replace("/Angstrom", "")
 
         new_rss.setData(mask=True, select=(~numpy.isfinite(new_rss._data))|(new_rss._data==0)|(~numpy.isfinite(new_rss._error))|(new_rss._error==0))
