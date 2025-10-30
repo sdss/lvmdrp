@@ -1352,8 +1352,7 @@ def interpolate_sky( in_frame: str, out_rss: str = None, display_plots: bool = F
         )
 
         # divide by the wavelength sampling step at each pixel
-        dlambda = np.diff(sky_wave, axis=1)
-        dlambda = np.column_stack((dlambda, dlambda[:, -1]))
+        dlambda = np.ones(frame._wave.shape) if frame._header["BUNIT"].endswith("/Angstrom") else np.gradient(sky_wave, axis=1)
         sky_data = sky_data / dlambda
         sky_vars = sky_vars / dlambda
 
@@ -1391,8 +1390,7 @@ def interpolate_sky( in_frame: str, out_rss: str = None, display_plots: bool = F
         )
 
         # interpolated sky
-        dlambda = np.diff(frame._wave, axis=1)
-        dlambda = np.column_stack((dlambda, dlambda[:, -1]))
+        dlambda = np.ones(frame._wave.shape) if frame._header["BUNIT"].endswith("/Angstrom") else np.gradient(frame._wave, axis=1)
         new_sky = s_ssky(frame._wave).astype("float32") * dlambda
         new_error = np.sqrt(s_error(frame._wave).astype("float32")) * dlambda
         new_mask = s_mask(frame._wave).astype(bool)
