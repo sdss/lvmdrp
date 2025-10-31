@@ -36,6 +36,8 @@ from lvmdrp.utils.paths import get_calib_paths
 from lvmdrp.core.spectrum1d import Spectrum1D, convolution_matrix
 from lvmdrp.core.rss import RSS
 
+from scipy.sparse import csr_matrix
+
 
 def get_mean_sens_curves(sens_dir):
     return {'b':pd.read_csv(f'{sens_dir}/mean-sens-b.csv', names=['wavelength', 'sens']),
@@ -66,8 +68,9 @@ def retrieve_header_stars(rss):
             c = SkyCoord(float(h[stdi + "RA"]), float(h[stdi + "DE"]), unit="deg")
             stdT = c.transform_to(AltAz(obstime=obstime, location=lco))
             secz = stdT.secz.value
+            zenith_angle = 90 - stdT.alt.value
             # print(gid, fib, et, secz)
-            stddata.append((i + 1, fiber, gaia_id, exptime, secz))
+            stddata.append((i + 1, fiber, gaia_id, exptime, secz, zenith_angle))
     return stddata
 
 
@@ -401,6 +404,102 @@ def lsf_convolve(data, diff_fwhm, wave_lsf_interp):
     kernel = np.asarray([np.exp(-0.5 * (pixels / sigmas[iw]) ** 2) for iw in range(data.size)])
     kernel = convolution_matrix(kernel)
     new_data = kernel @ data
+
+    return new_data
+
+
+def lsf_convolve_fast(data, diff_fwhm, waves=None, n_sigma=4, edges_reflect=True):
+    """
+    Degrade spectrum resolution using sparse matrix convolution (~40x faster than lsf_convolve).
+
+    Parameters
+    ----------
+    data : np.ndarray
+        Input flux array
+    diff_fwhm : np.ndarray
+        FWHM array for each pixel (same length as data); in pixels, or in wavelength units if waves provided
+    waves : np.ndarray, optional
+        Wavelength array; if provided, converts diff_fwhm from wavelength units to pixels
+    n_sigma : int, optional
+        Kernel size in units of sigma
+    edges_reflect : bool, optional
+        If True, reflect edges to avoid edge effects in convolution
+
+    Returns
+    -------
+    np.ndarray
+        Convolved flux array
+    """
+    # convert FWHM from wavelength units to pixels if wavelength array provided
+    if waves is not None:
+        # this calculates the sizes of pixels in wavelength units, can be used for irregular grids
+        delta_wave = np.diff(edges_from_centers(waves))
+        sigmas = (diff_fwhm / delta_wave) / 2.3548 # 2*np.sqrt(2*np.log(2))
+    else:
+        sigmas = diff_fwhm / 2.3548
+
+    # determine kernel size based on maximum sigma (nsigma-sigma coverage)
+    max_sigma = np.max(sigmas)
+    npix_half = int(np.ceil(n_sigma * max_sigma))
+    npix = 2 * npix_half + 1  # full size of the kernel
+
+    # handle edge reflection to avoid edge effects
+    if edges_reflect:
+        # get kernel sizes at edges
+        npix_half_left = int(np.ceil(n_sigma * sigmas[0]))
+        npix_half_right = int(np.ceil(n_sigma * sigmas[-1]))
+
+        # reflect edges
+        data_extended = np.concatenate([
+            data[npix_half_left:0:-1],  # left reflection (reversed)
+            data,
+            data[-2:-npix_half_right-2:-1]  # right reflection (reversed)
+        ])
+
+        # extend sigmas array using edge values
+        sigmas_extended = np.concatenate([
+            np.full(npix_half_left, sigmas[0]),
+            sigmas,
+            np.full(npix_half_right, sigmas[-1])
+        ])
+
+        offset = npix_half_left
+    else:
+        data_extended = data
+        sigmas_extended = sigmas
+        offset = 0
+
+    # create pixel grid for kernel
+    x_px = np.arange(-npix_half, npix_half + 1, dtype=float)
+
+    # compute Gaussian kernels for all pixels using broadcasting
+    # shape: (n_pixels, npix)
+    yy = x_px[None, :] / sigmas_extended[:, None]
+
+    kernels = np.exp(-0.5 * yy**2)
+    # normalize kernels numerically
+    kernels = kernels / kernels.sum(axis=1, keepdims=True)
+
+    # build sparse matrix indices
+    x_size = data_extended.size
+    rows2d = np.broadcast_to(np.arange(x_size)[:, None], (x_size, npix))
+    cols2d = rows2d + x_px.astype(int)
+
+    # clip columns to valid range [0, x_size)
+    valid_mask = (cols2d >= 0) & (cols2d < x_size)
+    rows_flat = rows2d[valid_mask]
+    cols_flat = cols2d[valid_mask]
+    data_flat = kernels[valid_mask]
+
+    # construct sparse convolution matrix
+    matrix_csr = csr_matrix((data_flat, (rows_flat, cols_flat)), shape=(x_size, x_size))
+
+    # apply convolution
+    new_data = matrix_csr @ data_extended
+
+    # remove reflected edges if they were added
+    if edges_reflect:
+        new_data = new_data[offset:offset + data.size]
 
     return new_data
 
