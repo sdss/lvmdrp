@@ -8,6 +8,7 @@
 
 
 import os
+import time
 # from os import listdir
 # from os.path import isfile, join
 import numpy as np
@@ -23,6 +24,8 @@ from astropy.stats import biweight_location, biweight_scale
 from astropy.table import Table
 from astropy.io import fits
 from astroquery.gaia import Gaia
+
+from lmfit import minimize, Parameters
 
 from lvmdrp.core.rss import RSS, loadRSS, lvmFFrame
 from lvmdrp.core.spectrum1d import Spectrum1D
@@ -315,6 +318,7 @@ def prepare_spec(in_rss, width=3):
     std_errors_all_bands = []
     lsf_all_bands = []
     std_spectra_all_bands = [] ## contains original std spectra for all stars in ALL band
+    std_spectra_orig_all_bands = []
     fibers_all_bands = []
     gaia_ids_all_bands = []
     # keys = ['fiber_0', 'good_flux_0', 'fiber_1', 'good_flux_1', 'fiber_2', 'good_flux_2']
@@ -351,15 +355,17 @@ def prepare_spec(in_rss, width=3):
 
         # iterate over standard stars
         std_spectra = []  # contains original std spectra for all stars in each band
+        std_spectra_orig = []
         normalized_spectra = []
         normalized_spectra_unconv = []
         std_errors = []
         lsf = []
         fibers = []
         gaia_ids = []
+        zenith_angles = []
 
         for s in stds:
-            nn, fiber, gaia_id, exptime, secz = s  # unpack standard star tuple
+            nn, fiber, gaia_id, exptime, secz, zenith_angle = s  # unpack standard star tuple
 
             # find the fiber with our spectrum of that Gaia star, if it is not in the current spectrograph, continue
             select = rss_tmp._slitmap["orig_ifulabel"] == fiber
@@ -402,13 +408,14 @@ def prepare_spec(in_rss, width=3):
                     continue
             gaia_ids.append(gaia_id)
             fibers.append(fiber)
+            zenith_angles.append(zenith_angle)
             # check_bad_fluxes[f'good_flux_{b}'].append(True)
 
-            spec_tmp = (rss_tmp._data[fibidx[0],:] - master_sky._data[fibidx[0],:])/exptime
+            spec_orig = (rss_tmp._data[fibidx[0],:] - master_sky._data[fibidx[0],:]) / exptime
 
             # interpolate over bright sky lines and nan values
-            mask_bad = ~np.isfinite(spec_tmp)
-            spec_tmp = fluxcal.interpolate_mask(w_tmp, spec_tmp, m | mask_bad, fill_value="extrapolate")
+            mask_bad = ~np.isfinite(spec_orig)
+            spec_tmp = fluxcal.interpolate_mask(w_tmp, spec_orig, m | mask_bad, fill_value="extrapolate")
             if channel == "z":
                 spec_tmp = fluxcal.interpolate_mask(w_tmp, spec_tmp, ~m2 | mask_bad, fill_value="extrapolate")
 
@@ -421,7 +428,10 @@ def prepare_spec(in_rss, width=3):
 
             # correct for extinction
             spec_ext_corr = spec_tmp.copy()
-            spec_ext_corr *= 10 ** (0.4 * ext * secz)
+            spec_orig_ext_corr = spec_orig.copy()
+            extinction_correction = 10 ** (0.4 * ext * secz)
+            spec_ext_corr *= extinction_correction
+            spec_orig_ext_corr *= extinction_correction
             pxsize = abs(np.nanmedian(w_tmp - np.roll(w_tmp, -1)))
             lsf_conv = np.sqrt(np.clip(2.3 ** 2 - lsf_tmp ** 2, 0.1, None))/pxsize  # as model spectra were already convolved with lsf=2.3 A,
             # we need to degrade our observed std spectra. Also, convert it to pixels
@@ -430,7 +440,7 @@ def prepare_spec(in_rss, width=3):
             lsf_conv_interpolated = fluxcal.interpolate_mask(w_tmp, lsf_conv, mask_lsf, fill_value="extrapolate")
 
             # # degrade observed std spectra
-            spec_tmp_convolved = fluxcal.lsf_convolve(spec_ext_corr, lsf_conv_interpolated, w_tmp)
+            spec_tmp_convolved = fluxcal.lsf_convolve_fast(spec_ext_corr, lsf_conv_interpolated)
 
             # Obtain continuum with 160A median filter and normalize spectra
             best_continuum = ndimage.filters.median_filter(spec_tmp_convolved, int(160/0.5), mode="nearest")
@@ -442,6 +452,7 @@ def prepare_spec(in_rss, width=3):
             normalized_spectra_unconv.append(spec_ext_corr/best_continuum)
             lsf.append(lsf_tmp) # initial std spec LSF for all standards in each channel
             std_spectra.append(spec_ext_corr)
+            std_spectra_orig.append(spec_orig_ext_corr)
 
         normalized_spectra_all_bands.append(normalized_spectra) # normalized std spectra degraded to 2.3A for all
                                                                         # standards and all channels together
@@ -449,10 +460,131 @@ def prepare_spec(in_rss, width=3):
         std_errors_all_bands.append(std_errors)
         lsf_all_bands.append(lsf) # initial std spec LSF for all standards and all channel together
         std_spectra_all_bands.append(std_spectra) # corrected for extinction
+        std_spectra_orig_all_bands.append(std_spectra_orig) # original std spectra without masking tellurics
         fibers_all_bands.append(fibers)
         gaia_ids_all_bands.append(gaia_ids)
 
-    return w, gaia_ids_all_bands[0], fibers, std_spectra_all_bands, normalized_spectra_unconv_all_bands, normalized_spectra_all_bands, std_errors_all_bands, lsf_all_bands
+    return w, gaia_ids_all_bands[0], fibers, std_spectra_all_bands, normalized_spectra_unconv_all_bands, normalized_spectra_all_bands, std_errors_all_bands, lsf_all_bands, std_spectra_orig_all_bands, zenith_angles
+
+
+def calc_transmission(trans_ma, fH2O, pwv, zenith_angle):
+    """
+    According to formulae 4 and 5 from Noll et al. 2025
+    PALACE v1.0: Paranal Airglow Line  And Continuum Emission model
+    """
+    cosz = np.cos(np.deg2rad(zenith_angle))
+    XZ = 1.0 / (cosz + 0.025 * np.exp(-11.0 * cosz))
+    rpwv = pwv / 2.5 - 1
+    return np.power(trans_ma, (1.0 + rpwv * fH2O) * XZ)
+
+
+def rebin_and_convolve(wave_target, wave_source, flux_source, lsf_px):
+    """Rebin and convolve spectrum to target wavelength grid."""
+    rebinned = fluxcal.fluxconserve_rebin(wave_target, wave_source, flux_source)
+    convolved = fluxcal.lsf_convolve_fast(rebinned, lsf_px)
+    return convolved
+
+
+def _residual_function(params, y_obs, valid_mask, za, trans_wave, trans_ma, trans_fH2O, waves, lsfs):
+    """Compute residuals between observed and model transmission."""
+    pwv = params['pwv'].value
+    trans_hr = calc_transmission(trans_ma, trans_fH2O, pwv, za)
+
+    resid_r = y_obs[0] - rebin_and_convolve(waves[0], trans_wave, trans_hr, lsfs[0])
+    resid_z = y_obs[1] - rebin_and_convolve(waves[1], trans_wave, trans_hr, lsfs[1])
+    resid = np.concatenate( (resid_r[valid_mask[0]], resid_z[valid_mask[1]]) )
+
+    return resid
+
+
+def calc_pwv(wave, spec, lsf, stellar_model, trans_wave, trans_ma, trans_fH2O,
+             pwv_init=3.0, pwv_bounds=(0.5, 50.0), zenith_angle=0.0):
+    """
+    Estimate precipitable water vapor (PWV) by fitting telluric absorption bands.
+    Fits standard star spectra in r and z channels using O2 and H2O absorption
+    regions to determine optimal PWV value.
+
+    Args:
+        wave: Wavelength arrays for [r_channel, z_channel]
+        spec: Observed spectra for [r_channel, z_channel]
+        lsf: Line spread functions for [r_channel, z_channel]
+        stellar_model: Model stellar spectra for [r_channel, z_channel]
+        trans_wave: Transmission wavelength grid
+        trans_ma: Molecular absorption transmission from Palace with removed ozone contribution
+        trans_fH2O: H2O transmission factor
+        pwv_init: Initial PWV guess in mm (default: 3.0)
+        pwv_bounds: PWV fitting bounds in mm (default: (0.5, 50.0))
+        zenith_angle: Observation zenith angle in degrees (default: 0.0)
+
+    Returns:
+        tuple: (pwv_value, pwv_error) in mm
+    """
+
+    # Define telluric band regions for r and z channels
+    R_CHANNEL = dict(deg=2, cont_regions=[[6750, 6860], [7080, 7145], [7400, 7460]])
+    Z_CHANNEL = dict(deg=2, cont_regions=[[7780, 7860], [8050, 8085], [8440, 8480]])
+    regions_info = [R_CHANNEL, Z_CHANNEL]
+
+    # Trim transmission curves to relevant wavelength range
+    wave_min = R_CHANNEL['cont_regions'][0][0] - 50
+    wave_max = Z_CHANNEL['cont_regions'][-1][1] + 50
+    trans_mask = (trans_wave >= wave_min) & (trans_wave <= wave_max)
+    trans_wave = trans_wave[trans_mask]
+    trans_ma = trans_ma[trans_mask]
+    trans_fH2O = trans_fH2O[trans_mask]
+
+    # Build wavelength masks for continuum fitting and full regions
+    continuum_masks = []
+    full_masks = []
+
+    for channel_info in regions_info:
+        regions = channel_info['cont_regions']
+        wave_ch = wave[len(continuum_masks)]  # current channel wavelength
+
+        # Full region spanning all continuum windows
+        full_mask = (wave_ch >= regions[0][0]) & (wave_ch <= regions[-1][1])
+
+        # Continuum regions only
+        cont_mask = np.zeros(len(wave_ch), dtype=bool)
+        for wmin, wmax in regions:
+            cont_mask |= (wave_ch >= wmin) & (wave_ch <= wmax)
+
+        continuum_masks.append(cont_mask)
+        full_masks.append(full_mask)
+
+    # Compute normalized absorption depth for each channel
+    y_data = []
+    valid_masks = []
+
+    for ich in range(2):
+        cont_msk = continuum_masks[ich]
+        full_msk = full_masks[ich]
+
+        # Fit polynomial to continuum ratio
+        ratio = spec[ich][cont_msk] / stellar_model[ich][cont_msk]
+        poly_coef = np.polyfit(wave[ich][cont_msk], ratio, regions_info[ich]['deg'])
+        poly_continuum = np.polyval(poly_coef, wave[ich][full_msk])
+
+        # Normalized absorption depth (1.0 = no absorption)
+        normalized_depth = spec[ich][full_msk] / (stellar_model[ich][full_msk] * poly_continuum)
+        y_data.append(normalized_depth)
+        valid_masks.append(np.isfinite(normalized_depth))
+
+    # Setup and run PWV optimization
+    params = Parameters()
+    params.add('pwv', value=pwv_init, min=pwv_bounds[0], max=pwv_bounds[1])
+
+    wave_channels = [wave[0][full_masks[0]], wave[1][full_masks[1]]]
+    lsf_channels = [lsf[0][full_masks[0]], lsf[1][full_masks[1]]]
+
+    result = minimize(_residual_function, params, method='leastsq',
+                      args=(y_data, valid_masks, zenith_angle,
+                            trans_wave, trans_ma, trans_fH2O,
+                            wave_channels, lsf_channels)
+    )
+
+    return result.params['pwv'].value, result.params['pwv'].stderr
+
 
 def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
     """ Selection of the stellar atmosphere model spectra (POLLUX database, AMBRE library)
@@ -491,13 +623,17 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
     telluric_tab = Table.read(telluric_file, format='ascii.fixed_width_two_line')
 
     with fits.open(name=models_dir + '/AMBRE_for_LVM_3000_11000.fits') as model:
-        model_good = model['PRIMARY'].data
-        model_norm = model['NORM'].data
-        model_info = pd.DataFrame(model['MODEL_INFO'].data)
+        model_good = model['FLUX'].data
         model_wave = model['WAVE'].data
+        model_norm = model['FLUX_NORM'].data
+        model_norm_wave = model['WAVE_LOG'].data
+        model_info = pd.DataFrame(model['MODEL_INFO'].data)
     model_names = model_info['Model_name'].to_list()
     n_models = len(model_names)
     log.info(f'Number of models: {n_models}')
+
+    # Reading Sky Model table to get transmission curve
+    skytab = fits.getdata(models_dir + '/transmission_from_Palace_SkyModel_step0.2.fits')
 
     GAIA_CACHE_DIR = "./" if GAIA_CACHE_DIR is None else GAIA_CACHE_DIR
     log.info(f"Using Gaia CACHE DIR '{GAIA_CACHE_DIR}'")
@@ -509,8 +645,9 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
     gaia_stars.add_index('source_id')
 
     # Prepare the spectra
-    (w, gaia_ids, fibers, std_spectra_all_bands, normalized_spectra_unconv_all_bands, normalized_spectra_all_bands,
-     std_errors_all_bands, lsf_all_bands) = prepare_spec(in_rss, width=width)
+    (w, gaia_ids, fibers, std_spectra_all_bands, normalized_spectra_unconv_all_bands,
+     normalized_spectra_all_bands, std_errors_all_bands, lsf_all_bands,
+     std_spectra_orig_all_bands, zenith_angles) = prepare_spec(in_rss, width=width)
 
     # Stitch wavelength arrays in brz together
     wave_b = np.round(w[0],1)
@@ -586,7 +723,7 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
 
         log_shift_full = fluxcal.derive_vecshift(flux_std_logscale[mask_good], flux_model_logscale[mask_good],
                                             max_ampl=3)*np.median(log_std_wave_all - np.roll(log_std_wave_all, 1))
-        vel_shift_full = log_shift_full * 3e5
+        vel_shift_full = log_shift_full * 299792.458
         flux_std_logscale_shifted = np.interp((log_std_wave_all - log_shift_full), log_std_wave_all, flux_std_logscale)
 
         best_id, chi2_bestfit, chi2_wave_bestfit_0 = chi2_model_matching(flux_std_logscale_shifted,
@@ -622,11 +759,41 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
         # Conversion coefficient model to gaia units
         model_flux = model_good[best_id]
 
+        #######################################################################
+        # PWV calculation
+        #######################################################################
+
+        # Prepare data for r and z channels, which will be used to estimate PWV
+        spec_rz = [
+            std_spectra_orig_all_bands[1][i],
+            std_spectra_orig_all_bands[2][i]
+        ]
+
+        lsf_rz = [
+            lsf_all_bands[1][i] / np.diff( fluxcal.edges_from_centers(w[1]) ),
+            lsf_all_bands[2][i] / np.diff( fluxcal.edges_from_centers(w[2]) )
+        ]
+
+        # accounting the velocity shift determined above
+        model_wave_ref = model_wave / (1 - vel_shift_full / 299792.45)
+        stellar_model_rz = [
+            rebin_and_convolve(w[1], model_wave_ref, model_flux, lsf_rz[0]),
+            rebin_and_convolve(w[2], model_wave_ref, model_flux, lsf_rz[1])
+        ]
+
+        t_start = time.time()
+        pwv, pwv_err = calc_pwv(w[1:], spec_rz, lsf_rz, stellar_model_rz,
+                                skytab['wave_air'], skytab['trans_ma'], skytab['fH2O'],
+                                zenith_angle=zenith_angles[i])
+
+        log.info(f"Estimated for star # {i} GAIA ID {gaia_ids[i]} PWV = {pwv:.2f} +/- {pwv_err:.2f} mm ({time.time() - t_start:.2f} sec)")
+
+        #######################################################################
+
         # resample model to the same step
         model_flux_resampled = np.interp(std_wave_all, model_wave, model_flux)
         good_model_to_std_lsf = np.sqrt(lsf_all ** 2 - 0.3 ** 2) # to degrade good resolution model to std lsf for plots
-        good_model_to_std_lsf_pix = good_model_to_std_lsf / np.diff(fluxcal.edges_from_centers(std_wave_all))
-        model_convolved_spec_lsf = fluxcal.lsf_convolve(model_flux_resampled, good_model_to_std_lsf_pix, std_wave_all)
+        model_convolved_spec_lsf = fluxcal.lsf_convolve_fast(model_flux_resampled, good_model_to_std_lsf, std_wave_all)
         best_continuum = ndimage.filters.median_filter(model_convolved_spec_lsf, int(160/0.5), mode="nearest")
         model_norm_convolved_spec_lsf = model_convolved_spec_lsf / best_continuum
         log_std_wave_all_tmp, log_model_norm_convolved_spec_lsf = linear_to_logscale(std_wave_all, model_norm_convolved_spec_lsf)
@@ -659,7 +826,7 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
             # Try to get stellar parameters from the local table first
             try:
                 # Used indexed column source_id, See where table was read
-                gaia_rec = gaia_stars.loc[gaia_ids[i]+100000]
+                gaia_rec = gaia_stars.loc[gaia_ids[i]]
                 teff, logg, z = gaia_rec['teff_gspspec'], gaia_rec['logg_gspspec'], gaia_rec['mh_gspspec']
             except KeyError:
                 # If entry not found in local table, then call external Gaia service
@@ -706,22 +873,11 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
 
         # Convert GAIA LSF in Angstroms to pixels of GAIA spectrum
         gaia_lsf_gw_pix = gaia_lsf_gw_ang / np.diff( fluxcal.edges_from_centers(gw) )
-        model_flux_gaia_convolved = fluxcal.lsf_convolve(model_flux_gaia_rebinned, gaia_lsf_gw_pix, gw)
+        model_flux_gaia_convolved = fluxcal.lsf_convolve_fast(model_flux_gaia_rebinned, gaia_lsf_gw_pix)
 
         model2gaia_factor = np.median(gf / model_flux_gaia_convolved)
         model_to_gaia_median.append(model2gaia_factor)
 
-        # Temporary plots TO BE REMOVED =======================================
-        # plt.close('all')
-        # plt.plot(std_wave_all, model_flux_resampled * model2gaia_factor, lw=0.1, alpha=0.3, label='model')
-        # plt.plot(gw, gf, lw=1, label='GAIA spectrum', color='red')
-        # plt.plot(std_wave_all, model_convolved_to_gaia * model2gaia_factor, lw=2.0, label='model convolved to GAIA lsf (orig)')
-        # plt.plot(gw, model_flux_gaia_rebinned * model2gaia_factor, lw=2.0, label='model rebinned to GAIA')
-        # plt.plot(gw, model_flux_gaia_convolved * model2gaia_factor, lw=2.0, label='model rebinned and convolved to GAIA')
-        
-        # plt.legend()
-        # plt.show()
-        # =====================================================================
 
         # prepare dictionaries to plot QA plots for model matching
         fig_path = in_rss[0]
@@ -1197,7 +1353,7 @@ def calc_sensitivity_from_model(wl, obs_spec, spec_lsf, model_wave, model_flux=[
     spec_lsf = np.sqrt(spec_lsf**2 - 0.3**2)  # as model spectra were already convolved with lsf=0.3, we need to account for this
 
     # convolve model to spec lsf after vel. shift
-    model_convolved_spec_lsf = fluxcal.lsf_convolve(model_flux_resampled, spec_lsf, wl)
+    model_convolved_spec_lsf = fluxcal.lsf_convolve_fast(model_flux_resampled, spec_lsf, wl)
     # first multiply to model_to_gaia_median to be able to compare sens. curve with STD and SCI methods
     sens = model_convolved_spec_lsf * model_to_gaia_median / obs_spec
 
@@ -1218,7 +1374,7 @@ def standard_sensitivity(stds, rss, GAIA_CACHE_DIR, ext, res, plot=False, width=
 
     # iterate over standard stars, derive sensitivity curve for each
     for i, s in enumerate(stds):
-        nn, fiber, gaia_id, exptime, secz = s  # unpack standard star tuple
+        nn, fiber, gaia_id, exptime, secz, _ = s  # unpack standard star tuple
 
         # find the fiber with our spectrum of that Gaia star, if it is not in the current spectrograph, continue
         select = rss._slitmap["orig_ifulabel"] == fiber
