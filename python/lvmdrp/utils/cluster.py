@@ -68,7 +68,6 @@ def run_cluster(mjds: list = None, expnums: Union[list, str] = None, nodes: int 
     else:
         q = []
 
-    cmd = "run"
     # skip drpall summary file in cluster runs to avoid race condition errors
     drp_options += " --skip-drpall" if "--skip-drpall" not in drp_options else ""
 
@@ -90,7 +89,7 @@ def run_cluster(mjds: list = None, expnums: Union[list, str] = None, nodes: int 
         mjds = list(filter(lambda mjd: mjd.isdigit() if isinstance(mjd, str) else True, mjds))
 
         for mjd in mjds:
-            script = f"umask 002 && drp {cmd} -m {mjd} {drp_options}"
+            script = f"umask 002 && drp run -m {mjd} {drp_options}"
             q.append(script)
 
     # submit the queue
@@ -115,7 +114,7 @@ def run_cluster_cals(mjds: list = None, from_epochs: bool = True, nodes: int = 2
     if not dry_run:
         q = queue()
         q.verbose = True
-        q.create(label='lvm_calibs_run', nodes=nodes, ppn=ppn, walltime=walltime, alloc=alloc, shared=True)
+        q.create(label='lvm_cals', nodes=nodes, ppn=ppn, walltime=walltime, alloc=alloc, shared=True)
     else:
         q = []
 
