@@ -183,7 +183,7 @@ def get_standards_sequence(frames, camera, ring="primary"):
     return frames.query("camera == @camera and calibfib in @standards_selection")
 
 
-def choose_sequence(frames, calibration, kind="longterm", ring="primary"):
+def choose_sequence(frames, calibration, ref_mjd=None, kind="longterm", ring="primary"):
     """Chooses the right calibration frame sequence depending on the calibration type and length
 
     Parameters
@@ -192,6 +192,8 @@ def choose_sequence(frames, calibration, kind="longterm", ring="primary"):
         Data frame containing the calibrations metadata
     calibration : str
         Calibration type, either 'bias', 'trace', 'wave', 'dome' or 'twilight'
+    ref_mjd : int, optional
+        Reference MJD around which a sequence will be chosen, by default None
     kind : str, optional
         Calibration sequence length, either 'nightly' (short) or 'longterm' (long), by default "longterm"
     ring : str, optional
@@ -240,9 +242,17 @@ def choose_sequence(frames, calibration, kind="longterm", ring="primary"):
     if calibration == "bias":
         return chosen_frames, chosen_frames.expnum.unique()
 
+    # select frames with requested standard fibers
     standards_sequence = _get_standards_ring(ring=ring)
     chosen_frames.query("calibfib in @standards_sequence", inplace=True)
-    chosen_expnums = chosen_frames.groupby("calibfib").first().reset_index().sort_values("calibfib").expnum.unique()
+
+    # select exposures around a given reference or just the first ocurrence of each standard fiber without sorting
+    if ref_mjd is not None:
+        chosen_frames["diff"] = (chosen_frames.mjd - ref_mjd).abs()
+        chosen_expnums = chosen_frames.sort_values(by=["diff", "expnum"]).groupby("calibfib").first().drop(columns=["diff"]).expnum.unique()
+    else:
+        chosen_expnums = chosen_frames.groupby("calibfib").first().reset_index().sort_values("calibfib").expnum.unique()
+
     chosen_frames.query("expnum in @chosen_expnums", inplace=True)
     return chosen_frames.reset_index(drop=True), chosen_expnums
 
@@ -1366,11 +1376,11 @@ def validate_calibration_epochs(mjd=None, calibrations=CALIBRATION_TYPES, epochs
 
             frames = md.get_calibrations_metadata(mjds=source_mjds, calibration=calibration)
             if calibration == "trace":
-                sequence_ldls, _ = choose_sequence(frames.loc[frames.ldls], calibration=calibration, ring=ring)
-                sequence_qrtz, _ = choose_sequence(frames.loc[frames.quartz], calibration=calibration, ring=ring)
+                sequence_ldls, _ = choose_sequence(frames.loc[frames.ldls], calibration=calibration, ref_mjd=mjd, ring=ring)
+                sequence_qrtz, _ = choose_sequence(frames.loc[frames.quartz], calibration=calibration, ref_mjd=mjd, ring=ring)
                 sequence = pd.concat((sequence_ldls, sequence_qrtz), ignore_index=True)
             else:
-                sequence, _ = choose_sequence(frames, calibration=calibration, ring=ring)
+                sequence, _ = choose_sequence(frames, calibration=calibration, ref_mjd=mjd, ring=ring)
             _log_dry_run(sequence)
 
             log.info(f"unique MJDs = {', '.join(sequence.mjd.unique().astype(str))}")
