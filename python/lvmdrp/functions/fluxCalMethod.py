@@ -622,7 +622,7 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
 
         # resample model to the same step
         model_flux_resampled = np.interp(std_wave_all, model_wave, model_flux)
-        good_model_to_std_lsf = np.sqrt(lsf_all ** 2 - 0.3 ** 2) # to degrade good resolution model to std lsf for plots
+        good_model_to_std_lsf = np.sqrt(lsf_all ** 2 - 0.3 ** 2)/0.5 # to degrade good resolution model to std lsf for plots
         model_convolved_spec_lsf = fluxcal.lsf_convolve(model_flux_resampled, good_model_to_std_lsf, std_wave_all)
         best_continuum = ndimage.filters.median_filter(model_convolved_spec_lsf, int(160/0.5), mode="nearest")
         model_norm_convolved_spec_lsf = model_convolved_spec_lsf / best_continuum
@@ -634,10 +634,10 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
         gaia_lsf_path = os.getenv("LVMCORE_DIR") + "/etc/Gaia_BPRP_resolution.txt"
         gaia_lsf_table_tmp = Table.read(gaia_lsf_path, format='ascii',
                                         names=['wavelength', 'resolution'])
-        gaia_lsf_table_tmp['wavelength'][len(gaia_lsf_table_tmp['wavelength']) - 1] = gaia_lsf_table_tmp['wavelength'][
-                                                                                          len(
-                                                                                              gaia_lsf_table_tmp[
-                                                                                                  'wavelength']) - 1] * 10
+        # gaia_lsf_table_tmp['wavelength'][len(gaia_lsf_table_tmp['wavelength']) - 1] = gaia_lsf_table_tmp['wavelength'][
+        #                                                                                   len(
+        #                                                                                       gaia_lsf_table_tmp[
+        #                                                                                           'wavelength']) - 1] * 10
         gaia_lsf_table_tmp['linewidth'] = gaia_lsf_table_tmp['wavelength'] / gaia_lsf_table_tmp['resolution']
         gaia_lsf_table_bp = gaia_lsf_table_tmp[0:10]
         gaia_lsf_table_rp = gaia_lsf_table_tmp[10:17]
@@ -671,7 +671,7 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
             continue
 
         # convolve model to gaia lsf
-        model_convolved_to_gaia = fluxcal.lsf_convolve(model_flux_resampled, gaia_lsf, std_wave_all)
+        model_convolved_to_gaia = fluxcal.lsf_convolve(model_flux_resampled, gaia_lsf/0.5, std_wave_all)
         model_to_gaia = stdflux/model_convolved_to_gaia
         model_to_gaia_median.append(np.median(model_to_gaia))
 
@@ -1124,7 +1124,7 @@ def calc_sensitivity_from_model(wl, obs_spec, spec_lsf, model_flux=[], model_to_
 
     #resample model to the same step
     model_flux_resampled = np.interp(wl, model_wave, flux_model_shifted)
-    spec_lsf = np.sqrt(spec_lsf**2 - 0.3**2)  # as model spectra were already convolved with lsf=0.3, we need to account for this
+    spec_lsf = np.sqrt(spec_lsf**2 - 0.3**2)/0.5  # as model spectra were already convolved with lsf=0.3, we need to account for this
 
     # convolve model to spec lsf after vel. shift
     model_convolved_spec_lsf = fluxcal.lsf_convolve(model_flux_resampled, spec_lsf, wl)
