@@ -551,7 +551,7 @@ def cluster_calibs(mjd_list, mjd_range, from_epochs, epochs_file, routine, nodes
         epochs = load_calibration_epochs(epochs_path=epochs_file, filter_by=mjds, verbose=verbose)
         mjds = sorted(list(epochs.keys()))
 
-    run_cluster_cals(mjds, nodes=nodes, ppn=ppn, walltime=walltime, alloc=alloc, submit=submit,
+    run_cluster_cals(mjds, from_epochs=from_epochs, nodes=nodes, ppn=ppn, walltime=walltime, alloc=alloc, submit=submit,
                      routine=routine, drp_options=drp_options, dry_run=dry_run)
 
 
