@@ -19,6 +19,10 @@ from scipy.signal import find_peaks
 # import re
 import pandas as pd
 
+from pathlib import Path
+from plotly.subplots import make_subplots
+import plotly.graph_objects as go
+
 from astropy import units as u
 from astropy.stats import biweight_location, biweight_scale
 from astropy.table import Table
@@ -485,20 +489,143 @@ def rebin_and_convolve(wave_target, wave_source, flux_source, lsf_px):
     return convolved
 
 
-def _residual_function(params, y_obs, valid_mask, za, trans_wave, trans_ma, trans_fH2O, waves, lsfs):
+def _residual_function(params, y_obs, valid_mask, za, trans_wave, trans_ma,
+                       trans_fH2O, waves, lsfs, return_components=False):
     """Compute residuals between observed and model transmission."""
+
     pwv = params['pwv'].value
     trans_hr = calc_transmission(trans_ma, trans_fH2O, pwv, za)
 
-    resid_r = y_obs[0] - rebin_and_convolve(waves[0], trans_wave, trans_hr, lsfs[0])
-    resid_z = y_obs[1] - rebin_and_convolve(waves[1], trans_wave, trans_hr, lsfs[1])
-    resid = np.concatenate( (resid_r[valid_mask[0]], resid_z[valid_mask[1]]) )
+    model_r = rebin_and_convolve(waves[0], trans_wave, trans_hr, lsfs[0])
+    model_z = rebin_and_convolve(waves[1], trans_wave, trans_hr, lsfs[1])
 
+    resid_r = y_obs[0] - model_r
+    resid_z = y_obs[1] - model_z
+
+    if return_components:
+        return resid_r, resid_z, model_r, model_z
+
+    resid = np.concatenate((resid_r[valid_mask[0]], resid_z[valid_mask[1]]))
     return resid
 
 
+def _qa_plot_pwv_calculation(fig_out, wave_channels, y_data, model_trans, residuals,
+                             obs_ratio, poly_continuum, continuum_regions,
+                             result, zenith_angle, rms, save_png=False):
+    """Create QA plot for PWV calculation. Pure visualization - all data pre-computed."""
+
+    # Ensure output directory exists and prepare file paths
+    output_path = Path(fig_out)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    html_path = output_path.with_suffix('.html')
+    png_path = output_path.with_suffix('.png')
+
+    # Create figure with two panels
+    fig = make_subplots(rows=2, cols=1,
+                        shared_xaxes=False,
+                        vertical_spacing=0.075,
+                        row_heights=[0.5, 0.5],
+                        subplot_titles=('PWV fitting', 'Continuum Fitting'))
+
+    channel_names = ['r', 'z']
+    color_map = ['black', 'black']
+    model_color = 'red'
+    residual_color = 'gray'
+
+    # Upper panel: PWV fitting
+    for ich in range(2):
+        wave_ch = wave_channels[ich]
+
+        # Plot observed data
+        fig.add_trace(go.Scatter(x=wave_ch, y=y_data[ich], mode='lines',
+                                 line=dict(color=color_map[ich], width=1),
+                                 name='Data' if ich == 0 else None,
+                                 showlegend=(ich == 0)), row=1, col=1)
+
+        # Plot best-fit model
+        fig.add_trace(go.Scatter(x=wave_ch, y=model_trans[ich], mode='lines',
+                                 line=dict(color=model_color, width=1.5),
+                                 name='Best-fit' if ich == 0 else None,
+                                 showlegend=(ich == 0)), row=1, col=1)
+
+        # Plot residuals
+        fig.add_trace(go.Scatter(x=wave_ch, y=residuals[ich], mode='lines',
+                                 line=dict(color=residual_color, width=1),
+                                 name='Resid.' if ich == 0 else None,
+                                 showlegend=(ich == 0)), row=1, col=1)
+
+    # Add zero line
+    fig.add_hline(y=0, line=dict(color='indigo', width=1, dash='dot'), row=1, col=1)
+
+    # Lower panel: continuum fitting
+    for ich in range(2):
+        wave_ch = wave_channels[ich]
+
+        # Plot observed/stellar ratio
+        fig.add_trace(go.Scatter(x=wave_ch, y=obs_ratio[ich],
+                                 mode='lines', showlegend=(ich == 0),
+                                 line=dict(color=color_map[ich], width=1),
+                                 name='Obs/Stellar model' if ich == 0 else None,
+                                 legend='legend2'), row=2, col=1)
+
+        # Plot polynomial continuum fit
+        fig.add_trace(go.Scatter(x=wave_ch, y=poly_continuum[ich],
+                                 mode='lines', showlegend=(ich == 0),
+                                 line=dict(color=model_color, width=2),
+                                 name='Continuum fit' if ich == 0 else None,
+                                 legend='legend2'), row=2, col=1)
+
+        # Mark continuum regions
+        for region_idx, (wmin, wmax) in enumerate(continuum_regions[ich]):
+            fig.add_vrect(x0=wmin, x1=wmax, fillcolor=color_map[ich], opacity=0.1,
+                          line_width=0, row=2, col=1, name='Mpoly Fit regins', legend='legend2')
+
+    fig.update_xaxes(title_text="Wavelength (Å)", row=2, col=1)
+    fig.update_yaxes(title_text="Obs. spec. / (Template * Mpoly)", row=1, col=1)
+    fig.update_yaxes(title_text="Obs. spec. / Template", row=2, col=1)
+    fig.update_yaxes(range=[-4 * rms, 1 + 4 * rms], row=1, col=1)
+
+    fig.update_layout(
+        legend=dict(orientation='h', xanchor='left', yanchor='bottom',
+                    x=0.0, y=0.98, bgcolor='rgba(255, 255, 255, 0.9)',
+                    font=dict(size=10)),
+        legend2=dict(orientation='h', xanchor='left', yanchor='top',
+                     x=0.0, y=0.485, bgcolor='rgba(255, 255, 255, 0.9)',
+                     font=dict(size=10)),
+        plot_bgcolor='rgba(245, 245, 245, 1)',
+        paper_bgcolor='white'
+    )
+
+    # Add title with fit results
+    pwv_val = result.params['pwv'].value
+    pwv_err = result.params['pwv'].stderr if result.params['pwv'].stderr is not None else 0.0
+    title_text = (
+        f"PWV = {pwv_val:.3f} ± {pwv_err:.3f} mm | "
+        f"Zenith Angle: {zenith_angle:.1f}° | "
+        f"N function evaluations: {result.nfev}"
+    )
+
+    fig.update_layout(margin=dict(l=60, r=20, t=50, b=60),
+                      title=dict(text=title_text, x=0.5, xanchor='center',
+                                 font=dict(size=14, weight=600)),
+                      width=1200, height=800)
+
+    # Save to HTML
+    fig.write_html(str(html_path), include_plotlyjs='cdn')
+    log.info(f"PWV QA plot saved to {html_path}")
+
+    if save_png:
+        # Save to PNG using kaleido (if available) which is very slow!
+        png_path = output_path.with_suffix('.png')
+        try:
+            fig.write_image(str(png_path), format='png', width=1200, height=800, scale=1)
+            log.info(f"PWV QA plot saved to {png_path}")
+        except Exception as e:
+            log.warning(f"Could not save PNG file: {e}. Only HTML saved.")
+
+
 def calc_pwv(wave, spec, lsf, stellar_model, trans_wave, trans_ma, trans_fH2O,
-             pwv_init=3.0, pwv_bounds=(0.5, 50.0), zenith_angle=0.0):
+             pwv_init=3.0, pwv_bounds=(0.5, 50.0), zenith_angle=0.0, fig_out=None):
     """
     Estimate precipitable water vapor (PWV) by fitting telluric absorption bands.
     Fits standard star spectra in r and z channels using O2 and H2O absorption
@@ -553,20 +680,27 @@ def calc_pwv(wave, spec, lsf, stellar_model, trans_wave, trans_ma, trans_fH2O,
         full_masks.append(full_mask)
 
     # Compute normalized absorption depth for each channel
-    y_data = []
-    valid_masks = []
+    y_data, valid_masks, poly_continuum_fits, obs_stellar_ratios = [], [], [], []
 
     for ich in range(2):
         cont_msk = continuum_masks[ich]
         full_msk = full_masks[ich]
 
-        # Fit polynomial to continuum ratio
-        ratio = spec[ich][cont_msk] / stellar_model[ich][cont_msk]
-        poly_coef = np.polyfit(wave[ich][cont_msk], ratio, regions_info[ich]['deg'])
+        # Observed / stellar ratio (for continuum fitting and QA plot)
+        obs_stellar_ratio = spec[ich][full_msk] / stellar_model[ich][full_msk]
+        obs_stellar_ratios.append(obs_stellar_ratio)
+
+        # Fit polynomial to continuum ratio (only in continuum regions)
+        ratio_cont = spec[ich][cont_msk] / stellar_model[ich][cont_msk]
+        finite_mask = np.isfinite(ratio_cont)
+        poly_coef = np.polyfit(wave[ich][cont_msk][finite_mask],
+                               ratio_cont[finite_mask],
+                               regions_info[ich]['deg'])
         poly_continuum = np.polyval(poly_coef, wave[ich][full_msk])
+        poly_continuum_fits.append(poly_continuum)
 
         # Normalized absorption depth (1.0 = no absorption)
-        normalized_depth = spec[ich][full_msk] / (stellar_model[ich][full_msk] * poly_continuum)
+        normalized_depth = obs_stellar_ratio / poly_continuum
         y_data.append(normalized_depth)
         valid_masks.append(np.isfinite(normalized_depth))
 
@@ -580,8 +714,31 @@ def calc_pwv(wave, spec, lsf, stellar_model, trans_wave, trans_ma, trans_fH2O,
     result = minimize(_residual_function, params, method='leastsq',
                       args=(y_data, valid_masks, zenith_angle,
                             trans_wave, trans_ma, trans_fH2O,
-                            wave_channels, lsf_channels)
-    )
+                            wave_channels, lsf_channels))
+
+    if fig_out is not None:
+        # Get best-fit model and residuals
+        resid_r, resid_z, model_r, model_z = _residual_function(
+            result.params, y_data, valid_masks, zenith_angle,
+            trans_wave, trans_ma, trans_fH2O, wave_channels, lsf_channels,
+            return_components=True
+        )
+
+        # Prepare data for QA plot
+        model_trans = [model_r, model_z]
+        residuals = [resid_r, resid_z]
+
+        # Calculate RMS for Y-axis scaling
+        rms = np.nanstd(np.concatenate(residuals))
+
+        # Extract continuum regions
+        continuum_regions = [info['cont_regions'] for info in regions_info]
+
+        # Call pure visualization function
+        _qa_plot_pwv_calculation(
+            fig_out, wave_channels, y_data, model_trans, residuals,
+            obs_stellar_ratios, poly_continuum_fits, continuum_regions,
+            result, zenith_angle, rms, save_png=False)
 
     return result.params['pwv'].value, result.params['pwv'].stderr
 
@@ -782,9 +939,13 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
         ]
 
         t_start = time.time()
+
+        # Path to QA Plotly plot for PWV calculation (without extension)
+        fig_out_pwv = in_rss[0].replace('lvm-hobject-b', 'qa/pwv_calc/lvm-hobject').replace('.fits', f"_pwv_std{i}")
+
         pwv, pwv_err = calc_pwv(w[1:], spec_rz, lsf_rz, stellar_model_rz,
                                 skytab['wave_air'], skytab['trans_ma'], skytab['fH2O'],
-                                zenith_angle=zenith_angles[i])
+                                zenith_angle=zenith_angles[i], fig_out=fig_out_pwv)
 
         log.info(f"Estimated for star # {i} GAIA ID {gaia_ids[i]} PWV = {pwv:.2f} +/- {pwv_err:.2f} mm ({time.time() - t_start:.2f} sec)")
 
