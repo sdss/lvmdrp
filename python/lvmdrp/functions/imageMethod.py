@@ -2564,7 +2564,7 @@ def extract_spectra(
     disp_axis: str = "X",
     replace_error: float = 1.0e10,
     display_plots: bool = False,
-    parallel: str = "auto",
+    parallel: str|int = 0,
 ):
     """
     Extracts the flux for each fiber along the dispersion direction which is written into an RSS FITS file format.
@@ -2593,7 +2593,7 @@ def extract_spectra(
                     a spatially resolved FWHM map is provided. Only used if method is set to 'optimal', otherwise this parameter is ignored.
     disp_axis: string of float, optional  with default: 'X'
                     Define the dispersion axis, either 'X','x', or 0 for the  x axis or 'Y','y', or 1 for the y axis.
-    parallel: either string of integer (>0) or  'auto', optional with default: 'auto'
+    parallel: either string of integer (>0) or  'auto', optional with default: 0
             Number of CPU cores used in parallel for the computation. If set to auto, the maximum number of CPUs
             for the given system is used.
 
