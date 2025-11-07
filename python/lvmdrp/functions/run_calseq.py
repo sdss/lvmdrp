@@ -1390,6 +1390,34 @@ def validate_calibration_epochs(mjd=None, calibrations=CALIBRATION_TYPES, epochs
             elif calibration in {"wave", "dome", "twilight"}:
                 _report_standards(sequence, nstandards)
 
+def check_epochs_completeness(mjd=None, version=drpver, calibrations=CALIBRATION_TYPES, epochs_path=CALIBRATION_EPOCHS_PATH):
+    epochs = load_calibration_epochs(epochs_path=epochs_path, verbose=False)
+    if mjd is not None and mjd not in epochs:
+        log.error(f"no calibrations epoch found for {mjd} in file {epochs_path}")
+        return
+
+    expected = pd.Series(index=CALIBRATION_PRODUCTS, data=9)
+    expected[["fiberflat_dome", "fiberflat_twilight"]] = 3
+
+    if not isinstance(calibrations, (tuple, list, set)):
+        calibrations = [calibrations]
+
+    epoch_mjds = [mjd] if mjd is not None else list(epochs.keys())
+
+    for mjd in epoch_mjds:
+        calibs = get_calib_paths(mjd=mjd, from_sandbox=False, version=version)
+
+        df = pd.DataFrame.from_dict(calibs).sort_index(axis=1)
+        df = df.map(lambda s: "DONE" if os.path.exists(s) else "MISSING", na_action="ignore")
+        df = df.fillna("--")
+        totality = ((df=="DONE").sum(axis="index") / expected * 100).round(1).astype("str")
+        df.loc["% total"] = totality.values
+
+        records = df.to_string().split("\n")
+        log.info(f"completeness for epoch {mjd}:")
+        for record in records:
+            log.info(f"   {record}")
+
 
 def create_bias(mjd, epochs=None, use_longterm_cals=True, skip_done=True, dry_run=False):
     """Reduce a sequence of bias frames to produce master frames for each camera

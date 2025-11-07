@@ -64,7 +64,7 @@ def mjd_from_expnum(expnum: Union[int, str, list, tuple]) -> List[int]:
     return [int(mjd)]
 
 
-def get_calib_paths(mjd, version=None, cameras="*", flavors=CALIBRATION_PRODUCTS, longterm_cals=True, from_sandbox=False, return_mjd=False):
+def get_calib_paths(mjd, version=None, cameras="*", flavors=CALIBRATION_PRODUCTS, longterm_cals=True, from_sandbox=False, return_mjd=False, only_existing=False):
     """Returns a dictionary containing paths for calibration frames
 
     Parameters
@@ -81,6 +81,10 @@ def get_calib_paths(mjd, version=None, cameras="*", flavors=CALIBRATION_PRODUCTS
         Whether to use long-term calibration frames or not, defaults to True
     from_sandbox : bool, optional
         Fall back option to pull calibrations from sandbox, by default False
+    return_mjd : bool, optional
+        Return MJD of the selected calibrations, by default False
+    only_existing : bool, optional
+        Return only existing paths in calibrations dictionary, by default False
 
     Returns
     -------
@@ -132,6 +136,17 @@ def get_calib_paths(mjd, version=None, cameras="*", flavors=CALIBRATION_PRODUCTS
             prefix = "m" if flavor in ["bias", "fiberflat_twilight"] or longterm_cals else "n"
 
         calibs[flavor] = {c: path.full(path_species, drpver=version, tileid=tileid, mjd=cals_mjd, kind=f"{prefix}{flavor}", camera=c) for c in cam_or_chan}
+
+    if only_existing:
+        calibs = {
+            flavor: {
+                cam: path
+                for cam, path in calibs[flavor].items()
+                if os.path.exists(path)
+            }
+            for flavor in calibs
+            if any(os.path.exists(p) for p in calibs[flavor].values())
+        }
 
     if return_mjd:
         return calibs, cals_mjd
