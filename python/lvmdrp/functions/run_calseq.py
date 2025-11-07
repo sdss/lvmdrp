@@ -455,7 +455,7 @@ def create_calibfib_hdrfix(mjd, calibration, ref_column=LVM_REFERENCE_COLUMN, nc
         return
 
     expnums = frames.expnum.unique()
-    calibs = get_calib_paths(mjd=mjd, version=drpver, flavors=CALIBRATION_NEEDS[calibration], from_sandbox=True)
+    calibs = get_calib_paths(mjd=mjd, flavors=CALIBRATION_NEEDS[calibration], from_sandbox=True)
     reduce_2d(mjds=mjd, calibrations=calibs, expnums=expnums, cameras=CAMERAS, add_astro=False, reject_cr=False, sub_straylight=False, skip_done=skip_done)
 
     exposed_stds = {}
@@ -958,7 +958,7 @@ def _create_wavelengths_60177(use_longterm_cals=True, skip_done=True, dry_run=Fa
     frames = md.get_calibrations_metadata(mjds=mjd, calibration="wave", expnums=expnums)
 
     # define master paths for target frames
-    calibs = get_calib_paths(mjd, version=drpver, longterm_cals=use_longterm_cals, flavors=CALIBRATION_NEEDS["wave"])
+    calibs = get_calib_paths(mjd, version=drpver, flavors=CALIBRATION_NEEDS["wave"], from_sandbox=False)
 
     if dry_run:
         _log_dry_run(frames, calibs=calibs, settings=None, caller=_create_wavelengths_60177.__name__)
@@ -1051,11 +1051,11 @@ def _copy_fiberflats_from(mjd, mjd_dest=60177, use_longterm_cals=True):
     """
 
     # get source fiberflats
-    fiberflat_paths = get_calib_paths(mjd, version=drpver, longterm_cals=use_longterm_cals)
+    fiberflat_paths = get_calib_paths(mjd, version=drpver, from_sandbox=False)
     fiberflat_paths = group_calib_paths(fiberflat_paths["fiberflat_twilight"])
 
      # define master paths for target frames
-    calibs = get_calib_paths(mjd_dest, version=drpver, longterm_cals=use_longterm_cals)
+    calibs = get_calib_paths(mjd_dest, version=drpver, from_sandbox=True)
     mwave_paths = group_calib_paths(calibs["wave"])
     mlsf_paths = group_calib_paths(calibs["lsf"])
 
@@ -1429,7 +1429,7 @@ def check_epochs_completeness(mjd=None, version=drpver, calibrations=CALIBRATION
     epoch_mjds = [mjd] if mjd is not None else list(epochs.keys())
 
     for mjd in epoch_mjds:
-        calibs = get_calib_paths(mjd=mjd, from_sandbox=False, version=version)
+        calibs = get_calib_paths(mjd=mjd, version=version, from_sandbox=False)
 
         df = pd.DataFrame.from_dict(calibs).sort_index(axis=1)
         df = df.map(lambda s: "DONE" if os.path.exists(s) else "MISSING", na_action="ignore")
@@ -1471,7 +1471,7 @@ def create_bias(mjd, epochs=None, use_longterm_cals=True, skip_done=True, dry_ru
         return
 
     # define master paths for target frames
-    calibs = get_calib_paths(mjd=mjd, version=drpver, longterm_cals=use_longterm_cals, flavors=CALIBRATION_NEEDS["bias"])
+    calibs = get_calib_paths(mjd=mjd, version=drpver, flavors=CALIBRATION_NEEDS["bias"], from_sandbox=False)
 
     if dry_run:
         _log_dry_run(frames, calibs=calibs, settings=None, caller=create_bias.__name__)
@@ -1553,7 +1553,7 @@ def create_nightly_traces(mjd, use_longterm_cals=False, expnums_ldls=None, expnu
         expnums_qrtz = np.sort(frames.query("quartz").expnum.unique())
 
     # define master paths for target frames
-    calibs = get_calib_paths(mjd, version=drpver, longterm_cals=use_longterm_cals, flavors=CALIBRATION_NEEDS["trace"])
+    calibs = get_calib_paths(mjd, version=drpver, flavors=CALIBRATION_NEEDS["trace"], from_sandbox=False)
 
     if dry_run:
         _log_dry_run(frames, calibs=calibs, settings=None, caller=create_nightly_traces.__name__)
@@ -1699,7 +1699,7 @@ def create_traces(mjd, epochs=None, cameras=CAMERAS, ring="primary",
         return
 
     # define master paths for target frames
-    calibs = get_calib_paths(mjd=mjd, version=drpver, longterm_cals=use_longterm_cals, flavors=CALIBRATION_NEEDS["trace"])
+    calibs = get_calib_paths(mjd=mjd, version=drpver, flavors=CALIBRATION_NEEDS["trace"], from_sandbox=False)
 
     if dry_run:
         _log_dry_run(frames, calibs=calibs, settings=None, caller=create_traces.__name__)
@@ -1831,7 +1831,7 @@ def create_dome_fiberflats(mjd, expnums_ldls=None, expnums_qrtz=None, cals_mjd=N
         frames, expnums = choose_sequence(frames, flavor="dome", kind=kind)
 
     # define master paths for target frames
-    calibs = get_calib_paths(mjd=cals_mjd or mjd, version=drpver, longterm_cals=use_longterm_cals, flavors=CALIBRATION_NEEDS["dome"])
+    calibs = get_calib_paths(mjd=cals_mjd or mjd, version=drpver, flavors=CALIBRATION_NEEDS["dome"], from_sandbox=False)
     calibs_grp = calibs.copy()
 
     if dry_run:
@@ -1951,7 +1951,7 @@ def create_twilight_fiberflats(mjd: int, epochs: dict[int, dict] = None, cals_mj
         return
 
     # define master paths for target frames
-    calibs = get_calib_paths(mjd=cals_mjd or mjd, version=drpver, longterm_cals=use_longterm_cals, flavors=CALIBRATION_NEEDS["twilight"])
+    calibs = get_calib_paths(mjd=cals_mjd or mjd, version=drpver, flavors=CALIBRATION_NEEDS["twilight"], from_sandbox=False)
 
     if dry_run:
         _log_dry_run(frames, calibs=calibs, settings=None, caller=create_dome_fiberflats.__name__)
@@ -2047,7 +2047,7 @@ def create_fiberflats_corrections(cals_mjd: int, science_mjds: Union[int, List[i
         frames = pd.concat([md.get_frames_metadata(mjd=mjd).query("tileid != 11111 and qaqual != 'BAD'") for mjd in science_mjds], ignore_index=True)
         science_expnums = frames.sort_values("expnum").drop_duplicates("expnum").expnum
 
-    calibs = get_calib_paths(mjd=cals_mjd, version=drpver, longterm_cals=use_longterm_cals, flavors=CALIBRATION_NEEDS["object"])
+    calibs = get_calib_paths(mjd=cals_mjd, version=drpver, flavors=CALIBRATION_NEEDS["object"], from_sandbox=False)
 
     if dry_run:
         _log_dry_run(frames, calibs=calibs, settings=None, caller=create_fiberflats_corrections.__name__)
@@ -2143,7 +2143,7 @@ def create_wavelengths(mjd, epochs=None, use_longterm_cals=True, kind="longterm"
         return
 
     # define master paths for target frames
-    calibs = get_calib_paths(mjd=mjd, version=drpver, longterm_cals=use_longterm_cals, flavors=CALIBRATION_NEEDS["wave"])
+    calibs = get_calib_paths(mjd=mjd, version=drpver, flavors=CALIBRATION_NEEDS["wave"], from_sandbox=False)
 
     if dry_run:
         _log_dry_run(frames, calibs=calibs, settings=None, caller=create_wavelengths.__name__)

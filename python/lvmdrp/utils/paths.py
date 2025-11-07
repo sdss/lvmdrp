@@ -64,7 +64,7 @@ def mjd_from_expnum(expnum: Union[int, str, list, tuple]) -> List[int]:
     return [int(mjd)]
 
 
-def get_calib_paths(mjd, version=None, cameras="*", flavors=CALIBRATION_PRODUCTS, longterm_cals=True, from_sandbox=False, return_mjd=False, only_existing=False):
+def get_calib_paths(mjd, version=None, cameras="*", flavors=CALIBRATION_PRODUCTS, nightly=False, from_sandbox=True, return_mjd=False, only_existing=False):
     """Returns a dictionary containing paths for calibration frames
 
     Parameters
@@ -77,8 +77,8 @@ def get_calib_paths(mjd, version=None, cameras="*", flavors=CALIBRATION_PRODUCTS
         List of cameras or wildcard to match, by default '*'
     flavors : list, tuple or set
         Only get paths for this calibrations, by default all available flavors
-    longterm_cals : bool
-        Whether to use long-term calibration frames or not, defaults to True
+    nightly : bool
+        Whether get nightly calibration or long-term paths, defaults to False
     from_sandbox : bool, optional
         Fall back option to pull calibrations from sandbox, by default False
     return_mjd : bool, optional
@@ -94,10 +94,6 @@ def get_calib_paths(mjd, version=None, cameras="*", flavors=CALIBRATION_PRODUCTS
     if version is None and not from_sandbox:
         raise ValueError(f"You must provide a version string to get calibration paths, {version = } given")
 
-    # make long-term if taking calibrations from sandbox (nightly calibrations are not stored in sandbox)
-    if from_sandbox:
-        longterm_cals = True
-
     cams = fnmatch.filter(CAMERAS, cameras)
     channels = "".join(sorted(set(map(lambda c: c.strip("123"), cams))))
 
@@ -105,7 +101,7 @@ def get_calib_paths(mjd, version=None, cameras="*", flavors=CALIBRATION_PRODUCTS
     tilegrp = tileid_grp(tileid)
 
     # get long-term MJDs from sandbox using get_master_mjd, else use given MJD
-    cals_mjd = get_master_mjd(mjd) if longterm_cals else mjd
+    cals_mjd = get_master_mjd(mjd) if from_sandbox else mjd
 
     # define root path to pixel flats and masks
     # TODO: remove this once sdss-tree are updated with the corresponding species
@@ -133,7 +129,7 @@ def get_calib_paths(mjd, version=None, cameras="*", flavors=CALIBRATION_PRODUCTS
         if path_species == "lvm_calib":
             prefix = ""
         else:
-            prefix = "m" if flavor in ["bias", "fiberflat_twilight"] or longterm_cals else "n"
+            prefix = "n" if nightly and flavor not in ["bias", "fiberflat_twilight"] else "m"
 
         calibs[flavor] = {c: path.full(path_species, drpver=version, tileid=tileid, mjd=cals_mjd, kind=f"{prefix}{flavor}", camera=c) for c in cam_or_chan}
 

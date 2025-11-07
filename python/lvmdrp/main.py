@@ -1595,7 +1595,7 @@ def science_reduction(expnum: int,
     calibs, cals_mjd = get_calib_paths(
         mjd=sci_mjd,
         version=drpver,
-        longterm_cals=use_longterm_cals,
+        nightly=not use_longterm_cals,
         from_sandbox=from_sandbox,
         flavors=["pixmask", "pixflat", "bias", "centroids", "sigmas", "model", "wave", "lsf", "fiberflat_twilight"],
         return_mjd=True)
