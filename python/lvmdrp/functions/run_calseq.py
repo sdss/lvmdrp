@@ -39,7 +39,6 @@ from datetime import datetime
 from shutil import copy2, copytree, rmtree
 from astropy.io import fits
 from astropy.table import Table
-from scipy import interpolate
 from typing import Union, Tuple, List, Dict
 from collections.abc import Callable
 from matplotlib.gridspec import GridSpec
@@ -687,74 +686,6 @@ def _link_pixelmasks():
                 target_is_directory=True)
 
 
-def _get_ring_expnums(expnums_ldls, expnums_qrtz, ring_size=12, sort_expnums=False):
-    """Split expnums into primary and secondary ring expnums
-
-    Given a set of MJDs and (optionally) exposure numbers, split the expnums
-    into primary and secondary ring expnums. This routine will return the
-    primary and secondary ring expnums for the given expnums.
-
-    Parameters:
-    ----------
-    expnums_ldls : list
-        List of LDLS expnums
-    expnums_qrtz : list
-        List of quartz expnums
-    ring_size : int
-        Size of the primary ring
-    sort_expnums : bool
-        Sort expnums
-
-    Returns:
-    -------
-    expnum_params : dict
-        Dictionary with the expnums parameters
-    """
-
-    # sort expnums
-    if sort_expnums:
-        expnums_ldls = sorted(expnums_ldls)
-        expnums_qrtz = sorted(expnums_qrtz)
-
-    # split expnums into primary and secondary ring expnums
-    pri_ldls_expnums = expnums_ldls[:ring_size]
-    pri_qrtz_expnums = expnums_qrtz[:ring_size]
-    sec_ldls_expnums = expnums_ldls[ring_size:]
-    sec_qrtz_expnums = expnums_qrtz[ring_size:]
-
-    # define expnum parameters
-    expnum_params = {camera: [] for camera in ["b1", "b2", "b3", "r1", "r2", "r3", "z1", "z2", "z3"]}
-    for ring, ring_expnums in enumerate([(pri_ldls_expnums, pri_qrtz_expnums), (sec_ldls_expnums, sec_qrtz_expnums)]):
-        for channel, expnums in [("b", ring_expnums[0]), ("r", ring_expnums[0]), ("z", ring_expnums[1])]:
-            for fiber, expnum in enumerate(expnums):
-                if expnum is None:
-                    continue
-                # define fiber ID
-                # TODO: change this to use CALIBFIB header keyword
-                fiber_str = f"P{ring+1}-{fiber+1}"
-                # get spectrograph where current fiber is plugged
-                fiber_par = SLITMAP[SLITMAP["orig_ifulabel"] == fiber_str]
-                block_id = int(fiber_par["blockid"][0][1:])-1
-                specid = fiber_par["spectrographid"][0]
-                # define camera exposure
-                camera = f"{channel}{specid}"
-
-                # define exposure parameters
-                expnum_params[camera].append((expnum, [block_id], fiber_str))
-
-    # add missing blocks for first exposure
-    for camera in expnum_params:
-        if len(expnum_params[camera]) == 0:
-            continue
-        expnums, block_ids, fiber_strs = zip(*expnum_params[camera])
-        block_ids = list(zip(*block_ids))[0]
-        missing_block_ids = list(set(range(18)) - set(block_ids))
-        filled_block_ids = list(block_ids)[0:1] + missing_block_ids
-        expnum_params[camera][0] = (expnums[0], sorted(filled_block_ids), fiber_strs[0])
-
-    return expnum_params
-
-
 def _get_crosstalk(cent, fwhm, ifiber, jcolumn, ypixels=None, nfibers=1):
     """Calculates the crosstalk between a reference fiber and its neighboring fibers
 
@@ -1035,69 +966,6 @@ def _create_wavelengths_60177(use_longterm_cals=True, skip_done=True, dry_run=Fa
         # apply wavelength solution to arcs and rectify
         rss_tasks.create_pixel_table(in_rss=xarc_path, out_rss=harc_path, in_waves=mwave_paths, in_lsfs=mlsf_paths)
         rss_tasks.resample_wavelength(in_rss=harc_path, out_rss=harc_path, method="linear", wave_range=SPEC_CHANNELS[channel], wave_disp=0.5)
-
-
-def _copy_fiberflats_from(mjd, mjd_dest=60177, use_longterm_cals=True):
-    """Copies twilight fiberflats from given MJD to MJD destination
-
-    Parameters
-    ----------
-    mjd : int
-        MJD of calibration epoch from which the twilight fiberflats will be copied
-    mjd_dest : int
-        MJD where copied twilight fiberflats will be stored
-    use_longterm_cals : bool, optional
-        Whether to use long-term calibration frames or not, defaults to True
-    """
-
-    # get source fiberflats
-    fiberflat_paths = get_calib_paths(mjd, version=drpver, from_sandbox=False)
-    fiberflat_paths = group_calib_paths(fiberflat_paths["fiberflat_twilight"])
-
-     # define master paths for target frames
-    calibs = get_calib_paths(mjd_dest, version=drpver, from_sandbox=True)
-    mwave_paths = group_calib_paths(calibs["wave"])
-    mlsf_paths = group_calib_paths(calibs["lsf"])
-
-    log.info(f"going to copy twilight fiberflats from {mjd = } to {mjd_dest = }")
-    for channel in "brz":
-        log.info(f"preparing wavelength for new fiberflats: {mwave_paths[channel]}, {mlsf_paths[channel]}")
-        mwaves = [TraceMask.from_file(mwave_path) for mwave_path in mwave_paths[channel]]
-        mwave = TraceMask.from_spectrographs(*mwaves)
-        mlsfs = [TraceMask.from_file(mlsf_path) for mlsf_path in mlsf_paths[channel]]
-        mlsf = TraceMask.from_spectrographs(*mlsfs)
-
-        fiberflat_path = fiberflat_paths[channel][0]
-        log.info(f"loading reference fiberflat from {fiberflat_path}")
-        fiberflat = RSS.from_file(fiberflat_path)
-
-        # interpolate fiberflats to mjd_ wavelengths
-        log.info("resampling fiberflat to new wavelengths")
-        new_fiberflat = copy(fiberflat)
-        new_fiberflat._header["MJD"] = mjd_dest
-        new_fiberflat._header["SMJD"] = mjd_dest
-        for ifiber in range(fiberflat._fibers):
-            old_wave = fiberflat._wave[ifiber]
-            new_wave = mwave._data[ifiber]
-            old_flat = fiberflat._data[ifiber]
-
-            new_fiberflat._data[ifiber] = interpolate.interp1d(old_wave, old_flat, bounds_error=False, fill_value="extrapolate")(new_wave)
-            if new_fiberflat._error is not None:
-                new_fiberflat._error[ifiber] = interpolate.interp1d(old_wave, fiberflat._error[ifiber], bounds_error=False, fill_value="extrapolate")(new_wave)
-            if new_fiberflat._mask is not None:
-                new_fiberflat._mask[ifiber] = interpolate.interp1d(old_wave, fiberflat._mask[ifiber].astype(int), bounds_error=False, kind="nearest", fill_value="extrapolate")(new_wave)
-                new_fiberflat._mask[ifiber] = new_fiberflat._mask[ifiber].astype(bool)
-
-        # update wavelength traces
-        new_fiberflat.set_wave_trace(mwave)
-        new_fiberflat.set_lsf_trace(mlsf)
-        new_fiberflat.set_wave_array(mwave._data)
-        new_fiberflat.set_lsf_array(mlsf._data)
-
-        # store new fiberflat
-        new_fiberflat_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd_dest, camera=channel, kind="mfiberflat_twilight")
-        log.info(f"writing new fiberflat to {new_fiberflat_path}")
-        new_fiberflat.writeFitsData(new_fiberflat_path)
 
 
 def tag_longterm_calibrations(mjd, version, flavors=None, dry_run=False):
