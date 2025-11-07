@@ -31,7 +31,7 @@ from lvmdrp.functions.run_calseq import (
     create_calibfib_hdrfix,
     create_imagetyp_hdrfix,
     create_qaqual_bad_hdrfix,
-    copy_longterm_calibrations,
+    tag_longterm_calibrations,
     create_fiberflats_corrections)
 
 from sdss_access import Access
@@ -419,20 +419,31 @@ def fiberflat_corrections(mjd, science_mjds, science_expnums, force_correction, 
 
 
 @click.command('create-tag', short_help='Create a tag for long-term calibrations', context_settings=dict(show_default=True))
-@click.option('--calib-version', type=str, default=drpver, help='Version of the calibration set')
+@click.option('-m', '--mjd', type=int, help='an MJD to reduce')
+@click.option('-l', '--mjd-list', type=IntListType(), help='a list of specific MJDs to reduce')
+@click.option('-r', '--mjd-range', type=str, help='a range of MJDs to reduce')
+@click.option('--from-epochs', is_flag=True, default=False, help="Use fiducial or given epochs file to produce long-term calibrations")
+@click.option('--epochs-file', type=str, default=None, help="Path to a calibrations epoch file")
+@click.option('--version', type=str, default=drpver, help='Version of the calibration set')
 @click.option("--dry-run", is_flag=True, default=False, help="Shows useful information about the current setup without actually running reductions")
 @cloup.constraint(mutually_exclusive, ['mjd', 'mjd_list', 'mjd_range'])
 @cloup.constraint(RequireExactly(1), ['mjd', 'mjd_list', 'mjd_range'])
-def create_tag(version, dry_run):
+def create_tag(mjd, mjd_list, mjd_range, from_epochs, epochs_file, version, dry_run):
 
+    # parse calibration MJDs
+    epochs = {}
     mjds = parse_mjds(mjd=mjd or mjd_list or mjd_range or None)
-    if not isinstance(mjds, (list, tuple)):
+    if mjds is not None and not isinstance(mjds, (list, tuple)):
         mjds = [mjds]
+    # if no MJD, get fiducial calibration epochs
+    if from_epochs or mjds is None:
+        epochs = load_calibration_epochs(epochs_path=epochs_file, filter_by=mjds, verbose=False)
+        mjds = sorted(list(epochs.keys()))
 
     for mjd in mjds:
         flavors = []
-        [flavors.extend(CALIBRATION_MAPPINGS.get(calname, [calname])) for calname in only_cals]
-        copy_longterm_calibrations(mjd=mjd, flavors=flavors, dry_run=dry_run)
+        [flavors.extend(CALIBRATION_MAPPINGS.get(calname, [calname])) for calname in CALIBRATION_TYPES]
+        tag_longterm_calibrations(mjd=mjd, version=version, flavors=flavors, dry_run=dry_run)
 
 
 @cli.command('fix-pixel-shifts', short_help='Fix the electronic pixel shifts in the raw data')

@@ -36,7 +36,7 @@ from itertools import product
 from pprint import pformat
 from copy import deepcopy as copy
 from datetime import datetime
-from shutil import copy2, rmtree
+from shutil import copy2, copytree, rmtree
 from astropy.io import fits
 from astropy.table import Table
 from scipy import interpolate
@@ -1100,13 +1100,15 @@ def _copy_fiberflats_from(mjd, mjd_dest=60177, use_longterm_cals=True):
         new_fiberflat.writeFitsData(new_fiberflat_path)
 
 
-def copy_longterm_calibrations(mjd, flavors=None, dry_run=False):
-    """Copies long-term calibrations from versioned path to sandbox
+def tag_longterm_calibrations(mjd, version, flavors=None, dry_run=False):
+    """Copies long-term calibrations from stagging path to sandbox
 
     Parameters
     ----------
     mjd : int
         MJD for the source calibrations to copy from
+    version: str
+        Creates a tagged calib directory 'calib_`version`' in addition to the currently used 'calib'
     flavors : str, optional
         Types of calibration (e.g., wave, bias), by default None (all calibrations)
     dry_run : bool, optional
@@ -1129,7 +1131,9 @@ def copy_longterm_calibrations(mjd, flavors=None, dry_run=False):
     for flavor in flavors:
         src_paths = sorted(path.expand("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, kind=f"m{flavor}", camera="*"))
         if not src_paths:
-            log.error(f"no paths found for {flavor = }: {src_paths}")
+            log.error(f"no paths found for {flavor = }")
+            continue
+
         for src_path in src_paths:
             camera = os.path.basename(src_path).split(".")[0].split("-")[-1]
             dst_path = path.full("lvm_calib", mjd=mjd, kind=flavor, camera=camera)
@@ -1143,7 +1147,7 @@ def copy_longterm_calibrations(mjd, flavors=None, dry_run=False):
                 log.info(f"   {dst_mtime.strftime('%a %d %b %Y, %I:%M:%S%p') if dst_exists else None} {dst_path}")
                 if src_mtime > dst_mtime:
                     log.info("   > source is newer than destination")
-                elif src_mtime <= dst_mtime:
+                elif src_mtime < dst_mtime:
                     log.warning("   < source is older than destination")
                 continue
             try:
@@ -1152,6 +1156,26 @@ def copy_longterm_calibrations(mjd, flavors=None, dry_run=False):
                 log.info(f"copied {src_path} into {dst_path}")
             except PermissionError as e:
                 log.error(f"error while copying {src_path}: {e}")
+
+    # create tagged directory
+    log.info(f"creating a tagged calibration directory calib_{version}/{mjd}")
+    current_calib = os.path.join(os.environ["LVM_SANDBOX"], "calib", f"{mjd}")
+    tagged_calib = os.path.join(os.environ["LVM_SANDBOX"], f"calib_{version}", f"{mjd}")
+
+    log.info(f"source      : {current_calib}")
+    log.info(f"destination : {tagged_calib}")
+    if dry_run:
+        return
+
+    try:
+        copytree(current_calib, tagged_calib)
+    except FileNotFoundError:
+        log.error(f"{current_calib} does not exist, skipping creation of tagged epoch {mjd}")
+    except FileExistsError:
+        log.warning(f"{tagged_calib} already exist, skipping creation of tagged epoch {mjd}")
+        return
+    except Exception as e:
+        log.error(f"while creating tagged calibrations: {e}")
 
 
 def messup_frame(mjd, expnum, spec="1", shifts=[1500, 2000, 3500], shift_size=-2, undo_messup=False):
