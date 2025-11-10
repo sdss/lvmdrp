@@ -1013,7 +1013,9 @@ def tag_longterm_calibrations(mjd, version, flavors=None, dry_run=False):
                 log.info(f"source/destination for {flavor = }, {camera = }:")
                 log.info(f"   {src_mtime.strftime('%a %d %b %Y, %I:%M:%S%p')} {src_path}")
                 log.info(f"   {dst_mtime.strftime('%a %d %b %Y, %I:%M:%S%p') if dst_exists else None} {dst_path}")
-                if src_mtime > dst_mtime:
+                if dst_mtime is None:
+                    log.info("   - source will create a new path on destination")
+                elif src_mtime > dst_mtime:
                     log.info("   > source is newer than destination")
                 elif src_mtime < dst_mtime:
                     log.warning("   < source is older than destination")
