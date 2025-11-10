@@ -992,10 +992,17 @@ def tag_longterm_calibrations(mjd, version, flavors=None, dry_run=False):
     else:
         raise ValueError(f"kind must be one of {flavors}")
 
+    # define paths in sandbox for current and tagged versions of the calibrations
+    current_calib = os.path.join(os.environ["LVM_SANDBOX"], "calib", f"{mjd}")
+    tagged_calib = os.path.join(os.environ["LVM_SANDBOX"], f"calib_{version}", f"{mjd}")
+    if os.path.exists(tagged_calib):
+        log.error(f"tagged calibrations for {version = } for epoch {mjd} already exist: {tagged_calib}, skipping tag creation")
+        return
+
     # filter out non-needed calibrations
     flavors = set(flavors).difference({"pixmask", "pixflat", "trace_guess", "amp", "fiberflat_dome"})
 
-    log.info(f"going to copy calibrations: {flavors}")
+    log.info(f"selected calibrations flavors: {flavors}")
     for flavor in flavors:
         src_paths = sorted(path.expand("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, kind=f"m{flavor}", camera="*"))
         if not src_paths:
@@ -1029,8 +1036,6 @@ def tag_longterm_calibrations(mjd, version, flavors=None, dry_run=False):
 
     # create tagged directory
     log.info(f"creating a tagged calibration directory calib_{version}/{mjd}")
-    current_calib = os.path.join(os.environ["LVM_SANDBOX"], "calib", f"{mjd}")
-    tagged_calib = os.path.join(os.environ["LVM_SANDBOX"], f"calib_{version}", f"{mjd}")
 
     log.info(f"source      : {current_calib}")
     log.info(f"destination : {tagged_calib}")
