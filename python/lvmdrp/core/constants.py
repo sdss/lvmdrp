@@ -69,6 +69,9 @@ MASTERS_DIR = os.getenv("LVM_MASTER_DIR")
 # path for pixel shifts table
 PIXELSHIFTS_PATH = os.path.join(os.getenv("LVMCORE_DIR"), "etc", "pixel_shifts.parquet")
 
+# path to validated electronic pixel shifts
+PIXELSHIFTS_DIR = os.path.join(os.getenv("LVMCORE_DIR"), "pixelshifts")
+
 SKYCORR_PAR_MAP = {
     "INPUT_OBJECT_SPECTRUM": "objfile",
     "INPUT_SKY_SPECTRUM": "skyfile",

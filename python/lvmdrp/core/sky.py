@@ -21,7 +21,7 @@ from astropy.io import fits
 from astropy.stats import biweight_location, biweight_scale
 from astropy.table import Table, hstack
 from astropy.time import Time
-from astropy.coordinates import get_body, solar_system_ephemeris, AltAz, EarthLocation, SkyCoord 
+from astropy.coordinates import get_body, solar_system_ephemeris, AltAz, EarthLocation, SkyCoord
 from skycalc_cli.skycalc import AlmanacQuery, SkyModel
 from skycalc_cli.skycalc_cli import fixObservatory
 from skyfield.positionlib import ICRS
@@ -237,8 +237,8 @@ def sky_pars_header(header):
     Additionally useful parameters needed for analyzing sky subtraction are provided
 
     Updated March 2025 AJ:
-        removed SkyFields dependencies, 
-        split sky and skymodel (re-named function), 
+        removed SkyFields dependencies,
+        split sky and skymodel (re-named function),
         included geo sh hght calc here,
         made header keywords more consistent with each other and drpall
 
@@ -253,35 +253,35 @@ def sky_pars_header(header):
     """
 
     # extract useful header information,
-    sci_ra = header.get("SCIRA", header.get("POSCIRA", np.nan)) 
+    sci_ra = header.get("SCIRA", header.get("POSCIRA", np.nan))
     sci_dec = header.get("SCIDEC", header.get("POSCIDE", np.nan))
-    skye_ra = header.get("SKYERA", header.get("POSKYERA", np.nan)) 
+    skye_ra = header.get("SKYERA", header.get("POSKYERA", np.nan))
     skye_dec = header.get("SKYEDEC", header.get("POSKYEDE", np.nan))
-    skyw_ra = header.get("SKYWRA", header.get("POSKYWRA", np.nan)) 
-    skyw_dec = header.get("SKYWDEC", header.get("POSKYWDE", np.nan))    
- 
+    skyw_ra = header.get("SKYWRA", header.get("POSKYWRA", np.nan))
+    skyw_dec = header.get("SKYWDEC", header.get("POSKYWDE", np.nan))
+
     obstime = Time(header["OBSTIME"])
 
-   
+
     # define location of LCO using shadow heigh calculator library
-    observatory_location = EarthLocation(lat=SH_CALCULATOR.observatory_topo.latitude.degrees*u.deg, 
-                                     lon=SH_CALCULATOR.observatory_topo.longitude.degrees*u.deg, 
+    observatory_location = EarthLocation(lat=SH_CALCULATOR.observatory_topo.latitude.degrees*u.deg,
+                                     lon=SH_CALCULATOR.observatory_topo.longitude.degrees*u.deg,
                                      height=SH_CALCULATOR.observatory_elevation.value*u.m)
-   
+
     #use astropy Time class for the observing time
     obs_time = Time(obstime)
 
     #use astropy's builtin emphermis for the locations of the sun and moon
     with solar_system_ephemeris.set('builtin'):
-        # Get the Moon's and Sun's coordinates at the specified time, and one hour later for moon phase 
+        # Get the Moon's and Sun's coordinates at the specified time, and one hour later for moon phase
         moon_coord = get_body('moon', obs_time,location=observatory_location)
         sun_coord = get_body('sun',obs_time,location=observatory_location)
         moon_coord_next = get_body('moon', obs_time+1*u.hour,location=observatory_location)
         sun_coord_next = get_body('sun',obs_time+1*u.hour,location=observatory_location)
 
-    #find alt-az frame/coordinates for observation    
+    #find alt-az frame/coordinates for observation
     altaz_frame = AltAz(obstime=obs_time, location=observatory_location)
-    
+
     #use astropy SkyCoord class
     sci_coord = SkyCoord(sci_ra, sci_dec, unit='deg')
     skye_coord = SkyCoord(skye_ra, skye_dec, unit='deg')
@@ -294,7 +294,7 @@ def sky_pars_header(header):
     moon_ra = moon_coord.ra.deg
     moon_dec = moon_coord.dec.deg
     moon_pos = SkyCoord(moon_ra*u.deg, moon_dec*u.deg)
-    
+
     # altitude of objects above the horizon (alt, 0 -- 90)
     sci_alt = sci_coord.transform_to(altaz_frame).alt
     skye_alt = skye_coord.transform_to(altaz_frame).alt
@@ -369,7 +369,7 @@ def sky_pars_header(header):
             time = 3
         else:
             time = 0
-    else:  
+    else:
         if hour in [23, 0, 1, 2, 3]:
             time = 1
         elif hour in [4, 5, 6, 7]:
@@ -799,7 +799,7 @@ def fit_supersky(sky_wave, sky_data, sky_vars, sky_mask, sci_wave, sci_data):
     # NOTE: store a super sampled version of the splines as an extension of the sky RSS
     f_data = interpolate.make_smoothing_spline(swave[~smask], ssky[~smask], w=weights[~smask], lam=1e-6)
     # NOTE: verify that the evaluated errors are not in variance at this stage
-    f_error = interpolate.make_smoothing_spline(swave[~smask], svars[~smask] / nsky_fibers, w=weights[~smask], lam=1e-6)
+    f_error = interpolate.make_smoothing_spline(swave[~smask], svars[~smask], w=weights[~smask], lam=1e-6)
     f_mask = interpolate.interp1d(swave, smask, kind="nearest", bounds_error=False, fill_value=0)
 
     return f_data, f_error, f_mask, swave, ssky, svars, smask
