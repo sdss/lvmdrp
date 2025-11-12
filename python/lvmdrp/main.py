@@ -1420,8 +1420,6 @@ def reduce_2d(mjds, calibrations, expnums=None, exptime=None, cameras=CAMERAS,
         imagetyp = assume_imagetyp or frame["imagetyp"]
 
         rframe_path = path.full("lvm_raw", camspec=frame["camera"], **frame)
-        eframe_path = path.full("lvm_anc", drpver=drpver, kind="e", imagetype=imagetyp, **frame)
-        frame_path = eframe_path if os.path.exists(eframe_path) else rframe_path
         pframe_path = path.full("lvm_anc", drpver=drpver, kind="p", imagetype=imagetyp, **frame)
         lframe_path = path.full("lvm_anc", drpver=drpver, kind="l", imagetype=imagetyp, **frame)
         lstr_path = path.full("lvm_anc", drpver=drpver, kind="d", imagetype="stray", **frame)
@@ -1438,7 +1436,7 @@ def reduce_2d(mjds, calibrations, expnums=None, exptime=None, cameras=CAMERAS,
             log.info(f"skipping {final_2d_dp}, file already exist")
         else:
             with Timer(name='Preproc '+pframe_path, logger=log.info):
-                preproc_raw_frame(in_image=frame_path, out_image=pframe_path,
+                preproc_raw_frame(in_image=rframe_path, out_image=pframe_path,
                                   in_mask=calibrations.get("pixmask", {}).get(camera), replace_with_nan=replace_with_nan, assume_imagetyp=assume_imagetyp)
             with Timer(name='Detrend '+dframe_path, logger=log.info):
                 detrend_frame(in_image=pframe_path, out_image=dframe_path,

@@ -107,6 +107,9 @@ STRAYLIGHT_PARS = dict(
 
 
 def _reject_pixelshifted(frames, pixelshifts_path=PIXELSHIFTS_PATH):
+    # NOTE: bypassing this function since all exposures in pixelshifts_path are already flagged in header fixes (see PR #9 in lvmcore)
+    return frames
+
     pixelshifts = pd.read_parquet(pixelshifts_path)
 
     # filter pixelshifts by exposure numbers in frames
@@ -231,7 +234,7 @@ def choose_sequence(frames, calibration, ref_mjd=None, kind="longterm", ring="pr
         "wave": 2 if kind == "nightly" else nstandards,
         "twilight": nstandards}
 
-    # reject frames affected by shifted/missing pixels
+    # reject frames affected by shifted/missing pixels (NOTE: this is being bypassed)
     chosen_frames = _reject_pixelshifted(frames)
 
     if kind == "nightly" and calibration != "twilight":
@@ -1151,7 +1154,8 @@ def fix_raw_pixel_shifts(mjd, expnums=None, ref_expnums=None, specs="123", image
             # update reference table by removing affected frame
             ref_frames = ref_frames.loc[(ref_frames.expnum != frame.expnum) & (ref_frames.camera != frame.camera)]
 
-    pixshifts.write_shifts(shifts or None, mjd=mjd, verbose=True)
+            # flag affected exposure with QAQUAL='BAD'
+            hdrfix.write_hdrfix_file(mjd=mjd, fileroot=f"sdR-*-*-{frame.expnum:>08d}", keyword="QAQUAL", value="BAD")
 
 
 def validate_calibration_epochs(mjd=None, calibrations=CALIBRATION_TYPES, epochs_path=CALIBRATION_EPOCHS_PATH, ring="primary"):
