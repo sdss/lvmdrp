@@ -30,7 +30,6 @@ from lvmdrp import log, DRP_COMMIT, __version__ as DRPVER
 from lvmdrp.core.constants import CONFIG_PATH, SPEC_CHANNELS, ARC_LAMPS, LVM_REFERENCE_COLUMN, FIDUCIAL_PLATESCALE, LVM_NFIBERS, LVM_NBLOCKS
 from lvmdrp.utils.decorators import skip_on_missing_input_path, drop_missing_input_paths
 from lvmdrp.utils.bitmask import QualityFlag
-from lvmdrp.utils.pixshifts import load_shifts, apply_shift_correction
 from lvmdrp.core.fiberrows import FiberRows, _read_fiber_ypix
 from lvmdrp.core.image import (
     Image,
@@ -2262,7 +2261,7 @@ def extract_spectra(
     disp_axis: str = "X",
     replace_error: float = 1.0e10,
     display_plots: bool = False,
-    parallel: str = "auto",
+    parallel: str|int = 0,
 ):
     """
     Extracts the flux for each fiber along the dispersion direction which is written into an RSS FITS file format.
@@ -2291,7 +2290,7 @@ def extract_spectra(
                     a spatially resolved FWHM map is provided. Only used if method is set to 'optimal', otherwise this parameter is ignored.
     disp_axis: string of float, optional  with default: 'X'
                     Define the dispersion axis, either 'X','x', or 0 for the  x axis or 'Y','y', or 1 for the y axis.
-    parallel: either string of integer (>0) or  'auto', optional with default: 'auto'
+    parallel: either string of integer (>0) or  'auto', optional with default: 0
             Number of CPU cores used in parallel for the computation. If set to auto, the maximum number of CPUs
             for the given system is used.
 
@@ -2438,7 +2437,7 @@ def extract_spectra(
     slitmap_spec = slitmap[select_spec]
     exposed_selection = numpy.array(list(img._header["STD*ACQ"].values()))
     # mask fibers that are not exposed
-    # TODO: use the more reliable routine get_exposed_std_fibers once is merged from addqa branch
+    # TODO: use the more reliable image method get_exposed_std once is merged from addqa branch
     if len(exposed_selection) != 0:
         exposed_std = numpy.array(list(img._header["STD*FIB"].values()))[exposed_selection]
         mask |= (~(numpy.isin(slitmap_spec["orig_ifulabel"], exposed_std))&((slitmap_spec["telescope"] == "Spec")))[:, None]
@@ -2891,18 +2890,6 @@ def preproc_raw_frame(
         org_img._header = apply_hdrfix(sjd, hdr=org_img._header) or org_img._header
     except ValueError as e:
         log.error(f"cannot apply header fix: {e}")
-
-    # fix pixel shifts if present
-    shifts = load_shifts(sjd)
-    org_img, fig = apply_shift_correction(org_img, shifts)
-    if fig is not None:
-        save_fig(
-            fig,
-            product_path=out_image,
-            to_display=display_plots,
-            figure_path="qa",
-            label="pixel_shifts"
-        )
 
     org_header = org_img.getHeader()
     camera = org_header["CCD"]
@@ -3738,7 +3725,7 @@ def create_master_frame(in_images: List[str], out_image: str, batch_size: int = 
     # combine images
     log.info(f"combining {nexp} frames into master frame")
     if master_type == "bias":
-        master_img = combineImages(org_imgs, method="median", normalize=False)
+        master_img = combineImages(org_imgs, method="median", normalize=True, normalize_percentile=50)
     elif master_type == "dark":
         master_img = combineImages(org_imgs, method="median", normalize=False)
     elif master_type == "pixflat":

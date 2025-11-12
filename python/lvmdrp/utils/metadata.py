@@ -19,7 +19,7 @@ from astropy.table import Table
 from filelock import FileLock, Timeout
 from tqdm import tqdm
 
-from lvmdrp.core.constants import CALIBRATION_NEEDS, CAMERAS
+from lvmdrp.core.constants import CALIBRATION_NEEDS, ARC_LAMPS, CON_LAMPS
 from lvmdrp.utils.bitmask import (
     QualityFlag,
     ReductionStage,
@@ -54,6 +54,7 @@ RAW_METADATA_COLUMNS = [
     ("argon", bool),
     ("ldls", bool),
     ("quartz", bool),
+    ("calibfib", str),
     ("hartmann", str),
     ("qaqual", str),
     ("stage", ReductionStage),
@@ -77,6 +78,7 @@ MASTER_METADATA_COLUMNS = [
     ("argon", bool),
     ("ldls", bool),
     ("quartz", bool),
+    ("calibfib", str),
     ("hartmann", str),
     ("qaqual", str),
     ("stage", ReductionStage),
@@ -616,6 +618,7 @@ def extract_metadata(frames_paths: list, kind: str = "raw") -> pd.DataFrame:
                 header.get("ARGON", "OFF") in onlamp,
                 header.get("LDLS", "OFF") in onlamp,
                 header.get("QUARTZ", "OFF") in onlamp,
+                header.get("CALIBFIB", "None") or "None",
                 header.get("HARTMANN", "0 0"),
                 # header.get("QUALITY", "excellent"),
                 # QC pipeline keywords
@@ -644,6 +647,7 @@ def extract_metadata(frames_paths: list, kind: str = "raw") -> pd.DataFrame:
                 header.get("ARGON", "OFF") in onlamp,
                 header.get("LDLS", "OFF") in onlamp,
                 header.get("QUARTZ", "OFF") in onlamp,
+                header.get("CALIBFIB", "None") or "None",
                 header.get("HARTMANN", "0 0"),
                 # TODO: QUALITY may be redundant, double check and remove if it is
                 # header.get("QUALITY", "excellent"),
@@ -977,7 +981,21 @@ def update_metadata(mjd):
         extract_metadata(new_paths)
 
 
-def get_sequence_metadata(mjd, expnums=None, exptime=None, cameras=CAMERAS, for_cals={"bias", "trace", "wave", "dome", "twilight"}, extract_metadata=False):
+def get_calibration_selection(frames, calibration):
+    # definitions of calibration frames
+    if calibration == "bias":
+        return frames.imagetyp.values == "bias"
+    elif calibration in ["trace", "dome"]:
+        return ((frames.ldls|frames.quartz) & ~(frames.neon|frames.hgne|frames.argon|frames.xenon)).values
+    elif calibration == "wave":
+        return ((frames.neon|frames.hgne|frames.argon|frames.xenon) & ~(frames.ldls|frames.quartz)).values
+    elif calibration == "twilight":
+        return ((frames.imagetyp == "flat") & ~(frames.ldls|frames.quartz) & ~(frames.neon|frames.hgne|frames.argon|frames.xenon)).values
+    else:
+        return np.zeros(len(frames), dtype="bool")
+
+
+def get_calibrations_metadata(mjds, calibration, camera=None, expnums=None, exptime=None, lamps=None, hartmann="0 0", extract_metadata=False):
     """Get frames metadata for a given sequence
 
     Given a set of MJDs and (optionally) exposure numbers, get the frames
@@ -986,16 +1004,16 @@ def get_sequence_metadata(mjd, expnums=None, exptime=None, cameras=CAMERAS, for_
 
     Parameters:
     ----------
-    mjd : int
-        MJD to reduce
+    mjds : int|list[int]
+        Single MJD or a list of MJDs
+    calibration : str
+        Only return frames meant to produce given calibrations, {'bias', 'trace', 'wave', 'dome', 'twilight'}
+    camera : str
+        Camera (e.g., 'b1', 'r3', 'z2') to filter by
     expnums : list
         List of exposure numbers to reduce
     exptime : int
         Filter frames metadata by exposure
-    cameras : list
-        List of cameras (e.g., "b1", "r3") to filter by
-    for_cals : list, tuple or set, optional
-        Only return frames meant to produce given calibrations, {'bias', 'trace', 'wave', 'dome', 'twilight'}
     extract_metadata : bool
         Whether to extract metadata or not, by default False
 
@@ -1006,52 +1024,52 @@ def get_sequence_metadata(mjd, expnums=None, exptime=None, cameras=CAMERAS, for_
     masters_mjd : float
         MJD for master frames
     """
-    # get frames metadata
-    frames = get_frames_metadata(mjd=mjd, overwrite=extract_metadata)
-    frames.query("imagetyp in ['bias', 'flat', 'arc']", inplace=True)
-    if len(frames) == 0:
-        log.error(f"no calibration frames found for MJD = {mjd}")
-        return frames, {}
+    LAMPS = list(map(str.lower, ARC_LAMPS + CON_LAMPS))
+    if hartmann is not None and hartmann not in {"0 0", "1 0", "0 1", "1 1"}:
+        raise ValueError(f"Invalid value for `hartmann`: {hartmann}. Expected either '0 0', '1 0', '0 1' or '1 1'")
+    if lamps is not None and not np.isin(lamps, LAMPS).all():
+        raise ValueError(f"Invalid value for `lamps`: {lamps}. Expected values in {LAMPS}")
 
+    if lamps is not None and not isinstance(lamps, (tuple, list, set)):
+        lamps = [lamps]
+    if not isinstance(mjds, (tuple, list, set)):
+        mjds = [mjds]
+
+    # remove repeated MJDs and sort
+    mjds = sorted(set(mjds))
+
+    # get frames metadata
+    frames = [get_frames_metadata(mjd=mjd, overwrite=extract_metadata) for mjd in mjds]
+    frames = pd.concat([f for f in frames if not f.empty], ignore_index=True)
+    # remove bad exposures
+    frames.query("qaqual == 'GOOD'", inplace=True)
+    # group calibrations according to their type
+    selection = get_calibration_selection(frames, calibration=calibration)
+    frames = frames.loc[selection]
+    if frames.empty:
+        return pd.DataFrame(columns=list(zip(*RAW_METADATA_COLUMNS))[0])
+
+    # filter by hartmann door status
+    if hartmann is not None:
+        frames.query("hartmann == @hartmann", inplace=True)
     # filter by given expnums
     if expnums is not None:
         frames.query("expnum in @expnums", inplace=True)
-
     # filter by given exptime
     if exptime is not None:
         frames.query("exptime == @exptime", inplace=True)
-
-    if cameras:
-        frames.query("camera in @cameras", inplace=True)
-
-    # simple fix of imagetyp, some images have the wrong type in the header
-    bias_selection = (frames.imagetyp == "bias")
-    twilight_selection = (frames.imagetyp == "flat") & ~(frames.ldls|frames.quartz) & ~(frames.neon|frames.hgne|frames.argon|frames.xenon)
-    domeflat_selection = (frames.ldls|frames.quartz) & ~(frames.neon|frames.hgne|frames.argon|frames.xenon)
-    arc_selection = (frames.neon|frames.hgne|frames.argon|frames.xenon) & ~(frames.ldls|frames.quartz)
-    frames.loc[twilight_selection, "imagetyp"] = "flat"
-    frames.loc[domeflat_selection, "imagetyp"] = "flat"
-    frames.loc[arc_selection, "imagetyp"] = "arc"
-
-    found_cals = {'bias', 'trace', 'wave', 'dome', 'twilight'}
-    if bias_selection.sum() == 0 and "bias" in for_cals:
-        log.error("no bias exposures found")
-        found_cals.remove("bias")
-    elif domeflat_selection.sum() == 0 and "trace" in for_cals:
-        log.error("no dome flat exposures found")
-        found_cals.remove("trace")
-    elif arc_selection.sum() == 0 and "wave" in for_cals:
-        log.error("no arc exposures found")
-        found_cals.remove("wave")
-    elif domeflat_selection.sum() == 0 and "dome" in for_cals:
-        log.error("no dome flat exposures found")
-    elif twilight_selection.sum() == 0 and "twilight" in for_cals:
-        log.error("no twilight exposures found")
-        found_cals.remove("twilight")
+    # filter by given camera
+    if camera is not None:
+        frames.query("camera == @camera", inplace=True)
+    # filter by lamp ON status
+    if lamps is not None:
+        lamps_selection = np.logical_and.reduce([frames[lamp] for lamp in lamps], axis=0)
+        frames = frames.loc[lamps_selection]
 
     frames.sort_values(["expnum", "camera"], inplace=True)
+    frames.reset_index(drop=True, inplace=True)
 
-    return frames, found_cals
+    return frames
 
 
 # TODO: implement matching of analogs and calibration masters

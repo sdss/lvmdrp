@@ -66,6 +66,9 @@ EPHEMERIS_DIR = os.path.join(os.getenv("LVMCORE_DIR"), "etc")
 # fiducial calibrations directory
 MASTERS_DIR = os.getenv("LVM_MASTER_DIR")
 
+# path for pixel shifts table
+PIXELSHIFTS_PATH = os.path.join(os.getenv("LVMCORE_DIR"), "etc", "pixel_shifts.parquet")
+
 # path to validated electronic pixel shifts
 PIXELSHIFTS_DIR = os.path.join(os.getenv("LVMCORE_DIR"), "pixelshifts")
 
@@ -104,6 +107,17 @@ SKYCORR_PAR_MAP = {
     "PLOT_TYPE": "plotType",
 }
 
+# high-level calibration types
+CALIBRATION_TYPES = {"bias", "trace", "wave", "dome", "twilight"}
+# calibration products
+CALIBRATION_PRODUCTS = {"pixmask", "pixflat", "bias", "trace_guess", "centroids", "sigmas", "counts", "model", "wave", "lsf", "fiberflat_dome", "fiberflat_twilight"}
+# a map for high-level calibration types and their products
+CALIBRATION_MAPPINGS = {
+    "trace": ["centroids", "sigmas", "model"],
+    "wave": ["wave", "lsf"],
+    "dome": ["fiberflat_dome"],
+    "twilight": ["fiberflat_twilight"]}
+# calibration products needed depending on the type of frame
 CALIBRATION_NEEDS = {
     "bias": ["pixmask"],
     "pixflat": ["pixmask", "bias", "dark"],
@@ -113,12 +127,6 @@ CALIBRATION_NEEDS = {
     "twilight": ["pixmask", "pixflat", "bias", "centroids", "sigmas", "model", "wave", "lsf"],
     "object": ["pixmask", "pixflat", "bias", "centroids", "sigmas", "model", "wave", "lsf", "fiberflat_twilight"],
 }
-CALIBRATION_NAMES = {"pixmask", "pixflat", "bias", "trace_guess", "centroids", "sigmas", "counts", "model", "wave", "lsf", "fiberflat_dome", "fiberflat_twilight"}
-CALIBRATION_MATCH = {
-    "trace": ["centroids", "sigmas", "model"],
-    "wave": ["wave", "lsf"],
-    "dome": ["fiberflat_dome"],
-    "twilight": ["fiberflat_twilight"]}
 
 CAMERAS = ["b1", "b2", "b3", "r1", "r2", "r3", "z1", "z2", "z3"]
 
@@ -141,6 +149,33 @@ LVM_BLOCKSIZE = 36
 LVM_NFIBERS = LVM_NBLOCKS * LVM_BLOCKSIZE
 LVM_REFERENCE_COLUMN = 2000
 FIDUCIAL_PLATESCALE = 112.36748321030637 # Focal plane platescale in "/mm
+
+# standard fiber labels
+STD_FIBER_LABELS = [
+    'P1-1',
+    'P2-2',
+    'P1-4',
+    'P2-5',
+    'P2-8',
+    'P1-7',
+    'P2-11',
+    'P1-10',
+    'P1-3',
+    'P2-1',
+    'P1-6',
+    'P2-4',
+    'P2-7',
+    'P1-9',
+    'P2-10',
+    'P1-12',
+    'P1-2',
+    'P2-3',
+    'P1-5',
+    'P2-6',
+    'P2-9',
+    'P1-8',
+    'P2-12',
+    'P1-11']
 
 # GB hand picked isolated bright lines across each channel which are not doublest in UVES atlas
 # true wavelengths taken from UVES sky line atlas

@@ -20,8 +20,8 @@ from scipy import ndimage
 from scipy import interpolate
 
 from lvmdrp import log
-from lvmdrp.core.constants import CON_LAMPS, ARC_LAMPS, LVM_NBLOCKS, LVM_BLOCKSIZE
-from lvmdrp.core.plot import plt, plot_fiber_residuals
+from lvmdrp.core.constants import CON_LAMPS, ARC_LAMPS, LVM_NBLOCKS, LVM_BLOCKSIZE, LVM_REFERENCE_COLUMN
+from lvmdrp.core.plot import plt, plot_fiber_residuals, plot_exposed_std
 from lvmdrp.core.fit_profile import gaussians, PROFILES
 from lvmdrp.core.apertures import Apertures
 from lvmdrp.core.header import Header
@@ -404,7 +404,6 @@ class Image(Header):
 
     def __truediv__(self, other):
         return self._apply_operation(other, numpy.divide, 'div')
-        self.__mul__(other)
 
     def __lt__(self, other):
         return self._data < other
@@ -423,6 +422,15 @@ class Image(Header):
 
     def __ge__(self, other):
         return self._data >= other
+
+    def _filter_slitmap(self):
+        if self._slitmap is None:
+                raise ValueError(f"Attribute `_slitmap` needs to be set: {self._slitmap = }")
+        if self._header is None:
+            raise ValueError(f"Attribute `_header` needs to be set: {self._header = }")
+
+        slitmap = self._slitmap[self._slitmap["spectrographid"]==int(self._header["SPEC"][-1])]
+        return slitmap
 
     def add_header_comment(self, comstr):
         '''
@@ -738,29 +746,22 @@ class Image(Header):
 
     def getSlice(self, slice, axis):
         if axis == "X" or axis == "x" or axis == 0:
-            if self._error is not None:
-                error = self._error[slice, :]
-            else:
-                error = None
-            if self._mask is not None:
-                mask = self._mask[slice, :]
-            else:
-                mask = None
-            return Spectrum1D(
-                numpy.arange(self._dim[1]), self._data[slice, :], error, mask
-            )
+            data = self._data[slice, :]
+            pixels = numpy.arange(self._dim[1])
+            error = self._error[slice, :] if self._error is not None else None
+            mask = self._mask[slice, :] if self._mask is not None else None
         elif axis == "Y" or axis == "y" or axis == 1:
-            if self._error is not None:
-                error = self._error[:, slice]
-            else:
-                error = None
-            if self._mask is not None:
-                mask = self._mask[:, slice]
-            else:
-                mask = None
-            return Spectrum1D(
-                numpy.arange(self._dim[0]), self._data[:, slice], error, mask
-            )
+            data = self._data[:, slice]
+            pixels = numpy.arange(self._dim[0])
+            error = self._error[:, slice] if self._error is not None else None
+            mask = self._mask[:, slice] if self._mask is not None else None
+
+        if data.ndim == 2:
+            img_slice = Image(data=data, error=error, mask=mask)
+        else:
+            img_slice = Spectrum1D(wave=pixels, data=data, error=error, mask=mask)
+
+        return img_slice
 
     def setData(
         self, data=None, error=None, mask=None, header=None, select=None, inplace=True
@@ -1021,57 +1022,48 @@ class Image(Header):
             self.setHdrValue("NAXIS1", self._dim[1])
             self.setHdrValue("NAXIS2", self._dim[0])
 
-    def get_exposed_std(self, ref_column, fiber_pos=None, snr_threshold=5, trust_errors=True, ax=None):
+    def get_exposed_std(self, ref_column, width=100, fiber_pos=None, nsigmas=5, trust_errors=True, ax=None):
+        # TODO: this uses a global average of the SNR, use a per-block average instead to better
+        # capture the expected peak SNR across the fiber array
         if self._slitmap is None:
             raise ValueError(f"Slitmap attribute `self._slitmap` has to be defined: {self._slitmap = }")
 
         if fiber_pos is None:
             fiber_pos = self.match_reference_column(ref_column)
+        fiber_pos = fiber_pos.round().astype("int")
 
         slitmap = self._slitmap[self._slitmap["spectrographid"] == int(self._header["SPEC"][-1])]
         spec_select = slitmap["telescope"] == "Spec"
 
-        ids_std = slitmap[spec_select]["orig_ifulabel"]
-        pos_std = fiber_pos[spec_select].round().astype("int")
-        idx_std = numpy.arange(pos_std.size)
+        ids_std = slitmap[spec_select]["orig_ifulabel"].data
+        pos_std = fiber_pos[spec_select]
 
         expnum = self._header["EXPOSURE"]
-        column = self.getSlice(ref_column, axis="Y")
+        camera = self._header["CCD"]
+        hw = max(width // 2, 1)
+        column = self.getSlice(slice(ref_column-hw, ref_column+hw), axis="Y").collapseImg(mode="mean", axis="X")
         snr = (column._data / (column._error if trust_errors else numpy.sqrt(column._data)))
-        snr_med = biweight_location(snr[fiber_pos.round().astype("int")], ignore_nan=True)
-        snr_std = biweight_scale(snr[fiber_pos.round().astype("int")], ignore_nan=True)
-        snr_std_med = biweight_location(snr[pos_std], ignore_nan=True)
-        snr_std_std = biweight_scale(snr[pos_std], ignore_nan=True)
-
-        ax.set_title(f"{expnum = }", loc="left")
-        ax.axhspan(snr_med-snr_std, snr_med+snr_std, lw=0, fc="0.7", alpha=0.5)
-        ax.axhline(snr_med, lw=1, color="0.7")
-        ax.axhline(snr_std_med+snr_threshold*snr_std_std, ls="--", lw=1, color="tab:red")
-        ax.axhline(snr_std_med, lw=1, color="0.7")
-        ax.bar(idx_std, snr[pos_std], hatch="///////", lw=0, ec="tab:blue", fc="none", zorder=999)
-        ax.set_xticks(idx_std)
-        ax.set_xticklabels(ids_std)
-        ax.text(-0.7, snr_med, "Global median SNR", ha="left", va="bottom")
-        ax.text(-0.7, snr_std_med, "Stds. median SNR", ha="left", va="bottom")
-        ax.text(-0.7, snr_std_med+snr_threshold*snr_std_std, "Exposed threshold", ha="left", va="bottom", color="tab:red")
+        snr_all_mu = biweight_location(snr[fiber_pos], ignore_nan=True)
+        snr_all_sigma = biweight_scale(snr[fiber_pos], ignore_nan=True)
+        snr_std_mu = biweight_location(snr[pos_std], ignore_nan=True)
+        snr_std_sigma = biweight_scale(snr[pos_std], ignore_nan=True)
+        snr_all_stats = snr_all_mu, snr_all_sigma
+        snr_std_stats = snr_std_mu, snr_std_sigma
 
         # select standard fiber exposed if any
-        select_std = numpy.abs(snr[pos_std] - snr_std_med) / snr_std_std > snr_threshold
+        select_std = numpy.abs(snr[pos_std] - snr_std_mu) / snr_std_sigma > nsigmas
         exposed_std = ids_std[select_std]
         if select_std.sum() > 1:
             exposed_std_ = exposed_std[numpy.argmax(snr[pos_std[select_std]])]
-            warnings.warn(f"More than one standard fiber selected in {expnum = }: {','.join(exposed_std)}, selecting highest SNR: '{exposed_std_}'")
+            warnings.warn(f"More than one standard fiber selected in {expnum = } | {camera = }: {','.join(exposed_std)}, selecting highest SNR: '{exposed_std_}'")
             exposed_std = exposed_std_
         elif select_std.sum() > 0:
             exposed_std = exposed_std[0]
-        else:
-            return None, snr, snr_std, snr_std_med, snr_std_std
+        exposed_std = str(exposed_std) if exposed_std else None
 
-        # highlight exposed fiber in plot
-        select_exposed = ids_std == exposed_std
-        ax.bar(idx_std[select_exposed], snr[pos_std][select_exposed], hatch="///////", lw=0, ec="tab:red", fc="none", zorder=999)
+        plot_exposed_std(self, snr[pos_std], snr_all_stats, snr_std_stats, exposed_std, nsigmas=nsigmas, ax=ax)
 
-        return exposed_std, snr, snr_std, snr_std_med, snr_std_std
+        return exposed_std, snr, fiber_pos, snr_all_stats, snr_std_stats
 
     def loadFitsData(
         self,
@@ -1634,16 +1626,27 @@ class Image(Header):
             axis = 0
             dim = self._dim[1]
         # collapse the image to Spectrum1D object with requested operation
+
+        pixels = numpy.arange(dim)
         if mode == "mean":
-            return Spectrum1D(numpy.arange(dim), bn.nanmean(self._data, axis))
+            data = bn.nanmean(self._data, axis)
+            error = numpy.sqrt(bn.nanmean(self._error**2, axis)) if self._error is not None else None
+            mask = numpy.logical_or.reduce(self._mask, axis) if self._mask is not None else None
         elif mode == "sum":
-            return Spectrum1D(numpy.arange(dim), bn.nansum(self._data, axis))
+            data = bn.nansum(self._data, axis)
+            error = numpy.sqrt(bn.nansum(self._error**2, axis)) if self._error is not None else None
+            mask = numpy.logical_or.reduce(self._mask, axis) if self._mask is not None else None
         elif mode == "median":
-            return Spectrum1D(numpy.arange(dim), bn.nanmedian(self._data, axis))
-        elif mode == "min":
-            return Spectrum1D(numpy.arange(dim), bn.nanmin(self._data, axis))
-        elif mode == "max":
-            return Spectrum1D(numpy.arange(dim), bn.nanmax(self._data, axis))
+            data = bn.nanmedian(self._data, axis)
+            error = numpy.sqrt(bn.nanmedian(self._error**2, axis)) if self._error is not None else None
+            mask = numpy.logical_or.reduce(self._mask, axis) if self._mask is not None else None
+        elif mode in {"min", "max"}:
+            idx = bn.nanargmax(self._data) if mode == "max" else bn.nanargmin(self._data)
+            data = self._data[idx]
+            error = self._error[idx] if self._error is not None else None
+            mask = self._mask[idx] if self._mask is not None else None
+
+        return Spectrum1D(wave=pixels, data=data, error=error, mask=mask)
 
     def fitPoly(self, axis="y", order=4, plot=-1):
         """
@@ -2144,26 +2147,32 @@ class Image(Header):
 
         return stray_img, data_binned, error_binned, valid_bins
 
-    def match_reference_column(self, ref_column=2000, ref_centroids=None, stretch_range=[0.7, 1.3], shift_range=[-100, 100], return_pars=False):
+    def match_reference_column(self, ref_column=LVM_REFERENCE_COLUMN, width=100, ref_centroids=None, stretch_range=[0.7, 1.3], shift_range=[-100, 100], return_all=False):
         """Returns the reference centroids matched against the current image
 
         Parameters
         ----------
         ref_column : int, optional
             column to use as reference, by default 2000
+        width : int, optional
+            number of columns that will be combined, by default 100
         ref_centroids : numpy.ndarray, optional
             reference centroids to use for matching, by default None
         stretch_range : list, tuple, optional
             range of stretch factors to try, by default [0.7, 1.3]
         shift_range : list, tuple, optional
             range of shifts to try in pixels, by default [-100, 100]
-        return_pars : bool, optional
-            also returns a tuple with the strech and shift parameters, by default False
+        return_all : bool, optional
+            also returns the image slice and the strech and shift parameters, by default False
 
         Returns
         -------
         numpy.ndarray
             matched reference centroids
+        lvm.core.spectrum1d.Spectrum1d
+            image column used to match fiber centroid positions
+        {float, float}
+            mhat and bhat resulting from the cross-correlation matching
         """
         if self._header is None:
             raise ValueError("No header available")
@@ -2187,22 +2196,23 @@ class Image(Header):
         stretch_factors = numpy.arange(s_min, s_max+s_del, s_del)
 
         # correct reference fiber positions
-        profile = self.getSlice(ref_column, axis="y")
+        hw = max(width // 2, 1)
+        profile = self.getSlice(slice(ref_column-hw, ref_column+hw), axis="Y").collapseImg(mode="mean", axis="X")
         profile._data = numpy.nan_to_num(profile._data, nan=0, neginf=0, posinf=0)
         pixels = profile._pixels
         pixels = numpy.arange(pixels.size)
         guess_heights = numpy.ones_like(ref_centroids) * bn.nanmax(profile._data)
         ref_profile = _spec_from_lines(ref_centroids, sigma=1.2, wavelength=pixels, heights=guess_heights)
-        log.info(f"correcting guess positions for column {ref_column}")
+        # log.info(f"correcting guess positions for column {ref_column}")
         cc, bhat, mhat = _cross_match(
             ref_spec=ref_profile,
             obs_spec=profile._data,
             stretch_factors=stretch_factors,
             shift_range=shift_range)
-        log.info(f"stretch factor: {mhat:.3f}, shift: {bhat:.3f}")
+        # log.info(f"stretch factor: {mhat:.3f}, shift: {bhat:.3f}")
         ref_centroids = ref_centroids * mhat + bhat
-        if return_pars:
-            return ref_centroids, mhat, bhat
+        if return_all:
+            return ref_centroids, profile, mhat, bhat
         return ref_centroids
 
     def guess_fibers(self, ref_column=2000, ref_centroids=None, fwhms_guess=2.5,

@@ -8,6 +8,7 @@ import shutil
 import traceback
 import pandas as pd
 from typing import Union, List
+from collections.abc import Iterator
 from functools import lru_cache
 from itertools import groupby
 from pprint import pformat
@@ -677,7 +678,7 @@ def reduce_masters(mjd: int):
         reduce_frame(path, master=True, **row)
 
 
-def start_logging(mjd: int, tileid: int):
+def start_logging(mjd: int, tileid: int, for_calibrations=False):
     """ Starts a file logger
 
     Starts a file logger for a given MJD and tile ID.
@@ -688,10 +689,13 @@ def start_logging(mjd: int, tileid: int):
         The MJD of the observations
     tileid : int
         The tile ID of the observations
+    for_calibrations : bool, optional
+        Whether the run will be for calibrations or not, by default False
     """
     tilegrp = tileid_grp(tileid)
-    lpath = (os.path.join(os.getenv('LVM_SPECTRO_REDUX'),
-             "{drpver}/{tilegrp}/{tileid}/{mjd}/lvm-drp-{tileid}-{mjd}.log"))
+    lpath = os.path.join(os.getenv('LVM_SPECTRO_REDUX'),
+                         "{drpver}", "{tilegrp}", "{tileid}", "{mjd}",
+                         "lvm-calibrations-{tileid}-{mjd}.log" if for_calibrations else "lvm-drp-{tileid}-{mjd}.log")
     logpath = lpath.format(drpver=drpver, mjd=mjd, tileid=tileid, tilegrp=tilegrp)
     logpath = pathlib.Path(logpath)
 
@@ -1158,7 +1162,7 @@ def add_extension(hdu: Union[fits.ImageHDU, fits.BinTableHDU], filename: str):
             hdulist.flush()
 
 
-def _yield_dir(root: pathlib.Path, mjd: int) -> pathlib.Path:
+def _yield_dir(root: pathlib.Path, mjd: int) -> Iterator[pathlib.Path]:
     """ Iteratively yield a pathlib directory
 
     Parameters
@@ -1346,7 +1350,7 @@ def update_error_file(tileid: int, mjd: int, expnum: int, error: str,
         f.write('\n')
 
 
-def reduce_2d(mjd, calibrations, expnums=None, exptime=None, cameras=CAMERAS,
+def reduce_2d(mjds, calibrations, expnums=None, exptime=None, cameras=CAMERAS,
               replace_with_nan=True, assume_imagetyp=None, reject_cr=True,
               add_astro=True, sub_straylight=True, parallel_run=1,
               skip_done=True, keep_ancillary=False, **cfg_straylight):
@@ -1360,8 +1364,8 @@ def reduce_2d(mjd, calibrations, expnums=None, exptime=None, cameras=CAMERAS,
 
     Parameters:
     ----------
-    mjd : int
-        MJD to reduce
+    mjds : int|list[int]
+        Single MJD or a list of MJDs
     calibrations : dict[str, dict[str, str]]
         Paths to calibrations to use, including bias and pixel masks and flats
     expnums : list
@@ -1392,7 +1396,15 @@ def reduce_2d(mjd, calibrations, expnums=None, exptime=None, cameras=CAMERAS,
         Keep ancillary files, by default False
     """
 
-    frames = get_frames_metadata(mjd)
+    if isinstance(mjds, (list, tuple, set)):
+        for mjd in mjds:
+            reduce_2d(mjds=mjd, calibrations=calibrations, expnums=expnums, exptime=exptime, cameras=cameras,
+                      replace_with_nan=replace_with_nan, assume_imagetyp=assume_imagetyp, reject_cr=reject_cr,
+                      add_astro=add_astro, sub_straylight=sub_straylight, parallel_run=parallel_run,
+                      skip_done=skip_done, keep_ancillary=keep_ancillary, **cfg_straylight)
+        return
+
+    frames = get_frames_metadata(mjds)
     if expnums is not None:
         frames.query("expnum in @expnums", inplace=True)
     if exptime is not None:
@@ -1409,16 +1421,9 @@ def reduce_2d(mjd, calibrations, expnums=None, exptime=None, cameras=CAMERAS,
         imagetyp = assume_imagetyp or frame["imagetyp"]
 
         rframe_path = path.full("lvm_raw", camspec=frame["camera"], **frame)
-        eframe_path = path.full("lvm_anc", drpver=drpver, kind="e", imagetype=imagetyp, **frame)
-        frame_path = eframe_path if os.path.exists(eframe_path) else rframe_path
         pframe_path = path.full("lvm_anc", drpver=drpver, kind="p", imagetype=imagetyp, **frame)
         lframe_path = path.full("lvm_anc", drpver=drpver, kind="l", imagetype=imagetyp, **frame)
         lstr_path = path.full("lvm_anc", drpver=drpver, kind="d", imagetype="stray", **frame)
-
-        # define agc coadd path
-        agcsci_path = path.full('lvm_agcam_coadd', mjd=mjd, specframe=frame["expnum"], tel='sci')
-        agcskye_path = path.full('lvm_agcam_coadd', mjd=mjd, specframe=frame["expnum"], tel='skye')
-        agcskyw_path = path.full('lvm_agcam_coadd', mjd=mjd, specframe=frame["expnum"], tel='skyw')
 
         # bypass creation of detrended frame in case of imagetyp=bias
         if imagetyp != "bias":
@@ -1432,20 +1437,22 @@ def reduce_2d(mjd, calibrations, expnums=None, exptime=None, cameras=CAMERAS,
             log.info(f"skipping {final_2d_dp}, file already exist")
         else:
             with Timer(name='Preproc '+pframe_path, logger=log.info):
-                preproc_raw_frame(in_image=frame_path, out_image=pframe_path,
-                                  in_mask=calibrations["pixmask"][camera], replace_with_nan=replace_with_nan, assume_imagetyp=assume_imagetyp)
-            if imagetyp == "bias":
-                continue
+                preproc_raw_frame(in_image=rframe_path, out_image=pframe_path,
+                                  in_mask=calibrations.get("pixmask", {}).get(camera), replace_with_nan=replace_with_nan, assume_imagetyp=assume_imagetyp)
             with Timer(name='Detrend '+dframe_path, logger=log.info):
                 detrend_frame(in_image=pframe_path, out_image=dframe_path,
-                            in_bias=calibrations["bias"][camera],
-                            in_pixelflat=calibrations["pixflat"][camera],
+                            in_bias=calibrations.get("bias", {}).get(camera),
+                            in_pixelflat=calibrations.get("pixflat", {}).get(camera),
                             replace_with_nan=replace_with_nan,
                             reject_cr=reject_cr,
                             in_slitmap=fibermap if imagetyp in {"flat", "arc", "object"} else None)
 
             # add astrometry to frame
             if add_astro:
+                # define agc coadd path
+                agcsci_path = path.full('lvm_agcam_coadd', mjd=mjds, specframe=frame["expnum"], tel='sci')
+                agcskye_path = path.full('lvm_agcam_coadd', mjd=mjds, specframe=frame["expnum"], tel='skye')
+                agcskyw_path = path.full('lvm_agcam_coadd', mjd=mjds, specframe=frame["expnum"], tel='skyw')
                 with Timer(name='Astrometry '+dframe_path, logger=log.info):
                     add_astrometry(in_image=dframe_path, out_image=dframe_path, in_agcsci_image=agcsci_path, in_agcskye_image=agcskye_path, in_agcskyw_image=agcskyw_path)
 
@@ -1459,7 +1466,7 @@ def reduce_2d(mjd, calibrations, expnums=None, exptime=None, cameras=CAMERAS,
                         nsigma=1.0, smoothing=40, median_box=None)
                     straylight_pars.update(cfg_straylight)
                     subtract_straylight(in_image=dframe_path, out_image=lframe_path, out_stray=lstr_path,
-                                        in_cent_trace=calibrations["centroids"][camera], parallel=parallel_run, **straylight_pars)
+                                        in_cent_trace=calibrations.get("centroids", {}).get(camera), parallel=parallel_run, **straylight_pars)
 
 
 def reduce_1d(mjd, calibrations, expnums=None, cameras=CAMERAS, replace_with_nan=True, sub_straylight=True, skip_done=True, keep_ancillary=False):
@@ -1587,7 +1594,7 @@ def science_reduction(expnum: int,
     calibs, cals_mjd = get_calib_paths(
         mjd=sci_mjd,
         version=drpver,
-        longterm_cals=use_longterm_cals,
+        nightly=not use_longterm_cals,
         from_sandbox=from_sandbox,
         flavors=["pixmask", "pixflat", "bias", "centroids", "sigmas", "model", "wave", "lsf", "fiberflat_twilight"],
         return_mjd=True)
@@ -1606,7 +1613,7 @@ def science_reduction(expnum: int,
         log.info("skipping 2D reduction")
     else:
         with Timer(name='Reduce2d', logger=log.info):
-            reduce_2d(mjd=sci_mjd, calibrations=calibs, expnums=[sci_expnum], reject_cr=reject_cr, skip_done=False)
+            reduce_2d(mjds=sci_mjd, calibrations=calibs, expnums=[sci_expnum], reject_cr=reject_cr, skip_done=False)
 
     # run reduction loop for each science camera exposure
     if skip_1d:
@@ -1816,7 +1823,7 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
     # write_config_file()
 
     if mjd is None and expnum is None:
-        log.error(f"you must provide either an exposure number `expnum` or an MJD `mjd`. None was given")
+        log.error("you must provide either an exposure number `expnum` or an MJD `mjd`. None was given")
         return
 
     if mjd is None:

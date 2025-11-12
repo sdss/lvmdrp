@@ -591,17 +591,17 @@ def plot_wavesol_wave(xpix, ref_waves, lines_pixels, wave_poly, wave_coeffs, ax=
         wave_sol[i] = wave_poly(wave_coeffs[i])(xpix)
         wave_lin[i] = wave_poly(wave_coeffs[i]).truncate(2)(xpix)
         wave_lin_ref = wave_poly(wave_coeffs[i]).truncate(2)(lines_pixels)
-        ax.plot(xpix, (wave_lin - wave_sol)[i], color="tab:blue", alpha=0.3, lw=1)
+        ax.plot(xpix, (wave_sol - wave_lin)[i], color="tab:blue", alpha=0.3, lw=1)
 
         ax.plot(
             lines_pixels[i],
-            wave_lin_ref[i] - ref_waves,
+            ref_waves - wave_lin_ref[i],
             ".",
             ms=4,
             color="k",
             zorder=999
         )
-    ax.plot(xpix, wave_lin.mean(0) - wave_sol.mean(0), lw=1, color="tab:blue")
+    ax.plot(xpix, wave_sol.mean(0) - wave_lin.mean(0), lw=1, color="tab:blue")
     if labels:
         ax.set_xlabel("X (pixel)")
         ax.set_ylabel("Wavelength model - linear terms (Angstrom)")
@@ -659,20 +659,20 @@ def plot_wavesol_lsf(xpix, lsf, lines_pixels, wave_poly, wave_coeffs, lsf_poly, 
         lsf_sol[i] = lsf_poly(lsf_coeffs[i])(xpix)
         lsf_lin[i] = lsf_poly(lsf_coeffs[i]).truncate(2)(xpix)
         lsf_lin_ref = lsf_poly(lsf_coeffs[i]).truncate(2)(lines_pixels)
-        ax.plot(xpix, (lsf_lin - lsf_sol)[i], color="tab:red", alpha=0.3, lw=1)
+        ax.plot(xpix, (lsf_sol - lsf_lin)[i], color="tab:red", alpha=0.3, lw=1)
 
         dwave[i] = np.abs(np.gradient(wave_sol[i]))
         dw = np.interp(lines_pixels[i], xpix, dwave[i])
 
         ax.plot(
             lines_pixels[i],
-            lsf_lin_ref[i] - dw * lsf[i],
+            dw * lsf[i] - lsf_lin_ref[i],
             ".",
             ms=4,
             color="k",
             zorder=999
         )
-    ax.plot(xpix, lsf_lin.mean(0) - lsf_sol.mean(0), lw=1, color="tab:red")
+    ax.plot(xpix, lsf_sol.mean(0) - lsf_lin.mean(0), lw=1, color="tab:red")
     if labels:
         ax.set_xlabel("X (pixel)")
         ax.set_ylabel("LSF model - linear term (Angstrom)")
@@ -831,6 +831,45 @@ def plot_flat_consistency(fflats, mflat, spec_wise=False, log_scale=False, label
         axs[0].legend(loc=1, frameon=False, fontsize="small")
 
     return axs
+
+
+def plot_exposed_std(image, snr_std, snr_all_stats, snr_std_stats, exposed_std, nsigmas, labels=False, ax=None):
+    if ax is None:
+        return
+
+    expnum = image._header["EXPOSURE"]
+    camera = image._header["CCD"]
+
+    slitmap = image._slitmap[image._slitmap["spectrographid"] == int(camera[1])]
+    spec_select = slitmap["telescope"] == "Spec"
+    ids_std = slitmap[spec_select]["orig_ifulabel"]
+    idx_std = np.arange(ids_std.size)
+
+    snr_all_mu, snr_all_sigma = snr_all_stats
+    snr_std_mu, snr_std_sigma = snr_std_stats
+    threshold = snr_std_mu + nsigmas * snr_std_sigma
+
+    ax.set_title(f"{expnum = } | {camera = }", loc="left")
+    ax.axhspan(snr_all_mu-snr_all_sigma, snr_all_mu+snr_all_sigma, lw=0, fc="0.7", alpha=0.5)
+    ax.axhline(snr_all_mu, lw=1, color="0.7")
+    ax.axhline(threshold, ls="--", lw=1, color="tab:red")
+    ax.axhline(snr_std_mu, lw=1, color="0.7")
+    ax.bar(idx_std, snr_std, hatch="///////", lw=0, ec="tab:blue", fc="none", zorder=999)
+    ax.set_xticks(idx_std)
+    ax.set_xticklabels(ids_std)
+    ax.text(-0.7, snr_all_mu, "Global mean SNR", ha="left", va="bottom")
+    ax.text(-0.7, snr_std_mu, "Stds. mean SNR", ha="left", va="bottom")
+    ax.text(-0.7, threshold, "Exposed threshold", ha="left", va="bottom", color="tab:red")
+
+    if labels:
+        ax.set_xlabel("Standard fibers")
+        ax.set_ylabel("SNR")
+
+    # highlight exposed fiber in plot
+    select_exposed = ids_std == exposed_std
+    ax.bar(idx_std[select_exposed], snr_std[select_exposed], hatch="///////", lw=0, ec="tab:red", fc="none", zorder=999)
+
+    return ax
 
 
 def ifu_view(slitmap=None, z=None, rss=None, cwave=None, dwave=None, comb_stat=None, telescope="Sci", use_world_coords=False,
