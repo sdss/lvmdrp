@@ -180,7 +180,7 @@ def get_standards_sequence(frames, camera, ring="primary"):
     # targeted standards in all spectrographs (i.e., all standards in a given ring or both rings)
     standards_ring = set(_get_standards_ring(ring=ring))
     # selection of standards present in the current camera spectrograph
-    standards_selection = standards.intersection(standards_ring)
+    standards_selection = standards.intersection(standards_ring) # noqa: F841
 
     return frames.query("camera == @camera and calibfib in @standards_selection")
 
@@ -245,7 +245,7 @@ def choose_sequence(frames, calibration, ref_mjd=None, kind="longterm", ring="pr
         return chosen_frames, chosen_frames.expnum.unique()
 
     # select frames with requested standard fibers
-    standards_sequence = _get_standards_ring(ring=ring)
+    standards_sequence = _get_standards_ring(ring=ring) # noqa: F841
     chosen_frames.query("calibfib in @standards_sequence", inplace=True)
 
     # select exposures around a given reference or just the first ocurrence of each standard fiber without sorting

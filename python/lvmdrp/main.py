@@ -8,6 +8,7 @@ import shutil
 import traceback
 import pandas as pd
 from typing import Union, List
+from collections.abc import Iterator
 from functools import lru_cache
 from itertools import groupby
 from pprint import pformat
@@ -1161,7 +1162,7 @@ def add_extension(hdu: Union[fits.ImageHDU, fits.BinTableHDU], filename: str):
             hdulist.flush()
 
 
-def _yield_dir(root: pathlib.Path, mjd: int) -> pathlib.Path:
+def _yield_dir(root: pathlib.Path, mjd: int) -> Iterator[pathlib.Path]:
     """ Iteratively yield a pathlib directory
 
     Parameters
