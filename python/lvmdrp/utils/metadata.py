@@ -938,7 +938,7 @@ def get_metadata(
         metadatas.append(metadata)
 
     if not metadatas:
-        return
+        return default_output
 
     metadata = pd.concat(metadatas, axis="index", ignore_index=True)
     # filter by exposure number, spectrograph and/or camera
@@ -970,7 +970,9 @@ def update_metadata(mjd):
 
     paths = np.asarray(sorted(path.expand("lvm_raw", hemi="s", camspec="*", mjd=mjd, expnum="????????")))
     names = np.asarray([os.path.basename(p).replace(".gz", "") for p in paths])
-    old_names = np.asarray(sorted(get_metadata(mjd=mjd, tileid="*")["name"].tolist()))
+
+    metadata = get_metadata(mjd=mjd, tileid="*")
+    old_names = np.asarray(sorted(metadata["name"].tolist()))
 
     new_selection = ~np.isin(names, old_names)
     npaths = new_selection.sum()
