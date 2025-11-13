@@ -13,6 +13,7 @@ from typing import Tuple, List
 from copy import deepcopy as copy
 import numpy as np
 from astropy.table import Table
+from scipy.ndimage import median_filter
 from scipy import interpolate
 from matplotlib.gridspec import GridSpec
 
@@ -462,8 +463,8 @@ def get_flatfield(rss, ref_kind=lambda x: biweight_location(x, ignore_nan=True),
                 continue
 
             select = np.isfinite(spec._data)
-            spec._data[select] = butter_lowpass_filter(spec._data[select], smoothing, nyq)
-            spec._error[select] = np.sqrt(butter_lowpass_filter(spec._error[select]**2, smoothing, nyq))
+            spec._data[select] = butter_lowpass_filter(median_filter(spec._data[select], 51), smoothing, nyq)
+            spec._error[select] = np.sqrt(butter_lowpass_filter(median_filter(spec._error[select]**2, 51), smoothing, nyq))
 
             flatfield.setSpec(ifiber, spec)
 

@@ -18,9 +18,8 @@ except ImportError:
     queue = None
 
 
-
 def run_cluster(mjds: list = None, expnums: Union[list, str] = None, nodes: int = 2, ppn: int = 64, walltime: str = '24:00:00',
-                alloc: str = 'sdss-np', submit: bool = True, run_calibs: str = None, drp_options: str = None, dry_run: bool = False):
+                alloc: str = 'sdss-np', submit: bool = True, drp_options: str = None, dry_run: bool = False):
     """ Submit a slurm cluster Utah job
 
     Creates the cluster job at $SLURM_SCRATCH_DIR, e.g /scratch/general/nfs1/[unid]/pbs
@@ -58,7 +57,7 @@ def run_cluster(mjds: list = None, expnums: Union[list, str] = None, nodes: int 
     """
 
     if not queue and not dry_run:
-        log.error('No slurm queue module available.  Cannot submit cluster run.')
+        log.error('No slurm queue module available. Cannot submit cluster run.')
         return
 
     # create the slurm queue
@@ -69,13 +68,8 @@ def run_cluster(mjds: list = None, expnums: Union[list, str] = None, nodes: int 
     else:
         q = []
 
-    cmd = "run"
-    if run_calibs is not None:
-        expnums = None
-        cmd = f"calibrations {run_calibs}"
-    else:
-        # skip drpall summary file in cluster runs to avoid race condition errors
-        drp_options += " --skip-drpall" if "--skip-drpall" not in drp_options else ""
+    # skip drpall summary file in cluster runs to avoid race condition errors
+    drp_options += " --skip-drpall" if "--skip-drpall" not in drp_options else ""
 
     if expnums is not None:
         if isinstance(expnums, str) and os.path.isfile(expnums):
@@ -92,15 +86,52 @@ def run_cluster(mjds: list = None, expnums: Union[list, str] = None, nodes: int 
     else:
         # get a list of mjds
         mjds = mjds or sorted(os.listdir(os.getenv('LVM_DATA_S')))
+        mjds = list(filter(lambda mjd: mjd.isdigit() if isinstance(mjd, str) else True, mjds))
 
         for mjd in mjds:
-            script = f"umask 002 && drp {cmd} -m {mjd} {drp_options}"
+            script = f"umask 002 && drp run -m {mjd} {drp_options}"
             q.append(script)
 
     # submit the queue
     if not dry_run:
         q.commit(hard=True, submit=submit)
     else:
-        log.info("queue for cluster run:")
+        log.info(f"queue for cluster run with {len(q)} nights:")
+        for run_ in q:
+            log.info(f"   {run_}")
+
+
+def run_cluster_cals(mjds: list = None, from_epochs: bool = True, nodes: int = 2, ppn: int = 64, walltime: str = '24:00:00',
+                     alloc: str = 'sdss-np', submit: bool = True, routine: str = "long-term", drp_options: str = None,
+                     dry_run: bool = False):
+
+
+    if not queue and not dry_run:
+        log.error('No slurm queue module available. Cannot submit cluster run.')
+        return
+
+    # create the slurm queue
+    if not dry_run:
+        q = queue()
+        q.verbose = True
+        q.create(label='lvm_cals', nodes=nodes, ppn=ppn, walltime=walltime, alloc=alloc, shared=True)
+    else:
+        q = []
+
+    cmd = f"calibrations {routine}{' --from-epochs' if from_epochs else ''}"
+
+    # get a list of mjds
+    mjds = mjds or sorted(os.listdir(os.getenv('LVM_DATA_S')))
+    mjds = list(filter(lambda mjd: mjd.isdigit() if isinstance(mjd, str) else True, mjds))
+
+    for mjd in mjds:
+        script = f"umask 002 && drp {cmd} -m {mjd} {drp_options}"
+        q.append(script)
+
+    # submit the queue
+    if not dry_run:
+        q.commit(hard=True, submit=submit)
+    else:
+        log.info(f"queue for calibrations cluster run with {len(q)} MJDs:")
         for run_ in q:
             log.info(f"   {run_}")

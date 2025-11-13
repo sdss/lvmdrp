@@ -92,6 +92,7 @@ def write_hdrfix_file(mjd: int, fileroot: str, keyword: str, value: str):
 
     read_hdrfix_file.cache_clear()
     fix = read_hdrfix_file.__wrapped__(mjd)
+    # fix = read_hdrfix_file(mjd)
     if fix is None or fix.empty:
         fix = pd.DataFrame.from_dict([{'fileroot': fileroot, 'keyword': keyword, 'value': value}])
     else:
@@ -162,7 +163,7 @@ def apply_hdrfix(mjd: int, camera: str = None, expnum: int = None,
         hdr = fits.getheader(filename)
     elif hdr:
         # assume these are correct in the headers, may need to change this
-        mjd = hdr.get("MJD")
+        # mjd = hdr.get("MJD")
         expnum = hdr.get("EXPOSURE")
         camera = hdr.get("CCD")
     elif not (mjd and camera and expnum):

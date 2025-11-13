@@ -5,7 +5,7 @@ import pandas as pd
 
 from typing import List, Union
 
-from lvmdrp.core.constants import CALIBRATION_NAMES, CAMERAS, MASTERS_DIR
+from lvmdrp.core.constants import CALIBRATION_PRODUCTS, CAMERAS, MASTERS_DIR
 from lvmdrp import path, __version__ as drpver
 from lvmdrp.utils.convert import tileid_grp
 from lvmdrp.utils import metadata as md
@@ -64,7 +64,7 @@ def mjd_from_expnum(expnum: Union[int, str, list, tuple]) -> List[int]:
     return [int(mjd)]
 
 
-def get_calib_paths(mjd, version=None, cameras="*", flavors=CALIBRATION_NAMES, longterm_cals=True, from_sandbox=False, return_mjd=False):
+def get_calib_paths(mjd, version=None, cameras="*", flavors=CALIBRATION_PRODUCTS, nightly=False, from_sandbox=True, return_mjd=False, only_existing=False):
     """Returns a dictionary containing paths for calibration frames
 
     Parameters
@@ -77,10 +77,14 @@ def get_calib_paths(mjd, version=None, cameras="*", flavors=CALIBRATION_NAMES, l
         List of cameras or wildcard to match, by default '*'
     flavors : list, tuple or set
         Only get paths for this calibrations, by default all available flavors
-    longterm_cals : bool
-        Whether to use long-term calibration frames or not, defaults to True
+    nightly : bool
+        Whether get nightly calibration or long-term paths, defaults to False
     from_sandbox : bool, optional
         Fall back option to pull calibrations from sandbox, by default False
+    return_mjd : bool, optional
+        Return MJD of the selected calibrations, by default False
+    only_existing : bool, optional
+        Return only existing paths in calibrations dictionary, by default False
 
     Returns
     -------
@@ -90,10 +94,6 @@ def get_calib_paths(mjd, version=None, cameras="*", flavors=CALIBRATION_NAMES, l
     if version is None and not from_sandbox:
         raise ValueError(f"You must provide a version string to get calibration paths, {version = } given")
 
-    # make long-term if taking calibrations from sandbox (nightly calibrations are not stored in sandbox)
-    if from_sandbox:
-        longterm_cals = True
-
     cams = fnmatch.filter(CAMERAS, cameras)
     channels = "".join(sorted(set(map(lambda c: c.strip("123"), cams))))
 
@@ -101,7 +101,7 @@ def get_calib_paths(mjd, version=None, cameras="*", flavors=CALIBRATION_NAMES, l
     tilegrp = tileid_grp(tileid)
 
     # get long-term MJDs from sandbox using get_master_mjd, else use given MJD
-    cals_mjd = get_master_mjd(mjd) if longterm_cals else mjd
+    cals_mjd = get_master_mjd(mjd) if from_sandbox else mjd
 
     # define root path to pixel flats and masks
     # TODO: remove this once sdss-tree are updated with the corresponding species
@@ -129,9 +129,20 @@ def get_calib_paths(mjd, version=None, cameras="*", flavors=CALIBRATION_NAMES, l
         if path_species == "lvm_calib":
             prefix = ""
         else:
-            prefix = "m" if flavor in ["bias", "fiberflat_twilight"] or longterm_cals else "n"
+            prefix = "n" if nightly and flavor not in ["bias", "fiberflat_twilight"] else "m"
 
         calibs[flavor] = {c: path.full(path_species, drpver=version, tileid=tileid, mjd=cals_mjd, kind=f"{prefix}{flavor}", camera=c) for c in cam_or_chan}
+
+    if only_existing:
+        calibs = {
+            flavor: {
+                cam: path
+                for cam, path in calibs[flavor].items()
+                if os.path.exists(path)
+            }
+            for flavor in calibs
+            if any(os.path.exists(p) for p in calibs[flavor].values())
+        }
 
     if return_mjd:
         return calibs, cals_mjd
