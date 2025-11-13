@@ -1320,7 +1320,7 @@ def science_sensitivity(rss, res_sci, ext, GAIA_CACHE_DIR, NSCI_MAX=15, r_spaxel
             # skip if the there are multiple stars in this fiber
             assert(fibs[i] != -1)
             if np.count_nonzero(fibs == fib) > 1:
-                log.info(f'dropping gaia star {data['source_id']} in fiber {fib}, multiple stars')
+                log.info(f"dropping gaia star {data['source_id']} in fiber {fib}, multiple stars")
                 continue
             # if we found a single star in a fiber
             gflux = calibrated_spectra.iloc[i].flux
