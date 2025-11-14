@@ -3060,7 +3060,7 @@ def join_spec_channels(in_fframes: List[str], out_cframe: str, use_weights: bool
                        wave=new_rss._wave, lsf=new_rss._lsf,
                        sky_east=new_rss._sky_east, sky_east_error=new_rss._sky_east_error,
                        sky_west=new_rss._sky_west, sky_west_error=new_rss._sky_west_error,
-                       fluxcal_std=new_rss._fluxcal_std, fluxcal_sci=new_rss._fluxcal_sci, slitmap=new_rss._slitmap)
+                       fluxcal_std=new_rss._fluxcal_std, fluxcal_sci=new_rss._fluxcal_sci, fluxcal_mod=new_rss._fluxcal_mod, slitmap=new_rss._slitmap)
 
     # write output RSS
     if out_cframe is not None:

@@ -2014,7 +2014,7 @@ def detrend_calibrations(mjd, calibration, dry_run=False, skip_done=True):
     frames = md.get_calibrations_metadata(mjds=mjd, calibration=calibration)
     frames = frames.loc[~frames.calibfib.isin(STD_FIBER_LABELS)]
     if frames.empty:
-        log.error("no bias frames found, skipping production of bias frames")
+        log.error(f"no frames for '{calibration}' found, skipping detrending")
         return
 
     # define master paths for target frames

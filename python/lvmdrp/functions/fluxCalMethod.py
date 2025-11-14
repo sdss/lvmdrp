@@ -752,7 +752,7 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
             sens_coef = gaia_flux/lvmflux
             #print(f'lvmflux={lvmflux}, gaia_flux={gaia_flux}, converted to gaia flux = {lvmflux*sens_coef}')
 
-            res_mod[f"STD{i}SEN"] = s(w[n_chan]).astype(np.float32)*sens_coef
+            res_mod[f"STD{i+1}SEN"] = s(w[n_chan]).astype(np.float32)*sens_coef
             sens = sens0*sens_coef
 
             # fig_path = in_rss[n_chan]

@@ -1640,7 +1640,7 @@ def quick_sky_subtraction(in_cframe, out_sframe, skymethod: str = 'farlines_near
     log.info(f"writing lvmSframe to {out_sframe}")
     sframe = lvmSFrame(data=skysub_data, error=skysub_error, mask=cframe._mask.astype(bool), sky=skydata, sky_error=sky_error,
                        wave=cframe._wave, lsf=cframe._lsf, header=cframe._header,
-                       fluxcal_std=cframe._fluxcal_std, fluxcal_sci=cframe._fluxcal_sci,
+                       fluxcal_std=cframe._fluxcal_std, fluxcal_sci=cframe._fluxcal_sci, fluxcal_mod=cframe._fluxcal_mod,
                        slitmap=cframe._slitmap)
     sframe._mask |= ~np.isfinite(sframe._error)
     sframe.writeFitsData(out_sframe)
