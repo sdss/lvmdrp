@@ -483,33 +483,14 @@ def prepare_spec(in_rss, width=3):
     )
 
 
-def calc_transmission(trans_ma, fH2O, pwv, zenith_angle):
-    """
-    According to formulae 4 and 5 from Noll et al. 2025
-    PALACE v1.0: Paranal Airglow Line  And Continuum Emission model
-    """
-    cosz = np.cos(np.deg2rad(zenith_angle))
-    XZ = 1.0 / (cosz + 0.025 * np.exp(-11.0 * cosz))
-    rpwv = pwv / 2.5 - 1
-    return np.power(trans_ma, (1.0 + rpwv * fH2O) * XZ)
-
-
-def rebin_and_convolve(wave_target, wave_source, flux_source, lsf_px):
-    """Rebin and convolve spectrum to target wavelength grid."""
-    rebinned = fluxcal.fluxconserve_rebin(wave_target, wave_source, flux_source)
-    convolved = fluxcal.lsf_convolve_fast(rebinned, lsf_px)
-    return convolved
-
-
-def _residual_function(params, y_obs, valid_mask, za, trans_wave, trans_ma,
-                       trans_fH2O, waves, lsfs, return_components=False):
+def _residual_function(params, y_obs, valid_mask, za, telluric_corrector,
+                       waves, lsfs, return_components=False):
     """Compute residuals between observed and model transmission."""
 
     pwv = params['pwv'].value
-    trans_hr = calc_transmission(trans_ma, trans_fH2O, pwv, za)
 
-    model_r = rebin_and_convolve(waves[0], trans_wave, trans_hr, lsfs[0])
-    model_z = rebin_and_convolve(waves[1], trans_wave, trans_hr, lsfs[1])
+    model_r = telluric_corrector.match_to_data(waves[0], lsfs[0], pwv, za)
+    model_z = telluric_corrector.match_to_data(waves[1], lsfs[1], pwv, za)
 
     resid_r = y_obs[0] - model_r
     resid_z = y_obs[1] - model_z
@@ -641,7 +622,7 @@ def _qa_plot_pwv_calculation(fig_out, wave_channels, y_data, model_trans, residu
             log.warning(f"Could not save PNG file: {e}. Only HTML saved.")
 
 
-def calc_pwv(wave, spec, lsf, stellar_model, trans_wave, trans_ma, trans_fH2O,
+def calc_pwv(wave, spec, lsf, stellar_model, telluric_corrector,
              pwv_init=3.0, pwv_bounds=(0.5, 50.0), zenith_angle=0.0, fig_out=None,
              std_info=None):
     """
@@ -654,9 +635,7 @@ def calc_pwv(wave, spec, lsf, stellar_model, trans_wave, trans_ma, trans_fH2O,
         spec: Observed spectra for [r_channel, z_channel]
         lsf: Line spread functions for [r_channel, z_channel]
         stellar_model: Model stellar spectra for [r_channel, z_channel]
-        trans_wave: Transmission wavelength grid
-        trans_ma: Molecular absorption transmission from Palace with removed ozone contribution
-        trans_fH2O: H2O transmission factor
+        telluric_corrector: TelluricCorrector instance for telluric transmission calculations
         pwv_init: Initial PWV guess in mm (default: 3.0)
         pwv_bounds: PWV fitting bounds in mm (default: (0.5, 50.0))
         zenith_angle: Observation zenith angle in degrees (default: 0.0)
@@ -670,13 +649,10 @@ def calc_pwv(wave, spec, lsf, stellar_model, trans_wave, trans_ma, trans_fH2O,
     Z_CHANNEL = dict(deg=2, cont_regions=[[7780, 7860], [8050, 8085], [8440, 8480]])
     regions_info = [R_CHANNEL, Z_CHANNEL]
 
-    # Trim transmission curves to relevant wavelength range
+    # Set wavelength range for efficiency (only compute transmission where needed)
     wave_min = R_CHANNEL['cont_regions'][0][0] - 50
     wave_max = Z_CHANNEL['cont_regions'][-1][1] + 50
-    trans_mask = (trans_wave >= wave_min) & (trans_wave <= wave_max)
-    trans_wave = trans_wave[trans_mask]
-    trans_ma = trans_ma[trans_mask]
-    trans_fH2O = trans_fH2O[trans_mask]
+    telluric_corrector.set_wave_range(wave_min, wave_max)
 
     # Build wavelength masks for continuum fitting and full regions
     continuum_masks = []
@@ -731,14 +707,14 @@ def calc_pwv(wave, spec, lsf, stellar_model, trans_wave, trans_ma, trans_fH2O,
 
     result = minimize(_residual_function, params, method='leastsq',
                       args=(y_data, valid_masks, zenith_angle,
-                            trans_wave, trans_ma, trans_fH2O,
+                            telluric_corrector,
                             wave_channels, lsf_channels))
 
     if fig_out is not None:
         # Get best-fit model and residuals
         resid_r, resid_z, model_r, model_z = _residual_function(
             result.params, y_data, valid_masks, zenith_angle,
-            trans_wave, trans_ma, trans_fH2O, wave_channels, lsf_channels,
+            telluric_corrector, wave_channels, lsf_channels,
             return_components=True
         )
 
@@ -757,6 +733,9 @@ def calc_pwv(wave, spec, lsf, stellar_model, trans_wave, trans_ma, trans_fH2O,
             fig_out, wave_channels, y_data, model_trans, residuals,
             obs_stellar_ratios, poly_continuum_fits, continuum_regions,
             result, zenith_angle, rms, save_png=False, std_info=std_info)
+
+    # Reset wavelength range to full model
+    telluric_corrector.reset_wave_range()
 
     return result.params['pwv'].value, result.params['pwv'].stderr
 
@@ -807,8 +786,9 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
     n_models = len(model_names)
     log.info(f'Number of models: {n_models}')
 
-    # Reading Sky Model table to get transmission curve
-    skytab = fits.getdata(models_dir + '/transmission_from_Palace_SkyModel_step0.2.fits')
+    # Initialize TelluricCorrector to handle atmospheric transmission calculations
+    skymodel_path = os.path.join(models_dir, 'transmission_from_Palace_SkyModel_step0.2.fits')
+    telluric_corrector = fluxcal.TelluricCorrector(skymodel_path)
 
     GAIA_CACHE_DIR = "./" if GAIA_CACHE_DIR is None else GAIA_CACHE_DIR
     log.info(f"Using Gaia CACHE DIR '{GAIA_CACHE_DIR}'")
@@ -949,7 +929,7 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
         model_wave_ref = model_wave / (1.0 - vel_shift_full / 299792.45)
 
         stellar_model = [
-            rebin_and_convolve(w[q], model_wave_ref, model_flux, lsf_pixels[q]) for q in [0, 1, 2]
+            fluxcal.rebin_and_convolve(w[q], model_wave_ref, model_flux, lsf_pixels[q]) for q in [0, 1, 2]
         ]
         stack_stellar_model.append(stellar_model)
 
@@ -970,15 +950,14 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
             t_start = time.time()
             # use only r and z channels
             pwv, pwv_err = calc_pwv(w[1:], spec_rz, lsf_pixels[1:], stellar_model[1:],
-                                    skytab['wave_air'], skytab['trans_ma'], skytab['fH2O'],
+                                    telluric_corrector,
                                     zenith_angle=zenith_angles[i], fig_out=fig_out_pwv,
                                     std_info=std_info[i])
             log.info(f"Estimated for star # {i} GAIA ID {gaia_ids[i]} PWV = {pwv:.2f} +/- {pwv_err:.2f} mm ({time.time() - t_start:.2f} sec)")
 
             # Calculate telluric transmission for all channels
-            trans_hr = calc_transmission(skytab['trans_ma'], skytab['fH2O'], pwv, zenith_angles[i])
             telluric_trans = [
-                rebin_and_convolve(w[k], skytab['wave_air'], trans_hr, lsf_pixels[k]) for k in range(3)
+                telluric_corrector.match_to_data(w[k], lsf_pixels[k], pwv, zenith_angles[i]) for k in range(3)
             ]
 
         except Exception as e:
@@ -1193,7 +1172,7 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
             # add PWV values and errors into header
             s_idx, s_fiber, s_gaia_id, *_ = std_info[i]
             rss.setHdrValue(f"S{s_idx}_PWV", pwv_values[i], f"PWV value for GAIA {s_gaia_id} {s_fiber}")
-            rss.setHdrValue(f"S{s_idx}_PWVE", pwv_errors[i], f"PWV error")
+            rss.setHdrValue(f"S{s_idx}_PWVE", pwv_errors[i], "PWV error")
 
         # Add PWV averaged values into header
         pwv_mean = np.nanmean(np.asarray(pwv_values))
@@ -1202,11 +1181,11 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
         pwv_mean_err = np.nanmean(np.asarray(pwv_errors))
         pwv_median_err = np.nanmedian(np.asarray(pwv_errors))
 
-        rss.setHdrValue(f"PWV_MEAN", pwv_mean, f"Mean PWV value based on all standard stars")
-        rss.setHdrValue(f"PWV_MED", pwv_median, f"Median PWV value")
-        rss.setHdrValue(f"PWV_STD", pwv_std, f"Standard deviation of PWV values")
-        rss.setHdrValue(f"PWVE_MNE", pwv_mean_err, f"Mean of PWV errors")
-        rss.setHdrValue(f"PWVE_MED", pwv_median_err, f"Median of PWV errors")
+        rss.setHdrValue(f"PWV_MEAN", pwv_mean, "Mean PWV value based on all standard stars")
+        rss.setHdrValue(f"PWV_MED", pwv_median, "Median PWV value")
+        rss.setHdrValue(f"PWV_STD", pwv_std, "Standard deviation of PWV values")
+        rss.setHdrValue(f"PWVE_MNE", pwv_mean_err, "Mean of PWV errors")
+        rss.setHdrValue(f"PWVE_MED", pwv_median_err, "Median of PWV errors")
 
         res_mod_pd = res_mod.to_pandas().values
         rms_mod = biweight_scale(res_mod_pd, axis=1, ignore_nan=True)

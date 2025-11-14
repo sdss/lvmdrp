@@ -801,3 +801,97 @@ def fluxconserve_rebin(output_wave, input_wave, input_flux, normalize=True):
 
     # Convert back to original dtype
     return output.astype(original_dtype)
+
+
+def rebin_and_convolve(wave_target, wave_source, flux_source, lsf_px):
+    """
+    Rebin and convolve spectrum to target wavelength grid.
+    """
+    rebinned = fluxconserve_rebin(wave_target, wave_source, flux_source)
+    convolved = lsf_convolve_fast(rebinned, lsf_px)
+    return convolved
+
+
+class TelluricCorrector:
+    """
+    Handles telluric transmission calculations using a precomputed high resolution
+    transmission curve generated with the Palace and SkyModel models.
+
+    Encapsulates the sky model data and provides methods to compute atmospheric
+    transmission as a function of precipitable water vapor (PWV) and zenith angle.
+    """
+
+    def __init__(self, skymodel_path=None):
+        """
+        Initialize TelluricCorrector by loading the Palace Sky Model.
+
+        Parameters
+        ----------
+        skymodel_path : str, optional
+            Full path to the SkyModel transmission FITS table.
+            If None, uses default: MASTERS_DIR/stellar_models/transmission_from_Palace_SkyModel_step0.2.fits
+        """
+        self._load_sky_model(skymodel_path)
+
+    def _load_sky_model(self, skymodel_path=None):
+        """Load the Palace Sky Model transmission table."""
+        if skymodel_path is None:
+            model_path = os.path.join(MASTERS_DIR, 'stellar_models', 'transmission_from_Palace_SkyModel_step0.2.fits')
+        else:
+            model_path = skymodel_path
+
+        log.info(f"Loading telluric transmission model from '{model_path}'")
+
+        skytab = fits.getdata(model_path)
+        # Store full model data
+        self._wave_air_full = skytab['wave_air']
+        self._trans_ma_full = skytab['trans_ma']
+        self._fH2O_full = skytab['fH2O']
+
+        # Initialize working arrays to full model
+        self.wave_air = self._wave_air_full
+        self.trans_ma = self._trans_ma_full
+        self.fH2O = self._fH2O_full
+        self._wave_range_set = False
+
+    def set_wave_range(self, wave_min, wave_max):
+        """
+        Set working wavelength range to improve computational efficiency.
+        """
+        mask = (self._wave_air_full >= wave_min) & (self._wave_air_full <= wave_max)
+        self.wave_air = self._wave_air_full[mask]
+        self.trans_ma = self._trans_ma_full[mask]
+        self.fH2O = self._fH2O_full[mask]
+        self._wave_range_set = True
+
+    def reset_wave_range(self):
+        """Reset wavelength range to full model coverage."""
+        self.wave_air = self._wave_air_full
+        self.trans_ma = self._trans_ma_full
+        self.fH2O = self._fH2O_full
+        self._wave_range_set = False
+
+    def calc_transmission(self, pwv, zenith_angle):
+        """
+        Calculate atmospheric transmission for given PWV and zenith angle.
+
+        According to formulae 4 and 5 from Noll et al. 2025
+        PALACE v1.0: Paranal Airglow Line And Continuum Emission model
+        """
+        cosz = np.cos(np.deg2rad(zenith_angle))
+        XZ = 1.0 / (cosz + 0.025 * np.exp(-11.0 * cosz))
+        rpwv = pwv / 2.5 - 1
+        return np.power(self.trans_ma, (1.0 + rpwv * self.fH2O) * XZ)
+
+    def match_to_data(self, wave_target, lsf_px, pwv, zenith_angle):
+        """
+        Calculate telluric transmission and match to observed data wavelength grid,
+        including rebinning and convolution with LSF.
+        """
+        # Calculate transmission at high resolution model grid
+        trans_hr = self.calc_transmission(pwv, zenith_angle)
+
+        # Rebin and convolve to target wavelength grid
+        trans_rebinned = rebin_and_convolve(wave_target, self.wave_air, trans_hr, lsf_px)
+
+        return trans_rebinned
