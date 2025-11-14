@@ -317,6 +317,7 @@ def prepare_spec(in_rss, width=3):
     std_spectra_all_bands = [] ## contains original std spectra for all stars in ALL band
     fibers_all_bands = []
     gaia_ids_all_bands = []
+    nns_all_bands = []
     # keys = ['fiber_0', 'good_flux_0', 'fiber_1', 'good_flux_1', 'fiber_2', 'good_flux_2']
     # check_bad_fluxes = {key: [] for key in keys}
 
@@ -357,6 +358,7 @@ def prepare_spec(in_rss, width=3):
         lsf = []
         fibers = []
         gaia_ids = []
+        nns = []
 
         for s in stds:
             nn, fiber, gaia_id, exptime, secz = s  # unpack standard star tuple
@@ -388,6 +390,7 @@ def prepare_spec(in_rss, width=3):
                         del lsf_all_bands[ind_b][idx]
                         del std_spectra_all_bands[ind_b][idx]
                         del gaia_ids_all_bands[ind_b][idx]
+                        del nns_all_bands[ind_b][idx]
                 # #rss.add_header_comment(f"fiber {fiber} @ {fibidx[0]} has counts < 100 e-, skipping")
                 continue
             if b > 0:
@@ -402,6 +405,7 @@ def prepare_spec(in_rss, width=3):
                     continue
             gaia_ids.append(gaia_id)
             fibers.append(fiber)
+            nns.append(nn)
             # check_bad_fluxes[f'good_flux_{b}'].append(True)
 
             spec_tmp = (rss_tmp._data[fibidx[0],:] - master_sky._data[fibidx[0],:])/exptime
@@ -451,8 +455,9 @@ def prepare_spec(in_rss, width=3):
         std_spectra_all_bands.append(std_spectra) # corrected for extinction
         fibers_all_bands.append(fibers)
         gaia_ids_all_bands.append(gaia_ids)
+        nns_all_bands.append(nns)
 
-    return w, gaia_ids_all_bands[0], fibers, std_spectra_all_bands, normalized_spectra_unconv_all_bands, normalized_spectra_all_bands, std_errors_all_bands, lsf_all_bands
+    return w, nns_all_bands[0], gaia_ids_all_bands[0], fibers, std_spectra_all_bands, normalized_spectra_unconv_all_bands, normalized_spectra_all_bands, std_errors_all_bands, lsf_all_bands
 
 def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
     """ Selection of the stellar atmosphere model spectra (POLLUX database, AMBRE library)
@@ -502,7 +507,7 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
     log.info(f"Using Gaia CACHE DIR '{GAIA_CACHE_DIR}'")
 
     # Prepare the spectra
-    (w, gaia_ids, fibers, std_spectra_all_bands, normalized_spectra_unconv_all_bands, normalized_spectra_all_bands,
+    (w, nns, gaia_ids, fibers, std_spectra_all_bands, normalized_spectra_unconv_all_bands, normalized_spectra_all_bands,
      std_errors_all_bands, lsf_all_bands) = prepare_spec(in_rss, width=width)
 
     # Stitch wavelength arrays in brz together
@@ -543,7 +548,7 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
     gaia_z = []
 
     # Stitch normalized spectra in brz together
-    for i in range(len(lsf_all_bands[0])):
+    for i, nn in enumerate(nns):
         std_norm_unconv = np.concatenate((normalized_spectra_unconv_all_bands[0][i][mask_b_norm],
                                           normalized_spectra_unconv_all_bands[1][i][mask_r_norm],
                                           normalized_spectra_unconv_all_bands[2][i][mask_z_norm]))
@@ -724,7 +729,7 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
             frame1 = fig1.add_axes((0.1, 0.3, 0.8, 0.6))
             frame1.set_xticklabels([])
 
-        for i in range(len(lsf_all_bands[0])):
+        for i, nn in enumerate(nns):
             if np.isnan(model_to_gaia_median[i]):
                 continue
             # !now telluric correction does not work!
@@ -752,7 +757,7 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
             sens_coef = gaia_flux/lvmflux
             #print(f'lvmflux={lvmflux}, gaia_flux={gaia_flux}, converted to gaia flux = {lvmflux*sens_coef}')
 
-            res_mod[f"STD{i+1}SEN"] = s(w[n_chan]).astype(np.float32)*sens_coef
+            res_mod[f"STD{nn}SEN"] = s(w[n_chan]).astype(np.float32)*sens_coef
             sens = sens0*sens_coef
 
             # fig_path = in_rss[n_chan]
