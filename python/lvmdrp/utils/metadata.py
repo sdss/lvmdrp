@@ -560,11 +560,15 @@ def extract_metadata(frames_paths: list, kind: str = "raw") -> pd.DataFrame:
         columns = MASTER_METADATA_COLUMNS
     else:
         pass
+
+    # define default output
+    default_output = pd.DataFrame(columns=[column for column, _ in columns])
+
     # extract metadata
     nframes = len(frames_paths)
     if nframes == 0:
         log.warning("zero paths given, nothing to do")
-        return pd.DataFrame(columns=[column for column, _ in columns])
+        return default_output
     log.info(f"going to extract metadata from {nframes} frames")
     new_metadata = {}
     iterator = tqdm(
@@ -663,6 +667,8 @@ def extract_metadata(frames_paths: list, kind: str = "raw") -> pd.DataFrame:
 
     # define dataframe
     new_metadata = pd.DataFrame.from_dict(new_metadata, orient="index")
+    if new_metadata.empty:
+        return default_output
     new_metadata.columns = list(zip(*columns))[0]
 
     # store metadata in HDF5 store
