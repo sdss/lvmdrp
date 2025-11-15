@@ -6,15 +6,19 @@ Change Log
 
 This document records the main changes to the drp code.
 
-1.2.0dev (unreleased)
----------------------
+1.2.0 (15-11-2025)
+------------------
 
 - Fitting routines now perform pixel integration
 - Physically motivated fiber profile for fiber modeling
+- Extraction using new fiber profile and speed up
 - New fiber flatfielding algorithm to account for shutter timing effects
+- Fixes resampling bug to get back 2% in flatfielding
 - New flux calibration using template matching
+- Fixes multiple stars issue in science field flux calibration
+- Much improved calibrations pipeline
 - Improved CR masking
-- Many more bug fixes
+- Many more bug fixes and improvements
 
 1.1.1 (20-12-2024)
 ------------------
