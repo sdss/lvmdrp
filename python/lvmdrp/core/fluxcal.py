@@ -803,16 +803,19 @@ def fluxconserve_rebin(output_wave, input_wave, input_flux, normalize=True):
     return output.astype(original_dtype)
 
 
-def rebin_and_convolve(wave_target, wave_source, flux_source, lsf_px):
+def rebin_and_convolve(wave_target, wave_source, flux_source, lsf, lsf_in_wavelength=False):
     """
     Rebin and convolve spectrum to target wavelength grid.
     """
     rebinned = fluxconserve_rebin(wave_target, wave_source, flux_source)
-    convolved = lsf_convolve_fast(rebinned, lsf_px)
+    if lsf_in_wavelength:
+        convolved = lsf_convolve_fast(rebinned, lsf, waves=wave_target)
+    else:
+        convolved = lsf_convolve_fast(rebinned, lsf)
     return convolved
 
 
-class TelluricCorrector:
+class TelluricCalculator:
     """
     Handles telluric transmission calculations using a precomputed high resolution
     transmission curve generated with the Palace and SkyModel models.
@@ -823,7 +826,7 @@ class TelluricCorrector:
 
     def __init__(self, skymodel_path=None):
         """
-        Initialize TelluricCorrector by loading the Palace Sky Model.
+        Initialize TelluricCalculator by loading the Palace Sky Model.
 
         Parameters
         ----------
@@ -871,27 +874,32 @@ class TelluricCorrector:
         self.fH2O = self._fH2O_full
         self._wave_range_set = False
 
-    def calc_transmission(self, pwv, zenith_angle):
+    def calc_transmission(self, pwv, zenith_angle=None, airmass=None):
         """
-        Calculate atmospheric transmission for given PWV and zenith angle.
+        Calculate atmospheric transmission for given PWV and zenith angle or airmass.
 
         According to formulae 4 and 5 from Noll et al. 2025
         PALACE v1.0: Paranal Airglow Line And Continuum Emission model
         """
-        cosz = np.cos(np.deg2rad(zenith_angle))
-        XZ = 1.0 / (cosz + 0.025 * np.exp(-11.0 * cosz))
-        rpwv = pwv / 2.5 - 1
-        return np.power(self.trans_ma, (1.0 + rpwv * self.fH2O) * XZ)
+        if zenith_angle is None and airmass is None:
+            raise ValueError("Either zenith_angle or airmass must be provided")
 
-    def match_to_data(self, wave_target, lsf_px, pwv, zenith_angle):
+        if airmass is None:
+            cosz = np.cos(np.deg2rad(zenith_angle))
+            airmass = 1.0 / (cosz + 0.025 * np.exp(-11.0 * cosz))
+
+        rpwv = pwv / 2.5 - 1
+        return np.power(self.trans_ma, (1.0 + rpwv * self.fH2O) * airmass)
+
+    def match_to_data(self, wave_target, lsf, pwv, zenith_angle=None, airmass=None, lsf_in_wavelength=False):
         """
         Calculate telluric transmission and match to observed data wavelength grid,
         including rebinning and convolution with LSF.
         """
         # Calculate transmission at high resolution model grid
-        trans_hr = self.calc_transmission(pwv, zenith_angle)
+        trans_hr = self.calc_transmission(pwv, zenith_angle=zenith_angle, airmass=airmass)
 
         # Rebin and convolve to target wavelength grid
-        trans_rebinned = rebin_and_convolve(wave_target, self.wave_air, trans_hr, lsf_px)
+        trans_rebinned = rebin_and_convolve(wave_target, self.wave_air, trans_hr, lsf, lsf_in_wavelength=lsf_in_wavelength)
 
         return trans_rebinned

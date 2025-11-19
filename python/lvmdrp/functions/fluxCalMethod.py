@@ -138,6 +138,40 @@ def apply_fluxcal(in_rss: str, out_fframe: str, method: str = 'MOD', display_plo
         sens_arr = fframe._fluxcal_mod.to_pandas().values[:, :-2]
         sens_ave = fframe._fluxcal_mod["mean"].value
 
+        # Incorporate into the sensitivity array the telluric bands absorption
+        # for estimated average PWV and given zenith angle
+
+        # Read median PWV from header
+        pwv = fframe._header.get("PWV_MED", None)
+
+        if pwv is not None and np.isfinite(pwv):
+            log.info(f"Applying telluric correction with PWV = {pwv:.2f} mm")
+
+            # Get airmass from header
+            airmass = fframe._header.get("TESCIAM")
+
+            # Initialize TelluricCalculator and compute transmission
+            telluric_corrector = fluxcal.TelluricCalculator()
+
+            # Use median LSF across all fibers for the telluric correction (in Angstroms)
+            # TODO: LSF should be used per fiber
+            lsf_median = np.nanmedian(fframe._lsf, axis=0)
+
+            # Compute telluric transmission matched to data wavelength grid with LSF convolution
+            # LSF is passed in wavelength units (Angstroms)
+            telluric_trans = telluric_corrector.match_to_data(fframe._wave, lsf_median, pwv, airmass=airmass, lsf_in_wavelength=True)
+
+            # Apply telluric correction to sensitivity curve
+            # The sensitivity curve should be divided by the telluric transmission
+            # to account for atmospheric absorption
+            sens_ave = sens_ave / telluric_trans
+            sens_arr = sens_arr / telluric_trans[:, None]
+
+        else:
+            log.warning(
+                "PWV_MED not found in header or invalid, skipping correction "
+                "of sensitivity curve for telluric absorption")
+
         # fall back to science field if all invalid values
         if (sens_ave == 0).all() or np.isnan(sens_ave).all():
             log.warning("all standard star sensitivities are <=0 or NaN, falling back to SCI stars")
@@ -635,7 +669,7 @@ def calc_pwv(wave, spec, lsf, stellar_model, telluric_corrector,
         spec: Observed spectra for [r_channel, z_channel]
         lsf: Line spread functions for [r_channel, z_channel]
         stellar_model: Model stellar spectra for [r_channel, z_channel]
-        telluric_corrector: TelluricCorrector instance for telluric transmission calculations
+        telluric_corrector: TelluricCalculator instance for telluric transmission calculations
         pwv_init: Initial PWV guess in mm (default: 3.0)
         pwv_bounds: PWV fitting bounds in mm (default: (0.5, 50.0))
         zenith_angle: Observation zenith angle in degrees (default: 0.0)
@@ -786,9 +820,9 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
     n_models = len(model_names)
     log.info(f'Number of models: {n_models}')
 
-    # Initialize TelluricCorrector to handle atmospheric transmission calculations
+    # Initialize TelluricCalculator to handle atmospheric transmission calculations
     skymodel_path = os.path.join(models_dir, 'transmission_from_Palace_SkyModel_step0.2.fits')
-    telluric_corrector = fluxcal.TelluricCorrector(skymodel_path)
+    telluric_corrector = fluxcal.TelluricCalculator(skymodel_path)
 
     GAIA_CACHE_DIR = "./" if GAIA_CACHE_DIR is None else GAIA_CACHE_DIR
     log.info(f"Using Gaia CACHE DIR '{GAIA_CACHE_DIR}'")
