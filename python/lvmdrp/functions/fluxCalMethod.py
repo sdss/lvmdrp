@@ -81,6 +81,9 @@ def apply_fluxcal(in_rss: str, out_fframe: str, method: str = 'MOD', display_plo
 
     expnum = fframe._header["EXPOSURE"]
     channel = fframe._header["CCD"]
+    sci_secz = fframe._header["TESCIAM"]
+    skye_secz = fframe._header["TESKYEAM"]
+    skyw_secz = fframe._header["TESKYWAM"]
 
     # set masked pixels to NaN
     fframe.apply_pixelmask()
@@ -120,6 +123,9 @@ def apply_fluxcal(in_rss: str, out_fframe: str, method: str = 'MOD', display_plo
 
         sens_arr = fframe._fluxcal_std.to_pandas().values[:, :-2]
         sens_ave = fframe._fluxcal_std["mean"].value
+        sens_ave_sci = sens_ave
+        sens_ave_skye = sens_ave
+        sens_ave_skyw = sens_ave
 
         # fall back to science field if all invalid values
         if (sens_ave == 0).all() or np.isnan(sens_ave).all() or (sens_ave<0).any():
@@ -147,9 +153,6 @@ def apply_fluxcal(in_rss: str, out_fframe: str, method: str = 'MOD', display_plo
         if pwv is not None and np.isfinite(pwv):
             log.info(f"Applying telluric correction with PWV = {pwv:.2f} mm")
 
-            # Get airmass from header
-            airmass = fframe._header.get("TESCIAM")
-
             # Initialize TelluricCalculator and compute transmission
             telluric_corrector = fluxcal.TelluricCalculator()
 
@@ -159,13 +162,16 @@ def apply_fluxcal(in_rss: str, out_fframe: str, method: str = 'MOD', display_plo
 
             # Compute telluric transmission matched to data wavelength grid with LSF convolution
             # LSF is passed in wavelength units (Angstroms)
-            telluric_trans = telluric_corrector.match_to_data(fframe._wave, lsf_median, pwv, airmass=airmass, lsf_in_wavelength=True)
+            # TODO: need to use LSF per fiber
+            telluric_trans_sci = telluric_corrector.match_to_data(fframe._wave, lsf_median, pwv, airmass=sci_secz, lsf_in_wavelength=True)
+            telluric_trans_skye = telluric_corrector.match_to_data(fframe._wave, lsf_median, pwv, airmass=skye_secz, lsf_in_wavelength=True)
+            telluric_trans_skyw = telluric_corrector.match_to_data(fframe._wave, lsf_median, pwv, airmass=skyw_secz, lsf_in_wavelength=True)
 
-            # Apply telluric correction to sensitivity curve
-            # The sensitivity curve should be divided by the telluric transmission
-            # to account for atmospheric absorption
-            sens_ave = sens_ave / telluric_trans
-            sens_arr = sens_arr / telluric_trans[:, None]
+            # Divide sensitivity curve by atmospheric molecular transmission
+            sens_ave_sci = sens_ave / telluric_trans_sci
+            sens_ave_skye = sens_ave / telluric_trans_skye
+            sens_ave_skyw = sens_ave / telluric_trans_skyw
+            # sens_arr_sci = sens_arr / telluric_trans_sci[:, np.newaxis] # Not used for the moment
 
         else:
             log.warning(
@@ -190,6 +196,9 @@ def apply_fluxcal(in_rss: str, out_fframe: str, method: str = 'MOD', display_plo
 
         sens_arr = fframe._fluxcal_sci.to_pandas().values[:, :-2]
         sens_ave = fframe._fluxcal_sci["mean"].value
+        sens_ave_sci = sens_ave
+        sens_ave_skye = sens_ave
+        sens_ave_skyw = sens_ave
 
         # fix case of all invalid values
         if (sens_ave == 0).all() or np.isnan(sens_ave).all():
@@ -245,7 +254,6 @@ def apply_fluxcal(in_rss: str, out_fframe: str, method: str = 'MOD', display_plo
     txt = np.genfromtxt(os.getenv("LVMCORE_DIR") + "/etc/lco_extinction.txt")
     lext, ext = txt[:, 0], txt[:, 1]
     ext = np.interp(fframe._wave, lext, ext)
-    sci_secz = fframe._header["TESCIAM"]
 
     # define exposure time factors
     exptimes = np.zeros(len(slitmap))
@@ -283,20 +291,21 @@ def apply_fluxcal(in_rss: str, out_fframe: str, method: str = 'MOD', display_plo
         fframe.setHdrValue("BUNIT", "electron / (Angstrom s)", "physical units of the array values")
     else:
         log.info("flux-calibrating data science and sky spectra")
-        fframe._data *= sens_ave * 10 ** (0.4 * ext * (sci_secz)) / exptimes[:, None]
-        fframe._error *= sens_ave * 10 ** (0.4 * ext * (sci_secz)) / exptimes[:, None]
+        fframe._data *= sens_ave_sci * 10 ** (0.4 * ext * (sci_secz)) / exptimes[:, None]
+        fframe._error *= sens_ave_sci * 10 ** (0.4 * ext * (sci_secz)) / exptimes[:, None]
         if fframe._sky is not None:
-            fframe._sky *= sens_ave * 10 ** (0.4 * ext * (sci_secz)) / exptimes[:, None]
+            # TODO: NEED TO UNDERSTAND: what sensetivity curve and airmass (secz) should be used for sky frame
+            fframe._sky *= sens_ave_sci * 10 ** (0.4 * ext * (sci_secz)) / exptimes[:, None]
         if fframe._sky_error is not None:
-            fframe._sky_error *= sens_ave * 10 ** (0.4 * ext * (sci_secz)) / exptimes[:, None]
+            fframe._sky_error *= sens_ave_sci * 10 ** (0.4 * ext * (sci_secz)) / exptimes[:, None]
         if fframe._sky_east is not None:
-            fframe._sky_east *= sens_ave * 10 ** (0.4 * ext * (sci_secz)) / exptimes[:, None]
+            fframe._sky_east *= sens_ave_skye * 10 ** (0.4 * ext * (skye_secz)) / exptimes[:, None]
         if fframe._sky_east_error is not None:
-            fframe._sky_east_error *= sens_ave * 10 ** (0.4 * ext * (sci_secz)) / exptimes[:, None]
+            fframe._sky_east_error *= sens_ave_skye * 10 ** (0.4 * ext * (skye_secz)) / exptimes[:, None]
         if fframe._sky_west is not None:
-            fframe._sky_west *= sens_ave * 10 ** (0.4 * ext * (sci_secz)) / exptimes[:, None]
+            fframe._sky_west *= sens_ave_skyw * 10 ** (0.4 * ext * (skyw_secz)) / exptimes[:, None]
         if fframe._sky_west_error is not None:
-            fframe._sky_west_error *= sens_ave * 10 ** (0.4 * ext * (sci_secz)) / exptimes[:, None]
+            fframe._sky_west_error *= sens_ave_skyw * 10 ** (0.4 * ext * (skyw_secz)) / exptimes[:, None]
         fframe.setHdrValue("BUNIT", "erg / (Angstrom s cm2)", "physical units of the array values")
 
     log.info(f"writing output file in {os.path.basename(out_fframe)}")
