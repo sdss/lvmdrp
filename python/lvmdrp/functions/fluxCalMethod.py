@@ -204,7 +204,7 @@ def apply_fluxcal(in_rss: str, out_fframe: str, method: str = 'MOD', display_plo
     txt = np.genfromtxt(os.getenv("LVMCORE_DIR") + "/etc/lco_extinction.txt")
     lext, ext = txt[:, 0], txt[:, 1]
     ext = np.interp(fframe._wave, lext, ext)
-    sci_secz = fframe._header["TESCIAM"]
+    sci_secz = fframe._header["SCIAM"]
 
     # define exposure time factors
     exptimes = np.zeros(len(slitmap))
@@ -1282,7 +1282,7 @@ def science_sensitivity(rss, res_sci, ext, GAIA_CACHE_DIR, NSCI_MAX=15, r_spaxel
     expnum = header['EXPOSURE']
     exptime = header['EXPTIME']
     channel = header['CCD']
-    secz = header['TESCIAM']
+    secz = header["SCIAM"]
 
     m = get_sky_mask_uves(obswave, width=width)
     m2 = None

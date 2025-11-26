@@ -17,8 +17,11 @@ import bottleneck as bn
 from astropy.table import Table
 from astropy.io import fits as pyfits
 from astropy.visualization import simple_norm
+from astropy.coordinates import EarthLocation, SkyCoord, AltAz
+from astropy.time import Time
 from astropy.wcs import wcs
 from astropy import units as u
+from skyfield.api import Topos
 import astropy.io.fits as fits
 from scipy import interpolate, integrate
 from scipy import signal
@@ -3373,6 +3376,34 @@ def add_astrometry(
     RAobs_skyw, DECobs_skyw, PAobs_skyw = getobsparam('skyw')
     RAobs_spec, DECobs_spec, PAobs_spec = getobsparam('spec')
 
+    observatory_elevation = 2380.0*u.m
+    observatory_lat = '29.0146S'
+    observatory_lon = '70.6926W'
+    observatory_topo = Topos(observatory_lat, observatory_lon, elevation_m=observatory_elevation.value)
+
+    # define location of LCO using shadow heigh calculator library
+    observatory_location = EarthLocation(lat=observatory_topo.latitude.degrees*u.deg,
+                                         lon=observatory_topo.longitude.degrees*u.deg,
+                                         height=observatory_elevation)
+
+    #find alt-az frame/coordinates for observation
+    altaz_frame = AltAz(obstime=Time(org_img._header["OBSTIME"]), location=observatory_location)
+
+    #use astropy SkyCoord class
+    sci_coord = SkyCoord(RAobs_sci, DECobs_sci, unit='deg')
+    skye_coord = SkyCoord(RAobs_skye, DECobs_skye, unit='deg')
+    skyw_coord = SkyCoord(RAobs_skyw, DECobs_skyw, unit='deg')
+
+    # altitude of objects above the horizon (alt, 0 -- 90)
+    sci_alt = sci_coord.transform_to(altaz_frame).alt.value
+    skye_alt = skye_coord.transform_to(altaz_frame).alt.value
+    skyw_alt = skyw_coord.transform_to(altaz_frame).alt.value
+
+    # define airmasses based on the final astrometric solution
+    sci_airmass = 1 / numpy.cos((90-sci_alt)*numpy.pi/180)
+    skye_airmass = 1 / numpy.cos((90-skye_alt)*numpy.pi/180)
+    skyw_airmass = 1 / numpy.cos((90-skyw_alt)*numpy.pi/180)
+
     # Create fake IFU image WCS object for each telescope focal plane and use it to calculate RA,DEC of each fiber
     telcoordsdir={'sci':(RAobs_sci, DECobs_sci, PAobs_sci), 'skye':(RAobs_skye, DECobs_skye, PAobs_skye), 'skyw':(RAobs_skyw, DECobs_skyw, PAobs_skyw), 'spec':(RAobs_spec, DECobs_spec, PAobs_spec)}
     seldir={'sci':selsci, 'skye':selskye, 'skyw':selskyw, 'spec':selspec}
@@ -3414,12 +3445,18 @@ def add_astrometry(
     org_img.setHdrValue('SCIRA', RAobs_sci, 'SCI center, fiberid=975, RA (ASTRMSRC)[deg]')
     org_img.setHdrValue('SCIDEC', DECobs_sci, 'SCI center, fiberid=975, DEC (ASTRMSRC)[deg]')
     org_img.setHdrValue('SCIPA', PAobs_sci, 'SCI center, fiberid=975, PA (ASTRMSRC)[deg]')
+    org_img.setHdrValue('SCIALT', sci_alt, 'SCI center, ALT (ASTRMSRC)[deg]')
+    org_img.setHdrValue('SCIAM', sci_airmass, 'SCI center, Airmass (ASTRMSRC)[deg]')
     org_img.setHdrValue('SKYERA', RAobs_skye, 'SKYE center, fiberid=36, RA (ASTRMSRC)[deg]')
     org_img.setHdrValue('SKYEDEC', DECobs_skye, 'SKYE center, fiberid=36, DEC (ASTRMSRC)[deg]')
     org_img.setHdrValue('SKYEPA', PAobs_skye, 'SKYE center, fiberid=36, PA (ASTRMSRC)[deg]')
+    org_img.setHdrValue('SKYEALT', skye_alt, 'SKYE center, ALT (ASTRMSRC)[deg]')
+    org_img.setHdrValue('SKYEAM', skye_airmass, 'SKYE center, Airmass (ASTRMSRC)[deg]')
     org_img.setHdrValue('SKYWRA', RAobs_skyw, 'SKYW center, fiberid=1, RA (ASTRMSRC)[deg]')
     org_img.setHdrValue('SKYWDEC', DECobs_skyw, 'SKYW center, fiberid=1, DEC (ASTRMSRC)[deg]')
     org_img.setHdrValue('SKYWPA', PAobs_skyw, 'SKYW center, fiberid=1, PA (ASTRMSRC)[deg]')
+    org_img.setHdrValue('SKYWALT', skyw_alt, 'SKYW center, ALT (ASTRMSRC)[deg]')
+    org_img.setHdrValue('SKYWAM', skyw_airmass, 'SKYW center, Airmass (ASTRMSRC)[deg]')
 
     log.info(f"writing RA,DEC to slitmap in image '{os.path.basename(out_image)}'")
     org_img.writeFitsData(out_image)
