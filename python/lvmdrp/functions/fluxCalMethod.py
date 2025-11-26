@@ -103,7 +103,7 @@ def apply_fluxcal(in_rss: str, out_fframe: str, method: str = 'MOD', display_plo
     # check for flux calibration data
     if method == "NONE":
         log.info("skipping flux calibration")
-        fframe.setHdrValue("FLUXCAL", 'NONE', "flux-calibration method")
+        fframe.setHdrValue("FLUXCAL", 'NONE', "flux calibration method")
         fframe.writeFitsData(out_fframe)
         return fframe
 
@@ -154,7 +154,7 @@ def apply_fluxcal(in_rss: str, out_fframe: str, method: str = 'MOD', display_plo
         if (sens_ave == 0).all() or np.isnan(sens_ave).all():
             log.warning("all field star sensitivities are zero or NaN, can't calibrate")
             rss.add_header_comment("all field star sensitivities are zero or NaN, can't calibrate")
-            sens_ave = np.ones_like(sens_ave)
+            # sens_ave = np.ones_like(sens_ave)
             # sens_rms = np.zeros_like(sens_rms)
 
     # final check on sensitivities
@@ -176,12 +176,12 @@ def apply_fluxcal(in_rss: str, out_fframe: str, method: str = 'MOD', display_plo
     #     sens_ave = biweight_location(sens_arr, axis=1, ignore_nan=True)
     #     sens_rms = biweight_scale(sens_arr, axis=1, ignore_nan=True)
 
-    if np.nanmean(sens_ave) > 1e-12:
+    if np.nanmean(sens_ave) > 1e-12 or np.isnan(sens_ave).all() or (sens_ave == 0).all():
         method = "NONE"
-        log.warning("standard and science field calibration yield average sensitivity > 1e-12, skipping flux calibration")
-        rss.add_header_comment("standard and science field calibration yield average sensitivity > 1e-12, skipping flux calibration")
+        log.warning("template matching, standard and science field calibration yield unreliable average sensitivity, skipping flux calibration")
+        rss.add_header_comment("template matching, standard and science field calibration yield unreliable average sensitivity, skipping flux calibration")
 
-    fframe.setHdrValue("FLUXCAL", method, "flux-calibration method")
+    fframe.setHdrValue("FLUXCAL", method, "flux calibration method")
 
     if method != 'NONE':
         ax.set_title(f"flux calibration for {channel = } with {method = }", loc="left")
@@ -238,7 +238,7 @@ def apply_fluxcal(in_rss: str, out_fframe: str, method: str = 'MOD', display_plo
             fframe._sky_west /= exptimes[:, None]
         if fframe._sky_west_error is not None:
             fframe._sky_west_error /= exptimes[:, None]
-        fframe.setHdrValue("FLUXCAL", 'NONE', "flux-calibration method")
+        fframe.setHdrValue("FLUXCAL", 'NONE', "flux calibration method")
         fframe.setHdrValue("BUNIT", "electron / (Angstrom s)", "physical units of the array values")
     else:
         log.info("flux-calibrating data science and sky spectra")
@@ -1307,7 +1307,7 @@ def science_sensitivity(rss, res_sci, ext, GAIA_CACHE_DIR, NSCI_MAX=15, r_spaxel
     master_sky = rss.eval_master_sky()
 
     # filter the GAIA stars to avoid multiple stars in a single fiber
-    # locate the science ifu fibers the stars are in 
+    # locate the science ifu fibers the stars are in
     fibs = np.zeros(len(calibrated_spectra)) - 1
     for i in range(len(calibrated_spectra)):
         data = r[i]
