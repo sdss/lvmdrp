@@ -1497,6 +1497,11 @@ def _collect_header_data(filename: str) -> dict:
     """
     hdr_dict_mapping = {'drpver': 'DRPVER', 'drpqual': 'DRPQUAL', 'dpos': 'DPOS', 'object': 'OBJECT',
                         'obstime': 'OBSTIME',
+                        # flux calibration parameters
+                        'std_mean_senb': 'STDSENMB', 'std_mean_senr': 'STDSENMR', 'std_mean_senz': 'STDSENMZ',
+                        'sci_mean_senb': 'SCISENMB', 'sci_mean_senr': 'SCISENMR', 'sci_mean_senz': 'SCISENMZ',
+                        'mod_mean_senb': 'MODSENMB', 'mod_mean_senr': 'MODSENMR', 'mod_mean_senz': 'MODSENMZ',
+                        'fluxcal': 'FLUXCAL',
                         # sci
                         'sci_ra': 'SCIRA', 'sci_dec': 'SCIDEC',
                         'sci_pa': 'SCIPA', 'sci_amass': 'TESCIAM',
