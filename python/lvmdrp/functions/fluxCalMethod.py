@@ -336,6 +336,7 @@ def prepare_spec(in_rss, width=3):
             # rss.writeFitsData(in_rss)
             # TODO: fix this, this seems to be copy-pasted from the gaia code
             # return res_std, mean_std, rms_std, rss
+            stds = []
 
         # wavelength array
         w_tmp = rss_tmp._wave
