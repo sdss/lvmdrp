@@ -3310,9 +3310,20 @@ def add_astrometry(
         comment = gdrhdr.comments[keyword] if inhdr else ''
         img.setHdrValue(f'HIERARCH GDRCOADD {keyword}', gdrhdr.get(keyword), comment)
 
+    def load_coadd_guider(in_agcimage):
+        if not os.path.isfile(in_agcimage):
+            log.warning(f"coadded guider image not found {in_agcimage}")
+            return
+        mfheader = fits.getheader(in_agcimage, ext=1)
+        if not mfheader.get("SOLVED", False):
+            log.warning(f"astrometric solution not found")
+            return
+        return mfheader
+
     def getobsparam(tel):
         if tel!='spec':
-            if os.path.isfile(agcfiledir[tel]):
+            mfheader = load_coadd_guider(agcfiledir[tel])
+            if mfheader is not None:
                 mfagc=fits.open(agcfiledir[tel])
                 mfheader=mfagc[1].header
                 outw = wcs.WCS(mfheader)
@@ -3320,13 +3331,8 @@ def add_astrometry(
                 posangrad=-1*numpy.arctan(CDmatrix[1,0]/CDmatrix[0,0])
                 PAobs=posangrad*180/numpy.pi
                 IFUcencoords=outw.pixel_to_world(2500,1000)
-                try:
-                    # some very early science data apparently fails here
-                    RAobs=IFUcencoords.ra.value
-                    DECobs=IFUcencoords.dec.value
-                except AttributeError:
-                    RAobs=0
-                    DECobs=0
+                RAobs=IFUcencoords.ra.value
+                DECobs=IFUcencoords.dec.value
                 org_img.setHdrValue('ASTRMSRC', 'GDR coadd', comment='source of astrometry: guider')
                 copy_guider_keyword(mfheader, 'FRAME0  ', org_img)
                 copy_guider_keyword(mfheader, 'FRAMEN  ', org_img)
