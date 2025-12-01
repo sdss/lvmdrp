@@ -55,7 +55,7 @@ def add_astrometry(in_image: str, out_image: str, in_agcsci_image: str, in_agcsk
     # read AGC coadd images and get RAobs, DECobs, and PAobs for each telescope
     in_guider_paths = {'Sci': in_agcsci_image, 'SkyE': in_agcskye_image, 'SkyW': in_agcskyw_image}
 
-    tel_coords = {tel: get_telescope_astrometry(in_guider_paths, tel, org_img) for tel in set(slitmap["telescope"].data)}
+    tel_coords = {tel: get_telescope_astrometry(in_guider_paths, tel, org_img) for tel in set(slitmap["telescope"].data) if tel != "Spec"}
 
     observatory_elevation = 2380.0 * u.m
     observatory_lat = '29.0146S'
@@ -85,16 +85,6 @@ def add_astrometry(in_image: str, out_image: str, in_agcsci_image: str, in_agcsk
     skye_airmass = 1 / np.cos((90-skye_alt)*np.pi/180)
     skyw_airmass = 1 / np.cos((90-skyw_alt)*np.pi/180)
 
-    # Create fake IFU image WCS object for each telescope focal plane and use it to calculate RA,DEC of each fiber
-    log.info(f'Using Fiducial Platescale = {FIDUCIAL_PLATESCALE:.2f} "/mm')
-    set_fibers_astrometry(slitmap, tel_coords, 'Sci', platescale=FIDUCIAL_PLATESCALE)
-    set_fibers_astrometry(slitmap, tel_coords, 'SkyE', platescale=FIDUCIAL_PLATESCALE)
-    set_fibers_astrometry(slitmap, tel_coords, 'SkyW', platescale=FIDUCIAL_PLATESCALE)
-    # BUG: fiber coordinates for Spec telescope are wrong, need to fix using STD* keywords
-    # getfibradec(slitmap, tel_coords, 'Spec', platescale=FIDUCIAL_PLATESCALE)
-    # add coordinates to slitmap
-    org_img.setSlitmap(slitmap)
-
     # set header keyword with best knowledge of IFU center for SCI, SKYE, SKYW
     org_img.setHdrValue('SCIRA', tel_coords["Sci"][0], 'SCI center, fiberid=975, RA (ASTRMSRC)[deg]')
     org_img.setHdrValue('SCIDEC', tel_coords["Sci"][1], 'SCI center, fiberid=975, DEC (ASTRMSRC)[deg]')
@@ -112,5 +102,12 @@ def add_astrometry(in_image: str, out_image: str, in_agcsci_image: str, in_agcsk
     org_img.setHdrValue('SKYWALT', skyw_alt, 'SKYW center, ALT (ASTRMSRC)[deg]')
     org_img.setHdrValue('SKYWAM', skyw_airmass, 'SKYW center, Airmass (ASTRMSRC)[deg]')
 
-    log.info(f"writing RA,DEC to slitmap in image '{out_image}'")
+    # add coordinates to slitmap
+    log.info(f'Using Fiducial Platescale = {FIDUCIAL_PLATESCALE:.2f} "/mm')
+    set_fibers_astrometry(org_img, 'Sci', platescale=FIDUCIAL_PLATESCALE)
+    set_fibers_astrometry(org_img, 'SkyE', platescale=FIDUCIAL_PLATESCALE)
+    set_fibers_astrometry(org_img, 'SkyW', platescale=FIDUCIAL_PLATESCALE)
+    org_img.setSlitmap(slitmap)
+
+    log.info(f"writing astrometry to image '{out_image}'")
     org_img.writeFitsData(out_image)

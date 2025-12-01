@@ -84,7 +84,7 @@ def get_telescope_astrometry(in_guider_paths, tel, img):
         (RAobs, DECobs, PAobs) observed coordinates and position angle for the given telescope
     """
     if tel == "Spec":
-        return 0.0, 0.0, 0.0
+        raise ValueError(f"Invalid value for `tel`: {tel}. Expected either 'Sci', 'SkyE', 'SkyW'")
 
     mfheader = load_coadded_guider(in_guider_paths[tel])
     if mfheader is None:
@@ -112,7 +112,7 @@ def get_telescope_astrometry(in_guider_paths, tel, img):
     return RAobs, DECobs, PAobs
 
 
-def set_fibers_astrometry(slitmap, tel_coords, tel, platescale):
+def set_fibers_astrometry(img, tel, platescale):
     """Calculate and set RA,DEC for each fiber in slitmap for a given telescope
 
     NOTE: this function modifies the input slitmap Table in place.
@@ -128,16 +128,41 @@ def set_fibers_astrometry(slitmap, tel_coords, tel, platescale):
     platescale : float
         Telescope plate scale in arcsec/mm
     """
+
+    slitmap = img.getSlitmap()
+    if slitmap is None:
+        warn(f"no slitmap information available, skipping fibers astrometry for telescope '{tel}'")
+        return
+
+    hdr = img.getHeader()
+    if hdr is None:
+        warn(f"no header information available, skipping fibers astrometry for telescope '{tel}'")
+        return
+
     # Add RA,DEC columns to slitmap if they do not exist
-    if "ra" or "dec" not in slitmap.colnames:
+    if "ra" not in slitmap.colnames or "dec" not in slitmap.colnames:
         slitmap['ra'] = np.zeros(len(slitmap)) * u.deg
         slitmap['dec'] = np.zeros(len(slitmap)) * u.deg
 
+    # add astrometry for standard fibers (special case)
+    if tel == "Spec":
+        for ifiber in range(15):
+            fiberid = img._header.get(f"STD{ifiber+1}FIB")
+            ra = img._header.get(f"STD{ifiber+1}RA", 0.0) or 0.0
+            dec = img._header.get(f"STD{ifiber+1}DE", 0.0) or 0.0
+
+            std_selection = slitmap["orig_ifulabel"] == fiberid
+            slitmap["ra"][std_selection] = ra * u.deg
+            slitmap["dec"][std_selection] = dec * u.deg
+        return
+
+    # add fibers astrometry for the rest of the telescopes: Sci, SkyE, SkyW
     selection = slitmap['telescope'].data == tel
     x = slitmap['xpmm'].data[selection]
     y = slitmap['ypmm'].data[selection]
 
-    RAobs, DECobs, PAobs = tel_coords[tel]
+    # Create fake IFU image WCS object for each telescope focal plane and use it to calculate RA,DEC of each fiber
+    RAobs, DECobs, PAobs = hdr[f"{tel.upper()}RA"], hdr[f"{tel.upper()}DEC"], hdr[f"{tel.upper()}PA"]
     pscale = 0.01  # IFU image pixel scale in mm/pix
     skypscale = pscale * platescale / 3600  # IFU image pixel scale in deg/pix
     npix = 1800  # size of fake IFU image
