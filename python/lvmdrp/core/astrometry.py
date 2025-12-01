@@ -11,8 +11,12 @@ import os
 from astropy.io import fits
 from astropy import wcs
 from astropy import units as u
+from astropy.coordinates import EarthLocation, AltAz, SkyCoord
+from astropy.time import Time
 from warnings import warn
 import numpy as np
+
+from lvmdrp.core.constants import LVM_LAT, LVM_LON, LVM_ELEVATION
 
 
 GUIDER_IMG_KEYWORDS = [
@@ -43,7 +47,7 @@ def copy_guider_keyword(gdrhdr, keyword, img):
     img.setHdrValue(f'HIERARCH GDRCOADD {keyword}', gdrhdr.get(keyword), comment)
 
 
-def load_coadded_guider(in_guider_path):
+def load_guider_header(in_guider_path):
     """Loads in memory coadded guider image
 
     Parameters
@@ -61,55 +65,125 @@ def load_coadded_guider(in_guider_path):
         return
     mfheader = fits.getheader(in_guider_path, ext=1)
     if not mfheader.get("SOLVED", False):
-        warn(f"astrometric solution not found")
+        warn("astrometric solution not found")
         return
     return mfheader
 
 
-def get_telescope_astrometry(in_guider_paths, tel, img):
-    """Get observed RA, DEC, PA for a given telescope from guider coadd or commanded position
+def set_telescope_astrometry(telescope, guider_header, img):
+    """Sets observed RA, DEC, PA for a given telescope from guider coadd or commanded position
+
+    NOTE: this function will add the astrometric information to `img` in place
 
     Parameters
     ----------
-    in_guider_paths : dict
-        Dictionary with file paths to coadded guider images for each telescope
-    tel : str
+    telescope : str
         Telescope identifier
+    guider_header : fits.Header
+        Coadded guider image header
     img : lvmdrp.core.image.Image
         Image object to copy header keywords to
 
     Returns
     -------
     tuple
-        (RAobs, DECobs, PAobs) observed coordinates and position angle for the given telescope
+        (ra_obs, dec_obs, pa_obs) observed coordinates and position angle for the given telescope
     """
-    if tel == "Spec":
-        raise ValueError(f"Invalid value for `tel`: {tel}. Expected either 'Sci', 'SkyE', 'SkyW'")
+    if telescope == "Spec" or telescope not in {"Sci", "SkyE", "SkyW"}:
+        raise ValueError(f"Invalid value for `tel`: {telescope}. Expected either 'Sci', 'SkyE', 'SkyW'")
 
-    mfheader = load_coadded_guider(in_guider_paths[tel])
-    if mfheader is None:
-        RAobs = img._header.get(f'PO{tel}RA'.capitalize(), 0.0) or 0.0
-        DECobs = img._header.get(f'PO{tel}DE'.capitalize(), 0.0) or 0.0
-        PAobs = img._header.get(f'PO{tel}PA'.capitalize(), 0.0) or 0.0
-        if -999.0 in [RAobs, DECobs]:
-            RAobs, DECobs, PAobs = 0.0, 0.0, 0.0
-        if np.any([RAobs, DECobs, PAobs]) == 0.0:
-            warn(f"some astrometry keywords for telescope '{tel}' are missing: {RAobs = }, {DECobs = }, {PAobs = }")
-            img.add_header_comment(f"no astromentry keywords '{tel}': {RAobs = }, {DECobs = }, {PAobs = }, using commanded")
-        img.setHdrValue('ASTRMSRC', 'CMD position', comment='source of astrometry: commanded position')
-        return RAobs, DECobs, PAobs
+    slitmap = img.getSlitmap()
+    if slitmap is None:
+        warn(f"no slitmap information available, skipping fibers astrometry for telescope '{telescope}'")
+        return
 
-    outw = wcs.WCS(mfheader)
+    hdr = img.getHeader()
+    if hdr is None:
+        warn(f"no header information available, skipping fibers astrometry for telescope '{telescope}'")
+        return
+
+    ifucen_selection = (slitmap["xpmm"] == 0) & (slitmap["ypmm"] == 0) & (slitmap["telescope"] == telescope)
+    fiberid = slitmap["fiberid"].data[ifucen_selection][0]
+
+    label = telescope.upper()
+    if guider_header is None:
+        ra_obs = img._header.get(f'PO{label}RA'.capitalize(), 0.0) or 0.0
+        dec_obs = img._header.get(f'PO{label}DE'.capitalize(), 0.0) or 0.0
+        pa_obs = img._header.get(f'PO{label}PA'.capitalize(), 0.0) or 0.0
+        if -999.0 in [ra_obs, dec_obs]:
+            ra_obs, dec_obs, pa_obs = 0.0, 0.0, 0.0
+        if np.any([ra_obs, dec_obs, pa_obs]) == 0.0:
+            warn(f"some astrometry keywords for telescope '{telescope}' are missing: {ra_obs = }, {dec_obs = }, {pa_obs = }")
+            img.add_header_comment(f"no astromentry keywords '{telescope}': {ra_obs = }, {dec_obs = }, {pa_obs = }, using commanded")
+
+        # set header keyword with best knowledge of IFU center for telescope `tel`
+        img.setHdrValue(f"{label}RA", ra_obs, f"{telescope} center, fiberid={fiberid}, RA [deg]")
+        img.setHdrValue(f"{label}DEC", dec_obs, f"{telescope} center, fiberid={fiberid}, Dec [deg]")
+        img.setHdrValue(f"{label}PA", pa_obs, "PA [deg]")
+        img.setHdrValue(f'{label}ASRC', 'CMD position', comment=f'{telescope} source of astrometry: commanded position')
+        return ra_obs, dec_obs, pa_obs
+
+    outw = wcs.WCS(guider_header)
     CDmatrix = outw.pixel_scale_matrix
     posangrad = -1 * np.arctan(CDmatrix[1, 0] / CDmatrix[0, 0])
-    PAobs = posangrad * 180 / np.pi
     IFUcencoords = outw.pixel_to_world(2500, 1000)
-    RAobs = IFUcencoords.ra.value
-    DECobs = IFUcencoords.dec.value
-    img.setHdrValue('ASTRMSRC', 'GDR coadd', comment='source of astrometry: guider')
+
+    ra_obs = IFUcencoords.ra.value
+    dec_obs = IFUcencoords.dec.value
+    pa_obs = posangrad * 180 / np.pi
+
+    img.setHdrValue(f"{label}RA", ra_obs, f"{telescope} center, fiberid={fiberid}, RA [deg]")
+    img.setHdrValue(f"{label}DEC", dec_obs, f"{telescope} center, fiberid={fiberid}, Dec [deg]")
+    img.setHdrValue(f"{label}PA", pa_obs, "PA [deg]")
+    img.setHdrValue(f'{label}ASRC', 'GDR coadd', comment=f'{telescope} source of astrometry: guider')
     for kw in GUIDER_IMG_KEYWORDS:
-        copy_guider_keyword(mfheader, kw, img)
-    return RAobs, DECobs, PAobs
+        copy_guider_keyword(guider_header, kw, img)
+    return ra_obs, dec_obs, pa_obs
+
+
+def set_altaz_params(telescope, img):
+    """Sets Alt-Az parameters to `img` header
+
+    NOTE: this function will add information about the observing conditions to `img` in place
+
+    Parameters
+    ----------
+    telescope : str
+        Telescope name
+    img : lvmdrp.core.image.Image
+        Image object to add observing conditions to
+
+    Raises
+    ------
+    ValueError
+        If the value of `telescope` is not one of 'Sci', 'SkyE', 'SkyW'
+    """
+    if telescope == "Spec" or telescope not in {"Sci", "SkyE", "SkyW"}:
+        raise ValueError(f"Invalid value for `tel`: {telescope}. Expected either 'Sci', 'SkyE', 'SkyW'")
+
+    hdr = img.getHeader()
+    if hdr is None:
+        warn(f"no header information available, skipping fibers astrometry for telescope '{telescope}'")
+        return
+
+    # define LVMi location
+    lvm_location = EarthLocation(lat=LVM_LAT, lon=LVM_LON, height=LVM_ELEVATION * u.m)
+
+    # find alt-az frame/coordinates for observation
+    altaz_frame = AltAz(obstime=Time(img._header["OBSTIME"]), location=lvm_location)
+
+    # use astropy SkyCoord class
+    label = telescope.upper()
+    coords = SkyCoord(img._header[f"{label}RA"], img._header[f"{label}DEC"], unit='deg')
+
+    # altitude of objects above the horizon (alt, 0 -- 90)
+    alt = coords.transform_to(altaz_frame).alt.value
+
+    # define airmasses based on the final astrometric solution
+    airmass = 1 / np.cos((90 - alt) * np.pi / 180)
+
+    img.setHdrValue(f'{label}ALT', alt, f'{telescope} center Alt [deg]')
+    img.setHdrValue(f'{label}AM', airmass, f'{telescope} center Airmass')
 
 
 def set_fibers_astrometry(img, tel, platescale):
@@ -128,6 +202,8 @@ def set_fibers_astrometry(img, tel, platescale):
     platescale : float
         Telescope plate scale in arcsec/mm
     """
+    if tel not in {"Sci", "SkyE", "SkyW", "Spec"}:
+        raise ValueError(f"Invalid value for `tel`: {tel}. Expected either 'Sci', 'SkyE', 'SkyW', 'Spec'")
 
     slitmap = img.getSlitmap()
     if slitmap is None:
