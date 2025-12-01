@@ -1,158 +1,157 @@
 # encoding: utf-8
 #
-# @Author: Alfredo Mejía-Narváez
-# @Date: Jan 27, 2023
+# @Author: Guillermo Blanc, Niv Drory, Alfredo Mejía-Narváez
+# @Date: Dec 1, 2025
 # @Filename: astrometry.py
 # @License: BSD 3-Clause
 # @Copyright: SDSS-V LVM
 
 
-# read original position table in mm
-# convert position table from mm to arcsec using the focal radius
-# format Euro3D
-# row 1: s, c, h
-# download PanSTARR images with pixel size of 1/4 of the size of the fiber
-# size of the search box 1/3 of the IFU size
-
-
-from multiprocessing import Pool, cpu_count
-
+import os
+from astropy.io import fits
+from astropy import wcs
+from astropy import units as u
+from warnings import warn
 import numpy as np
 
 
-def get_ps_images(ra, dec, size_pix, scale, passband_name):
+GUIDER_IMG_KEYWORDS = [
+            'FRAME0  ', 'FRAMEN  ', 'NFRAMES ', 'STACK0  ', 'STACKN  ', 'NSTACKED',
+            'COESTIM ', 'SIGCLIP ', 'SIGMA   ', 'OBSTIME0', 'OBSTIMEN',
+            'FWHM0   ', 'FWHMN   ', 'FWHMMED ', 'COFWHM  ', 'COFWHMST',
+            'PACOEFFA', 'PACOEFFB', 'PAMIN   ', 'PAMAX   ', 'PADRIFT ',
+            'ZEROPT  ', 'SOLVED  ', 'WARNPADR', 'WARNTRAN', 'WARNMATC', 'WARNFWHM'
+        ]
+
+
+def copy_guider_keyword(gdrhdr, keyword, img):
+    """Copy a keyword from a guider coadd header to an Image object Header
+
+    NOTE: this function modifies the input Image object in place.
+
+    Parameters
+    ----------
+    gdrhdr : fits.Header
+        Guider image header
+    keyword : str
+        Header keyword to copy
+    img : lvmdrp.core.image.Image
+        Image object to copy header keywords to
     """
+    inhdr = keyword in gdrhdr
+    comment = gdrhdr.comments[keyword] if inhdr else ''
+    img.setHdrValue(f'HIERARCH GDRCOADD {keyword}', gdrhdr.get(keyword), comment)
 
-    Downloads reference image from PanSTARRS
 
+def load_coadded_guider(in_guider_path):
+    """Loads in memory coadded guider image
+
+    Parameters
+    ----------
+    in_guider_path : str
+        File path to coadded guider image
+
+    Returns
+    -------
+    fits.Header
+        Header object from second coadded guider image HDU
     """
-    pass
+    if not os.path.isfile(in_guider_path):
+        warn(f"coadded guider image not found {in_guider_path}")
+        return
+    mfheader = fits.getheader(in_guider_path, ext=1)
+    if not mfheader.get("SOLVED", False):
+        warn(f"astrometric solution not found")
+        return
+    return mfheader
 
 
-def register_image(
-    rss,
-    image,
-    passband,
-    search_box,
-    step_search,
-    ref_pix_x,
-    ref_pix_y,
-    arc_scale,
-    angle=0.0,
-    guess_x=0.0,
-    guess_y=0.0,
-    parallel="auto",
-):
+def get_telescope_astrometry(in_guider_paths, tel, img):
+    """Get observed RA, DEC, PA for a given telescope from guider coadd or commanded position
+
+    Parameters
+    ----------
+    in_guider_paths : dict
+        Dictionary with file paths to coadded guider images for each telescope
+    tel : str
+        Telescope identifier
+    img : lvmdrp.core.image.Image
+        Image object to copy header keywords to
+
+    Returns
+    -------
+    tuple
+        (RAobs, DECobs, PAobs) observed coordinates and position angle for the given telescope
     """
+    if tel == "Spec":
+        return 0.0, 0.0, 0.0
 
-    Returns a map of offsets and the corresponding chi-square map after matching the reference
-    image with the given RSS.
+    mfheader = load_coadded_guider(in_guider_paths[tel])
+    if mfheader is None:
+        RAobs = img._header.get(f'PO{tel}RA'.capitalize(), 0.0) or 0.0
+        DECobs = img._header.get(f'PO{tel}DE'.capitalize(), 0.0) or 0.0
+        PAobs = img._header.get(f'PO{tel}PA'.capitalize(), 0.0) or 0.0
+        if -999.0 in [RAobs, DECobs]:
+            RAobs, DECobs, PAobs = 0.0, 0.0, 0.0
+        if np.any([RAobs, DECobs, PAobs]) == 0.0:
+            warn(f"some astrometry keywords for telescope '{tel}' are missing: {RAobs = }, {DECobs = }, {PAobs = }")
+            img.add_header_comment(f"no astromentry keywords '{tel}': {RAobs = }, {DECobs = }, {PAobs = }, using commanded")
+        img.setHdrValue('ASTRMSRC', 'CMD position', comment='source of astrometry: commanded position')
+        return RAobs, DECobs, PAobs
 
-    Given an RSS object ('rss') and a reference 'image' in a 'passband', this function will map
-    the matching of the RSS with the reference image by applying a set of offsets within a
-    predefined 'search_box' in 'step_search'
+    outw = wcs.WCS(mfheader)
+    CDmatrix = outw.pixel_scale_matrix
+    posangrad = -1 * np.arctan(CDmatrix[1, 0] / CDmatrix[0, 0])
+    PAobs = posangrad * 180 / np.pi
+    IFUcencoords = outw.pixel_to_world(2500, 1000)
+    RAobs = IFUcencoords.ra.value
+    DECobs = IFUcencoords.dec.value
+    img.setHdrValue('ASTRMSRC', 'GDR coadd', comment='source of astrometry: guider')
+    for kw in GUIDER_IMG_KEYWORDS:
+        copy_guider_keyword(mfheader, kw, img)
+    return RAobs, DECobs, PAobs
 
+
+def set_fibers_astrometry(slitmap, tel_coords, tel, platescale):
+    """Calculate and set RA,DEC for each fiber in slitmap for a given telescope
+
+    NOTE: this function modifies the input slitmap Table in place.
+
+    Parameters
+    ----------
+    slitmap : astropy.table.Table
+        Slitmap table with fiber positions
+    tel_coords : dict
+        Dictionary with observed (RA, DEC, PA) for each telescope
+    tel : str
+        Telescope identifier
+    platescale : float
+        Telescope plate scale in arcsec/mm
     """
-    posTab = rss.getPositionTable()
-    fiber_area = np.pi * posTab._size[0] ** 2
+    # Add RA,DEC columns to slitmap if they do not exist
+    if "ra" or "dec" not in slitmap.colnames:
+        slitmap['ra'] = np.zeros(len(slitmap)) * u.deg
+        slitmap['dec'] = np.zeros(len(slitmap)) * u.deg
 
-    # extract the Passband fluxes for each spectrum of the RSS
-    (flux_rss, error_rss, min_rss, max_rss, std_rss) = passband.getFluxRSS(rss)
-    flux_rss = flux_rss * fiber_area
-    error_rss = error_rss * fiber_area
-    select_neg = flux_rss <= 0
-    flux_rss[select_neg] = 1e-10
-    rss_mag = passband.fluxToMag(flux_rss)
-    AB_flux = 10 ** (rss_mag / -2.5)
-    AB_eflux = error_rss * (AB_flux / flux_rss)
-    good_rss = flux_rss / error_rss > 3.0
+    selection = slitmap['telescope'].data == tel
+    x = slitmap['xpmm'].data[selection]
+    y = slitmap['ypmm'].data[selection]
 
-    # define empty areas for the search grid
-    offsets_x = (
-        np.arange(-search_box / 2.0, search_box / 2.0 + step_search, step_search)
-        + guess_x
-    )
-    offsets_y = (
-        np.arange(-search_box / 2.0, search_box / 2.0 + step_search, step_search)
-        + guess_y
-    )
-    # angles_off = np.arange(-10, 10, 2)
-    offsets_xIFU = np.zeros((len(offsets_x), len(offsets_y)))
-    offsets_yIFU = np.zeros((len(offsets_x), len(offsets_y)))
-    chisq = np.zeros((len(offsets_x), len(offsets_y)))
-    scale_flux = np.zeros((len(offsets_x), len(offsets_y)))
-    valid_fibers = np.zeros((len(offsets_x), len(offsets_y)))
+    RAobs, DECobs, PAobs = tel_coords[tel]
+    pscale = 0.01  # IFU image pixel scale in mm/pix
+    skypscale = pscale * platescale / 3600  # IFU image pixel scale in deg/pix
+    npix = 1800  # size of fake IFU image
+    w = wcs.WCS(naxis=2)  # IFU image wcs object
+    w.wcs.crpix = [int(npix / 2) + 1, int(npix / 2) + 1]
+    posangrad = PAobs * np.pi / 180
+    w.wcs.cd = np.array([[skypscale * np.cos(posangrad), -1 * skypscale * np.sin(posangrad)], [-1 * skypscale * np.sin(posangrad), -1 * skypscale * np.cos(posangrad)]])
+    w.wcs.crval = [RAobs, DECobs]
+    w.wcs.ctype = ["RA---TAN", "DEC--TAN"]
+    # Calculate RA,DEC of each individual fiber
+    xfib = x / pscale + int(npix / 2)  # pixel x coordinates of fibers
+    yfib = y / pscale + int(npix / 2)  # pixel y coordinates of fibers
+    fibcoords = w.pixel_to_world(xfib, yfib).to_table()
 
-    if parallel == "auto":
-        cpus = cpu_count()
-    else:
-        cpus = int(parallel)
-    if cpus > 1:
-        pool = Pool(cpus)
-        threads = []
-        for i in range(len(offsets_x)):
-            for j in range(len(offsets_y)):
-                threads.append(
-                    pool.apply_async(
-                        image.extractApertures,
-                        args=(
-                            posTab,
-                            ref_pix_x,
-                            ref_pix_y,
-                            arc_scale,
-                            angle,
-                            offsets_x[i],
-                            offsets_y[j],
-                        ),
-                    )
-                )
-        pool.close()
-        pool.join()
-    m = 0
-    for i in range(len(offsets_x)):
-        for j in range(len(offsets_y)):
-            offsets_xIFU[i, j] = offsets_x[i] / arc_scale
-            offsets_yIFU[i, j] = offsets_y[j] / arc_scale
-            if cpus == 1:
-                flux = image.extractApertures(
-                    posTab,
-                    ref_pix_x,
-                    ref_pix_y,
-                    arc_scale,
-                    angle=angle,
-                    offset_arc_x=offsets_x[i],
-                    offset_arc_y=offsets_y[j],
-                )
-            else:
-                flux = threads[m].get()
-            good_pix = flux[0] / flux[1] > 3.0
-            good = (
-                np.logical_or(good_pix, good_rss)
-                & (flux[2] > 0.0)
-                & np.logical_not(np.isnan(flux[1]))
-                & np.logical_not(np.isnan(error_rss))
-            )
-            sort = np.argsort(flux[0][good])
-            match = np.median(flux[0][good][sort[:-1]] / AB_flux[good][sort[:-1]])
-            scale_flux[i, j] = match
-            valid_fibers[i, j] = np.sum(good[sort[:-1]])
-            chisq[i, j] = float(
-                np.sum(
-                    (
-                        flux[0][good][sort[:-1]]
-                        - scale_flux[i, j] * AB_flux[good][sort[:-1]]
-                    )
-                    ** 2
-                    / (flux[1][good][sort[:-1]] ** 2 + AB_eflux[good][sort[:-1]] ** 2)
-                )
-            ) / (valid_fibers[i, j])
-            m += 1
-
-    return (
-        offsets_xIFU * arc_scale,
-        offsets_yIFU * arc_scale,
-        chisq,
-        scale_flux,
-        AB_flux,
-        valid_fibers,
-    )
+    # update slitmap with fiber RA,DEC
+    slitmap["ra"][selection] = fibcoords['ra'].degree * u.deg
+    slitmap["dec"][selection] = fibcoords['dec'].degree * u.deg

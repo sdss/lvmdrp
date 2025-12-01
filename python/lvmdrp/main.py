@@ -24,9 +24,10 @@ from astropy.time import Time
 from astropy.wcs import WCS
 from lvmdrp.core.constants import CAMERAS, SPEC_CHANNELS, MASTERS_DIR
 from lvmdrp.core.rss import RSS
+from lvmdrp.functions.astrometryMethod import add_astrometry
 from lvmdrp.functions.imageMethod import (preproc_raw_frame, create_master_frame,
                                           create_pixelmask, detrend_frame,
-                                          add_astrometry, subtract_straylight,
+                                          subtract_straylight,
                                           trace_peaks,
                                           extract_spectra)
 
