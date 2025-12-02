@@ -15,7 +15,7 @@ from astropy.stats import biweight_location, biweight_scale
 from astropy import units as u
 
 from lvmdrp import log
-from lvmdrp.core.constants import CONFIG_PATH, CON_LAMPS, ARC_LAMPS
+from lvmdrp.core.constants import LVM_ELEVATION, LVM_LAT, LVM_LON, CONFIG_PATH, CON_LAMPS, ARC_LAMPS
 from lvmdrp.core.apertures import Aperture
 from lvmdrp.core.cube import Cube
 from lvmdrp.core.fiberrows import FiberRows
@@ -3215,6 +3215,8 @@ class RSS(FiberRows):
         if self._header is None or self._header["IMAGETYP"] != "object" or not self._header["PO*RA"] or not self._header["PO*DE"]:
             return
 
+        lvm_location = EarthLocation(lat=LVM_LAT, lon=LVM_LON, height=LVM_ELEVATION * u.m)
+
         # calculate heliocentric velocity
         obs_time = Time(self._header['OBSTIME'])
         hrv_corrs = {}
@@ -3230,7 +3232,7 @@ class RSS(FiberRows):
                 hrv_corrs[tel] = numpy.round(0.0, 4)
             else:
                 radec = SkyCoord(ra, dec, unit="deg") # center of the pointing or coordinates of the fiber
-                hrv_corr = radec.radial_velocity_correction(kind='heliocentric', obstime=obs_time, location=EarthLocation.of_site('lco')).to(u.km / u.s).value
+                hrv_corr = radec.radial_velocity_correction(kind='heliocentric', obstime=obs_time, location=lvm_location).to(u.km / u.s).value
                 self._header[f"HIERARCH WAVE HELIORV_{tel}"] = (numpy.round(hrv_corr, 4), f"heliocentric vel. corr. for {tel} [km/s]")
                 hrv_corrs[tel] = numpy.round(hrv_corr, 4)
 
@@ -3252,7 +3254,7 @@ class RSS(FiberRows):
                 self._header[f"STD{istd}HRV"] = (0.0, f"standard {istd} heliocentric vel. corr. [km/s]")
                 continue
             std_radec = SkyCoord(std_ra, std_dec, unit="deg")
-            std_hrv_corr = std_radec.radial_velocity_correction(kind="heliocentric", obstime=std_obstime, location=EarthLocation.of_site("lco")).to(u.km / u.s).value
+            std_hrv_corr = std_radec.radial_velocity_correction(kind="heliocentric", obstime=std_obstime, location=lvm_location).to(u.km / u.s).value
             self._header[f"STD{istd}HRV"] = (numpy.round(std_hrv_corr, 4), f"standard {istd} heliocentric vel. corr. [km/s]")
 
         if apply_hrv_corr: ...

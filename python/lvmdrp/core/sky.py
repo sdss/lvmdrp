@@ -39,6 +39,9 @@ from lvmdrp.core.constants import (
     SKYMODEL_INST_CONFIG_PATH,
     SKYMODEL_INST_PATH,
     SKYMODEL_MODEL_CONFIG_PATH,
+    LVM_ELEVATION,
+    LVM_LAT,
+    LVM_LON
 )
 from lvmdrp.external.skycorr import createParFile, fitstabSkyCorrWrapper, runSkyCorr
 from lvmdrp import log
@@ -266,9 +269,7 @@ def sky_pars_header(header):
 
 
     # define location of LCO using shadow heigh calculator library
-    observatory_location = EarthLocation(lat=SH_CALCULATOR.observatory_topo.latitude.degrees*u.deg,
-                                     lon=SH_CALCULATOR.observatory_topo.longitude.degrees*u.deg,
-                                     height=SH_CALCULATOR.observatory_elevation.value*u.m)
+    observatory_location = EarthLocation(lat=LVM_LAT, lon=LVM_LON, height=LVM_ELEVATION * u.m)
 
     #use astropy Time class for the observing time
     obs_time = Time(obstime)
@@ -290,7 +291,7 @@ def sky_pars_header(header):
     skyw_coord = SkyCoord(skyw_ra, skyw_dec, unit='deg')
 
     # observatory height ('sm_h' in km)
-    sm_h = SH_CALCULATOR.observatory_elevation
+    sm_h = LVM_ELEVATION * u.m
 
     # RA and dec of moon (moonra, moondec) and SkyCoord position for moon
     moon_ra = moon_coord.ra.deg
