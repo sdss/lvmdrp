@@ -1504,18 +1504,18 @@ def _collect_header_data(filename: str) -> dict:
                         'fluxcal': 'FLUXCAL',
                         # sci
                         'sci_ra': 'SCIRA', 'sci_dec': 'SCIDEC',
-                        'sci_pa': 'SCIPA', 'sci_amass': 'SCIAM',
+                        'sci_pa': 'SCIPA', 'sci_amass': 'SCIAM', 'sci_astsrc': 'SCIASRC',
                         'sci_kmpos': 'TESCIKM', 'sci_focpos': 'TESCIFO', 'sci_alt': 'SKY SCI_ALT',
                         'sci_sh_hght': 'SKY SCI_SH_HGHT', 'sci_moon_sep': 'SKY SCI_MOON_SEP',
                         # skye
                         'skye_ra': 'SKYERA', 'skye_dec': 'SKYEDEC',
-                        'skye_pa': 'SKYEPA', 'skye_amass': 'SKYEAM',
+                        'skye_pa': 'SKYEPA', 'skye_amass': 'SKYEAM', 'skye_astsrc': 'SKYEASRC',
                         'skye_kmpos': 'TESKYEKM', 'skye_focpos': 'TESKYEFO', 'skye_name': 'SKYENAME',
                         'skye_alt': 'SKY SKYE_ALT', 'sci_skye_sep': 'SKY SCI_SKYE_SEP',
                         'skye_sh_hght': 'SKY SKYE_SH_HGHT', 'skye_moon_sep': 'SKY SKYE_MOON_SEP',
                         # skyw
                         'skyw_ra': 'SKYWRA', 'skyw_dec': 'SKYWDEC',
-                        'skyw_pa': 'SKYWPA', 'skyw_amass': 'SKYWAM',
+                        'skyw_pa': 'SKYWPA', 'skyw_amass': 'SKYWAM', 'skyw_astsrc': 'SKYWASRC',
                         'skyw_kmpos': 'TESKYWKM', 'skyw_focpos': 'TESKYWFO', 'skyw_name': 'SKYWNAME',
                         'skyw_alt': 'SKY SKYW_ALT', 'sci_skyw_sep': 'SKY SCI_SKYW_SEP',
                         'skyw_sh_hght': 'SKY SKYW_SH_HGHT', 'skyw_moon_sep': 'SKY SKYW_MOON_SEP',
@@ -1626,7 +1626,8 @@ def update_summary_file(filename: str, tileid: int = None, mjd: int = None, expn
 
     # set min column sizes for some columns
     min_itemsize = {'skye_name': 20, 'skyw_name': 20, 'location': 120, 'agcam_location': 120,
-                    'object': 24, 'filename': 120, 'obstime': 23, 'drpver': 15}
+                    'object': 24, 'filename': 120, 'obstime': 23, 'drpver': 15,
+                    'fluxcal': 5, 'sci_astsrc': 15, 'skye_astsrc': 15, 'skyw_astsrc': 15}
 
     # write to pytables hdf5
     try:
