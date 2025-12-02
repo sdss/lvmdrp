@@ -54,11 +54,15 @@ def test_collect_header_data(make_framefits):
                'skye_pa': 0.0, 'skye_amass': 1.013, 'skye_kmpos': -37.5, 'skye_focpos': 36.19,
                'skye_name': 'WHAM_south_02', 'skye_alt': 80.9755, 'sci_skye_sep': 58.2987,
                'skye_sh_hght': 164.79533, 'skye_moon_sep': 18.4705,
-               'skyw_ra': 58.011871, 'skyw_dec': 11.817184, 'skyw_pa': 0.0, 'skyw_amass': 1.555, 
-               'skyw_kmpos': -54.51, 'skyw_focpos': 37.11, 'skyw_name': 'grid087', 
+               'skyw_ra': 58.011871, 'skyw_dec': 11.817184, 'skyw_pa': 0.0, 'skyw_amass': 1.555,
+               'skyw_kmpos': -54.51, 'skyw_focpos': 37.11, 'skyw_name': 'grid087',
                'skyw_alt': 40.0142, 'sci_skyw_sep': 8.4839, 'skyw_sh_hght': 165.41738,
                'skyw_moon_sep': 27.7977, 'moon_ra': 348.42157, 'moon_dec': -7.55955,
-               'moon_phase': 79.91, 'moon_fli': 0.4136, 'sun_alt': -13.3779, 'moon_alt': 46.8744}
+               'moon_phase': 79.91, 'moon_fli': 0.4136, 'sun_alt': -13.3779, 'moon_alt': 46.8744,
+               'std_mean_senb': 2.0e-14, 'std_mean_senr': 2.0e-14, 'std_mean_senz': 2.0e-14,
+               'sci_mean_senb': 2.0e-14, 'sci_mean_senr': 2.0e-14, 'sci_mean_senz': 2.0e-14,
+               'mod_mean_senb': 2.0e-14, 'mod_mean_senr': 2.0e-14, 'mod_mean_senz': 2.0e-14,
+               'fluxcal': "MOD"}
 
     assert hdr_data == expdata
 
