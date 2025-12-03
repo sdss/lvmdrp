@@ -30,6 +30,7 @@ from lvmdrp.utils.hdrfix import apply_hdrfix
 from lvmdrp.utils.convert import dateobs_to_sjd, correct_sjd, tileid_grp
 
 pd.set_option('io.hdf.default_format', 'table')
+pd.set_option('future.no_silent_downcasting', True)
 
 
 DRPVER = __version__

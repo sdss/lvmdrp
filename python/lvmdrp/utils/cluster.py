@@ -13,7 +13,7 @@ os.environ["SLURM_SCRATCH_DIR"] = os.getenv("SLURM_SCRATCH_DIR", "~")
 os.environ["SLURM_LOGS_DIR"] = os.getenv("SLURM_LOGS_DIR", "~")
 
 try:
-    from slurm import queue
+    from slurm import queue # type: ignore
 except ImportError:
     queue = None
 
