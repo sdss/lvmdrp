@@ -12,6 +12,8 @@ import astropy.units as u
 from astropy.table import Table
 import matplotlib.backends.backend_pdf
 
+from lvmdrp.core.constants import LVM_ELEVATION, LVM_LAT, LVM_LON
+
 
 # Measure line fluxes by direct integration of the spectra and add to table
 maplist=['[OI]5577', '[OI]6300', '[OH]6865', 'Bcont(4195, 4220)', 'Rcont(6420, 6440)', 'Zcont(9130, 9145)']
@@ -611,7 +613,7 @@ def get_moon_info_las_campanas(datetime_utc,verbose=False):
     Get information about the moon (and sun) as a fuction of UT
     '''
     # Las Campanas Observatory coordinates
-    observatory_location = EarthLocation(lat=-29.0089*u.deg, lon=-70.6920*u.deg, height=2281*u.m)
+    observatory_location = EarthLocation(lat=LVM_LAT, lon=LVM_LON, height=LVM_ELEVATION * u.m)
 
     # Specify the observation time in UT
     obs_time = Time(datetime_utc)

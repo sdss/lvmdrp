@@ -11,6 +11,11 @@ import os
 from lvmdrp.utils import get_env_lib_directory
 
 
+# LVMi constants
+LVM_ELEVATION = 2380.0 # in m
+LVM_LAT = '29.0146S'
+LVM_LON = '70.6926W'
+
 # sources server URL
 LVM_UNAM_URL = "http://ifs.astroscu.unam.mx/LVM"
 LVM_SRC_URL = f"{LVM_UNAM_URL}/lvmdrp_src.zip"

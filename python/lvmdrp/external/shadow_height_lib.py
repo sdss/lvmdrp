@@ -5,13 +5,14 @@ from astropy import units as u
 from skyfield.api import Loader
 from skyfield.api import Topos
 
-from lvmdrp.core.constants import EPHEMERIS_DIR
+from lvmdrp.core.constants import LVM_ELEVATION, LVM_LAT, LVM_LON, EPHEMERIS_DIR
+
 
 class shadow_calc(object):
     def __init__(self, observatory_name="LCO",
-    observatory_elevation=2380.0*u.m,
-    observatory_lat='29.0146S',
-    observatory_lon = '70.6926W',
+    observatory_elevation=LVM_ELEVATION*u.m,
+    observatory_lat=LVM_LAT,
+    observatory_lon=LVM_LON,
     jd=2459458,
     eph=None,
     earth=None,
@@ -347,8 +348,8 @@ def test_shadow_calc():
         eph = load('de421.bsp')
         import lvmsurveysim.utils.iterative_shadow_height_lib as iterative_shadow_height_lib
         iter_calc = iterative_shadow_height_lib.shadow_calc(observatory_name='LCO',
-                        observatory_elevation=2380*u.m,
-                        observatory_lat='29.0146S', observatory_lon='70.6926W',
+                        observatory_elevation=LVM_ELEVATION*u.m,
+                        observatory_lat=LVM_LAT, observatory_lon=LVM_LON,
                         eph=eph, earth=eph['earth'], sun=eph['sun'])
         iter_calc.update_t(jd)
         old_h = iter_calc.height_from_radec(ra/15., dec, simple_output=True)['height']
