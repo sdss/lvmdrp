@@ -103,7 +103,7 @@ STRAYLIGHT_PARS = dict(
     select_nrows=(10,10), use_weights=True, aperture=11,
     x_bins=60, x_bounds=("data","data"), y_bounds=(0.0,0.0),
     x_nbound=10, y_nbound=5, clip=(0.0,None),
-    nsigma=1.0, smoothing=90, median_box=None)
+    nsigma=1.0, smoothing=90, median_box=11)
 
 
 def _reject_pixelshifted(frames, pixelshifts_path=PIXELSHIFTS_PATH):
