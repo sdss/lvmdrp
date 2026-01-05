@@ -527,6 +527,42 @@ def create_qaqual_bad_hdrfix(mjd, expnums):
         hdrfix.write_hdrfix_file(mjd=mjd, fileroot=f"sdR-*-*-{expnum:>08d}", keyword="QAQUAL", value="BAD")
 
 
+def create_lamps_on_hdrfix(mjd, lamps_on, expnum):
+    """Creates header fixes for lamps status in calibration frames
+
+    Parameters
+    ----------
+    mjd : int
+        MJD of the night to analyse
+    lamps_on : list_like
+        A list of valid (case-insensitive) lamp names, for which status will be set to 'ON'. Lamps not listed will be set to 'OFF'
+    expnum : int
+        Exposure number to create header fix for
+
+    Raises
+    ------
+    ValueError
+        If all values in `lamps_on` are invalid names of lamps
+    """
+
+    lamps_all = CON_LAMPS + ARC_LAMPS
+    lamps_status = dict.fromkeys(lamps_all, "OFF")
+    lamps_ = set(lamps_all).intersection(map(str.upper, lamps_on))
+    if not lamps_:
+        raise ValueError(f"Invalid value(s) in `lamps_on`: {lamps_on}. Expected a subset of {lamps_all}")
+    lamps_status.update(dict.fromkeys(lamps_, "ON"))
+
+    frames = [md.get_calibrations_metadata(mjds=mjd, expnums=[expnum], calibration=calibration) for calibration in CALIBRATION_TYPES]
+    frames = pd.concat(frames, ignore_index=True)
+    if frames.empty:
+        log.info(f"no need to apply header fixes for lamps status on MJD = {mjd}, {expnum = }")
+        return
+    log.info(f"going to write header fixes for lamps status on MJD = {mjd}, {expnum = }: {lamps_on = }")
+
+    for lamp, status in lamps_status.items():
+        hdrfix.write_hdrfix_file(mjd=mjd, fileroot=f"sdR-*-*-{expnum:>08d}", keyword=lamp, value=status)
+
+
 def _parse_list(items_str):
     # handle list
     if isinstance(items_str, str) and "," in items_str:
