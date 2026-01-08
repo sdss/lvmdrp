@@ -42,6 +42,13 @@ from lvmdrp.core.constants import MASTERS_DIR
 
 description = "provides flux calibration tasks"
 
+# Telluric-free continuum regions for PWV fitting (wavelengths in Angstroms)
+# Regions between these windows contain telluric absorption (O2, H2O bands)
+TELLURIC_FREE_REGIONS = {
+    'r': [[6750, 6860], [7080, 7145], [7400, 7460]],  # O2 B-band ~6860-7080, H2O ~7145-7400
+    'z': [[7780, 7860], [8050, 8085], [8440, 8480]],  # O2 A-band ~7600-7780, H2O ~8085-8440
+}
+
 
 def apply_fluxcal(in_rss: str, out_fframe: str, method: str = 'MOD', display_plots: bool = False):
     """applies flux calibration to spectrograph-combined data
@@ -391,12 +398,9 @@ def prepare_spec(in_rss, width=3):
         w_tmp = rss_tmp._wave
         w.append(w_tmp)
 
-        # load the sky masks
+        # Load sky emission line mask (telluric bands are NOT masked - handled in model_selection)
         channel = rss_tmp._header['CCD']
         m = get_sky_mask_uves(w[b], width=width)
-        m2 = None
-        if channel == "z":
-            m2 = get_z_continuum_mask(w_tmp)
 
         master_sky = rss_tmp.eval_master_sky()
 
@@ -460,11 +464,10 @@ def prepare_spec(in_rss, width=3):
 
             spec_orig = (rss_tmp._data[fibidx[0],:] - master_sky._data[fibidx[0],:]) / exptime
 
-            # interpolate over bright sky lines and nan values
+            # Interpolate over bright sky emission lines and bad pixels
+            # Note: telluric bands are NOT masked here - telluric correction is applied later in model_selection()
             mask_bad = ~np.isfinite(spec_orig)
             spec_tmp = fluxcal.interpolate_mask(w_tmp, spec_orig, m | mask_bad, fill_value="extrapolate")
-            if channel == "z":
-                spec_tmp = fluxcal.interpolate_mask(w_tmp, spec_tmp, ~m2 | mask_bad, fill_value="extrapolate")
 
             # extinction correction
             # load extinction curve
@@ -546,9 +549,9 @@ def _residual_function(params, y_obs, valid_mask, za, telluric_corrector,
 
 
 def _qa_plot_pwv_calculation(fig_out, wave_channels, y_data, model_trans, residuals,
-                             obs_ratio, poly_continuum, continuum_regions,
-                             result, zenith_angle, rms, save_png=False,
-                             std_info=None):
+                             obs_ratio, poly_continuum, regions_info,
+                             result, zenith_angle, rms, sky_masks=None,
+                             save_png=False, std_info=None):
     """Create QA plot for PWV calculation. Pure visualization - all data pre-computed."""
 
     # Ensure output directory exists and prepare file paths
@@ -565,7 +568,8 @@ def _qa_plot_pwv_calculation(fig_out, wave_channels, y_data, model_trans, residu
                         subplot_titles=('PWV fitting', 'Continuum Fitting'))
 
     channel_names = ['r', 'z']
-    color_map = ['black', 'black']
+    data_color_masked = 'black'
+    data_color_full = 'orange'
     model_color = 'red'
     residual_color = 'gray'
 
@@ -573,11 +577,27 @@ def _qa_plot_pwv_calculation(fig_out, wave_channels, y_data, model_trans, residu
     for ich in range(2):
         wave_ch = wave_channels[ich]
 
-        # Plot observed data
-        fig.add_trace(go.Scatter(x=wave_ch, y=y_data[ich], mode='lines',
-                                 line=dict(color=color_map[ich], width=1),
+        # Plot good pixels only (black)
+        y_good = y_data[ich].copy()
+        if sky_masks is not None:
+            y_good[sky_masks[ich]] = np.nan
+        fig.add_trace(go.Scatter(x=wave_ch, y=y_good, mode='lines',
+                                 line=dict(color=data_color_masked, width=1),
                                  name='Data' if ich == 0 else None,
                                  showlegend=(ich == 0)), row=1, col=1)
+
+        # Plot masked pixels only (orange), with edge pixels for visual continuity
+        if sky_masks is not None:
+            # Expand mask by 1 pixel on each edge for visual continuity
+            mask_expanded = sky_masks[ich].copy()
+            mask_expanded[1:] |= sky_masks[ich][:-1]   # add left neighbor
+            mask_expanded[:-1] |= sky_masks[ich][1:]   # add right neighbor
+            y_masked = y_data[ich].copy()
+            y_masked[~mask_expanded] = np.nan
+            fig.add_trace(go.Scatter(x=wave_ch, y=y_masked, mode='lines',
+                                     line=dict(color=data_color_full, width=1),
+                                     name='Masked (possibly sky lines cotaminated)' if ich == 0 else None,
+                                     showlegend=(ich == 0)), row=1, col=1)
 
         # Plot best-fit model
         fig.add_trace(go.Scatter(x=wave_ch, y=model_trans[ich], mode='lines',
@@ -598,12 +618,28 @@ def _qa_plot_pwv_calculation(fig_out, wave_channels, y_data, model_trans, residu
     for ich in range(2):
         wave_ch = wave_channels[ich]
 
-        # Plot observed/stellar ratio
-        fig.add_trace(go.Scatter(x=wave_ch, y=obs_ratio[ich],
+        # Plot good pixels only (black)
+        obs_good = obs_ratio[ich].copy()
+        if sky_masks is not None:
+            obs_good[sky_masks[ich]] = np.nan
+        fig.add_trace(go.Scatter(x=wave_ch, y=obs_good,
                                  mode='lines', showlegend=(ich == 0),
-                                 line=dict(color=color_map[ich], width=1),
+                                 line=dict(color=data_color_masked, width=1),
                                  name='Obs/Stellar model' if ich == 0 else None,
                                  legend='legend2'), row=2, col=1)
+
+        # Plot masked pixels only (orange), with edge pixels for visual continuity
+        if sky_masks is not None:
+            mask_expanded = sky_masks[ich].copy()
+            mask_expanded[1:] |= sky_masks[ich][:-1]   # add left neighbor
+            mask_expanded[:-1] |= sky_masks[ich][1:]   # add right neighbor
+            obs_masked = obs_ratio[ich].copy()
+            obs_masked[~mask_expanded] = np.nan
+            fig.add_trace(go.Scatter(x=wave_ch, y=obs_masked,
+                                     mode='lines', showlegend=(ich == 0),
+                                     line=dict(color=data_color_full, width=1),
+                                     name='Masked (possibly sky lines cotaminated)' if ich == 0 else None,
+                                     legend='legend2'), row=2, col=1)
 
         # Plot polynomial continuum fit
         fig.add_trace(go.Scatter(x=wave_ch, y=poly_continuum[ich],
@@ -613,9 +649,9 @@ def _qa_plot_pwv_calculation(fig_out, wave_channels, y_data, model_trans, residu
                                  legend='legend2'), row=2, col=1)
 
         # Mark continuum regions
-        for region_idx, (wmin, wmax) in enumerate(continuum_regions[ich]):
-            fig.add_vrect(x0=wmin, x1=wmax, fillcolor=color_map[ich], opacity=0.1,
-                          line_width=0, row=2, col=1, name='Mpoly Fit regins', legend='legend2')
+        for region_idx, (wmin, wmax) in enumerate(regions_info[ich]):
+            fig.add_vrect(x0=wmin, x1=wmax, fillcolor='gray', opacity=0.1,
+                          line_width=0, row=2, col=1, name='Poly fit regions', legend='legend2')
 
     fig.update_xaxes(title_text="Wavelength (Å)", row=2, col=1)
     fig.update_yaxes(title_text="Obs. spec. / (Template * Mpoly)", row=1, col=1)
@@ -627,7 +663,7 @@ def _qa_plot_pwv_calculation(fig_out, wave_channels, y_data, model_trans, residu
                     x=0.0, y=0.98, bgcolor='rgba(255, 255, 255, 0.9)',
                     font=dict(size=10)),
         legend2=dict(orientation='h', xanchor='left', yanchor='top',
-                     x=0.0, y=0.485, bgcolor='rgba(255, 255, 255, 0.9)',
+                     x=0.0, y=0.465, bgcolor='rgba(255, 255, 255, 0.9)',
                      font=dict(size=10)),
         plot_bgcolor='rgba(245, 245, 245, 1)',
         paper_bgcolor='white'
@@ -666,8 +702,8 @@ def _qa_plot_pwv_calculation(fig_out, wave_channels, y_data, model_trans, residu
 
 
 def calc_pwv(wave, spec, lsf, stellar_model, telluric_corrector,
-             pwv_init=3.0, pwv_bounds=(0.5, 50.0), zenith_angle=0.0, fig_out=None,
-             std_info=None):
+             pwv_init=3.0, pwv_bounds=(0.5, 50.0), zenith_angle=0.0,
+             continuum_poly_deg=2, sky_mask_width=3, fig_out=None, std_info=None):
     """
     Estimate precipitable water vapor (PWV) by fitting telluric absorption bands.
     Fits standard star spectra in r and z channels using O2 and H2O absorption
@@ -682,28 +718,28 @@ def calc_pwv(wave, spec, lsf, stellar_model, telluric_corrector,
         pwv_init: Initial PWV guess in mm (default: 3.0)
         pwv_bounds: PWV fitting bounds in mm (default: (0.5, 50.0))
         zenith_angle: Observation zenith angle in degrees (default: 0.0)
+        continuum_poly_deg: Polynomial degree for continuum fitting (default: 2)
+        sky_mask_width: Width for sky emission line masking (default: 3)
 
     Returns:
         tuple: (pwv_value, pwv_error) in mm
     """
 
-    # Define telluric band regions for r and z channels
-    R_CHANNEL = dict(deg=2, cont_regions=[[6750, 6860], [7080, 7145], [7400, 7460]])
-    Z_CHANNEL = dict(deg=2, cont_regions=[[7780, 7860], [8050, 8085], [8440, 8480]])
-    regions_info = [R_CHANNEL, Z_CHANNEL]
+    # Use module-level telluric-free regions
+    regions_info = [TELLURIC_FREE_REGIONS['r'], TELLURIC_FREE_REGIONS['z']]
 
     # Set wavelength range for efficiency (only compute transmission where needed)
-    wave_min = R_CHANNEL['cont_regions'][0][0] - 50
-    wave_max = Z_CHANNEL['cont_regions'][-1][1] + 50
+    wave_min = TELLURIC_FREE_REGIONS['r'][0][0] - 50
+    wave_max = TELLURIC_FREE_REGIONS['z'][-1][1] + 50
     telluric_corrector.set_wave_range(wave_min, wave_max)
 
     # Build wavelength masks for continuum fitting and full regions
     continuum_masks = []
     full_masks = []
+    sky_masks_full = []  # sky masks for full fitting regions
 
-    for channel_info in regions_info:
-        regions = channel_info['cont_regions']
-        wave_ch = wave[len(continuum_masks)]  # current channel wavelength
+    for ich, regions in enumerate(regions_info):
+        wave_ch = wave[ich]
 
         # Full region spanning all continuum windows
         full_mask = (wave_ch >= regions[0][0]) & (wave_ch <= regions[-1][1])
@@ -713,8 +749,15 @@ def calc_pwv(wave, spec, lsf, stellar_model, telluric_corrector,
         for wmin, wmax in regions:
             cont_mask |= (wave_ch >= wmin) & (wave_ch <= wmax)
 
+        # Sky emission line mask (True = masked/bad pixel)
+        sky_mask = get_sky_mask_uves(wave_ch, width=sky_mask_width)
+
+        # Apply sky mask to continuum mask (exclude sky lines from continuum fitting)
+        cont_mask = cont_mask & ~sky_mask
+
         continuum_masks.append(cont_mask)
         full_masks.append(full_mask)
+        sky_masks_full.append(sky_mask[full_mask])  # sky mask for full region only
 
     # Compute normalized absorption depth for each channel
     y_data, valid_masks, poly_continuum_fits, obs_stellar_ratios = [], [], [], []
@@ -732,14 +775,15 @@ def calc_pwv(wave, spec, lsf, stellar_model, telluric_corrector,
         finite_mask = np.isfinite(ratio_cont)
         poly_coef = np.polyfit(wave[ich][cont_msk][finite_mask],
                                ratio_cont[finite_mask],
-                               regions_info[ich]['deg'])
+                               continuum_poly_deg)
         poly_continuum = np.polyval(poly_coef, wave[ich][full_msk])
         poly_continuum_fits.append(poly_continuum)
 
         # Normalized absorption depth (1.0 = no absorption)
         normalized_depth = obs_stellar_ratio / poly_continuum
         y_data.append(normalized_depth)
-        valid_masks.append(np.isfinite(normalized_depth))
+        # Valid mask: finite values AND not masked by sky lines
+        valid_masks.append(np.isfinite(normalized_depth) & ~sky_masks_full[ich])
 
     # Setup and run PWV optimization
     params = Parameters()
@@ -749,8 +793,7 @@ def calc_pwv(wave, spec, lsf, stellar_model, telluric_corrector,
     lsf_channels = [lsf[0][full_masks[0]], lsf[1][full_masks[1]]]
 
     result = minimize(_residual_function, params, method='leastsq',
-                      args=(y_data, valid_masks, zenith_angle,
-                            telluric_corrector,
+                      args=(y_data, valid_masks, zenith_angle, telluric_corrector,
                             wave_channels, lsf_channels))
 
     if fig_out is not None:
@@ -768,14 +811,12 @@ def calc_pwv(wave, spec, lsf, stellar_model, telluric_corrector,
         # Calculate RMS for Y-axis scaling
         rms = np.nanstd(np.concatenate(residuals))
 
-        # Extract continuum regions
-        continuum_regions = [info['cont_regions'] for info in regions_info]
-
         # Call pure visualization function
         _qa_plot_pwv_calculation(
             fig_out, wave_channels, y_data, model_trans, residuals,
-            obs_stellar_ratios, poly_continuum_fits, continuum_regions,
-            result, zenith_angle, rms, save_png=False, std_info=std_info)
+            obs_stellar_ratios, poly_continuum_fits, regions_info,
+            result, zenith_angle, rms, sky_masks=sky_masks_full,
+            save_png=False, std_info=std_info)
 
     # Reset wavelength range to full model
     telluric_corrector.reset_wave_range()
@@ -1186,19 +1227,26 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
             if np.isnan(model_to_gaia_median[i]):
                 continue
 
-            # absorption telluric correction
+            # Telluric absorption correction on unmasked spectrum
             std_telluric_corrected = std_spectra_orig_all_bands[n_chan][i] / stack_telluric_trans[i][n_chan]
 
-            # calculate sensitivity curve
-            sens_tmp = stack_stellar_model[i][n_chan] * model_to_gaia_median[i] / std_telluric_corrected
+            # Mask bad pixels and sky emission lines AFTER telluric correction
+            mask_bad = ~np.isfinite(std_telluric_corrected)
+            mask_skylines = get_sky_mask_uves(w[n_chan], width=3)
+            std_masked = fluxcal.interpolate_mask(
+                w[n_chan], std_telluric_corrected, mask_bad | mask_skylines, fill_value="extrapolate"
+            )
+
+            # Calculate sensitivity curve using masked spectrum
+            sens_tmp = stack_stellar_model[i][n_chan] * model_to_gaia_median[i] / std_masked
 
             # Filter and interpolate sensitivity curve
             wgood, sgood = fluxcal.filter_channel(w[n_chan], sens_tmp, 3, method='savgol')
-            s = interpolate.make_smoothing_spline(wgood, sgood, lam=1e4) #lam=win
+            s = interpolate.make_smoothing_spline(wgood, sgood, lam=1e4)
             sens0 = s(w[n_chan]).astype(np.float32)
 
-            # calculate the normalization of the average (known) sensitivity curve in a broad band
-            lvmflux = fluxcal.spec_to_LVM_flux(chan, w[n_chan], std_spectra_all_bands[n_chan][i]*sens0)
+            # Calculate flux normalization using telluric-corrected masked spectrum
+            lvmflux = fluxcal.spec_to_LVM_flux(chan, w[n_chan], std_masked * sens0)
             gaia_flux = fluxcal.spec_to_LVM_flux(chan, std_wave_all, gaia_flux_interpolated[i])
             sens_coef = gaia_flux / lvmflux
             #print(f'lvmflux={lvmflux}, gaia_flux={gaia_flux}, converted to gaia flux = {lvmflux*sens_coef}')
