@@ -17,9 +17,6 @@ import bottleneck as bn
 from astropy.table import Table
 from astropy.io import fits as pyfits
 from astropy.visualization import simple_norm
-from astropy.wcs import wcs
-from astropy import units as u
-import astropy.io.fits as fits
 from scipy import interpolate, integrate
 from scipy import signal
 from tqdm import tqdm
@@ -27,7 +24,7 @@ from tqdm import tqdm
 from typing import List, Tuple, Dict
 
 from lvmdrp import log, DRP_COMMIT, __version__ as DRPVER
-from lvmdrp.core.constants import CONFIG_PATH, SPEC_CHANNELS, ARC_LAMPS, LVM_REFERENCE_COLUMN, FIDUCIAL_PLATESCALE, LVM_NFIBERS, LVM_NBLOCKS
+from lvmdrp.core.constants import CONFIG_PATH, SPEC_CHANNELS, ARC_LAMPS, LVM_REFERENCE_COLUMN, LVM_NFIBERS, LVM_NBLOCKS
 from lvmdrp.utils.decorators import skip_on_missing_input_path, drop_missing_input_paths
 from lvmdrp.utils.bitmask import QualityFlag
 from lvmdrp.core.fiberrows import FiberRows, _read_fiber_ypix
@@ -3246,183 +3243,6 @@ def preproc_raw_frame(
     )
 
     return org_img, os_profiles, os_models, proc_img
-
-
-def add_astrometry(
-    in_image: str,
-    out_image: str,
-    in_agcsci_image: str,
-    in_agcskye_image: str,
-    in_agcskyw_image: str
-):
-    """
-    uses WCS in AG camera coadd image to calculate RA,DEC of
-    each fiber in each telescope and adds these to SLITMAP extension
-    if AGC frames are not available it uses the POtelRA,POtelDEC,POtelPA
-
-    Parameters
-
-    in_image : str
-        path to input image
-    out_image : str
-        path to output image
-    in_agcsci_image : str
-        path to Sci telescope AGC coadd master frame
-    in_agcskye_image : str
-        path to SkyE telescope AGC coadd master frame
-    in_agcskyw_image : str
-        path to SkyW telescope AGC coadd master frame
-    """
-
-    # print("**************************************")
-    # print("**** ADDING ASTROMETRY TO SLITMAP ****")
-    # print("**************************************")
-    log.info(f"loading frame from {in_image}")
-    #print(in_image)
-    #print(out_image)
-    #print(in_agcsci_image)
-    #print(in_agcskye_image)
-    #print(in_agcskyw_image)
-    #print(in_agcspec_image)
-
-    # reading slitmap
-    org_img = loadImage(in_image)
-    slitmap = org_img.getSlitmap()
-    telescope=numpy.array(slitmap['telescope'].data)
-    x=numpy.array(slitmap['xpmm'].data)
-    y=numpy.array(slitmap['ypmm'].data)
-
-    # selection mask for fibers from different telescopes
-    selsci=(telescope=='Sci')
-    selskye=(telescope=='SkyE')
-    selskyw=(telescope=='SkyW')
-    selspec=(telescope=='Spec')
-
-    # read AGC coadd images and get RAobs, DECobs, and PAobs for each telescope
-    agcfiledir={'sci':in_agcsci_image, 'skye':in_agcskye_image, 'skyw':in_agcskyw_image}
-
-    def copy_guider_keyword(gdrhdr, keyword, img):
-        '''Copy a keyword from a guider coadd header to an Image object Header'''
-        inhdr = keyword in gdrhdr
-        comment = gdrhdr.comments[keyword] if inhdr else ''
-        img.setHdrValue(f'HIERARCH GDRCOADD {keyword}', gdrhdr.get(keyword), comment)
-
-    def getobsparam(tel):
-        if tel!='spec':
-            if os.path.isfile(agcfiledir[tel]):
-                mfagc=fits.open(agcfiledir[tel])
-                mfheader=mfagc[1].header
-                outw = wcs.WCS(mfheader)
-                CDmatrix=outw.pixel_scale_matrix
-                posangrad=-1*numpy.arctan(CDmatrix[1,0]/CDmatrix[0,0])
-                PAobs=posangrad*180/numpy.pi
-                IFUcencoords=outw.pixel_to_world(2500,1000)
-                try:
-                    # some very early science data apparently fails here
-                    RAobs=IFUcencoords.ra.value
-                    DECobs=IFUcencoords.dec.value
-                except AttributeError:
-                    RAobs=0
-                    DECobs=0
-                org_img.setHdrValue('ASTRMSRC', 'GDR coadd', comment='source of astrometry: guider')
-                copy_guider_keyword(mfheader, 'FRAME0  ', org_img)
-                copy_guider_keyword(mfheader, 'FRAMEN  ', org_img)
-                copy_guider_keyword(mfheader, 'NFRAMES ', org_img)
-                copy_guider_keyword(mfheader, 'STACK0  ', org_img)
-                copy_guider_keyword(mfheader, 'STACKN  ', org_img)
-                copy_guider_keyword(mfheader, 'NSTACKED', org_img)
-                copy_guider_keyword(mfheader, 'COESTIM ', org_img)
-                copy_guider_keyword(mfheader, 'SIGCLIP ', org_img)
-                copy_guider_keyword(mfheader, 'SIGMA   ', org_img)
-                copy_guider_keyword(mfheader, 'OBSTIME0', org_img)
-                copy_guider_keyword(mfheader, 'OBSTIMEN', org_img)
-                copy_guider_keyword(mfheader, 'FWHM0   ', org_img)
-                copy_guider_keyword(mfheader, 'FWHMN   ', org_img)
-                copy_guider_keyword(mfheader, 'FWHMMED ', org_img)
-                copy_guider_keyword(mfheader, 'COFWHM  ', org_img)
-                copy_guider_keyword(mfheader, 'COFWHMST', org_img)
-                copy_guider_keyword(mfheader, 'PACOEFFA', org_img)
-                copy_guider_keyword(mfheader, 'PACOEFFB', org_img)
-                copy_guider_keyword(mfheader, 'PAMIN   ', org_img)
-                copy_guider_keyword(mfheader, 'PAMAX   ', org_img)
-                copy_guider_keyword(mfheader, 'PADRIFT ', org_img)
-                copy_guider_keyword(mfheader, 'ZEROPT  ', org_img)
-                copy_guider_keyword(mfheader, 'SOLVED  ', org_img)
-                copy_guider_keyword(mfheader, 'WARNPADR', org_img)
-                copy_guider_keyword(mfheader, 'WARNTRAN', org_img)
-                copy_guider_keyword(mfheader, 'WARNMATC', org_img)
-                copy_guider_keyword(mfheader, 'WARNFWHM', org_img)
-            else:
-                RAobs=org_img._header.get(f'PO{tel}RA'.capitalize(), 0) or 0
-                DECobs=org_img._header.get(f'PO{tel}DE'.capitalize(), 0) or 0
-                PAobs=org_img._header.get(f'PO{tel}PA'.capitalize(), 0) or 0
-                if -999.0 in [RAobs, DECobs]:
-                    RAobs, DECobs, PAobs = 0, 0, 0
-                if numpy.any([RAobs, DECobs, PAobs]) == 0:
-                    log.warning(f"some astrometry keywords for telescope '{tel}' are missing: {RAobs = }, {DECobs = }, {PAobs = }")
-                    org_img.add_header_comment(f"no astromentry keywords '{tel}': {RAobs = }, {DECobs = }, {PAobs = }, using commanded")
-                org_img.setHdrValue('ASTRMSRC', 'CMD position', comment='source of astrometry: commanded position')
-        else:
-            RAobs=0
-            DECobs=0
-            PAobs=0
-        return RAobs, DECobs, PAobs
-
-    RAobs_sci, DECobs_sci, PAobs_sci = getobsparam('sci')
-    RAobs_skye, DECobs_skye, PAobs_skye = getobsparam('skye')
-    RAobs_skyw, DECobs_skyw, PAobs_skyw = getobsparam('skyw')
-    RAobs_spec, DECobs_spec, PAobs_spec = getobsparam('spec')
-
-    # Create fake IFU image WCS object for each telescope focal plane and use it to calculate RA,DEC of each fiber
-    telcoordsdir={'sci':(RAobs_sci, DECobs_sci, PAobs_sci), 'skye':(RAobs_skye, DECobs_skye, PAobs_skye), 'skyw':(RAobs_skyw, DECobs_skyw, PAobs_skyw), 'spec':(RAobs_spec, DECobs_spec, PAobs_spec)}
-    seldir={'sci':selsci, 'skye':selskye, 'skyw':selskyw, 'spec':selspec}
-
-    RAfib=numpy.zeros(len(slitmap))
-    DECfib=numpy.zeros(len(slitmap))
-
-    def getfibradec(tel, platescale):
-        RAobs, DECobs, PAobs = telcoordsdir[tel]
-        pscale=0.01 # IFU image pixel scale in mm/pix
-        skypscale=pscale*platescale/3600 # IFU image pixel scale in deg/pix
-        npix=1800 # size of fake IFU image
-        w = wcs.WCS(naxis=2) # IFU image wcs object
-        w.wcs.crpix = [int(npix/2)+1, int(npix/2)+1]
-        posangrad=PAobs*numpy.pi/180
-        w.wcs.cd=numpy.array([[skypscale*numpy.cos(posangrad), -1*skypscale*numpy.sin(posangrad)],[-1*skypscale*numpy.sin(posangrad), -1*skypscale*numpy.cos(posangrad)]])
-        w.wcs.crval = [RAobs,DECobs]
-        w.wcs.ctype = ["RA---TAN", "DEC--TAN"]
-        # Calculate RA,DEC of each individual fiber
-        sel=seldir[tel]
-        xfib=x[sel]/pscale+int(npix/2) # pixel x coordinates of fibers
-        yfib=y[sel]/pscale+int(npix/2) # pixel y coordinates of fibers
-        fibcoords=w.pixel_to_world(xfib,yfib).to_table()
-        RAfib[sel]=fibcoords['ra'].degree
-        DECfib[sel]=fibcoords['dec'].degree
-
-    log.info(f'Using Fiducial Platescale = {FIDUCIAL_PLATESCALE:.2f} "/mm')
-    getfibradec('sci', platescale=FIDUCIAL_PLATESCALE)
-    getfibradec('skye', platescale=FIDUCIAL_PLATESCALE)
-    getfibradec('skyw', platescale=FIDUCIAL_PLATESCALE)
-    getfibradec('spec', platescale=FIDUCIAL_PLATESCALE)
-
-    # add coordinates to slitmap
-    slitmap['ra']=RAfib * u.deg
-    slitmap['dec']=DECfib * u.deg
-    org_img._slitmap=slitmap
-
-    # set header keyword with best knowledge of IFU center for SCI, SKYE, SKYW
-    org_img.setHdrValue('SCIRA', RAobs_sci, 'SCI center, fiberid=975, RA (ASTRMSRC)[deg]')
-    org_img.setHdrValue('SCIDEC', DECobs_sci, 'SCI center, fiberid=975, DEC (ASTRMSRC)[deg]')
-    org_img.setHdrValue('SCIPA', PAobs_sci, 'SCI center, fiberid=975, PA (ASTRMSRC)[deg]')
-    org_img.setHdrValue('SKYERA', RAobs_skye, 'SKYE center, fiberid=36, RA (ASTRMSRC)[deg]')
-    org_img.setHdrValue('SKYEDEC', DECobs_skye, 'SKYE center, fiberid=36, DEC (ASTRMSRC)[deg]')
-    org_img.setHdrValue('SKYEPA', PAobs_skye, 'SKYE center, fiberid=36, PA (ASTRMSRC)[deg]')
-    org_img.setHdrValue('SKYWRA', RAobs_skyw, 'SKYW center, fiberid=1, RA (ASTRMSRC)[deg]')
-    org_img.setHdrValue('SKYWDEC', DECobs_skyw, 'SKYW center, fiberid=1, DEC (ASTRMSRC)[deg]')
-    org_img.setHdrValue('SKYWPA', PAobs_skyw, 'SKYW center, fiberid=1, PA (ASTRMSRC)[deg]')
-
-    log.info(f"writing RA,DEC to slitmap in image '{os.path.basename(out_image)}'")
-    org_img.writeFitsData(out_image)
 
 
 @skip_on_missing_input_path(["in_image"])

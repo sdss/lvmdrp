@@ -242,7 +242,7 @@ def determine_wavelength_solution(in_arcs: List[str]|str, out_wave: str, out_lsf
                                   fwhm_guess: float = 3.0,
                                   bg_guess: float = 0.0,
                                   flux_range: List[float] = [100.0, numpy.inf],
-                                  cent_range: List[float] = [-1.5, 1.5],
+                                  cent_range: List[float] = [-2.0, 2.0],
                                   fwhm_range: List[float] = [1.5, 4.5],
                                   bg_range: List[float] = [-1e3, 1e4],
                                   poly_disp: int = 6, poly_fwhm: int = 4,
@@ -3060,7 +3060,7 @@ def join_spec_channels(in_fframes: List[str], out_cframe: str, use_weights: bool
                        wave=new_rss._wave, lsf=new_rss._lsf,
                        sky_east=new_rss._sky_east, sky_east_error=new_rss._sky_east_error,
                        sky_west=new_rss._sky_west, sky_west_error=new_rss._sky_west_error,
-                       fluxcal_std=new_rss._fluxcal_std, fluxcal_sci=new_rss._fluxcal_sci, slitmap=new_rss._slitmap)
+                       fluxcal_std=new_rss._fluxcal_std, fluxcal_sci=new_rss._fluxcal_sci, fluxcal_mod=new_rss._fluxcal_mod, slitmap=new_rss._slitmap)
 
     # write output RSS
     if out_cframe is not None:

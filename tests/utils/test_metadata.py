@@ -49,16 +49,21 @@ def test_collect_header_data(make_framefits):
 
     expdata = {'drpver': '0.1.1', 'drpqual': 0, 'dpos': 0, 'object': 'tile_id=1054755',
                'obstime': '2023-12-19T00:47:39.095', 'sci_ra': 65.949555, 'sci_dec': 15.348684,
-               'sci_pa': 66.7, 'sci_amass': 1.857, 'sci_kmpos': -87.5, 'sci_focpos': 36.58, 'sci_alt': 32.5605,
+               'sci_pa': 66.7, 'sci_amass': 1.857, 'sci_astsrc': 'GDR coadd', 'sci_kmpos': -87.5,
+               'sci_focpos': 36.58, 'sci_alt': 32.5605,
                'sci_sh_hght': 165.52885,'sci_moon_sep': 29.8097, 'skye_ra': 21.008216, 'skye_dec': -22.933382,
-               'skye_pa': 0.0, 'skye_amass': 1.013, 'skye_kmpos': -37.5, 'skye_focpos': 36.19,
-               'skye_name': 'WHAM_south_02', 'skye_alt': 80.9755, 'sci_skye_sep': 58.2987,
+               'skye_pa': 0.0, 'skye_amass': 1.013, 'skye_astsrc': 'GDR coadd', 'skye_kmpos': -37.5,
+               'skye_focpos': 36.19, 'skye_name': 'WHAM_south_02', 'skye_alt': 80.9755, 'sci_skye_sep': 58.2987,
                'skye_sh_hght': 164.79533, 'skye_moon_sep': 18.4705,
-               'skyw_ra': 58.011871, 'skyw_dec': 11.817184, 'skyw_pa': 0.0, 'skyw_amass': 1.555, 
-               'skyw_kmpos': -54.51, 'skyw_focpos': 37.11, 'skyw_name': 'grid087', 
+               'skyw_ra': 58.011871, 'skyw_dec': 11.817184, 'skyw_pa': 0.0, 'skyw_amass': 1.555,
+               'skyw_astsrc': 'GDR coadd', 'skyw_kmpos': -54.51, 'skyw_focpos': 37.11, 'skyw_name': 'grid087',
                'skyw_alt': 40.0142, 'sci_skyw_sep': 8.4839, 'skyw_sh_hght': 165.41738,
                'skyw_moon_sep': 27.7977, 'moon_ra': 348.42157, 'moon_dec': -7.55955,
-               'moon_phase': 79.91, 'moon_fli': 0.4136, 'sun_alt': -13.3779, 'moon_alt': 46.8744}
+               'moon_phase': 79.91, 'moon_fli': 0.4136, 'sun_alt': -13.3779, 'moon_alt': 46.8744,
+               'std_mean_senb': 2.0e-14, 'std_mean_senr': 2.0e-14, 'std_mean_senz': 2.0e-14,
+               'sci_mean_senb': 2.0e-14, 'sci_mean_senr': 2.0e-14, 'sci_mean_senz': 2.0e-14,
+               'mod_mean_senb': 2.0e-14, 'mod_mean_senr': 2.0e-14, 'mod_mean_senz': 2.0e-14,
+               'fluxcal': "MOD"}
 
     assert hdr_data == expdata
 

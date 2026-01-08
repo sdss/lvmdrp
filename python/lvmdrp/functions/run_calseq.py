@@ -103,7 +103,7 @@ STRAYLIGHT_PARS = dict(
     select_nrows=(10,10), use_weights=True, aperture=11,
     x_bins=60, x_bounds=("data","data"), y_bounds=(0.0,0.0),
     x_nbound=10, y_nbound=5, clip=(0.0,None),
-    nsigma=1.0, smoothing=90, median_box=None)
+    nsigma=1.0, smoothing=90, median_box=11)
 
 
 def _reject_pixelshifted(frames, pixelshifts_path=PIXELSHIFTS_PATH):
@@ -525,6 +525,42 @@ def create_qaqual_bad_hdrfix(mjd, expnums):
     log.info(f"going to write header fixes QAQUAL = 'BAD' on {nexpnums} exposures")
     for expnum in expnums:
         hdrfix.write_hdrfix_file(mjd=mjd, fileroot=f"sdR-*-*-{expnum:>08d}", keyword="QAQUAL", value="BAD")
+
+
+def create_lamps_on_hdrfix(mjd, lamps_on, expnum):
+    """Creates header fixes for lamps status in calibration frames
+
+    Parameters
+    ----------
+    mjd : int
+        MJD of the night to analyse
+    lamps_on : list_like
+        A list of valid (case-insensitive) lamp names, for which status will be set to 'ON'. Lamps not listed will be set to 'OFF'
+    expnum : int
+        Exposure number to create header fix for
+
+    Raises
+    ------
+    ValueError
+        If all values in `lamps_on` are invalid names of lamps
+    """
+
+    lamps_all = CON_LAMPS + ARC_LAMPS
+    lamps_status = dict.fromkeys(lamps_all, "OFF")
+    lamps_ = set(lamps_all).intersection(map(str.upper, lamps_on))
+    if not lamps_:
+        raise ValueError(f"Invalid value(s) in `lamps_on`: {lamps_on}. Expected a subset of {lamps_all}")
+    lamps_status.update(dict.fromkeys(lamps_, "ON"))
+
+    frames = [md.get_calibrations_metadata(mjds=mjd, expnums=[expnum], calibration=calibration) for calibration in CALIBRATION_TYPES]
+    frames = pd.concat(frames, ignore_index=True)
+    if frames.empty:
+        log.info(f"no need to apply header fixes for lamps status on MJD = {mjd}, {expnum = }")
+        return
+    log.info(f"going to write header fixes for lamps status on MJD = {mjd}, {expnum = }: {lamps_on = }")
+
+    for lamp, status in lamps_status.items():
+        hdrfix.write_hdrfix_file(mjd=mjd, fileroot=f"sdR-*-*-{expnum:>08d}", keyword=lamp, value=status)
 
 
 def _parse_list(items_str):
@@ -2014,7 +2050,7 @@ def detrend_calibrations(mjd, calibration, dry_run=False, skip_done=True):
     frames = md.get_calibrations_metadata(mjds=mjd, calibration=calibration)
     frames = frames.loc[~frames.calibfib.isin(STD_FIBER_LABELS)]
     if frames.empty:
-        log.error("no bias frames found, skipping production of bias frames")
+        log.error(f"no frames for '{calibration}' found, skipping detrending")
         return
 
     # define master paths for target frames

@@ -12,6 +12,8 @@ import astropy.units as u
 from astropy.table import Table
 import matplotlib.backends.backend_pdf
 
+from lvmdrp.core.constants import LVM_ELEVATION, LVM_LAT, LVM_LON
+
 
 # Measure line fluxes by direct integration of the spectra and add to table
 maplist=['[OI]5577', '[OI]6300', '[OH]6865', 'Bcont(4195, 4220)', 'Rcont(6420, 6440)', 'Zcont(9130, 9145)']
@@ -24,7 +26,7 @@ lrangelist=[(5574, 5580), (6298,6304), (6862,6868), (4195, 4220), (6420, 6440), 
 crangelist=[(5571, 5583), (6295, 6307), (6859, 6871), (-999, -999), (-999, -999), (-999, -999), (5885, 5901), (-999, -999), (-999, -999)]
 
 def sumlineflux(wave, flux, sky, ivar, mask, slitmap, maplist, lrangelist, crangelist, type):
-    
+
     flux, sky, ivar, sel = good_masked_fibers(slitmap, flux, sky, ivar, mask, type)
     error=np.sqrt(1/ivar)
 
@@ -43,9 +45,9 @@ def sumlineflux(wave, flux, sky, ivar, mask, slitmap, maplist, lrangelist, crang
     for j in range(len(maplist)):
 
         lsel, csel = line_windows(lrangelist[j], crangelist[j], wave)
-        
+
         # selecting line range
-        fluxsel=flux[:,lsel]  
+        fluxsel=flux[:,lsel]
         skysel=sky[:,lsel]
 
         # subtracting continuum and storing continuum subtracted flux and sky
@@ -53,14 +55,14 @@ def sumlineflux(wave, flux, sky, ivar, mask, slitmap, maplist, lrangelist, crang
             cfluxsel=fluxsel
             cskysel=skysel
         else:
-            cfluxsel=fluxsel-np.tile(np.nanmedian(flux[:,csel], axis=1), (np.shape(fluxsel)[1],1)).transpose() 
-            cskysel=skysel-np.tile(np.nanmedian(sky[:,csel], axis=1), (np.shape(skysel)[1],1)).transpose() 
+            cfluxsel=fluxsel-np.tile(np.nanmedian(flux[:,csel], axis=1), (np.shape(fluxsel)[1],1)).transpose()
+            cskysel=skysel-np.tile(np.nanmedian(sky[:,csel], axis=1), (np.shape(skysel)[1],1)).transpose()
 
         # Non-parametric flux, error and sky
         lflux=np.nansum(cfluxsel, axis=1)
         lerror=np.sqrt(np.nansum((error[:,lsel])**2, axis=1))
         lsky=np.nansum(cskysel, axis=1)
-        
+
         auxlinetab['flux_'+maplist[j]]=lflux
         auxlinetab['error_'+maplist[j]]=lerror
         auxlinetab['sky_'+maplist[j]]=lsky
@@ -75,7 +77,7 @@ def create_sky_table(wave, flux, sky, ivar, mask, slitmap, header, maplist, medl
     medtab=Table()
     metricstab=Table()
     sky_infotab=Table()
-        
+
     # getting the map info
     linetab_sci=sumlineflux(wave, flux, sky, ivar, mask, slitmap, maplist, lrangelist, crangelist, 'sci')
     #table_sci = Table(linetab_sci)
@@ -99,12 +101,12 @@ def create_sky_table(wave, flux, sky, ivar, mask, slitmap, header, maplist, medl
     sky_info = create_overview(header)
     for key,val in sky_info.items():
         sky_infotab[key]=val
-    
+
     # needed if want to save info as a fits file
     # hdu_list = fits.HDUList([
     #     fits.PrimaryHDU(),
     #     fits.table_to_hdu(table_sci),
-    #     fits.table_to_hdu(table_skye), 
+    #     fits.table_to_hdu(table_skye),
     #     fits.table_to_hdu(table_skyw),
     #     fits.table_to_hdu(medtab),
     #     fits.table_to_hdu(metricstab),
@@ -117,14 +119,14 @@ def create_sky_table(wave, flux, sky, ivar, mask, slitmap, header, maplist, medl
     # hdu_list[4].name = 'median_spectra'
     # hdu_list[5].name = 'sky_metrics'
     # hdu_list[6].name = 'sky_info'
-    
+
     # hdu_list.writeto(f'{outfile}.fits', overwrite=True)
 
     #returning data for creating the plots
     return linetab_sci, linetab_skye, linetab_skyw, wave, med_sky, med_flux, med_ivar, med_skye, med_skyw, stats_list, wvl_list, wvc_list, sky_info
 
 def plotmap_row(data_sci, data_skye, data_skyw, line, row, fig, gs):
-    
+
     vmine=np.nanpercentile(data_sci['error_'+line], 10)
     vmaxe=np.nanpercentile(data_sci['error_'+line], 90)
     vmins=np.min([np.nanpercentile(data_skye['flux_'+line]+data_skye['sky_'+line], 10), np.nanpercentile(data_skyw['flux_'+line]+data_skyw['sky_'+line], 10)])
@@ -175,7 +177,7 @@ def plotmap_row(data_sci, data_skye, data_skyw, line, row, fig, gs):
     ax3.set_title(r'SkyE error', loc='left')
     ax3.tick_params(axis='x')
     ax3.tick_params(axis='y')
-    ax3.invert_xaxis()    
+    ax3.invert_xaxis()
     ax3.axes.get_xaxis().set_visible(False)
     ax3.axes.get_yaxis().set_visible(False)
     cbar=fig.colorbar(sc3, ax=ax3, fraction=0.045)
@@ -235,10 +237,10 @@ def plotmap_line(data_sci, data_skye, data_skyw, maplist):
                  'xtick.labelsize': 'small',
                  'font.size': '8.0',
                  'legend.fontsize':'small'})
-    
+
     for j in range(3):
        fig1=plotmap_row(data_sci, data_skye, data_skyw, maplist[j], 3*j, fig1, gs1)
-    
+
     return fig1
 
 def plotmap_cont(data_sci, data_skye, data_skyw, maplist):
@@ -253,10 +255,10 @@ def plotmap_cont(data_sci, data_skye, data_skyw, maplist):
                  'xtick.labelsize': 'small',
                  'font.size': '8.0',
                  'legend.fontsize':'small'})
-    
+
     for j in range(3):
        fig2=plotmap_row(data_sci, data_skye, data_skyw, maplist[j+3], 3*j, fig2, gs2)
- 
+
     return fig2
 
 ##### main programs ####
@@ -264,12 +266,12 @@ def run_qa_local():
     # for running locally (outside of DRP)
     #expnumlist = [5736, 6109, 6110, 6161, 6373, 6443, 6451, 6661, 9379, 9380, 10827, 10892, 11061, 11062, 14460, 15138, 15298, 15613, 15610, 15684, 15924]
     expnumlist = [6109]
-    #mjdlist = [60222, 11111, 60222, 11111]  
+    #mjdlist = [60222, 11111, 60222, 11111]
     for i in range(len(expnumlist)):
         outfile=f'refdata_v1.1.0/skyQA_{expnumlist[i]}'
         rssfile=f'lvmSFrame-{expnumlist[i]:0>8}.fits' #now only reads in SFrames that are in current dir
         wave, flux, sky, ivar, mask, slitmap, header = read_rssfile(rssfile)
-        
+
         data_sci, data_skye, data_skyw, wave, med_sky, med_flux, med_ivar, med_skye, med_skyw, stats_list, wvl_list, wvc_list, sky_info = create_sky_table(wave, flux, sky, ivar, mask, slitmap, header, maplist, medlist, lrangelist, crangelist, outfile)
 
         pdf = matplotlib.backends.backend_pdf.PdfPages(f'{outfile}.pdf')
@@ -286,7 +288,7 @@ def run_qa_local():
 def run_qa(rssfile, outfile):
     # main program for running QA script in DRP
     wave, flux, sky, ivar, mask, slitmap, header = read_rssfile(rssfile)
-        
+
     data_sci, data_skye, data_skyw, wave, med_sky, med_flux, med_ivar, med_skye, med_skyw, stats_list, wvl_list, wvc_list, sky_info = create_sky_table(wave, flux, sky, ivar, mask, slitmap, header, maplist, medlist, lrangelist, crangelist, outfile)
 
     with matplotlib.backends.backend_pdf.PdfPages(f'{outfile}.pdf') as pdf:
@@ -299,7 +301,7 @@ def run_qa(rssfile, outfile):
         fig_maps2=plotmap_cont(data_sci, data_skye, data_skyw, maplist)
         pdf.savefig(fig_maps2)
         plt.close()
-    
+
 
 ####################################################################
 #selecting the good fibers for a given telescope
@@ -322,7 +324,7 @@ def read_rssfile(filename):
         x=fits.open(filename)
     except Exception:
         print('Error: eval_qual: Could not open %s' % filename)
-        return   
+        return
     slitmap=Table(x['SLITMAP'].data)
     wav=x['WAVE'].data
     flux=x['FLUX'].data
@@ -343,13 +345,13 @@ def good_masked_fibers(slitmap, flux, sky, ivar, mask, type):
 
     flux=flux[sel,:]
     ivar=ivar[sel,:]
-    sky=sky[sel,:]    
+    sky=sky[sel,:]
 
     return flux, sky, ivar, sel
 
 #getting the medians of the sky, flux, and err, and wave from file
 def get_med(flux, sky, ivar, mask, xtab,):
-    
+
     xgood=selfib_good(xtab, 'sci')
     flux_sci=flux[xgood,:]
     sky_sci=sky[xgood,:]
@@ -369,7 +371,7 @@ def get_med(flux, sky, ivar, mask, xtab,):
     sky_sci=np.ma.masked_array(sky_sci, mask_sci)
     ivar_sci=np.ma.masked_array(ivar_sci, mask_sci)
     skye_flux=np.ma.masked_array(skye_flux, skye_mask)
-    skyw_flux=np.ma.masked_array(skyw_flux, skyw_mask) 
+    skyw_flux=np.ma.masked_array(skyw_flux, skyw_mask)
     skye_sky=np.ma.masked_array(skye_sky, skye_mask)
     skyw_sky=np.ma.masked_array(skyw_sky, skyw_mask)
 
@@ -379,18 +381,18 @@ def get_med(flux, sky, ivar, mask, xtab,):
     med_ivar=np.ma.median(ivar_sci,axis=0)*len(xgood)/(1.253**2)
     med_skye=np.ma.median(skye_flux+skye_sky,axis=0)
     med_skyw=np.ma.median(skyw_flux+skyw_sky,axis=0)
-     
+
     return med_flux, med_sky, med_ivar, med_skye, med_skyw
 
 #define the line and cont windows around line based on central line wave and width provided
 def line_windows(lrange, crange, wave):
-    
+
     wave_line = (wave>=lrange[0]) & (wave<=lrange[1]) # line range selection
     if crange[0] == -999:
         wave_cont = [-999]
     else:
         wave_cont = ((wave>=crange[0]) & (wave<lrange[0])) | ((wave>lrange[1]) & (wave<=crange[1])) # cont range selection
-        
+
     return wave_line, wave_cont
 
 #gets the stats wanted for the sky line residuals
@@ -415,7 +417,7 @@ def cont_stats(flux, sky, ivar, wave_window):
 
 def get_all_stats(wave, flux, sky, ivar, mask, slitmap, medlist):
     med_flux, med_sky, med_ivar, med_skye, med_skyw = get_med(flux, sky, ivar, mask, slitmap)
-    
+
     wvl_list=[]
     wvc_list=[]
     stats_list=[]
@@ -426,7 +428,7 @@ def get_all_stats(wave, flux, sky, ivar, mask, slitmap, medlist):
         wvl_list.append(wvl)
         wvc_list.append(wvc)
         #stats_list.append([g1,g2,g3])
-            
+
     return wave, med_sky, med_flux, med_ivar, med_skye, med_skyw, stats_list, wvl_list, wvc_list
 
 def plot_intro(wave, sky, flux, ivar, skye, skyw, sky_info):
@@ -454,7 +456,7 @@ def plot_intro(wave, sky, flux, ivar, skye, skyw, sky_info):
 
     axt = fig1.add_subplot(gs1[0, 0])
     axt.axis([0,10,0,15])
-    
+
     if sky_info['Moon_Alt'] < 0:
         moon_status = 'Moon BELOW horizon'
     else:
@@ -479,7 +481,7 @@ def plot_intro(wave, sky, flux, ivar, skye, skyw, sky_info):
     ax1.set_xlim(3600,9600)
     ax1.set_ylim(-1e-14,1e-13)
     ax1.legend()
-    
+
     if sky_info['Sci_SkyE'] < sky_info['Sci_SkyW']:
         nsky=skye
         fsky=skyw
@@ -611,7 +613,7 @@ def get_moon_info_las_campanas(datetime_utc,verbose=False):
     Get information about the moon (and sun) as a fuction of UT
     '''
     # Las Campanas Observatory coordinates
-    observatory_location = EarthLocation(lat=-29.0089*u.deg, lon=-70.6920*u.deg, height=2281*u.m)
+    observatory_location = EarthLocation(lat=LVM_LAT, lon=LVM_LON, height=LVM_ELEVATION * u.m)
 
     # Specify the observation time in UT
     obs_time = Time(datetime_utc)
@@ -769,21 +771,21 @@ def create_overview(hdr):
     mjd=get_header_value(hdr,'MJD')
     object_name=get_header_string(hdr,'OBJECT')
     obs_time=get_header_string(hdr,'OBSTIME')
-    ra=get_header_value(hdr,'TESCIRA')
-    dec=get_header_value(hdr,'TESCIDE')
-    alt=get_header_value(hdr, 'SKY SCI_ALT')
+    ra=get_header_value(hdr,'SCIRA')
+    dec=get_header_value(hdr,'SCIDEC')
+    alt=get_header_value(hdr, 'SCIALT')
 
-    
-    ra_sky_e=get_header_value(hdr,'POSKYERA')
-    dec_sky_e=get_header_value(hdr,'POSKYEDE')
-    alt_sky_e=get_header_value(hdr, 'SKY SKYE_ALT')
-    
-    ra_sky_w=get_header_value(hdr,'POSKYWRA')
-    dec_sky_w=get_header_value(hdr,'POSKYWDE')
-    alt_sky_w=get_header_value(hdr, 'SKY SKYW_ALT')
+
+    ra_sky_e=get_header_value(hdr,'SKYERA')
+    dec_sky_e=get_header_value(hdr,'SKYEDEC')
+    alt_sky_e=get_header_value(hdr, 'SKYEALT')
+
+    ra_sky_w=get_header_value(hdr,'SKYWRA')
+    dec_sky_w=get_header_value(hdr,'SKYWDEC')
+    alt_sky_w=get_header_value(hdr, 'SKYWALT')
 
     moon_info=get_moon_info_las_campanas(obs_time)
-    
+
     distance_sky_w=distance(ra,dec,ra_sky_w,dec_sky_w)
     distance_sky_e=distance(ra,dec,ra_sky_e,dec_sky_e)
     distance_moon=distance(ra,dec,moon_info['MoonRA'],moon_info['MoonDec'])
@@ -791,7 +793,7 @@ def create_overview(hdr):
     distance_skyemoon=distance(ra_sky_e,dec_sky_e,moon_info['MoonRA'],moon_info['MoonDec'])
 
     moon_info=get_moon_info_las_campanas(obs_time)
-    
+
     xdict={
         'Exposure' : [exposure],
         'MJD' : [mjd],
@@ -808,14 +810,14 @@ def create_overview(hdr):
         'SkyW_Alt' : np.round(alt_sky_w,2),
         'Moon_Alt' : np.round(moon_info['MoonAlt'],2),
         'Moon_Ill' : np.round(moon_info['MoonIll'],2),
-        'Sci_SkyE' : np.round(distance_sky_e,2), 
+        'Sci_SkyE' : np.round(distance_sky_e,2),
         'Sci_SkyW' : np.round(distance_sky_w,2),
         'Sun_Alt' : np.round(moon_info['SunAlt'], 2),
-        'Sci_Moon' : np.round(distance_moon,2), 
-        'SkyE_Moon' : np.round(distance_skyemoon,2), 
+        'Sci_Moon' : np.round(distance_moon,2),
+        'SkyE_Moon' : np.round(distance_skyemoon,2),
         'SkyW_Moon' : np.round(distance_skywmoon,2)
     }
- 
+
     return xdict
 
 if __name__ == "__main__":

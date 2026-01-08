@@ -244,7 +244,19 @@ For those willing to contribute by coding, there are some steps to streamline th
     git push
     ```
 
-7. Finally, if you consider your feature is ready to be merged to the `master` branch, you can create a new [pull request at Github](https://github.com/sdss/lvmdrp/pulls).
+7. If you consider your feature is ready to be merged to the `master` branch, you can create a new [pull request at Github](https://github.com/sdss/lvmdrp/pulls).
+
+8. Finally, it might useful to have different versions of the DRP outputs in separated directories. To achieve this, you can set the environment variable `LVM_DRPVER` in your `.bashrc` (or equivalent) to a string representing the version of the DRP you are working on. For example:
+
+    ```bash
+    export LVM_DRPVER="my_tests"
+    ```
+
+    This will make the DRP to store the outputs in a directory named `my_tests`, under the usual SAS path:
+
+    ```bash
+    $SAS_BASE_DIR/sdsswork/lvm/spectro/redux/my_tests/<tilegrp>/<tileid>/<mjd>/
+    ```
 
 Regarding commits, I'm trying to go for an *atomic* approach, where each commit has a single purpose. So please try to avoid as much as possible pushing lots of unrelated changes in one commit.
 

@@ -88,9 +88,9 @@ def apply_fluxcal(in_rss: str, out_fframe: str, method: str = 'MOD', display_plo
 
     expnum = fframe._header["EXPOSURE"]
     channel = fframe._header["CCD"]
-    sci_secz = fframe._header["TESCIAM"]
-    skye_secz = fframe._header["TESKYEAM"]
-    skyw_secz = fframe._header["TESKYWAM"]
+    sci_secz = fframe._header["SCIAM"]
+    skye_secz = fframe._header["SKYEAM"]
+    skyw_secz = fframe._header["SKYWAM"]
 
     # set masked pixels to NaN
     fframe.apply_pixelmask()
@@ -120,7 +120,7 @@ def apply_fluxcal(in_rss: str, out_fframe: str, method: str = 'MOD', display_plo
     # check for flux calibration data
     if method == "NONE":
         log.info("skipping flux calibration")
-        fframe.setHdrValue("FLUXCAL", 'NONE', "flux-calibration method")
+        fframe.setHdrValue("FLUXCAL", 'NONE', "flux calibration method")
         fframe.writeFitsData(out_fframe)
         return fframe
 
@@ -211,7 +211,7 @@ def apply_fluxcal(in_rss: str, out_fframe: str, method: str = 'MOD', display_plo
         if (sens_ave == 0).all() or np.isnan(sens_ave).all():
             log.warning("all field star sensitivities are zero or NaN, can't calibrate")
             rss.add_header_comment("all field star sensitivities are zero or NaN, can't calibrate")
-            sens_ave = np.ones_like(sens_ave)
+            # sens_ave = np.ones_like(sens_ave)
             # sens_rms = np.zeros_like(sens_rms)
 
     # final check on sensitivities
@@ -233,12 +233,12 @@ def apply_fluxcal(in_rss: str, out_fframe: str, method: str = 'MOD', display_plo
     #     sens_ave = biweight_location(sens_arr, axis=1, ignore_nan=True)
     #     sens_rms = biweight_scale(sens_arr, axis=1, ignore_nan=True)
 
-    if np.nanmean(sens_ave) > 1e-12:
+    if np.nanmean(sens_ave) > 1e-12 or np.isnan(sens_ave).all() or (sens_ave == 0).all():
         method = "NONE"
-        log.warning("standard and science field calibration yield average sensitivity > 1e-12, skipping flux calibration")
-        rss.add_header_comment("standard and science field calibration yield average sensitivity > 1e-12, skipping flux calibration")
+        log.warning("template matching, standard and science field calibration yield unreliable average sensitivity, skipping flux calibration")
+        rss.add_header_comment("template matching, standard and science field calibration yield unreliable average sensitivity, skipping flux calibration")
 
-    fframe.setHdrValue("FLUXCAL", method, "flux-calibration method")
+    fframe.setHdrValue("FLUXCAL", method, "flux calibration method")
 
     if method != 'NONE':
         ax.set_title(f"flux calibration for {channel = } with {method = }", loc="left")
@@ -294,7 +294,7 @@ def apply_fluxcal(in_rss: str, out_fframe: str, method: str = 'MOD', display_plo
             fframe._sky_west /= exptimes[:, None]
         if fframe._sky_west_error is not None:
             fframe._sky_west_error /= exptimes[:, None]
-        fframe.setHdrValue("FLUXCAL", 'NONE', "flux-calibration method")
+        fframe.setHdrValue("FLUXCAL", 'NONE', "flux calibration method")
         fframe.setHdrValue("BUNIT", "electron / (Angstrom s)", "physical units of the array values")
     else:
         log.info("flux-calibrating data science and sky spectra")
@@ -375,6 +375,7 @@ def prepare_spec(in_rss, width=3):
     std_spectra_orig_all_bands = []
     fibers_all_bands = []
     gaia_ids_all_bands = []
+    nns_all_bands = []
     # keys = ['fiber_0', 'good_flux_0', 'fiber_1', 'good_flux_1', 'fiber_2', 'good_flux_2']
     # check_bad_fluxes = {key: [] for key in keys}
 
@@ -393,6 +394,7 @@ def prepare_spec(in_rss, width=3):
             # rss.writeFitsData(in_rss)
             # TODO: fix this, this seems to be copy-pasted from the gaia code
             # return res_std, mean_std, rms_std, rss
+            stds = []
 
         # wavelength array
         w_tmp = rss_tmp._wave
@@ -414,6 +416,7 @@ def prepare_spec(in_rss, width=3):
         fibers = []
         gaia_ids = []
         zenith_angles = []
+        nns = []
 
         for s in stds:
             nn, fiber, gaia_id, exptime, secz, zenith_angle = s  # unpack standard star tuple
@@ -445,6 +448,7 @@ def prepare_spec(in_rss, width=3):
                         del lsf_all_bands[ind_b][idx]
                         del std_spectra_all_bands[ind_b][idx]
                         del gaia_ids_all_bands[ind_b][idx]
+                        del nns_all_bands[ind_b][idx]
                 # #rss.add_header_comment(f"fiber {fiber} @ {fibidx[0]} has counts < 100 e-, skipping")
                 continue
             if b > 0:
@@ -460,6 +464,7 @@ def prepare_spec(in_rss, width=3):
             gaia_ids.append(gaia_id)
             fibers.append(fiber)
             zenith_angles.append(zenith_angle)
+            nns.append(nn)
             # check_bad_fluxes[f'good_flux_{b}'].append(True)
 
             spec_orig = (rss_tmp._data[fibidx[0],:] - master_sky._data[fibidx[0],:]) / exptime
@@ -513,9 +518,11 @@ def prepare_spec(in_rss, width=3):
         std_spectra_orig_all_bands.append(std_spectra_orig) # original std spectra without masking tellurics
         fibers_all_bands.append(fibers)
         gaia_ids_all_bands.append(gaia_ids)
+        nns_all_bands.append(nns)
 
     return (
         w,
+        nns_all_bands[0],
         gaia_ids_all_bands[0],
         fibers,
         std_spectra_all_bands,
@@ -884,7 +891,7 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
     gaia_stars.add_index('source_id')
 
     # Prepare the spectra
-    (w, gaia_ids, fibers, std_spectra_all_bands, normalized_spectra_unconv_all_bands,
+    (w, nns, gaia_ids, fibers, std_spectra_all_bands, normalized_spectra_unconv_all_bands,
      normalized_spectra_all_bands, std_errors_all_bands, lsf_all_bands,
      std_spectra_orig_all_bands, zenith_angles, std_info) = prepare_spec(in_rss, width=width)
 
@@ -927,9 +934,8 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
     pwv_values, pwv_errors = [], []
     stack_stellar_model, stack_telluric_trans = [], []
 
-    # Loop over standard stars
-    for i in range(len(lsf_all_bands[0])):
-        # Stitch normalized spectra in brz together
+    # Loop over standard stars, stitch normalized spectra in brz together
+    for i, nn in enumerate(nns):
         std_norm_unconv = np.concatenate((normalized_spectra_unconv_all_bands[0][i][mask_b_norm],
                                           normalized_spectra_unconv_all_bands[1][i][mask_r_norm],
                                           normalized_spectra_unconv_all_bands[2][i][mask_z_norm]))
@@ -1223,7 +1229,7 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
             frame1 = fig1.add_axes((0.1, 0.3, 0.8, 0.6))
             frame1.set_xticklabels([])
 
-        for i in range(len(lsf_all_bands[0])):
+        for i, nn in enumerate(nns):
             if np.isnan(model_to_gaia_median[i]):
                 continue
 
@@ -1251,7 +1257,7 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
             sens_coef = gaia_flux / lvmflux
             #print(f'lvmflux={lvmflux}, gaia_flux={gaia_flux}, converted to gaia flux = {lvmflux*sens_coef}')
 
-            res_mod[f"STD{i}SEN"] = sens0 * sens_coef
+            res_mod[f"STD{nn}SEN"] = sens0 * sens_coef
             sens = sens0 * sens_coef
 
             # fig_path = in_rss[n_chan]
@@ -1796,7 +1802,7 @@ def science_sensitivity(rss, res_sci, ext, GAIA_CACHE_DIR, NSCI_MAX=15, r_spaxel
     expnum = header['EXPOSURE']
     exptime = header['EXPTIME']
     channel = header['CCD']
-    secz = header['TESCIAM']
+    secz = header["SCIAM"]
 
     m = get_sky_mask_uves(obswave, width=width)
     m2 = None
@@ -1820,13 +1826,28 @@ def science_sensitivity(rss, res_sci, ext, GAIA_CACHE_DIR, NSCI_MAX=15, r_spaxel
 
     master_sky = rss.eval_master_sky()
 
+    # filter the GAIA stars to avoid multiple stars in a single fiber
+    # locate the science ifu fibers the stars are in
+    fibs = np.zeros(len(calibrated_spectra)) - 1
+    for i in range(len(calibrated_spectra)):
+        data = r[i]
+        d = np.sqrt((data['ra']-scifibs['ra'])**2 + (data['dec']-scifibs['dec'])**2) # in degrees
+        fib = np.where(d<r_spaxel)[0] # there can only be zero or one fiber with a distance cut smaller than a fiber diameter
+        if fib.size > 0:
+            fibs[i] = fib
+
     # locate the science ifu fibers the stars are in
     for i in range(len(calibrated_spectra)):
         data = r[i]
         d = np.sqrt((data['ra']-scifibs['ra'])**2 + (data['dec']-scifibs['dec'])**2) # in degrees
         fib = np.where(d<r_spaxel)[0] # there can only be zero or one fiber with a distance cut smaller than a fiber diameter
         if fib.size > 0:
-            # if we found a star in a fiber
+            # skip if the there are multiple stars in this fiber
+            assert(fibs[i] != -1)
+            if np.count_nonzero(fibs == fib) > 1:
+                log.info(f"dropping gaia star {data['source_id']} in fiber {fib}, multiple stars")
+                continue
+            # if we found a single star in a fiber
             gflux = calibrated_spectra.iloc[i].flux
 
             fibidx = scifibs['fiberid'][fib] - 1

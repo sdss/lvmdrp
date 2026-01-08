@@ -1474,12 +1474,12 @@ def combine_skies(in_rss: str, out_rss, sky_weights: Tuple[float, float] = None)
 
     # linearly interpolate in sky coordinates
     log.info("interpolating sky fibers for both telescopes")
-    ra_e = rss._header.get("TESKYERA", rss._header.get("SKYERA"))
-    dec_e = rss._header.get("TESKYEDE", rss._header.get("SKYEDEC"))
-    ra_w = rss._header.get("TESKYWRA", rss._header.get("SKYWRA"))
-    dec_w = rss._header.get("TESKYWDE", rss._header.get("SKYWDEC"))
-    ra_s = rss._header.get("TESCIRA", rss._header.get("SCIRA"))
-    dec_s = rss._header.get("TESCIDE", rss._header.get("SCIDEC"))
+    ra_e = rss._header.get("SKYERA")
+    dec_e = rss._header.get("SKYEDEC")
+    ra_w = rss._header.get("SKYWRA")
+    dec_w = rss._header.get("SKYWDEC")
+    ra_s = rss._header.get("SCIRA")
+    dec_s = rss._header.get("SCIDEC")
 
     log.info(
         "interpolating sky telescopes pointings "
@@ -1640,7 +1640,7 @@ def quick_sky_subtraction(in_cframe, out_sframe, skymethod: str = 'farlines_near
     log.info(f"writing lvmSframe to {out_sframe}")
     sframe = lvmSFrame(data=skysub_data, error=skysub_error, mask=cframe._mask.astype(bool), sky=skydata, sky_error=sky_error,
                        wave=cframe._wave, lsf=cframe._lsf, header=cframe._header,
-                       fluxcal_std=cframe._fluxcal_std, fluxcal_sci=cframe._fluxcal_sci,
+                       fluxcal_std=cframe._fluxcal_std, fluxcal_sci=cframe._fluxcal_sci, fluxcal_mod=cframe._fluxcal_mod,
                        slitmap=cframe._slitmap)
     sframe._mask |= ~np.isfinite(sframe._error)
     sframe.writeFitsData(out_sframe)
@@ -1740,11 +1740,10 @@ def prep_input_simplesky_mean(filename: str = None) -> fits.HDUList:
 
         # First do the science data
 
-        ra = x["PRIMARY"].header["TESCIRA"]
-        dec = x["PRIMARY"].header["TESCIDE"]
-        airmass = x["PRIMARY"].header["TESCIAM"]
+        ra = x["PRIMARY"].header["SCIRA"]
+        dec = x["PRIMARY"].header["SCIDEC"]
+        alt = x["PRIMARY"].header["SCIALT"]
         xtel = "Sci"
-        alt = 90 - np.arccos(1.0 / airmass) * 57.29578
 
         # create science table
 
@@ -1758,11 +1757,10 @@ def prep_input_simplesky_mean(filename: str = None) -> fits.HDUList:
         sci_table_hdu.header["TELE"] = xtel
 
         # creating table for Sky E
-        ra = x["PRIMARY"].header["TESKYERA"]
-        dec = x["PRIMARY"].header["TESKYEDE"]
-        airmass = x["PRIMARY"].header["TESKYEAM"]
+        ra = x["PRIMARY"].header["SKYERA"]
+        dec = x["PRIMARY"].header["SKYEDEC"]
+        alt = x["PRIMARY"].header["SKYEALT"]
         xtel = "SkyE"
-        alt = 90 - np.arccos(1.0 / airmass) * 57.29578
 
         xtab_sky_e = Table([wave, sky_e_flux, sky_e_err], names=["WAVE", "FLUX", "ERROR"])
         skye_table_hdu = fits.BinTableHDU(xtab_sky_e, name="SKYE")
@@ -1773,11 +1771,10 @@ def prep_input_simplesky_mean(filename: str = None) -> fits.HDUList:
         skye_table_hdu.header["TELE"] = xtel
 
         # creating table for Sky W
-        ra = x["PRIMARY"].header["TESKYWRA"]
-        dec = x["PRIMARY"].header["TESKYWDE"]
-        airmass = x["PRIMARY"].header["TESKYWAM"]
-        xtel = "SkyE"
-        alt = 90 - np.arccos(1.0 / airmass) * 57.29578
+        ra = x["PRIMARY"].header["SKYWRA"]
+        dec = x["PRIMARY"].header["SKYWDEC"]
+        alt = x["PRIMARY"].header["SKYWALT"]
+        xtel = "SkyW"
 
         xtab_sky_w = Table([wave, sky_w_flux, sky_w_err], names=["WAVE", "FLUX", "ERROR"])
         skyw_table_hdu = fits.BinTableHDU(xtab_sky_w, name="SKYW")
@@ -1788,11 +1785,10 @@ def prep_input_simplesky_mean(filename: str = None) -> fits.HDUList:
         skyw_table_hdu.header["TELE"] = xtel
 
         # create table for the supersky sky east
-        ra = x["PRIMARY"].header["TESKYERA"]
-        dec = x["PRIMARY"].header["TESKYEDE"]
-        airmass = x["PRIMARY"].header["TESKYEAM"]
+        ra = x["PRIMARY"].header["SKYERA"]
+        dec = x["PRIMARY"].header["SKYEDEC"]
+        alt = x["PRIMARY"].header["SKYEALT"]
         xtel = "SkyE"
-        alt = 90 - np.arccos(1.0 / airmass) * 57.29578
 
         xtab_sky_e = Table([wave, sky_east_super, sky_east_super_e], names=["WAVE", "FLUX", "ERROR"])
         super_skye_table_hdu = fits.BinTableHDU(xtab_sky_e, name="SKYE_SUPER")
@@ -1803,11 +1799,10 @@ def prep_input_simplesky_mean(filename: str = None) -> fits.HDUList:
         super_skye_table_hdu.header["TELE"] = xtel
 
         # create table for the supersky sky west
-        ra = x["PRIMARY"].header["TESKYWRA"]
-        dec = x["PRIMARY"].header["TESKYWDE"]
-        airmass = x["PRIMARY"].header["TESKYWAM"]
-        xtel = "SkyE"
-        alt = 90 - np.arccos(1.0 / airmass) * 57.29578
+        ra = x["PRIMARY"].header["SKYWRA"]
+        dec = x["PRIMARY"].header["SKYWDEC"]
+        alt = x["PRIMARY"].header["SKYWALT"]
+        xtel = "SkyW"
 
         xtab_sky_w = Table([wave, sky_west_super, sky_west_super_e], names=["WAVE", "FLUX", "ERROR"])
         super_skyw_table_hdu = fits.BinTableHDU(xtab_sky_w, name="SKYW_SUPER")

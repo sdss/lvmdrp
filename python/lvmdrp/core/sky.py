@@ -39,6 +39,9 @@ from lvmdrp.core.constants import (
     SKYMODEL_INST_CONFIG_PATH,
     SKYMODEL_INST_PATH,
     SKYMODEL_MODEL_CONFIG_PATH,
+    LVM_ELEVATION,
+    LVM_LAT,
+    LVM_LON
 )
 from lvmdrp.external.skycorr import createParFile, fitstabSkyCorrWrapper, runSkyCorr
 from lvmdrp import log
@@ -253,20 +256,20 @@ def sky_pars_header(header):
     """
 
     # extract useful header information,
-    sci_ra = header.get("SCIRA", header.get("POSCIRA", np.nan))
-    sci_dec = header.get("SCIDEC", header.get("POSCIDE", np.nan))
-    skye_ra = header.get("SKYERA", header.get("POSKYERA", np.nan))
-    skye_dec = header.get("SKYEDEC", header.get("POSKYEDE", np.nan))
-    skyw_ra = header.get("SKYWRA", header.get("POSKYWRA", np.nan))
-    skyw_dec = header.get("SKYWDEC", header.get("POSKYWDE", np.nan))
-
-    obstime = Time(header["OBSTIME"])
+    sci_ra = header.get("SCIRA")
+    sci_dec = header.get("SCIDEC")
+    sci_alt = header.get("SCIALT")
+    skye_ra = header.get("SKYERA")
+    skye_dec = header.get("SKYEDEC")
+    skye_alt = header.get("SKYEALT")
+    skyw_ra = header.get("SKYWRA")
+    skyw_dec = header.get("SKYWDEC")
+    skyw_alt = header.get("SKYWALT")
+    obstime = header["OBSTIME"]
 
 
     # define location of LCO using shadow heigh calculator library
-    observatory_location = EarthLocation(lat=SH_CALCULATOR.observatory_topo.latitude.degrees*u.deg,
-                                     lon=SH_CALCULATOR.observatory_topo.longitude.degrees*u.deg,
-                                     height=SH_CALCULATOR.observatory_elevation.value*u.m)
+    observatory_location = EarthLocation(lat=LVM_LAT, lon=LVM_LON, height=LVM_ELEVATION * u.m)
 
     #use astropy Time class for the observing time
     obs_time = Time(obstime)
@@ -288,17 +291,12 @@ def sky_pars_header(header):
     skyw_coord = SkyCoord(skyw_ra, skyw_dec, unit='deg')
 
     # observatory height ('sm_h' in km)
-    sm_h = SH_CALCULATOR.observatory_elevation
+    sm_h = LVM_ELEVATION * u.m
 
     # RA and dec of moon (moonra, moondec) and SkyCoord position for moon
     moon_ra = moon_coord.ra.deg
     moon_dec = moon_coord.dec.deg
     moon_pos = SkyCoord(moon_ra*u.deg, moon_dec*u.deg)
-
-    # altitude of objects above the horizon (alt, 0 -- 90)
-    sci_alt = sci_coord.transform_to(altaz_frame).alt
-    skye_alt = skye_coord.transform_to(altaz_frame).alt
-    skyw_alt = skyw_coord.transform_to(altaz_frame).alt
 
     # altitude of moon ('moon_alt') and sun (sun_alt) [ -90 -- 90]
     moon_alt=moon_coord.transform_to(altaz_frame).alt
@@ -393,9 +391,9 @@ def sky_pars_header(header):
     #header keywords SKY = parameters used for sky subtraction testing (incl geocoronal)
     #header keywords SKYMODEL = additional parameters needed to run the ESO sky model
     sky_pars = {
-        "HIERARCH SKY SCI_ALT": (np.round(sci_alt.to(u.deg).value, 4), "altitude of object above horizon [deg]"),
-        "HIERARCH SKY SKYE_ALT": (np.round(skye_alt.to(u.deg).value, 4), "altitude of object above horizon [deg]"),
-        "HIERARCH SKY SKYW_ALT": (np.round(skyw_alt.to(u.deg).value, 4), "altitude of object above horizon [deg]"),
+        "HIERARCH SKY SCI_ALT": (np.round(sci_alt, 4), "altitude of object above horizon [deg]"),
+        "HIERARCH SKY SKYE_ALT": (np.round(skye_alt, 4), "altitude of object above horizon [deg]"),
+        "HIERARCH SKY SKYW_ALT": (np.round(skyw_alt, 4), "altitude of object above horizon [deg]"),
         "HIERARCH SKY SCI_SKYE_SEP": (np.round(sci_skye.to(u.deg).value, 4), "separation of SCI and SkyE [deg]"),
         "HIERARCH SKY SCI_SKYW_SEP": (np.round(sci_skyw.to(u.deg).value, 4), "separation of SCI and SkyW [deg]"),
         "HIERARCH SKY SCI_MOON_SEP": (np.round(sci_rho.to(u.deg).value, 4), "separation of Moon and object [deg]"),

@@ -29,9 +29,8 @@ from astropy.coordinates import SkyCoord, EarthLocation, AltAz
 from astropy import units as u
 
 from lvmdrp import log
-from lvmdrp.core.constants import MASTERS_DIR
+from lvmdrp.core.constants import LVM_ELEVATION, LVM_LON, LVM_LAT, MASTERS_DIR, STELLAR_TEMP_PATH
 from lvmdrp.core.tracemask import TraceMask
-from lvmdrp.core.constants import STELLAR_TEMP_PATH
 from lvmdrp.utils.paths import get_calib_paths
 from lvmdrp.core.spectrum1d import Spectrum1D, convolution_matrix
 from lvmdrp.core.rss import RSS
@@ -49,7 +48,7 @@ def retrieve_header_stars(rss):
     Retrieve fiber, Gaia ID, exposure time and airmass for the 12 standard stars in the header.
     return a list of tuples of the above quantities.
     """
-    lco = EarthLocation(lat=-29.008999964 * u.deg, lon=-70.688663912 * u.deg, height=2800 * u.m)
+    lco = EarthLocation(lat=LVM_LAT, lon=LVM_LON, height=LVM_ELEVATION * u.m)
     h = rss._header
     slitmap = rss._slitmap
     # retrieve the data for the 12 standards from the header

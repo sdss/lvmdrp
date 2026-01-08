@@ -30,6 +30,7 @@ from lvmdrp.utils.hdrfix import apply_hdrfix
 from lvmdrp.utils.convert import dateobs_to_sjd, correct_sjd, tileid_grp
 
 pd.set_option('io.hdf.default_format', 'table')
+pd.set_option('future.no_silent_downcasting', True)
 
 
 DRPVER = __version__
@@ -560,11 +561,15 @@ def extract_metadata(frames_paths: list, kind: str = "raw") -> pd.DataFrame:
         columns = MASTER_METADATA_COLUMNS
     else:
         pass
+
+    # define default output
+    default_output = pd.DataFrame(columns=[column for column, _ in columns])
+
     # extract metadata
     nframes = len(frames_paths)
     if nframes == 0:
         log.warning("zero paths given, nothing to do")
-        return pd.DataFrame(columns=[column for column, _ in columns])
+        return default_output
     log.info(f"going to extract metadata from {nframes} frames")
     new_metadata = {}
     iterator = tqdm(
@@ -663,6 +668,8 @@ def extract_metadata(frames_paths: list, kind: str = "raw") -> pd.DataFrame:
 
     # define dataframe
     new_metadata = pd.DataFrame.from_dict(new_metadata, orient="index")
+    if new_metadata.empty:
+        return default_output
     new_metadata.columns = list(zip(*columns))[0]
 
     # store metadata in HDF5 store
@@ -938,7 +945,7 @@ def get_metadata(
         metadatas.append(metadata)
 
     if not metadatas:
-        return
+        return default_output
 
     metadata = pd.concat(metadatas, axis="index", ignore_index=True)
     # filter by exposure number, spectrograph and/or camera
@@ -970,7 +977,9 @@ def update_metadata(mjd):
 
     paths = np.asarray(sorted(path.expand("lvm_raw", hemi="s", camspec="*", mjd=mjd, expnum="????????")))
     names = np.asarray([os.path.basename(p).replace(".gz", "") for p in paths])
-    old_names = np.asarray(sorted(get_metadata(mjd=mjd, tileid="*")["name"].tolist()))
+
+    metadata = get_metadata(mjd=mjd, tileid="*")
+    old_names = np.asarray(sorted(metadata["name"].tolist()))
 
     new_selection = ~np.isin(names, old_names)
     npaths = new_selection.sum()
@@ -1489,20 +1498,25 @@ def _collect_header_data(filename: str) -> dict:
     """
     hdr_dict_mapping = {'drpver': 'DRPVER', 'drpqual': 'DRPQUAL', 'dpos': 'DPOS', 'object': 'OBJECT',
                         'obstime': 'OBSTIME',
+                        # flux calibration parameters
+                        'std_mean_senb': 'STDSENMB', 'std_mean_senr': 'STDSENMR', 'std_mean_senz': 'STDSENMZ',
+                        'sci_mean_senb': 'SCISENMB', 'sci_mean_senr': 'SCISENMR', 'sci_mean_senz': 'SCISENMZ',
+                        'mod_mean_senb': 'MODSENMB', 'mod_mean_senr': 'MODSENMR', 'mod_mean_senz': 'MODSENMZ',
+                        'fluxcal': 'FLUXCAL',
                         # sci
                         'sci_ra': 'SCIRA', 'sci_dec': 'SCIDEC',
-                        'sci_pa': 'SCIPA', 'sci_amass': 'TESCIAM',
+                        'sci_pa': 'SCIPA', 'sci_amass': 'SCIAM', 'sci_astsrc': 'SCIASRC',
                         'sci_kmpos': 'TESCIKM', 'sci_focpos': 'TESCIFO', 'sci_alt': 'SKY SCI_ALT',
                         'sci_sh_hght': 'SKY SCI_SH_HGHT', 'sci_moon_sep': 'SKY SCI_MOON_SEP',
                         # skye
                         'skye_ra': 'SKYERA', 'skye_dec': 'SKYEDEC',
-                        'skye_pa': 'SKYEPA', 'skye_amass': 'TESKYEAM',
+                        'skye_pa': 'SKYEPA', 'skye_amass': 'SKYEAM', 'skye_astsrc': 'SKYEASRC',
                         'skye_kmpos': 'TESKYEKM', 'skye_focpos': 'TESKYEFO', 'skye_name': 'SKYENAME',
                         'skye_alt': 'SKY SKYE_ALT', 'sci_skye_sep': 'SKY SCI_SKYE_SEP',
                         'skye_sh_hght': 'SKY SKYE_SH_HGHT', 'skye_moon_sep': 'SKY SKYE_MOON_SEP',
                         # skyw
                         'skyw_ra': 'SKYWRA', 'skyw_dec': 'SKYWDEC',
-                        'skyw_pa': 'SKYWPA', 'skyw_amass': 'TESKYWAM',
+                        'skyw_pa': 'SKYWPA', 'skyw_amass': 'SKYWAM', 'skyw_astsrc': 'SKYWASRC',
                         'skyw_kmpos': 'TESKYWKM', 'skyw_focpos': 'TESKYWFO', 'skyw_name': 'SKYWNAME',
                         'skyw_alt': 'SKY SKYW_ALT', 'sci_skyw_sep': 'SKY SCI_SKYW_SEP',
                         'skyw_sh_hght': 'SKY SKYW_SH_HGHT', 'skyw_moon_sep': 'SKY SKYW_MOON_SEP',
@@ -1613,7 +1627,8 @@ def update_summary_file(filename: str, tileid: int = None, mjd: int = None, expn
 
     # set min column sizes for some columns
     min_itemsize = {'skye_name': 20, 'skyw_name': 20, 'location': 120, 'agcam_location': 120,
-                    'object': 24, 'filename': 120, 'obstime': 23, 'drpver': 15}
+                    'object': 24, 'filename': 120, 'obstime': 23, 'drpver': 15,
+                    'fluxcal': 5, 'sci_astsrc': 15, 'skye_astsrc': 15, 'skyw_astsrc': 15}
 
     # write to pytables hdf5
     try:
