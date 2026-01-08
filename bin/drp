@@ -616,6 +616,14 @@ def get_calibs(kind, mjd, camera):
     a = Access()
     a.remote()
     a.add('lvm_calib', kind="odels_ambre", mjd="stellar_models", camera="all")
+    ###########################################################################
+    # TODO: These files are required for the updated telluric correction workflow.
+    # The file naming and file locations are not finalized yet and should be
+    # properly defined and formally registered.
+    a.add('lvm_calib', kind="MBRE_for_LVM_3000_11000", mjd="stellar_models", camera="all")
+    a.add('lvm_calib', kind="ransmission_from_Palace_SkyModel_step0.2", mjd="stellar_models", camera="all")
+    a.add('lvm_calib', kind="aia_stars_5-9_ftype_v4", mjd="gais_cache", camera="all")
+    ###########################################################################
     a.add('lvm_calib', kind="pix*", mjd="pixelmasks", camera=camera)
     a.add('lvm_calib', kind=kind, mjd=mjd, camera=camera)
     a.set_stream()
