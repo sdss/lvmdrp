@@ -8,6 +8,11 @@ from tree import Tree
 from sdss_access.path import Path
 import subprocess
 
+# Disable LaTeX rendering in matplotlib to avoid issues with special characters
+# in axis labels (^, #, _, etc.). This must be set before any matplotlib imports.
+import matplotlib
+matplotlib.rcParams['text.usetex'] = False
+
 
 NAME = 'lvmdrp'
 

@@ -2,6 +2,10 @@
 # encoding: utf-8
 #
 
+# Disable LaTeX rendering BEFORE any other imports
+import matplotlib
+matplotlib.rcParams['text.usetex'] = False
+
 import os
 import pathlib
 import shutil

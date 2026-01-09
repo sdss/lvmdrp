@@ -34,6 +34,9 @@ if not IS_INTERACTIVE:
     plt.switch_backend(newbackend="Agg")
 plt.style.use("seaborn-v0_8-talk")
 
+# Disable LaTeX rendering after style.use() to ensure it's not overridden
+plt.rcParams['text.usetex'] = False
+
 
 def create_subplots(to_display, flatten_axes=True, **subplots_params):
     """creates a figure and axes given a plt.subplots set of parameters
@@ -330,8 +333,8 @@ def plot_detrend(ori_image, det_image, axs, mbias=None, mdark=None, labels=False
     if labels:
         axs[2].set_xlabel(f"counts ({unit})")
         axs[3].set_xlabel(f"Counts ({unit})")
-        axs[0].set_ylabel(r"\#")
-        axs[2].set_ylabel(r"\#")
+        axs[0].set_ylabel("#")
+        axs[2].set_ylabel("#")
 
     return axs
 
@@ -394,7 +397,7 @@ def plot_error(frame, axs, counts_threshold=(1000, 20000), ref_value=1.0, labels
     if labels:
         axs[0].set_title(f"{n_pixels = } | {median_ratio = :.2f} | {mu = :.2f}", loc="left")
         axs[0].set_xlabel(f"Counts ({unit})")
-        axs[1].set_xlabel(r"\#")
+        axs[1].set_xlabel("#")
         axs[0].set_ylabel(r"$\sqrt{\mathrm{Counts}} / \mathrm{Error}$")
 
 
