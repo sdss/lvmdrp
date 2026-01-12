@@ -2073,16 +2073,15 @@ class Image(Header):
         valid_bins = numpy.isfinite(data_binned) & numpy.isfinite(error_binned)
 
         # fit 2D smoothing spline
-        tck = interpolate.bisplrep(
-            x[valid_bins].ravel(), y[valid_bins].ravel(), data_binned[valid_bins].ravel(),
-            w=1.0/error_binned[valid_bins].ravel() if use_weights else None,
-            s=smoothing, xb=0, xe=4086, yb=0, ye=4080, eps=1e-8)
-        model_data = interpolate.bisplev(x_pixels, y_pixels, tck).T
+        model = interpolate.CloughTocher2DInterpolator(
+            list(zip(x[valid_bins].ravel(), y[valid_bins].ravel())),
+            data_binned[valid_bins].ravel())
+        model_data = model(X, Y)
         if clip is not None and isinstance(clip, tuple) and len(clip) == 2:
             model_data = numpy.clip(model_data, *clip)
 
         # calculate binned residuals & model systematic errors
-        model_binned = interpolate.bisplev(x_cent, y_cent, tck).T
+        model_binned = model(x, y)
         model_residuals = (model_binned - data_binned) / error_binned
 
         model_error = interpolate.griddata(
@@ -2113,7 +2112,8 @@ class Image(Header):
                 axs["yma"].plot(model_data[:, ix], y_pixels, ",", color=colors_y[ix], alpha=0.2)
             axs["yma"].step(numpy.sqrt(bn.nanmedian(self._error, axis=1)), y_pixels, lw=1, color="0.8", where="mid")
 
-            model_ = interpolate.bisplev(x_pixels, y_cent, tck).T
+            X_, YC_ = numpy.meshgrid(x_pixels, y_cent, indexing="xy")
+            model_ = model(X_, YC_)
             if clip is not None and isinstance(clip, tuple) and len(clip) == 2:
                 model_ = numpy.clip(model_, *clip)
             for i in range(y_nbins):
