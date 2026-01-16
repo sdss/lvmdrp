@@ -1600,6 +1600,16 @@ def quick_sky_subtraction(in_cframe, out_sframe, skymethod: str = 'farlines_near
     skyesky, skyesky_error = create_skysub_spectrum(sky_hdu, tel="skye", method=skymethod)
     skywsky, skywsky_error = create_skysub_spectrum(sky_hdu, tel="skyw", method=skymethod)
 
+    # mask Halpha to avoid wrong geocoronal subtraction
+    from lvmdrp.core.fluxcal import interpolate_mask
+    plt.figure()
+    plt.plot(cframe._wave, scisky)
+    scisky = interpolate_mask(cframe._wave, scisky, (cframe._wave>6559)&(cframe._wave<6566))
+
+    plt.plot(cframe._wave, scisky)
+    plt.show()
+    return
+
     # select correct fibers
     data = cframe._data
     error = cframe._error
