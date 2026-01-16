@@ -1390,14 +1390,14 @@ def qa_model_matching(fig_path, fiber_params=None, gaia_params=None, model_param
         if n_peak == 0:
             width = int(matching_params["properties"]["widths"][np.where(matching_params["peaks"] == peak)][0])  # Use detected width
             start = max(0, peak - width)
-            end = min(len(matching_params["chi2_wave_bestfit_0"]), peak + width)
+            end = min(len(matching_params["chi2_wave_bestfit_0"]) - 1, peak + width)
             plt.axvspan(wave_arrays['log_std_wave_all'][mask_dict['mask_good']][start],
                         wave_arrays['log_std_wave_all'][mask_dict['mask_good']][end],
                         ymin=ylim[0], ymax=ylim[1], alpha=0.2, color='red', label='Chi square mask')
         else:
             width = int(matching_params["properties"]["widths"][np.where(matching_params["peaks"] == peak)][0])  # Use detected width
             start = max(0, peak - width)
-            end = min(len(matching_params["chi2_wave_bestfit_0"]), peak + width)
+            end = min(len(matching_params["chi2_wave_bestfit_0"]) - 1, peak + width)
             plt.axvspan(wave_arrays['log_std_wave_all'][mask_dict['mask_good']][start],
                         wave_arrays['log_std_wave_all'][mask_dict['mask_good']][end],
                         ymin=ylim[0], ymax=ylim[1], alpha=0.2, color='red')
@@ -1440,7 +1440,7 @@ def qa_model_matching(fig_path, fiber_params=None, gaia_params=None, model_param
     for peak in matching_params["peaks"]:
         width = int(matching_params["properties"]["widths"][np.where(matching_params["peaks"] == peak)][0])  # Use detected width
         start = max(0, peak - width)
-        end = min(len(matching_params["chi2_wave_bestfit_0"]), peak + width)
+        end = min(len(matching_params["chi2_wave_bestfit_0"]) - 1, peak + width)
         plt.axvspan(wave_arrays['log_std_wave_all'][mask_dict['mask_good']][start],
                     wave_arrays['log_std_wave_all'][mask_dict['mask_good']][end],
                     ymin=ylim[0], ymax=ylim[1], alpha=0.2, color='red')
@@ -1481,7 +1481,7 @@ def qa_model_matching(fig_path, fiber_params=None, gaia_params=None, model_param
     for peak in matching_params["peaks"]:
         width = int(matching_params["properties"]["widths"][np.where(matching_params["peaks"] == peak)][0])  # Use detected width
         start = max(0, peak - width)
-        end = min(len(matching_params["chi2_wave_bestfit_0"]), peak + width)
+        end = min(len(matching_params["chi2_wave_bestfit_0"]) - 1, peak + width)
         plt.axvspan(wave_arrays['log_std_wave_all'][mask_dict['mask_good']][start],
                     wave_arrays['log_std_wave_all'][mask_dict['mask_good']][end],
                     ymin=ylim[0], ymax=ylim[1], alpha=0.2, color='red')
@@ -1526,7 +1526,7 @@ def qa_model_matching(fig_path, fiber_params=None, gaia_params=None, model_param
     for peak in matching_params["peaks"]:
         width = int(matching_params["properties"]["widths"][np.where(matching_params["peaks"] == peak)][0])  # Use detected width
         start = max(0, peak - width)
-        end = min(len(matching_params["chi2_wave_bestfit_0"]), peak + width)
+        end = min(len(matching_params["chi2_wave_bestfit_0"]) - 1, peak + width)
         plt.axvspan(wave_arrays['log_std_wave_all'][mask_dict['mask_good']][start],
                     wave_arrays['log_std_wave_all'][mask_dict['mask_good']][end],
                     ymin=ylim[0], ymax=ylim[1], alpha=0.2, color='red')
@@ -1570,7 +1570,7 @@ def qa_model_matching(fig_path, fiber_params=None, gaia_params=None, model_param
     for peak in matching_params["peaks"]:
         width = int(matching_params["properties"]["widths"][np.where(matching_params["peaks"] == peak)][0])  # Use detected width
         start = max(0, peak - width)
-        end = min(len(matching_params["chi2_wave_bestfit_0"]), peak + width)
+        end = min(len(matching_params["chi2_wave_bestfit_0"]) - 1, peak + width)
         plt.axvspan(wave_arrays['log_std_wave_all'][mask_dict['mask_good']][start],
                     wave_arrays['log_std_wave_all'][mask_dict['mask_good']][end],
                     ymin=ylim[0], ymax=ylim[1], alpha=0.2, color='red')
