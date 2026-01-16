@@ -330,8 +330,8 @@ def plot_detrend(ori_image, det_image, axs, mbias=None, mdark=None, labels=False
     if labels:
         axs[2].set_xlabel(f"counts ({unit})")
         axs[3].set_xlabel(f"Counts ({unit})")
-        axs[0].set_ylabel("#")
-        axs[2].set_ylabel("#")
+        axs[0].set_ylabel("Frequency")
+        axs[2].set_ylabel("Frequency")
 
     return axs
 
@@ -394,7 +394,7 @@ def plot_error(frame, axs, counts_threshold=(1000, 20000), ref_value=1.0, labels
     if labels:
         axs[0].set_title(f"{n_pixels = } | {median_ratio = :.2f} | {mu = :.2f}", loc="left")
         axs[0].set_xlabel(f"Counts ({unit})")
-        axs[1].set_xlabel("#")
+        axs[1].set_xlabel("Frequency")
         axs[0].set_ylabel(r"$\sqrt{\mathrm{Counts}} / \mathrm{Error}$")
 
 
