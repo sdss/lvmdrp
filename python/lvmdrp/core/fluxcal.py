@@ -831,14 +831,14 @@ class TelluricCalculator:
         ----------
         skymodel_path : str, optional
             Full path to the SkyModel transmission FITS table.
-            If None, uses default: MASTERS_DIR/stellar_models/lvm-model_transmission_Palace_SkyModel_step0.2.fits
+            If None, uses default: MASTERS_DIR/stellar_models/lvm-model_transmission_Palace_SkyModel_step0.2-all.fits
         """
         self._load_sky_model(skymodel_path)
 
     def _load_sky_model(self, skymodel_path=None):
         """Load the Palace Sky Model transmission table."""
         if skymodel_path is None:
-            model_path = os.path.join(MASTERS_DIR, 'stellar_models', 'lvm-model_transmission_Palace_SkyModel_step0.2.fits')
+            model_path = os.path.join(MASTERS_DIR, 'stellar_models', 'lvm-model_transmission_Palace_SkyModel_step0.2-all.fits')
         else:
             model_path = skymodel_path
 

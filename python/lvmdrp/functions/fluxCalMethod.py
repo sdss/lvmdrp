@@ -867,7 +867,7 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
     # https://github.com/desihub/desispec/blob/main/py/desispec/data/arc_lines/telluric_lines.txt
     telluric_tab = Table.read(telluric_file, format='ascii.fixed_width_two_line')
 
-    with fits.open(name=models_dir + '/lvm-models_AMBRE_for_LVM_3000_11000.fits') as model:
+    with fits.open(name=models_dir + '/lvm-models_AMBRE_for_LVM_3000_11000-all.fits') as model:
         model_good = model['FLUX'].data
         model_wave = model['WAVE'].data
         model_norm = model['FLUX_NORM'].data
@@ -878,7 +878,7 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
     log.info(f'Number of models: {n_models}')
 
     # Initialize TelluricCalculator to handle atmospheric transmission calculations
-    skymodel_path = os.path.join(models_dir, 'lvm-model_transmission_Palace_SkyModel_step0.2.fits')
+    skymodel_path = os.path.join(models_dir, 'lvm-model_transmission_Palace_SkyModel_step0.2-all.fits')
     telluric_corrector = fluxcal.TelluricCalculator(skymodel_path)
 
     GAIA_CACHE_DIR = "./" if GAIA_CACHE_DIR is None else GAIA_CACHE_DIR
@@ -887,7 +887,7 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
     # Read Calibration GAIA stars table and create index on source_id for quick
     # record retrieval
     # https://sdss-wiki.atlassian.net/wiki/spaces/LVM/pages/14460157/Calibration+Stars
-    gaia_stars = Table.read(models_dir + '/lvm-many_Gaia_stars_5-9_ftype_v4.fits', format='fits')
+    gaia_stars = Table.read(models_dir + '/lvm-many_Gaia_stars_5-9_ftype_v4-all.fits', format='fits')
     gaia_stars.add_index('source_id')
 
     # Prepare the spectra
