@@ -1567,8 +1567,6 @@ def subtract_straylight(
     y_nbound: int = 3,
     nsigma: float = 5.0,
     clip: Tuple[int,int] = None,
-    smoothing: float = 0.01,
-    use_weights : bool = False,
     median_box: int = 11,
     parallel: int|str = "auto",
     display_plots: bool = False,
@@ -1598,10 +1596,6 @@ def subtract_straylight(
         Width (in pixels) to mask around each fiber trace (default: 11).
     nsigma : float, optional
         Sigma threshold for clipping outlier bins, (default: 5.0).
-    smoothing : float, optional
-        Smoothing parameter for the 2D spline fit (default: 0.01).
-    use_weights : bool, optional
-        If True, use image errors as weights in the spline fit (default: False).
     median_box : int, optional
         Width of the median filter along the dispersion axis (default: 11).
     parallel : int or str, optional
@@ -1672,11 +1666,6 @@ def subtract_straylight(
     #     log.info(f"inferring number of bins along X as SNR^2 ({SNR = :.2f}): {x_bins = }")
 
     # set number of bins in X and Y
-    y_extras = 0
-    if y_bounds[0] is not None:
-        y_extras += 1
-    if y_bounds[1] is not None:
-        y_extras += 1
     y_bins = 19
     bins = (x_bins, y_bins)
 
@@ -1691,11 +1680,13 @@ def subtract_straylight(
     #         log.info(f"inferring spline smoothing: {smoothing = :.4f}")
 
     # fit the signal in unmaksed areas along cross-dispersion axis by a polynomial
-    fig = plt.figure(figsize=(13, 10+3*(y_bins+y_extras)), layout="constrained")
+    fig = plt.figure(figsize=(13, 10+3*(y_bins)), layout="constrained")
     fig.suptitle(f"Stray Light Subtraction for frame {os.path.basename(in_image)}")
-    gs = GridSpec(5+(y_bins+y_extras), 5, figure=fig)
+    gs = GridSpec(5+(y_bins), 5, figure=fig)
 
     ax_img = fig.add_subplot(gs[1:5, :-1])
+    ax_img.set_xlim(0, img._dim[1])
+    ax_img.set_ylim(0, img._dim[0])
     ax_img.tick_params(labelbottom=False)
     ax_img.set_ylabel("Y (pixels)", fontsize="large")
     ax_xma = fig.add_subplot(gs[0, :-1], sharex=ax_img)
@@ -1708,20 +1699,18 @@ def subtract_straylight(
     ax_col.tick_params(labelsize="small", labelcolor="tab:red")
 
     axs_res = []
-    for i in range(y_bins+y_extras):
+    for i in range(y_bins):
         ax = fig.add_subplot(gs[5+i, :-1], sharex=ax_img)
-        if i != y_bins+y_extras-1:
+        if i != y_bins-1:
             ax.tick_params(labelbottom=False)
         else:
             ax.set_xlabel("X (pixels)", fontsize="large")
         axs_res.append(ax)
 
     log.info(f"binning with parameters: {bins = }, {x_bounds = }, {y_bounds = }, {x_nbound = }, {y_nbound = } and {clip = }")
-    log.info(f"fitting smoothing spline with parameters: {nsigma = }, {smoothing = } and {use_weights = }")
     img_stray, data_binned, error_binned, valid_bins = img_median.fit_spline2d(
         bins=bins, x_bounds=x_bounds, y_bounds=y_bounds, x_nbound=x_nbound, y_nbound=y_nbound, clip=clip,
-        nsigma=nsigma, smoothing=smoothing, use_weights=use_weights, use_mask=True,
-        axs={"img": ax_img, "col": ax_col, "xma": ax_xma, "yma": ax_yma, "res": axs_res})
+        nsigma=nsigma, use_mask=True, axs={"img": ax_img, "col": ax_col, "xma": ax_xma, "yma": ax_yma, "res": axs_res})
 
     # subtract smoothed background signal from original image
     log.info("subtracting the smoothed background signal from the original image")

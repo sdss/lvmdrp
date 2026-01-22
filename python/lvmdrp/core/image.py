@@ -1912,73 +1912,100 @@ class Image(Header):
 
         return img
 
-    def _get_bins(self, data, error, mask, bins, x_bounds=(None,None), y_bounds=(None,None), x_nbound=11, y_nbound=3):
+    def _get_bins(self, data, error, mask, bins, x_bounds_type=(None,None), y_bounds_type=(None,None), x_nbound=10, y_nbound=11):
+        """Returns bins for given 2D image, considering the errors and the pixel mask
+
+        This function will create arrays for bins along X and Y, possibly
+        adding boundary bins. Given `data`, `error` and `mask` arrays are
+        modified inplace.
+
+        NOTE: the implementation of 'data' boundary types along X axis is still missing
+
+        Parameters
+        ----------
+        data : arry_like[float]
+            Data array
+        error : arry_like[float]
+            Error array
+        mask : arry_like[bool]
+            Pixel Mask
+        bins : tuple[int,int]
+            Number of bins along X and Y
+        x_bounds_type : tuple, optional
+            Boundary types along X, either None, 'data' or a floating point value, by default (None,None)
+        y_bounds_type : tuple, optional
+            Boundary types along Y, either None, 'data' or a floating point value, by default (None,None)
+        x_nbound : int, optional
+            Size of the boundary bins in X, by default 10
+        y_nbound : int, optional
+            Size of the boundary bins in Y, by default 11
+
+        Returns
+        -------
+        {data, error, mask}
+            Updated arrays after constructing bins
+        {x_bins, y_bins}
+            Bins edges along X and Y directions
+
+        Raises
+        ------
+        ValueError
+            If `x_nbound` is not consistent with image shape
+        ValueError
+            If `y_nbound` is not consistent with image shape
+        """
+        def edge_centered_bins(nbins, size):
+            centers = numpy.linspace(0, size, nbins)
+            d = centers[1] - centers[0]
+            return numpy.concatenate(([centers[0] - d / 2],
+                                    centers[:-1] + d / 2,
+                                    [centers[-1] + d / 2]))
 
         x_nbins, y_nbins = bins
-        x_range, y_range = (0, self._dim[1]), (0, self._dim[0])
-        x_pixels = numpy.arange(x_range[1], dtype="int")
-        y_pixels = numpy.arange(y_range[1], dtype="int")
-        left = right = bottom = top = 0
-
-        # set left and right boundaries if given (offset by 3 pixels to account for pre-scan regions)
-        l_bound, r_bound = x_bounds
-        if l_bound is not None:
-            left = x_nbound
-        if r_bound is not None:
-            right = x_nbound
-
+        # set left and right boundaries if given
+        l_bound, r_bound = x_bounds_type
         # set top and bottom boundaries if given
-        b_bound, t_bound = y_bounds
-        if b_bound is not None:
-            bottom = y_nbound
-        if t_bound is not None:
-            top = y_nbound
+        b_bound, t_bound = y_bounds_type
 
-        x_bins = numpy.histogram_bin_edges(x_pixels, bins=x_nbins, range=(x_range[0]+left,x_range[1]-right))
-        y_bins = numpy.histogram_bin_edges(y_pixels, bins=y_nbins, range=(y_range[0]+bottom,y_range[1]-top))
+        if x_nbound < 0 or x_nbound > self._dim[1]:
+            raise ValueError(f"Invalid values for `x_nbound`: {x_nbound}. Consider the data size along X-axis: {data.shape[1]}")
+        if y_nbound < 0 or y_nbound > self._dim[0]:
+            raise ValueError(f"Invalid values for `y_nbound`: {y_nbound}. Consider the data size along Y-axis: {data.shape[0]}")
 
-        # add extra bins
-        if l_bound is not None:
-            x_bins = numpy.insert(x_bins, 0, 0.0)
-        if r_bound is not None:
-            x_bins = numpy.append(x_bins, self._dim[1])
-        if b_bound is not None:
-            y_bins = numpy.insert(y_bins, 0, 0)
-        if t_bound is not None:
-            y_bins = numpy.append(y_bins, self._dim[0])
+        x_bins = edge_centered_bins(x_nbins, self._dim[1])
+        y_bins = edge_centered_bins(y_nbins, self._dim[0])
 
-        # offset by 3 pixels to account for pre-scan regions
+        # handle boundary types along X and Y
+        # if given specific values for boundaries, set small error values (assume robust knowledge of these bins)
         if isinstance(l_bound, (float, int)):
-            data[:, (x_nbound)] = l_bound
-            error[:, (x_nbound)] = 0.1
-            mask[:, (x_nbound)] = False
+            data[:, 3:x_nbound] = l_bound
+            error[:, 3:x_nbound] = 0.1
+            mask[:, 3:x_nbound] = False
         elif l_bound == "data":
             pass
         if isinstance(r_bound, (float, int)):
-            data[:, -(x_nbound):] = r_bound
-            error[:, -(x_nbound):] = 0.1
-            mask[:, -(x_nbound):] = False
+            data[:, -x_nbound:-3] = r_bound
+            error[:, -x_nbound:-3] = 0.1
+            mask[:, -x_nbound:-3] = False
         elif r_bound == "data":
             pass
-
         if isinstance(b_bound, (float, int)):
             data[:y_nbound, :] = b_bound
             error[:y_nbound, :] = 0.1
             mask[:y_nbound, :] = False
         elif b_bound == "data":
-            pass
-        if isinstance(b_bound, (float, int)):
-            data[-y_nbound, :] = t_bound
-            error[-y_nbound, :] = 0.1
-            mask[-y_nbound, :] = False
+            mask[:y_nbound, :] = False
+        if isinstance(t_bound, (float, int)):
+            data[-y_nbound:, :] = t_bound
+            error[-y_nbound:, :] = 0.1
+            mask[-y_nbound:, :] = False
         elif t_bound == "data":
-            pass
+            mask[-y_nbound:, :] = False
 
         return data, error, mask, x_bins, y_bins
 
     def histogram(self, bins, nsigma=5.0, stat=bn.nanmedian, x_bounds=(None,None), y_bounds=(None,None), x_nbound=3, y_nbound=3, clip=None, use_mask=True):
 
-        x_nbins, y_nbins = bins
         x_pixels = numpy.arange(self._dim[1], dtype="int")
         y_pixels = numpy.arange(self._dim[0], dtype="int")
         X, Y = numpy.meshgrid(x_pixels, y_pixels, indexing="xy")
@@ -1990,7 +2017,7 @@ class Image(Header):
 
         img_data, img_error, img_mask, x_bins, y_bins = self._get_bins(
             data=img_data, error=img_error, mask=img_mask,
-            bins=bins, x_bounds=x_bounds, x_nbound=x_nbound, y_bounds=y_bounds, y_nbound=y_nbound)
+            bins=bins, x_bounds_type=x_bounds, x_nbound=x_nbound, y_bounds_type=y_bounds, y_nbound=y_nbound)
 
         if use_mask:
             img_data[img_mask] = numpy.nan
@@ -2022,9 +2049,9 @@ class Image(Header):
         y_cent = (y_bins[:-1]+y_bins[1:]) / 2
         x, y = numpy.meshgrid(x_cent, y_cent, indexing="xy")
 
-        return (ix,iy), x_bins, y_bins, x, y, data_binned, error_binned, X, Y, img_data, img_error, data, error
+        return (ix,iy), x_bins, y_bins, x, y, data_binned, error_binned, X, Y, data, error
 
-    def fit_spline2d(self, bins, x_bounds=("data","data"), y_bounds=(0.0,0.0), x_nbound=3, y_nbound=3, nsigma=None, clip=None, smoothing=None, use_weights=True, use_mask=True, axs=None):
+    def fit_spline2d(self, bins, x_bounds=("data","data"), y_bounds=(0.0,0.0), x_nbound=3, y_nbound=3, nsigma=None, clip=None, use_mask=True, axs=None):
         """Fits a 2D bivariate spline to the image data, using binned statistics and sigma clipping.
 
         The image is divided into bins along both axes, and the median value in each bin is computed.
@@ -2038,10 +2065,6 @@ class Image(Header):
             Number of bins along the (X, Y) axes, e.g., (x_bins, y_bins).
         nsigma : float
             Sigma threshold for clipping outlier bins. If None, no rejection is performed.
-        smoothing : float, optional
-            Smoothing parameter for the spline fit. If None, the default is used.
-        use_weights : bool, optional
-            If True, use inverse variance of the binned errors as weights in the spline fit (default: True).
         axs : dict of matplotlib.axes.Axes, optional
             Dictionary of axes for diagnostic plotting (default: None).
 
@@ -2060,7 +2083,7 @@ class Image(Header):
         y_pixels = numpy.arange(self._dim[0])
 
         # get 2D histogram
-        xybins, x_bins, y_bins, x, y, data_binned, error_binned, X, Y, img_data, img_error, data, error = self.histogram(
+        xybins, x_bins, y_bins, x, y, data_binned, error_binned, X, Y, data, error = self.histogram(
             bins=bins, nsigma=nsigma,
             x_bounds=x_bounds, x_nbound=x_nbound,
             y_bounds=y_bounds, y_nbound=y_nbound,

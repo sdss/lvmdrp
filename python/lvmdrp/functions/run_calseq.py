@@ -100,10 +100,10 @@ FIBER_SMOOTHING_CONFIG = {
 CALIBRATION_EPOCHS_PATH = os.path.join(os.getenv("LVMCORE_DIR"), "calibrations", "calibration-epochs.yaml")
 
 STRAYLIGHT_PARS = dict(
-    select_nrows=(10,10), use_weights=True, aperture=11,
-    x_bins=60, x_bounds=("data","data"), y_bounds=(0.0,0.0),
+    select_nrows=(10,10), aperture=11,
+    x_bins=100, x_bounds=("data","data"), y_bounds=(0.0,0.0),
     x_nbound=10, y_nbound=5, clip=(0.0,None),
-    nsigma=1.0, smoothing=90, median_box=11)
+    nsigma=1.0, median_box=None)
 
 
 def _reject_pixelshifted(frames, pixelshifts_path=PIXELSHIFTS_PATH):
