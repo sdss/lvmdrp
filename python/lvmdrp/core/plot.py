@@ -14,6 +14,7 @@ import numpy as np
 import bottleneck as bn
 from astropy.visualization import AsinhStretch, ImageNormalize, PercentileInterval, simple_norm
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
+from matplotlib.gridspec import GridSpec
 import warnings
 
 from lvmdrp.core.constants import LVM_NCOLS, LVM_NROWS, LVM_NOVER
@@ -56,6 +57,41 @@ def create_subplots(to_display, flatten_axes=True, **subplots_params):
     if flatten_axes and isinstance(axs, np.ndarray):
         axs = axs.flatten()
     return fig, axs
+
+
+def create_straylight_axes(img, y_bins):
+    unit = img._header["BUNIT"]
+    in_image = img._header["FILENAME"]
+
+    fig = plt.figure(figsize=(13, 10+3*(y_bins)), layout="constrained")
+    fig.suptitle(f"Stray Light Subtraction for frame {in_image}")
+    gs = GridSpec(5+(y_bins), 5, figure=fig)
+
+    ax_img = fig.add_subplot(gs[1:5, :-1])
+    ax_img.set_xlim(0, img._dim[1])
+    ax_img.set_ylim(0, img._dim[0])
+    ax_img.tick_params(labelbottom=False)
+    ax_img.set_ylabel("Y (pixels)", fontsize="large")
+    ax_xma = fig.add_subplot(gs[0, :-1], sharex=ax_img)
+    ax_yma = fig.add_subplot(gs[1:5, -1], sharey=ax_img)
+    ax_xma.tick_params(labelbottom=False)
+    ax_yma.tick_params(labelleft=False)
+    ax_xma.set_ylabel(f"Counts ({unit})", fontsize="large")
+    ax_yma.set_xlabel(f"Counts ({unit})", fontsize="large")
+    ax_col = inset_axes(ax_img, width="60%", height="2%", loc="upper right")
+    ax_col.tick_params(labelsize="small", labelcolor="tab:red")
+
+    axs_res = []
+    for i in range(y_bins):
+        ax = fig.add_subplot(gs[5+i, :-1], sharex=ax_img)
+        if i != y_bins-1:
+            ax.tick_params(labelbottom=False)
+        else:
+            ax.set_xlabel("X (pixels)", fontsize="large")
+        axs_res.append(ax)
+
+    return fig, {"img": ax_img, "col": ax_col, "xma": ax_xma, "yma": ax_yma, "res": axs_res}
+
 
 def set_colorbar(axis, collection):
     axcb = inset_axes(

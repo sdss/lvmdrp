@@ -33,6 +33,15 @@ from lvmdrp.external.fast_median import fast_median_filter_2d
 
 from lvmdrp import __version__ as drpver
 
+
+def _edge_centered_bins(nbins, size):
+    centers = numpy.linspace(0, size, nbins)
+    d = centers[1] - centers[0]
+    return numpy.concatenate(([centers[0] - d / 2],
+                            centers[:-1] + d / 2,
+                            [centers[-1] + d / 2]))
+
+
 def _fill_column_list(columns, width):
     """Adds # width columns around the given columns list
 
@@ -1948,13 +1957,6 @@ class Image(Header):
         ValueError
             If `y_nbound` is not consistent with image shape
         """
-        def edge_centered_bins(nbins, size):
-            centers = numpy.linspace(0, size, nbins)
-            d = centers[1] - centers[0]
-            return numpy.concatenate(([centers[0] - d / 2],
-                                    centers[:-1] + d / 2,
-                                    [centers[-1] + d / 2]))
-
         data = self._data.copy()
         error = numpy.sqrt(self._data).copy()
         mask = self._mask.copy()
@@ -1970,8 +1972,8 @@ class Image(Header):
         if y_nbound < 0 or y_nbound > self._dim[0]:
             raise ValueError(f"Invalid values for `y_nbound`: {y_nbound}. Consider the data size along Y-axis: {data.shape[0]}")
 
-        x_bins = edge_centered_bins(x_nbins, self._dim[1])
-        y_bins = edge_centered_bins(y_nbins, self._dim[0])
+        x_bins = _edge_centered_bins(x_nbins, self._dim[1])
+        y_bins = _edge_centered_bins(y_nbins, self._dim[0])
 
         # handle boundary types along X and Y
         # if given specific values for boundaries, set small error values (assume robust knowledge of these bins)
@@ -2043,6 +2045,151 @@ class Image(Header):
         x, y = numpy.meshgrid(x_cent, y_cent, indexing="xy")
 
         return (ix,iy), x_bins, y_bins, x, y, data_binned, error_binned, X, Y, data, error
+
+    def straylight_binning(self, centroids, x_nbins=20, y_margin=7, nrows=5, nsigma=1.0):
+        # initialize image pixel grid
+        x_pixels, y_pixels = numpy.arange(self._dim[1]), numpy.arange(self._dim[0])
+        X, Y = numpy.meshgrid(x_pixels, y_pixels, indexing="xy")
+
+        # get top and bottom bins
+        first = centroids.get_block(0)
+        last = centroids.get_block(LVM_NBLOCKS - 1)
+
+        above_fibers = (Y >= first._data[0] + y_margin) & (Y <= first._data[0] + y_margin + nrows)
+        below_fibers = (Y <= last._data[-1] - y_margin) & (Y >= last._data[-1] - y_margin - nrows)
+
+        # get interblock bins
+        strips = []
+        ninter = LVM_NBLOCKS - 1
+        for iblock in range(ninter):
+            i = centroids.get_block(iblock)
+            j = centroids.get_block(iblock + 1)
+            inter = (Y >= j._data[0] + y_margin) & (Y <= i._data[-1] - y_margin)
+
+            strips.append(inter)
+
+        # define list of straylight strips
+        strips = [above_fibers] + strips + [below_fibers]
+
+        # bin along X
+        x_bins = _edge_centered_bins(nbins=x_nbins, size=self._dim[1])
+        x_index = numpy.digitize(numpy.arange(self._dim[1]), x_bins) - 1
+        x_centers = 0.5 * (x_bins[:-1] + x_bins[1:])
+        cols_per_bin = [numpy.where(x_index == i)[0] for i in range(x_nbins)]
+        samples = []
+
+        for k, strip in enumerate(strips):
+
+            xs, ys, zs, es = [], [], [], []
+
+            # iterate over X bins
+            for ibin in range(x_nbins):
+                cols = cols_per_bin[ibin]
+                if cols.size == 0:
+                    continue
+
+                # restrict to strip pixels in these columns
+                sel = strip[:, cols]
+                if not numpy.any(sel):
+                    continue
+
+                values = self._data[:, cols][sel]
+                vars = self._error[:, cols][sel] ** 2
+
+                # reject outlying pixels
+                med = bn.nanmedian(values)
+                mad = 1.4826 * bn.nanmedian(numpy.abs(values - med))
+                valid = numpy.abs(values - med) < nsigma * mad
+
+                xs.append(x_centers[ibin])
+                ys.append(numpy.mean(Y[:, cols][sel][valid]))
+                zs.append(bn.nanmedian(values[valid]))
+                es.append(numpy.sqrt(bn.nanmedian(vars[valid])))
+
+            if xs:
+                samples.append(
+                    dict(
+                        strip_id=k,
+                        x=numpy.array(xs),
+                        y=numpy.array(ys),
+                        z=numpy.array(zs),
+                        e=numpy.array(es)
+                    )
+                )
+
+        return samples, strips, X, Y
+
+    def fit_straylight(self, samples, strips, X, Y, clip=None, axs=None):
+
+        x_pixels = X[0]
+        y_pixels = Y[:, 0]
+
+        x_all = numpy.concatenate([s["x"] for s in samples])
+        y_all = numpy.concatenate([s["y"] for s in samples])
+        z_all = numpy.concatenate([s["z"] for s in samples])
+        y_cent = numpy.mean([s["y"] for s in samples], axis=1)
+        y_nbins = y_cent.size
+
+        model = interpolate.CloughTocher2DInterpolator(numpy.column_stack((x_all, y_all)), z_all)
+
+        # evaluate model
+        model_data = model(X, Y)
+        # extrapolate empty rows
+        good = numpy.isfinite(model_data).all(axis=1)
+        idx = numpy.where(good)[0]
+        i, j = idx[0], idx[-1]
+        model_data[:i] = model_data[i]
+        model_data[j+1:] = model_data[j]
+
+        if clip is not None and isinstance(clip, tuple) and len(clip) == 2:
+            model_data = numpy.clip(model_data, *clip)
+
+        if axs is not None:
+            unit = self._header["BUNIT"]
+            norm = simple_norm(data=model_data, stretch="asinh")
+            im = axs["img"].imshow(model_data, origin="lower", cmap="Greys_r", norm=norm, interpolation="none")
+            cbar = plt.colorbar(im, cax=axs["col"], orientation="horizontal")
+            cbar.set_label(f"Counts ({unit})", fontsize="small", color="tab:red")
+            axs["img"].set_aspect("auto")
+
+            axs["img"].plot(x_all, y_all, "o", mew=0.5, ms=4, mec="tab:blue", mfc="none")
+
+            colors_x = plt.cm.coolwarm(numpy.linspace(0, 1, self._data.shape[0]))
+            colors_y = plt.cm.coolwarm(numpy.linspace(0, 1, self._data.shape[1]))
+            for iy in y_pixels:
+                axs["xma"].plot(x_pixels, model_data[iy], ",", color=colors_x[iy], alpha=0.2)
+            axs["xma"].step(x_pixels, numpy.sqrt(bn.nanmedian(self._error**2, axis=0)), lw=1, color="0.8", where="mid")
+            for ix in x_pixels:
+                axs["yma"].plot(model_data[:, ix], y_pixels, ",", color=colors_y[ix], alpha=0.2)
+            axs["yma"].step(numpy.sqrt(bn.nanmedian(self._error, axis=1)), y_pixels, lw=1, color="0.8", where="mid")
+
+            for i in range(y_nbins):
+                strip = strips[i]
+                data_ = self._data[strip]
+                error_ = self._error[strip]
+                model_ = model_data[strip]
+                residuals = (model_ - data_) / error_
+                mu = numpy.nanmean(residuals, axis=0)
+
+                axs["res"][i].set_title(f"Y-bin = {y_cent[i]:.0f}", fontsize="large", loc="left")
+                axs["res"][i].set_ylabel(f"Counts ({unit})", fontsize="large")
+                axs["res"][i].errorbar(samples[i]["x"], samples[i]["z"], yerr=samples[i]["e"], fmt=",", color="tab:blue", ecolor="tab:blue", lw=1)
+                ylims = axs["res"][i].get_ylim()
+                axs["res"][i].errorbar(X[strip], data_, yerr=error_, fmt=",", color="0.7", ecolor="0.7", lw=1, zorder=-1)
+
+                axs["res"][i].plot(X[strip], model_, ",", color="0.2")
+
+                f = numpy.abs(ylims).max()*0.03
+                axs["res"][i].plot(X[strip].T, residuals.T*f, ",", color="0.2")
+                axs["res"][i].step(X[strip].mean(0), mu*f, "-", color="0.2", lw=1, where="mid")
+                axs["res"][i].axhline(-f, ls=":", lw=1, color="0.4")
+                axs["res"][i].axhline(+f, ls=":", lw=1, color="0.4")
+                axs["res"][i].axhline(ls="--", lw=1, color="0.4")
+                axs["res"][i].set_ylim(-f*2, ylims[1])
+
+        stray_img = copy(self)
+        stray_img.setData(data=model_data, error=None, mask=None)
+        return stray_img
 
     def fit_spline2d(self, bins, x_bounds=("data","data"), y_bounds=(0.0,0.0), x_nbound=3, y_nbound=3, nsigma=None, clip=None, use_mask=True, axs=None):
         """Fits a 2D bivariate spline to the image data, using binned statistics and sigma clipping.
