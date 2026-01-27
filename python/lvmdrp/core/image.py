@@ -1912,7 +1912,7 @@ class Image(Header):
 
         return img
 
-    def _get_bins(self, data, error, mask, bins, x_bounds_type=(None,None), y_bounds_type=(None,None), x_nbound=10, y_nbound=11):
+    def _get_bins(self, bins, x_bounds_type=(None,None), y_bounds_type=(None,None), x_nbound=10, y_nbound=11):
         """Returns bins for given 2D image, considering the errors and the pixel mask
 
         This function will create arrays for bins along X and Y, possibly
@@ -1923,12 +1923,6 @@ class Image(Header):
 
         Parameters
         ----------
-        data : arry_like[float]
-            Data array
-        error : arry_like[float]
-            Error array
-        mask : arry_like[bool]
-            Pixel Mask
         bins : tuple[int,int]
             Number of bins along X and Y
         x_bounds_type : tuple, optional
@@ -1960,6 +1954,10 @@ class Image(Header):
             return numpy.concatenate(([centers[0] - d / 2],
                                     centers[:-1] + d / 2,
                                     [centers[-1] + d / 2]))
+
+        data = self._data.copy()
+        error = numpy.sqrt(self._data).copy()
+        mask = self._mask.copy()
 
         x_nbins, y_nbins = bins
         # set left and right boundaries if given
@@ -2011,12 +2009,7 @@ class Image(Header):
         X, Y = numpy.meshgrid(x_pixels, y_pixels, indexing="xy")
         xx, yy = X.ravel(), Y.ravel()
 
-        img_data = self._data.copy()
-        img_error = numpy.sqrt(self._data).copy()
-        img_mask = self._mask.copy()
-
         img_data, img_error, img_mask, x_bins, y_bins = self._get_bins(
-            data=img_data, error=img_error, mask=img_mask,
             bins=bins, x_bounds_type=x_bounds, x_nbound=x_nbound, y_bounds_type=y_bounds, y_nbound=y_nbound)
 
         if use_mask:
@@ -2112,8 +2105,6 @@ class Image(Header):
             method="nearest", rescale=True).reshape(self._dim)
 
         if axs is not None:
-            y_pixels = numpy.arange(self._data.shape[0])
-            x_pixels = numpy.arange(self._data.shape[1])
             unit = self._header["BUNIT"]
             norm = simple_norm(data=model_data, stretch="asinh")
             im = axs["img"].imshow(model_data, origin="lower", cmap="Greys_r", norm=norm, interpolation="none")
@@ -2360,7 +2351,6 @@ class Image(Header):
             upper = (centroids_slice[select] + nsigma/2.354*fwhms_slice[select]).max()
             pixels_selection = (lower <= img_slice._pixels) & (img_slice._pixels <= upper)
 
-
             model_block, par_block = img_slice.fitMultiGauss_fixed_counts(
                 pixels_selection, counts_slice[select], centroids_slice[select], fwhms_slice[select], fwhms_range=fwhms_range, solver=solver, loss=loss)
 
@@ -2596,7 +2586,6 @@ class Image(Header):
         # TODO: implement burn-in iterations to refine guess traces using Gaussian fitting
         fitted_traces = copy(guess_traces)
 
-
         log.info(f"initiating iterative fiber tracing with parameters: {list(fitted_traces.keys())}")
         for i, free_name, fixed_names in _block_cycle(fitted_traces.keys(), niter=niter):
             # TODO: set boundary constraints at image edges to avoid overshoots
@@ -2717,14 +2706,14 @@ class Image(Header):
         if isinstance(traces["sigmas"], (int, float, numpy.float32)):
             traces["sigmas"] = TraceMask(data=numpy.ones_like(traces["centroids"]._data) * traces["sigmas"], mask=numpy.zeros_like(traces["centroids"]._data, dtype=bool))
         elif isinstance(traces["sigmas"], TraceMask):
-                pass
+            pass
         else:
             raise ValueError("trace_width must be a TraceMask instance or an int/float")
 
         if isinstance(traces["counts"], (int, float, numpy.float32)):
             traces["counts"] = TraceMask(data=numpy.ones_like(traces["centroids"]._data) * traces["counts"], mask=numpy.zeros_like(traces["centroids"]._data, dtype=bool))
         elif isinstance(traces["counts"], TraceMask):
-                pass
+            pass
         else:
             raise ValueError("traces['counts'] must be a TraceMask instance or an int/float")
 
@@ -2760,7 +2749,6 @@ class Image(Header):
             axs = plot_fiber_residuals(model, self, blocks["centroids"], iblock, X=X, Y=Y, axs=axs)
 
         return model, X, Y, pixels_selection
-
 
     def traceFWHM(
         self, axis_select, TraceMask, blocks, init_fwhm, threshold_flux, max_pix=None
@@ -3433,14 +3421,14 @@ class Image(Header):
         if isinstance(trace_width, (int, float, numpy.float32)):
             trace_width = TraceMask(data=numpy.ones_like(trace_cent._data) * trace_width, mask=numpy.zeros_like(trace_cent._data, dtype=bool))
         elif isinstance(trace_width, TraceMask):
-                pass
+            pass
         else:
             raise ValueError("trace_width must be a TraceMask instance or an int/float")
 
         if isinstance(trace_amp, (int, float, numpy.float32)):
             trace_amp = TraceMask(data=numpy.ones_like(trace_cent._data) * trace_amp, mask=numpy.zeros_like(trace_cent._data, dtype=bool))
         elif isinstance(trace_amp, TraceMask):
-                pass
+            pass
         else:
             raise ValueError("trace_amp must be a TraceMask instance or an int/float")
 
