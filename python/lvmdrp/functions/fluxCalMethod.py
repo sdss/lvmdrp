@@ -157,7 +157,7 @@ def apply_fluxcal(in_rss: str, out_fframe: str, method: str = 'MOD', display_plo
         # Read median PWV from header
         pwv = fframe._header.get("PWV_MED", None)
 
-        if pwv is not None and np.isfinite(pwv):
+        if pwv is not None and ((isinstance(pwv, float) or isinstance(pwv, int)) and np.isfinite(pwv)):
             log.info(f"Applying telluric correction with PWV = {pwv:.2f} mm")
 
             # Initialize TelluricCalculator and compute transmission
