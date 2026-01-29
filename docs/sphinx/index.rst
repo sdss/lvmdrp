@@ -14,6 +14,9 @@ This is the Sphinx documentation for the SDSS Python product lvmdrp
    :caption: Contents
 
    intro
+   Installation
+   DirectoryStructure
+   Overview
    CHANGELOG
    api
 
