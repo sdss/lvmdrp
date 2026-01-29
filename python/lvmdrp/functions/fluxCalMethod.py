@@ -9,6 +9,7 @@
 
 import os
 import time
+import warnings
 # from os import listdir
 # from os.path import isfile, join
 import numpy as np
@@ -41,6 +42,9 @@ from lvmdrp.core.plot import plt, create_subplots, save_fig
 from lvmdrp.core.constants import MASTERS_DIR
 
 description = "provides flux calibration tasks"
+
+# Default PWV value [mm] used when PWV calculation fails for all standard stars
+DEFAULT_PWV = 15.0
 
 # Telluric-free continuum regions for PWV fitting (wavelengths in Angstroms)
 # Regions between these windows contain telluric absorption (O2, H2O bands)
@@ -154,36 +158,36 @@ def apply_fluxcal(in_rss: str, out_fframe: str, method: str = 'MOD', display_plo
         # Incorporate into the sensitivity array the telluric bands absorption
         # for estimated average PWV and given zenith angle
 
-        # Read median PWV from header
-        pwv = fframe._header.get("PWV_MED", None)
+        # Read median PWV from header, use default if missing or invalid (-999.9)
+        pwv = fframe._header.get("PWV_MED", -999.9)
+        use_default_pwv = not (np.isfinite(pwv) and pwv > 0)
 
-        if pwv is not None and np.isfinite(pwv):
-            log.info(f"Applying telluric correction with PWV = {pwv:.2f} mm")
+        if use_default_pwv:
+            warnings.warn(f"PWV_MED not found or invalid ({pwv}), using default PWV={DEFAULT_PWV} mm")
+            pwv = DEFAULT_PWV
+            rss.add_header_comment(f"Used default PWV={DEFAULT_PWV} mm for telluric correction")
 
-            # Initialize TelluricCalculator and compute transmission
-            telluric_corrector = fluxcal.TelluricCalculator()
+        log.info(f"Applying telluric correction with PWV = {pwv:.2f} mm")
 
-            # Use median LSF across all fibers for the telluric correction (in Angstroms)
-            # TODO: LSF should be used per fiber
-            lsf_median = np.nanmedian(fframe._lsf, axis=0)
+        # Initialize TelluricCalculator and compute transmission
+        telluric_corrector = fluxcal.TelluricCalculator()
 
-            # Compute telluric transmission matched to data wavelength grid with LSF convolution
-            # LSF is passed in wavelength units (Angstroms)
-            # TODO: need to use LSF per fiber
-            telluric_trans_sci = telluric_corrector.match_to_data(fframe._wave, lsf_median, pwv, airmass=sci_secz, lsf_in_wavelength=True)
-            telluric_trans_skye = telluric_corrector.match_to_data(fframe._wave, lsf_median, pwv, airmass=skye_secz, lsf_in_wavelength=True)
-            telluric_trans_skyw = telluric_corrector.match_to_data(fframe._wave, lsf_median, pwv, airmass=skyw_secz, lsf_in_wavelength=True)
+        # Use median LSF across all fibers for the telluric correction (in Angstroms)
+        # TODO: LSF should be used per fiber
+        lsf_median = np.nanmedian(fframe._lsf, axis=0)
 
-            # Divide sensitivity curve by atmospheric molecular transmission
-            sens_ave_sci = sens_ave / telluric_trans_sci
-            sens_ave_skye = sens_ave / telluric_trans_skye
-            sens_ave_skyw = sens_ave / telluric_trans_skyw
-            # sens_arr_sci = sens_arr / telluric_trans_sci[:, np.newaxis] # Not used for the moment
+        # Compute telluric transmission matched to data wavelength grid with LSF convolution
+        # LSF is passed in wavelength units (Angstroms)
+        # TODO: need to use LSF per fiber
+        telluric_trans_sci = telluric_corrector.match_to_data(fframe._wave, lsf_median, pwv, airmass=sci_secz, lsf_in_wavelength=True)
+        telluric_trans_skye = telluric_corrector.match_to_data(fframe._wave, lsf_median, pwv, airmass=skye_secz, lsf_in_wavelength=True)
+        telluric_trans_skyw = telluric_corrector.match_to_data(fframe._wave, lsf_median, pwv, airmass=skyw_secz, lsf_in_wavelength=True)
 
-        else:
-            log.warning(
-                "PWV_MED not found in header or invalid, skipping correction "
-                "of sensitivity curve for telluric absorption")
+        # Divide sensitivity curve by atmospheric molecular transmission
+        sens_ave_sci = sens_ave / telluric_trans_sci
+        sens_ave_skye = sens_ave / telluric_trans_skye
+        sens_ave_skyw = sens_ave / telluric_trans_skyw
+        # sens_arr_sci = sens_arr / telluric_trans_sci[:, np.newaxis] # Not used for the moment
 
         # fall back to science field if all invalid values
         if (sens_ave == 0).all() or np.isnan(sens_ave).all():
@@ -828,7 +832,12 @@ def calc_pwv(wave, spec, lsf, stellar_model, telluric_corrector,
     # Reset wavelength range to full model
     telluric_corrector.reset_wave_range()
 
-    return result.params['pwv'].value, result.params['pwv'].stderr
+    pwv_value = result.params['pwv'].value
+    pwv_stderr = result.params['pwv'].stderr
+    # lmfit returns None for stderr when error estimation fails
+    if pwv_stderr is None:
+        pwv_stderr = np.nan
+    return pwv_value, pwv_stderr
 
 
 def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
@@ -1051,7 +1060,7 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
             ]
 
         except Exception as e:
-            log.error(f"Failed to calculate PWV for star # {i} GAIA ID {gaia_ids[i]}: {e}")
+            warnings.warn(f"Failed to calculate PWV for star # {i} GAIA ID {gaia_ids[i]}: {e}")
             pwv = np.nan
             pwv_err = np.nan
             telluric_trans = [ np.ones_like(w[k]) for k in range(3) ] # dummy unity values
@@ -1268,8 +1277,10 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
 
             # add PWV values and errors into header
             s_idx, s_fiber, s_gaia_id, *_ = std_info[i]
-            rss.setHdrValue(f"S{s_idx}_PWV", pwv_values[i], f"PWV value for GAIA {s_gaia_id} {s_fiber}")
-            rss.setHdrValue(f"S{s_idx}_PWVE", pwv_errors[i], "PWV error")
+            pwv_val = -999.9 if np.isnan(pwv_values[i]) else pwv_values[i]
+            pwv_err_val = -999.9 if np.isnan(pwv_errors[i]) else pwv_errors[i]
+            rss.setHdrValue(f"S{s_idx}_PWV", pwv_val, f"PWV value for GAIA {s_gaia_id} {s_fiber}")
+            rss.setHdrValue(f"S{s_idx}_PWVE", pwv_err_val, "PWV error")
 
         # Add PWV averaged values into header
         pwv_mean = np.nanmean(np.asarray(pwv_values))
@@ -1278,11 +1289,23 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
         pwv_mean_err = np.nanmean(np.asarray(pwv_errors))
         pwv_median_err = np.nanmedian(np.asarray(pwv_errors))
 
-        rss.setHdrValue(f"PWV_MEAN", pwv_mean, "Mean PWV value based on all standard stars")
-        rss.setHdrValue(f"PWV_MED", pwv_median, "Median PWV value")
-        rss.setHdrValue(f"PWV_STD", pwv_std, "Standard deviation of PWV values")
-        rss.setHdrValue(f"PWVE_MNE", pwv_mean_err, "Mean of PWV errors")
-        rss.setHdrValue(f"PWVE_MED", pwv_median_err, "Median of PWV errors")
+        # Use -999.9 placeholder for NaN values to maintain FITS header consistency
+        # Default PWV fallback is handled in apply_fluxcal() when PWV_MED is invalid
+        if np.isnan(pwv_mean):
+            warnings.warn(f"All PWV calculations failed, PWV values set to -999.9")
+            rss.add_header_comment(f"PWV calculation failed for all stars")
+            rss._header.add_history(f"PWV calculation failed - values set to -999.9")
+        pwv_mean = -999.9 if np.isnan(pwv_mean) else pwv_mean
+        pwv_median = -999.9 if np.isnan(pwv_median) else pwv_median
+        pwv_std = -999.9 if np.isnan(pwv_std) else pwv_std
+        pwv_mean_err = -999.9 if np.isnan(pwv_mean_err) else pwv_mean_err
+        pwv_median_err = -999.9 if np.isnan(pwv_median_err) else pwv_median_err
+
+        rss.setHdrValue(f"PWV_MEAN", pwv_mean, "Mean PWV value (-999.9 if failed)")
+        rss.setHdrValue(f"PWV_MED", pwv_median, "Median PWV value (-999.9 if failed)")
+        rss.setHdrValue(f"PWV_STD", pwv_std, "Std dev of PWV (-999.9 if failed)")
+        rss.setHdrValue(f"PWVE_MNE", pwv_mean_err, "Mean of PWV errors (-999.9 if failed)")
+        rss.setHdrValue(f"PWVE_MED", pwv_median_err, "Median of PWV errors (-999.9 if failed)")
 
         res_mod_pd = res_mod.to_pandas().values
         rms_mod = biweight_scale(res_mod_pd, axis=1, ignore_nan=True)
