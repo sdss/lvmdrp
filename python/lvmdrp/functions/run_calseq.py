@@ -35,7 +35,7 @@ from itertools import product
 from pprint import pformat
 from copy import deepcopy as copy
 from datetime import datetime
-from shutil import copy2, copytree, rmtree
+from shutil import copy2, copytree
 from astropy.io import fits
 from astropy.table import Table
 from typing import Union, Tuple, List, Dict
@@ -615,42 +615,6 @@ def get_calibration_epoch(mjd, flavors=None, trigger=None, comment=None):
     return calibs_mjds
 
 
-def _clean_ancillary(mjd, expnums=None, flavors="all"):
-    """Clean ancillary files
-
-    Given a set of MJDs and (optionally) exposure numbers, clean the ancillary
-    files for the given flavor of frames. This routine will remove the ancillary
-    files for the given flavor of frames in the corresponding calibration
-    directory in the `masters_mjd` or by default in the smallest MJD in `mjds`.
-
-    Parameters:
-    ----------
-    mjd : int
-        MJD to clean
-    expnums : list
-        List of exposure numbers to clean
-    flavors : list, tuple, set or str
-        type of, defaults to "all"
-    """
-    # filter by target image types
-    all_flavors = {"bias", "dark", "flat", "arc", "cent", "amp", "width", "stray"}
-    if not set(flavors).issubset(flavors):
-        raise ValueError(f"Invalid flavor: '{flavors}'. Must be one of {all_flavors} or 'all'")
-
-    ancillary_dir = os.path.join(os.getenv("LVM_SPECTRO_REDUX"), drpver, "0011XX", "11111", str(mjd), "ancillary")
-    if flavors == "all":
-        rmtree(ancillary_dir)
-        return
-
-    for flavor in flavors:
-        # remove ancillary files
-        ancillary_paths = path.expand("lvm_anc", drpver=drpver, mjd=mjd, tileid=11111, kind='*', imagetype=flavor, camera="*", expnum="*")
-        [os.remove(ancillary_path) for ancillary_path in ancillary_paths]
-
-    if not os.listdir(ancillary_dir):
-        os.rmdir(ancillary_dir)
-
-
 def _link_pixelmasks():
     """Creates a symbolic link of fiducial pixel flats and masks to current version directory"""
     tileid = 11111
@@ -961,7 +925,7 @@ def tag_longterm_calibrations(mjd, version, flavors=None, dry_run=False):
     flavors : str, optional
         Types of calibration (e.g., wave, bias), by default None (all calibrations)
     dry_run : bool, optional
-        log information about source and
+        Logs useful information abaut the current setup without actually tagging, by default False
     """
     # handle possible acceptable flavors
     if isinstance(flavors, (list, tuple, set, np.ndarray)):

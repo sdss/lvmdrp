@@ -1944,6 +1944,8 @@ def fluxcal_standard_stars(in_rss, plot=True, GAIA_CACHE_DIR=None):
     # load input RSS
     log.info(f"loading input RSS file '{os.path.basename(in_rss)}'")
     rss = RSS.from_file(in_rss)
+    label = rss._header['CCD']
+    channel = label.lower()
 
     # wavelength array
     w = rss._wave
@@ -1968,6 +1970,10 @@ def fluxcal_standard_stars(in_rss, plot=True, GAIA_CACHE_DIR=None):
     except KeyError:
         log.warning(f"no standard star metadata found in '{in_rss}', skipping sensitivity measurement")
         rss.add_header_comment(f"no standard star metadata found in '{in_rss}', skipping sensitivity measurement")
+        mean_std_band = -999.9
+        rms_std_band = -999.9
+        rss.setHdrValue(f"STDSENM{label}", mean_std_band, f"mean stdstar sensitivity in {channel}")
+        rss.setHdrValue(f"STDSENR{label}", rms_std_band, f"mean stdstar sensitivity rms in {channel}")
         rss.set_fluxcal(fluxcal=res_std, source='std')
         rss.writeFitsData(in_rss)
         return res_std, mean_std, rms_std, rss
@@ -1976,6 +1982,10 @@ def fluxcal_standard_stars(in_rss, plot=True, GAIA_CACHE_DIR=None):
     if len(stds) == 0:
         log.warning(f"no standard stars found in '{in_rss}', skipping sensitivity measurement")
         rss.add_header_comment(f"no standard stars found in '{in_rss}', skipping sensitivity measurement")
+        mean_std_band = -999.9
+        rms_std_band = -999.9
+        rss.setHdrValue(f"STDSENM{label}", mean_std_band, f"mean stdstar sensitivity in {channel}")
+        rss.setHdrValue(f"STDSENR{label}", rms_std_band, f"mean stdstar sensitivity rms in {channel}")
         rss.set_fluxcal(fluxcal=res_std, source='std')
         rss.writeFitsData(in_rss)
         return res_std, mean_std, rms_std, rss
@@ -1992,9 +2002,6 @@ def fluxcal_standard_stars(in_rss, plot=True, GAIA_CACHE_DIR=None):
 
     rms_std = biweight_scale(res_std_pd, axis=1, ignore_nan=True)
     mean_std = biweight_location(res_std_pd, axis=1, ignore_nan=True)
-
-    label = rss._header['CCD']
-    channel = label.lower()
 
     mean_std_band = np.nanmean(mean_std[1000:3000])
     rms_std_band = np.nanmean(rms_std[1000:3000])

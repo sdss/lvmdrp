@@ -1,12 +1,14 @@
 import os
 import fnmatch
+from glob import glob
+from shutil import rmtree
 from itertools import groupby
 import pandas as pd
 
 from typing import List, Union
 
 from lvmdrp.core.constants import CALIBRATION_PRODUCTS, CAMERAS, MASTERS_DIR
-from lvmdrp import path, __version__ as drpver
+from lvmdrp import log, path, __version__ as drpver
 from lvmdrp.utils.convert import tileid_grp
 from lvmdrp.utils import metadata as md
 
@@ -209,3 +211,64 @@ def get_frames_paths(mjds, kind, camera_or_channel, query=None, expnums=None, fi
     if filter_existing:
         paths = list(filter(lambda p: os.path.isfile(p), paths))
     return paths
+
+
+def get_dir_size(path):
+    """Calculates the total size of a directory in Gigabytes"""
+    total_size = 0
+    # walk through all directories and files in the specified path
+    for dirpath, _, filenames in os.walk(path):
+        for f in filenames:
+            fp = os.path.join(dirpath, f)
+            # skip symlinks to prevent double counting or infinite loops
+            if not os.path.islink(fp):
+                try:
+                    total_size += os.path.getsize(fp)
+                except OSError:
+                    # handle potential permissions errors or file access issues
+                    print(f"Error accessing file: {fp}")
+                    continue
+
+    # convert bytes to Gigabytes (1 GB = 1024^3 bytes, using the IEC standard)
+    bytes_in_tb = 1024**3
+    size_tb = total_size / bytes_in_tb
+    return size_tb
+
+
+def remove_ancillary_paths(version, mjd=None, dry_run=False):
+    """Remove ancillary files
+
+    Parameters:
+    ----------
+    version : str
+        DRP version to target
+    mjd : str, optional
+        MJD to clean, by default None (all MJDs)
+    dry_run : bool, optional
+        Logs useful information abaut the current setup without actually removing the paths, by default False
+    """
+
+    mjd = mjd or "*"
+    ancillary_dirs = sorted(glob(os.path.join(os.getenv("LVM_SPECTRO_REDUX"), version, "*", "*", str(mjd), "ancillary")))
+    npaths = len(ancillary_dirs)
+    if npaths == 0:
+        log.info(f"no ancillary paths found for {version = } and {mjd = }. Nothing to do")
+        return
+    log.info(f"going to remove {npaths} ancillary directories for {version = }")
+
+    df = pd.DataFrame(data=ancillary_dirs, columns=["path"])
+    df["volume"] = df.path.apply(get_dir_size)
+    df["removed"] = False
+    records = df.filter(items=("path", "volume")).to_string(index=None).split("\n")
+    for i, r in df.iterrows():
+        log.info(f"{records[i]}")
+        if dry_run:
+            continue
+        try:
+            rmtree(r.path)
+            df.loc[i, "removed"] = True
+        except Exception as e:
+            log.error(f"while trying to remove {r.p}: {e}")
+    log.info(f"total volume (GB): {df.volume.sum():g}")
+
+    return df
