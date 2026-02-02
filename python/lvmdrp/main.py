@@ -2012,7 +2012,7 @@ def create_drpall(drp_version: str = None, overwrite: bool = False) -> None:
 
     log.info(f"finished summarizing {nframes-nfailed} lvmSFrames in {drpall_h5}")
     if nfailed == nframes:
-        log.error(f"all attempted frames failed:")
+        log.error("all attempted frames failed:")
         log.error(f"{failed = }")
         return
     if nfailed != 0:

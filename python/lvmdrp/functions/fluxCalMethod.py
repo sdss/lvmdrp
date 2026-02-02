@@ -405,7 +405,7 @@ def prepare_spec(in_rss, width=3):
         w.append(w_tmp)
 
         # Load sky emission line mask (telluric bands are NOT masked - handled in model_selection)
-        channel = rss_tmp._header['CCD']
+        # channel = rss_tmp._header['CCD']
         m = get_sky_mask_uves(w[b], width=width)
 
         master_sky = rss_tmp.eval_master_sky()
@@ -578,7 +578,7 @@ def _qa_plot_pwv_calculation(fig_out, wave_channels, y_data, model_trans, residu
                         row_heights=[0.5, 0.5],
                         subplot_titles=('PWV fitting', 'Continuum Fitting'))
 
-    channel_names = ['r', 'z']
+    # channel_names = ['r', 'z']
     data_color_masked = 'black'
     data_color_full = 'orange'
     model_color = 'red'
@@ -880,7 +880,7 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
         model_good = model['FLUX'].data
         model_wave = model['WAVE'].data
         model_norm = model['FLUX_NORM'].data
-        model_norm_wave = model['WAVE_LOG'].data
+        # model_norm_wave = model['WAVE_LOG'].data
         model_info = pd.DataFrame(model['MODEL_INFO'].data)
     model_names = model_info['Model_name'].to_list()
     n_models = len(model_names)
@@ -1094,14 +1094,14 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
         #                                                                                       gaia_lsf_table_tmp[
         #                                                                                           'wavelength']) - 1] * 10
         gaia_lsf_table_tmp['linewidth'] = gaia_lsf_table_tmp['wavelength'] / gaia_lsf_table_tmp['resolution']
-        gaia_lsf_table_bp = gaia_lsf_table_tmp[0:10]
-        gaia_lsf_table_rp = gaia_lsf_table_tmp[10:17]
-        wave_bprp_mean = (max(gaia_lsf_table_bp['wavelength']) + min(gaia_lsf_table_rp['wavelength'])) / 2
-        mask_wl_bp = (std_wave_all < wave_bprp_mean)
-        mask_wl_rp = (std_wave_all >= wave_bprp_mean)
-        gaia_lsf_bp = np.interp(std_wave_all[mask_wl_bp], gaia_lsf_table_bp['wavelength'], gaia_lsf_table_bp['linewidth'])
-        gaia_lsf_rp = np.interp(std_wave_all[mask_wl_rp], gaia_lsf_table_rp['wavelength'], gaia_lsf_table_rp['linewidth'])
-        gaia_lsf = np.concatenate((gaia_lsf_bp, gaia_lsf_rp))
+        # gaia_lsf_table_bp = gaia_lsf_table_tmp[0:10]
+        # gaia_lsf_table_rp = gaia_lsf_table_tmp[10:17]
+        # wave_bprp_mean = (max(gaia_lsf_table_bp['wavelength']) + min(gaia_lsf_table_rp['wavelength'])) / 2
+        # mask_wl_bp = (std_wave_all < wave_bprp_mean)
+        # mask_wl_rp = (std_wave_all >= wave_bprp_mean)
+        # gaia_lsf_bp = np.interp(std_wave_all[mask_wl_bp], gaia_lsf_table_bp['wavelength'], gaia_lsf_table_bp['linewidth'])
+        # gaia_lsf_rp = np.interp(std_wave_all[mask_wl_rp], gaia_lsf_table_rp['wavelength'], gaia_lsf_table_rp['linewidth'])
+        # gaia_lsf = np.concatenate((gaia_lsf_bp, gaia_lsf_rp))
 
         # load Gaia BP-RP spectrum from cache, or download from webapp, and fit the continuum to Gaia spec
         try:
@@ -1292,20 +1292,20 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
         # Use -999.9 placeholder for NaN values to maintain FITS header consistency
         # Default PWV fallback is handled in apply_fluxcal() when PWV_MED is invalid
         if np.isnan(pwv_mean):
-            warnings.warn(f"All PWV calculations failed, PWV values set to -999.9")
-            rss.add_header_comment(f"PWV calculation failed for all stars")
-            rss._header.add_history(f"PWV calculation failed - values set to -999.9")
+            warnings.warn("All PWV calculations failed, PWV values set to -999.9")
+            rss.add_header_comment("PWV calculation failed for all stars")
+            rss._header.add_history("PWV calculation failed - values set to -999.9")
         pwv_mean = -999.9 if np.isnan(pwv_mean) else pwv_mean
         pwv_median = -999.9 if np.isnan(pwv_median) else pwv_median
         pwv_std = -999.9 if np.isnan(pwv_std) else pwv_std
         pwv_mean_err = -999.9 if np.isnan(pwv_mean_err) else pwv_mean_err
         pwv_median_err = -999.9 if np.isnan(pwv_median_err) else pwv_median_err
 
-        rss.setHdrValue(f"PWV_MEAN", pwv_mean, "Mean PWV value (-999.9 if failed)")
-        rss.setHdrValue(f"PWV_MED", pwv_median, "Median PWV value (-999.9 if failed)")
-        rss.setHdrValue(f"PWV_STD", pwv_std, "Std dev of PWV (-999.9 if failed)")
-        rss.setHdrValue(f"PWVE_MNE", pwv_mean_err, "Mean of PWV errors (-999.9 if failed)")
-        rss.setHdrValue(f"PWVE_MED", pwv_median_err, "Median of PWV errors (-999.9 if failed)")
+        rss.setHdrValue("PWV_MEAN", pwv_mean, "Mean PWV value (-999.9 if failed)")
+        rss.setHdrValue("PWV_MED", pwv_median, "Median PWV value (-999.9 if failed)")
+        rss.setHdrValue("PWV_STD", pwv_std, "Std dev of PWV (-999.9 if failed)")
+        rss.setHdrValue("PWVE_MNE", pwv_mean_err, "Mean of PWV errors (-999.9 if failed)")
+        rss.setHdrValue("PWVE_MED", pwv_median_err, "Median of PWV errors (-999.9 if failed)")
 
         res_mod_pd = res_mod.to_pandas().values
         rms_mod = biweight_scale(res_mod_pd, axis=1, ignore_nan=True)
