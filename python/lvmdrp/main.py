@@ -110,7 +110,7 @@ def create_masters(flavor: str, frames: pd.DataFrame):
 
     Create the master calibration frames for a given flavor
     or imagetyp.  These files live in the "calib" subdirectory
-    with the "lvm-m(flavor)-*" prefix.
+    with the ``lvm-m(flavor)-*`` prefix.
 
     Parameters
     ----------
@@ -1363,7 +1363,7 @@ def reduce_2d(mjds, calibrations, expnums=None, exptime=None, cameras=CAMERAS,
     straylight-subtracted frames in the corresponding calibration directory in
     the `masters_mjd` or by default in the smallest MJD in `mjds`.
 
-    Parameters:
+    Parameters
     ----------
     mjds : int|list[int]
         Single MJD or a list of MJDs
