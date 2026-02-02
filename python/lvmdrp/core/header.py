@@ -146,17 +146,17 @@ class Header(object):
         for card in cards:
             self._header.append(card)
 
-    def setHdrValue(self, keyword, value, comment=None):
+    def setHdrValue(self, keyword, value, comment=None, placeholder=-999.9):
         if self._header is None:
             self._header = pyfits.Header()
         if comment is None:
             if isinstance(value, float) and ~np.isfinite(value):
-                self._header[keyword] = 'NAN'
+                self._header[keyword] = placeholder
             else:
                 self._header[keyword] = value
         else:
             if isinstance(value, float) and ~np.isfinite(value):
-                self._header[keyword] = ('NAN', comment)
+                self._header[keyword] = (placeholder, comment)
             else:
                 self._header[keyword] = (value, comment)
 
