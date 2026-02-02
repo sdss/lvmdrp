@@ -24,15 +24,20 @@ except FileNotFoundError:
     config = {}
 
 
+existing_lvmconf_path = {kw: os.getenv(kw) for kw in ['LVM_MASTER_DIR', 'LVM_SANDBOX', 'LVMCORE_DIR', 'SAS_BASE_DIR']}
+
 # setup the sdss tree environment and paths
 def setup_paths(release: str = 'sdsswork', replant: bool = False):
     tree = Tree(release)
     if replant:
         tree.replant_tree(release)
     return Path(release='sdsswork')
-
-
 path = setup_paths()
+
+# ensure keeping the user-defined paths
+for kw in ['LVM_MASTER_DIR', 'LVM_SANDBOX', 'LVMCORE_DIR', 'SAS_BASE_DIR']:
+    if existing_lvmconf_path[kw] is not None:
+        os.environ[kw] = existing_lvmconf_path[kw]
 
 
 __version__ = os.getenv("LVMDRP_VERSION") or get_package_version(path=__file__, package_name=NAME)
