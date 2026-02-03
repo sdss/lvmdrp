@@ -33,6 +33,15 @@ from lvmdrp.external.fast_median import fast_median_filter_2d
 
 from lvmdrp import __version__ as drpver
 
+
+def _edge_centered_bins(nbins, size):
+    centers = numpy.linspace(0, size, nbins)
+    d = centers[1] - centers[0]
+    return numpy.concatenate(([centers[0] - d / 2],
+                            centers[:-1] + d / 2,
+                            [centers[-1] + d / 2]))
+
+
 def _fill_column_list(columns, width):
     """Adds # width columns around the given columns list
 
@@ -1912,85 +1921,98 @@ class Image(Header):
 
         return img
 
-    def _get_bins(self, data, error, mask, bins, x_bounds=(None,None), y_bounds=(None,None), x_nbound=11, y_nbound=3):
+    def _get_bins(self, bins, x_bounds_type=(None,None), y_bounds_type=(None,None), x_nbound=10, y_nbound=11):
+        """Returns bins for given 2D image, considering the errors and the pixel mask
+
+        This function will create arrays for bins along X and Y, possibly
+        adding boundary bins. Given `data`, `error` and `mask` arrays are
+        modified inplace.
+
+        NOTE: the implementation of 'data' boundary types along X axis is still missing
+
+        Parameters
+        ----------
+        bins : tuple[int,int]
+            Number of bins along X and Y
+        x_bounds_type : tuple, optional
+            Boundary types along X, either None, 'data' or a floating point value, by default (None,None)
+        y_bounds_type : tuple, optional
+            Boundary types along Y, either None, 'data' or a floating point value, by default (None,None)
+        x_nbound : int, optional
+            Size of the boundary bins in X, by default 10
+        y_nbound : int, optional
+            Size of the boundary bins in Y, by default 11
+
+        Returns
+        -------
+        {data, error, mask}
+            Updated arrays after constructing bins
+        {x_bins, y_bins}
+            Bins edges along X and Y directions
+
+        Raises
+        ------
+        ValueError
+            If `x_nbound` is not consistent with image shape
+        ValueError
+            If `y_nbound` is not consistent with image shape
+        """
+        data = self._data.copy()
+        error = numpy.sqrt(self._data).copy()
+        mask = self._mask.copy()
 
         x_nbins, y_nbins = bins
-        x_range, y_range = (0, self._dim[1]), (0, self._dim[0])
-        x_pixels = numpy.arange(x_range[1], dtype="int")
-        y_pixels = numpy.arange(y_range[1], dtype="int")
-        left = right = bottom = top = 0
-
-        # set left and right boundaries if given (offset by 3 pixels to account for pre-scan regions)
-        l_bound, r_bound = x_bounds
-        if l_bound is not None:
-            left = x_nbound
-        if r_bound is not None:
-            right = x_nbound
-
+        # set left and right boundaries if given
+        l_bound, r_bound = x_bounds_type
         # set top and bottom boundaries if given
-        b_bound, t_bound = y_bounds
-        if b_bound is not None:
-            bottom = y_nbound
-        if t_bound is not None:
-            top = y_nbound
+        b_bound, t_bound = y_bounds_type
 
-        x_bins = numpy.histogram_bin_edges(x_pixels, bins=x_nbins, range=(x_range[0]+left,x_range[1]-right))
-        y_bins = numpy.histogram_bin_edges(y_pixels, bins=y_nbins, range=(y_range[0]+bottom,y_range[1]-top))
+        if x_nbound < 0 or x_nbound > self._dim[1]:
+            raise ValueError(f"Invalid values for `x_nbound`: {x_nbound}. Consider the data size along X-axis: {data.shape[1]}")
+        if y_nbound < 0 or y_nbound > self._dim[0]:
+            raise ValueError(f"Invalid values for `y_nbound`: {y_nbound}. Consider the data size along Y-axis: {data.shape[0]}")
 
-        # add extra bins
-        if l_bound is not None:
-            x_bins = numpy.insert(x_bins, 0, 0.0)
-        if r_bound is not None:
-            x_bins = numpy.append(x_bins, self._dim[1])
-        if b_bound is not None:
-            y_bins = numpy.insert(y_bins, 0, 0)
-        if t_bound is not None:
-            y_bins = numpy.append(y_bins, self._dim[0])
+        x_bins = _edge_centered_bins(x_nbins, self._dim[1])
+        y_bins = _edge_centered_bins(y_nbins, self._dim[0])
 
-        # offset by 3 pixels to account for pre-scan regions
+        # handle boundary types along X and Y
+        # if given specific values for boundaries, set small error values (assume robust knowledge of these bins)
         if isinstance(l_bound, (float, int)):
-            data[:, (x_nbound)] = l_bound
-            error[:, (x_nbound)] = 0.1
-            mask[:, (x_nbound)] = False
+            data[:, 3:x_nbound] = l_bound
+            error[:, 3:x_nbound] = 0.1
+            mask[:, 3:x_nbound] = False
         elif l_bound == "data":
             pass
         if isinstance(r_bound, (float, int)):
-            data[:, -(x_nbound):] = r_bound
-            error[:, -(x_nbound):] = 0.1
-            mask[:, -(x_nbound):] = False
+            data[:, -x_nbound:-3] = r_bound
+            error[:, -x_nbound:-3] = 0.1
+            mask[:, -x_nbound:-3] = False
         elif r_bound == "data":
             pass
-
         if isinstance(b_bound, (float, int)):
             data[:y_nbound, :] = b_bound
             error[:y_nbound, :] = 0.1
             mask[:y_nbound, :] = False
         elif b_bound == "data":
-            pass
-        if isinstance(b_bound, (float, int)):
-            data[-y_nbound, :] = t_bound
-            error[-y_nbound, :] = 0.1
-            mask[-y_nbound, :] = False
+            mask[:y_nbound, :] = False
+        if isinstance(t_bound, (float, int)):
+            data[-y_nbound:, :] = t_bound
+            error[-y_nbound:, :] = 0.1
+            mask[-y_nbound:, :] = False
         elif t_bound == "data":
-            pass
+            mask[-y_nbound:, :] = False
 
         return data, error, mask, x_bins, y_bins
 
     def histogram(self, bins, nsigma=5.0, stat=bn.nanmedian, x_bounds=(None,None), y_bounds=(None,None), x_nbound=3, y_nbound=3, clip=None, use_mask=True):
 
-        x_nbins, y_nbins = bins
         x_pixels = numpy.arange(self._dim[1], dtype="int")
         y_pixels = numpy.arange(self._dim[0], dtype="int")
         X, Y = numpy.meshgrid(x_pixels, y_pixels, indexing="xy")
         xx, yy = X.ravel(), Y.ravel()
 
-        img_data = self._data.copy()
-        img_error = numpy.sqrt(self._data).copy()
-        img_mask = self._mask.copy()
-
         img_data, img_error, img_mask, x_bins, y_bins = self._get_bins(
-            data=img_data, error=img_error, mask=img_mask,
-            bins=bins, x_bounds=x_bounds, x_nbound=x_nbound, y_bounds=y_bounds, y_nbound=y_nbound)
+            bins=bins, x_bounds_type=x_bounds, x_nbound=x_nbound, y_bounds_type=y_bounds, y_nbound=y_nbound)
 
         if use_mask:
             img_data[img_mask] = numpy.nan
@@ -2022,9 +2044,154 @@ class Image(Header):
         y_cent = (y_bins[:-1]+y_bins[1:]) / 2
         x, y = numpy.meshgrid(x_cent, y_cent, indexing="xy")
 
-        return (ix,iy), x_bins, y_bins, x, y, data_binned, error_binned, X, Y, img_data, img_error, data, error
+        return (ix,iy), x_bins, y_bins, x, y, data_binned, error_binned, X, Y, data, error
 
-    def fit_spline2d(self, bins, x_bounds=("data","data"), y_bounds=(0.0,0.0), x_nbound=3, y_nbound=3, nsigma=None, clip=None, smoothing=None, use_weights=True, use_mask=True, axs=None):
+    def straylight_binning(self, centroids, x_nbins=20, y_margin=7, nrows=5, nsigma=1.0):
+        # initialize image pixel grid
+        x_pixels, y_pixels = numpy.arange(self._dim[1]), numpy.arange(self._dim[0])
+        X, Y = numpy.meshgrid(x_pixels, y_pixels, indexing="xy")
+
+        # get top and bottom bins
+        first = centroids.get_block(0)
+        last = centroids.get_block(LVM_NBLOCKS - 1)
+
+        above_fibers = (Y >= first._data[0] + y_margin) & (Y <= first._data[0] + y_margin + nrows)
+        below_fibers = (Y <= last._data[-1] - y_margin) & (Y >= last._data[-1] - y_margin - nrows)
+
+        # get interblock bins
+        strips = []
+        ninter = LVM_NBLOCKS - 1
+        for iblock in range(ninter):
+            i = centroids.get_block(iblock)
+            j = centroids.get_block(iblock + 1)
+            inter = (Y >= j._data[0] + y_margin) & (Y <= i._data[-1] - y_margin)
+
+            strips.append(inter)
+
+        # define list of straylight strips
+        strips = [above_fibers] + strips + [below_fibers]
+
+        # bin along X
+        x_bins = _edge_centered_bins(nbins=x_nbins, size=self._dim[1])
+        x_index = numpy.digitize(numpy.arange(self._dim[1]), x_bins) - 1
+        x_centers = 0.5 * (x_bins[:-1] + x_bins[1:])
+        cols_per_bin = [numpy.where(x_index == i)[0] for i in range(x_nbins)]
+        samples = []
+
+        for k, strip in enumerate(strips):
+
+            xs, ys, zs, es = [], [], [], []
+
+            # iterate over X bins
+            for ibin in range(x_nbins):
+                cols = cols_per_bin[ibin]
+                if cols.size == 0:
+                    continue
+
+                # restrict to strip pixels in these columns
+                sel = strip[:, cols]
+                if not numpy.any(sel):
+                    continue
+
+                values = self._data[:, cols][sel]
+                vars = self._error[:, cols][sel] ** 2
+
+                # reject outlying pixels
+                med = bn.nanmedian(values)
+                mad = 1.4826 * bn.nanmedian(numpy.abs(values - med))
+                valid = numpy.abs(values - med) < nsigma * mad
+
+                xs.append(x_centers[ibin])
+                ys.append(numpy.mean(Y[:, cols][sel][valid]))
+                zs.append(bn.nanmedian(values[valid]))
+                es.append(numpy.sqrt(bn.nanmedian(vars[valid])))
+
+            if xs:
+                samples.append(
+                    dict(
+                        strip_id=k,
+                        x=numpy.array(xs),
+                        y=numpy.array(ys),
+                        z=numpy.array(zs),
+                        e=numpy.array(es)
+                    )
+                )
+
+        return samples, strips, X, Y
+
+    def fit_straylight(self, samples, strips, X, Y, clip=None, axs=None):
+
+        x_pixels = X[0]
+        y_pixels = Y[:, 0]
+
+        x_all = numpy.concatenate([s["x"] for s in samples])
+        y_all = numpy.concatenate([s["y"] for s in samples])
+        z_all = numpy.concatenate([s["z"] for s in samples])
+        y_cent = numpy.mean([s["y"] for s in samples], axis=1)
+        y_nbins = y_cent.size
+
+        model = interpolate.CloughTocher2DInterpolator(numpy.column_stack((x_all, y_all)), z_all)
+
+        # evaluate model
+        model_data = model(X, Y)
+        # extrapolate empty rows
+        good = numpy.isfinite(model_data).all(axis=1)
+        idx = numpy.where(good)[0]
+        i, j = idx[0], idx[-1]
+        model_data[:i] = model_data[i]
+        model_data[j+1:] = model_data[j]
+
+        if clip is not None and isinstance(clip, tuple) and len(clip) == 2:
+            model_data = numpy.clip(model_data, *clip)
+
+        if axs is not None:
+            unit = self._header["BUNIT"]
+            norm = simple_norm(data=model_data, stretch="asinh")
+            im = axs["img"].imshow(model_data, origin="lower", cmap="Greys_r", norm=norm, interpolation="none")
+            cbar = plt.colorbar(im, cax=axs["col"], orientation="horizontal")
+            cbar.set_label(f"Counts ({unit})", fontsize="small", color="tab:red")
+            axs["img"].set_aspect("auto")
+
+            axs["img"].plot(x_all, y_all, "o", mew=0.5, ms=4, mec="tab:blue", mfc="none")
+
+            colors_x = plt.cm.coolwarm(numpy.linspace(0, 1, self._data.shape[0]))
+            colors_y = plt.cm.coolwarm(numpy.linspace(0, 1, self._data.shape[1]))
+            for iy in y_pixels:
+                axs["xma"].plot(x_pixels, model_data[iy], ",", color=colors_x[iy], alpha=0.2)
+            axs["xma"].step(x_pixels, numpy.sqrt(bn.nanmedian(self._error**2, axis=0)), lw=1, color="0.8", where="mid")
+            for ix in x_pixels:
+                axs["yma"].plot(model_data[:, ix], y_pixels, ",", color=colors_y[ix], alpha=0.2)
+            axs["yma"].step(numpy.sqrt(bn.nanmedian(self._error, axis=1)), y_pixels, lw=1, color="0.8", where="mid")
+
+            for i in range(y_nbins):
+                strip = strips[i]
+                data_ = self._data[strip]
+                error_ = self._error[strip]
+                model_ = model_data[strip]
+                residuals = (model_ - data_) / error_
+                mu = numpy.nanmean(residuals, axis=0)
+
+                axs["res"][i].set_title(f"Y-bin = {y_cent[i]:.0f}", fontsize="large", loc="left")
+                axs["res"][i].set_ylabel(f"Counts ({unit})", fontsize="large")
+                axs["res"][i].errorbar(samples[i]["x"], samples[i]["z"], yerr=samples[i]["e"], fmt=",", color="tab:blue", ecolor="tab:blue", lw=1)
+                ylims = axs["res"][i].get_ylim()
+                axs["res"][i].errorbar(X[strip], data_, yerr=error_, fmt=",", color="0.7", ecolor="0.7", lw=1, zorder=-1)
+
+                axs["res"][i].plot(X[strip], model_, ",", color="0.2")
+
+                f = numpy.abs(ylims).max()*0.03
+                axs["res"][i].plot(X[strip].T, residuals.T*f, ",", color="0.2")
+                axs["res"][i].step(X[strip].mean(0), mu*f, "-", color="0.2", lw=1, where="mid")
+                axs["res"][i].axhline(-f, ls=":", lw=1, color="0.4")
+                axs["res"][i].axhline(+f, ls=":", lw=1, color="0.4")
+                axs["res"][i].axhline(ls="--", lw=1, color="0.4")
+                axs["res"][i].set_ylim(-f*2, ylims[1])
+
+        stray_img = copy(self)
+        stray_img.setData(data=model_data, error=None, mask=None)
+        return stray_img
+
+    def fit_spline2d(self, bins, x_bounds=("data","data"), y_bounds=(0.0,0.0), x_nbound=3, y_nbound=3, nsigma=None, clip=None, use_mask=True, axs=None):
         """Fits a 2D bivariate spline to the image data, using binned statistics and sigma clipping.
 
         The image is divided into bins along both axes, and the median value in each bin is computed.
@@ -2038,10 +2205,6 @@ class Image(Header):
             Number of bins along the (X, Y) axes, e.g., (x_bins, y_bins).
         nsigma : float
             Sigma threshold for clipping outlier bins. If None, no rejection is performed.
-        smoothing : float, optional
-            Smoothing parameter for the spline fit. If None, the default is used.
-        use_weights : bool, optional
-            If True, use inverse variance of the binned errors as weights in the spline fit (default: True).
         axs : dict of matplotlib.axes.Axes, optional
             Dictionary of axes for diagnostic plotting (default: None).
 
@@ -2060,7 +2223,7 @@ class Image(Header):
         y_pixels = numpy.arange(self._dim[0])
 
         # get 2D histogram
-        xybins, x_bins, y_bins, x, y, data_binned, error_binned, X, Y, img_data, img_error, data, error = self.histogram(
+        xybins, x_bins, y_bins, x, y, data_binned, error_binned, X, Y, data, error = self.histogram(
             bins=bins, nsigma=nsigma,
             x_bounds=x_bounds, x_nbound=x_nbound,
             y_bounds=y_bounds, y_nbound=y_nbound,
@@ -2073,16 +2236,15 @@ class Image(Header):
         valid_bins = numpy.isfinite(data_binned) & numpy.isfinite(error_binned)
 
         # fit 2D smoothing spline
-        tck = interpolate.bisplrep(
-            x[valid_bins].ravel(), y[valid_bins].ravel(), data_binned[valid_bins].ravel(),
-            w=1.0/error_binned[valid_bins].ravel() if use_weights else None,
-            s=smoothing, xb=0, xe=4086, yb=0, ye=4080, eps=1e-8)
-        model_data = interpolate.bisplev(x_pixels, y_pixels, tck).T
+        model = interpolate.CloughTocher2DInterpolator(
+            list(zip(x[valid_bins].ravel(), y[valid_bins].ravel())),
+            data_binned[valid_bins].ravel())
+        model_data = model(X, Y)
         if clip is not None and isinstance(clip, tuple) and len(clip) == 2:
             model_data = numpy.clip(model_data, *clip)
 
         # calculate binned residuals & model systematic errors
-        model_binned = interpolate.bisplev(x_cent, y_cent, tck).T
+        model_binned = model(x, y)
         model_residuals = (model_binned - data_binned) / error_binned
 
         model_error = interpolate.griddata(
@@ -2090,8 +2252,6 @@ class Image(Header):
             method="nearest", rescale=True).reshape(self._dim)
 
         if axs is not None:
-            y_pixels = numpy.arange(self._data.shape[0])
-            x_pixels = numpy.arange(self._data.shape[1])
             unit = self._header["BUNIT"]
             norm = simple_norm(data=model_data, stretch="asinh")
             im = axs["img"].imshow(model_data, origin="lower", cmap="Greys_r", norm=norm, interpolation="none")
@@ -2113,7 +2273,8 @@ class Image(Header):
                 axs["yma"].plot(model_data[:, ix], y_pixels, ",", color=colors_y[ix], alpha=0.2)
             axs["yma"].step(numpy.sqrt(bn.nanmedian(self._error, axis=1)), y_pixels, lw=1, color="0.8", where="mid")
 
-            model_ = interpolate.bisplev(x_pixels, y_cent, tck).T
+            X_, YC_ = numpy.meshgrid(x_pixels, y_cent, indexing="xy")
+            model_ = model(X_, YC_)
             if clip is not None and isinstance(clip, tuple) and len(clip) == 2:
                 model_ = numpy.clip(model_, *clip)
             for i in range(y_nbins):
@@ -2336,7 +2497,6 @@ class Image(Header):
             lower = (centroids_slice[select] - nsigma/2.354*fwhms_slice[select]).min()
             upper = (centroids_slice[select] + nsigma/2.354*fwhms_slice[select]).max()
             pixels_selection = (lower <= img_slice._pixels) & (img_slice._pixels <= upper)
-
 
             model_block, par_block = img_slice.fitMultiGauss_fixed_counts(
                 pixels_selection, counts_slice[select], centroids_slice[select], fwhms_slice[select], fwhms_range=fwhms_range, solver=solver, loss=loss)
@@ -2573,7 +2733,6 @@ class Image(Header):
         # TODO: implement burn-in iterations to refine guess traces using Gaussian fitting
         fitted_traces = copy(guess_traces)
 
-
         log.info(f"initiating iterative fiber tracing with parameters: {list(fitted_traces.keys())}")
         for i, free_name, fixed_names in _block_cycle(fitted_traces.keys(), niter=niter):
             # TODO: set boundary constraints at image edges to avoid overshoots
@@ -2694,14 +2853,14 @@ class Image(Header):
         if isinstance(traces["sigmas"], (int, float, numpy.float32)):
             traces["sigmas"] = TraceMask(data=numpy.ones_like(traces["centroids"]._data) * traces["sigmas"], mask=numpy.zeros_like(traces["centroids"]._data, dtype=bool))
         elif isinstance(traces["sigmas"], TraceMask):
-                pass
+            pass
         else:
             raise ValueError("trace_width must be a TraceMask instance or an int/float")
 
         if isinstance(traces["counts"], (int, float, numpy.float32)):
             traces["counts"] = TraceMask(data=numpy.ones_like(traces["centroids"]._data) * traces["counts"], mask=numpy.zeros_like(traces["centroids"]._data, dtype=bool))
         elif isinstance(traces["counts"], TraceMask):
-                pass
+            pass
         else:
             raise ValueError("traces['counts'] must be a TraceMask instance or an int/float")
 
@@ -2737,7 +2896,6 @@ class Image(Header):
             axs = plot_fiber_residuals(model, self, blocks["centroids"], iblock, X=X, Y=Y, axs=axs)
 
         return model, X, Y, pixels_selection
-
 
     def traceFWHM(
         self, axis_select, TraceMask, blocks, init_fwhm, threshold_flux, max_pix=None
@@ -3410,14 +3568,14 @@ class Image(Header):
         if isinstance(trace_width, (int, float, numpy.float32)):
             trace_width = TraceMask(data=numpy.ones_like(trace_cent._data) * trace_width, mask=numpy.zeros_like(trace_cent._data, dtype=bool))
         elif isinstance(trace_width, TraceMask):
-                pass
+            pass
         else:
             raise ValueError("trace_width must be a TraceMask instance or an int/float")
 
         if isinstance(trace_amp, (int, float, numpy.float32)):
             trace_amp = TraceMask(data=numpy.ones_like(trace_cent._data) * trace_amp, mask=numpy.zeros_like(trace_cent._data, dtype=bool))
         elif isinstance(trace_amp, TraceMask):
-                pass
+            pass
         else:
             raise ValueError("trace_amp must be a TraceMask instance or an int/float")
 

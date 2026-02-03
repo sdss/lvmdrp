@@ -99,12 +99,6 @@ FIBER_SMOOTHING_CONFIG = {
 
 CALIBRATION_EPOCHS_PATH = os.path.join(os.getenv("LVMCORE_DIR"), "calibrations", "calibration-epochs.yaml")
 
-STRAYLIGHT_PARS = dict(
-    select_nrows=(10,10), use_weights=True, aperture=11,
-    x_bins=60, x_bounds=("data","data"), y_bounds=(0.0,0.0),
-    x_nbound=10, y_nbound=5, clip=(0.0,None),
-    nsigma=1.0, smoothing=90, median_box=11)
-
 
 def _reject_pixelshifted(frames, pixelshifts_path=PIXELSHIFTS_PATH):
     # NOTE: bypassing this function since all exposures in pixelshifts_path are already flagged in header fixes (see PR #9 in lvmcore)
@@ -1399,7 +1393,7 @@ def create_nightly_traces(mjd, use_longterm_cals=False, expnums_ldls=None, expnu
                 log.info(f"skipping {lflat_path}, file already exist")
             else:
                 image_tasks.subtract_straylight(in_image=cflat_path, out_image=lflat_path, out_stray=dstray_path,
-                                                in_cent_trace=cent_guess_path, parallel=1, **STRAYLIGHT_PARS)
+                                                in_cent_trace=cent_guess_path)
 
             if skip_done and os.path.isfile(flux_path) and os.path.isfile(cent_path) and os.path.isfile(fwhm_path):
                 log.info(f"skipping {flux_path}, {cent_path} and {fwhm_path}, files already exist")
@@ -1546,7 +1540,7 @@ def create_traces(mjd, epochs=None, cameras=CAMERAS, ring="primary",
                 log.info(f"skipping {lflat_path}, file already exist")
             else:
                 image_tasks.subtract_straylight(in_image=dflat_path, out_image=lflat_path, out_stray=dstray_path,
-                                                in_cent_trace=guess_paths["centroids"], parallel=1, **STRAYLIGHT_PARS)
+                                                in_cent_trace=guess_paths["centroids"])
 
             log.info(f"going to trace std fiber {std_fiberid} in {camera} within {block_idxs = }")
             fitted_params, img, model, _ = image_tasks.fit_fibers_params(in_image=lflat_path, in_fiber_guess=guess_paths, coadd=20,
@@ -1749,8 +1743,9 @@ def create_twilight_fiberflats(mjd: int, epochs: dict[int, dict] = None, cals_mj
         return
 
     # 2D reduction of twilight sequence
-    reduce_2d(mjds=mjds, calibrations=calibs, expnums=expnums, reject_cr=True,
-              add_astro=False, sub_straylight=True, skip_done=skip_done, **STRAYLIGHT_PARS)
+    reduce_2d(mjds=mjds, calibrations=calibs, expnums=expnums,
+              reject_cr=True, add_astro=False, sub_straylight=True,
+              skip_done=skip_done, **{"x_bins": 70})
 
     for flat in frames.to_dict("records"):
         camera = flat["camera"]
