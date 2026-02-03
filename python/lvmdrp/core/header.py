@@ -1,5 +1,5 @@
 from astropy.io import fits as pyfits
-
+import numpy as np
 
 class Header(object):
     def __init__(self, header=None, origin=None):
@@ -146,13 +146,19 @@ class Header(object):
         for card in cards:
             self._header.append(card)
 
-    def setHdrValue(self, keyword, value, comment=None):
+    def setHdrValue(self, keyword, value, comment=None, placeholder=-999.9):
         if self._header is None:
             self._header = pyfits.Header()
         if comment is None:
-            self._header[keyword] = value
+            if isinstance(value, float) and ~np.isfinite(value):
+                self._header[keyword] = placeholder
+            else:
+                self._header[keyword] = value
         else:
-            self._header[keyword] = (value, comment)
+            if isinstance(value, float) and ~np.isfinite(value):
+                self._header[keyword] = (placeholder, comment)
+            else:
+                self._header[keyword] = (value, comment)
 
     def extendHierarch(self, keyword, add_prefix, verbose=1):
         if self._header is not None:

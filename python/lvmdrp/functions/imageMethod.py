@@ -17,7 +17,7 @@ from astropy.table import Table
 from astropy.io import fits as pyfits
 from astropy.visualization import simple_norm
 from scipy import interpolate, integrate
-from scipy import signal
+from scipy import signal, sparse
 from tqdm import tqdm
 
 from typing import List, Tuple, Dict
@@ -38,7 +38,7 @@ from lvmdrp.core.image import (
 from lvmdrp.core import fit_profile as fp
 from lvmdrp.core.plot import plt, create_subplots, create_straylight_axes, plot_detrend, plot_error, plot_strips, plot_fiber_thermal_shift, save_fig
 from lvmdrp.core.rss import RSS
-from lvmdrp.core.spectrum1d import Spectrum1D, _spec_from_lines, _cross_match
+from lvmdrp.core.spectrum1d import Spectrum1D, _spec_from_lines, _cross_match, FiberProfileCache
 from lvmdrp.core.tracemask import TraceMask
 from lvmdrp.utils.hdrfix import apply_hdrfix
 from lvmdrp.utils.convert import dateobs_to_sjd, correct_sjd
@@ -2699,10 +2699,23 @@ def validate_extraction(in_image, in_cent, in_width, in_rss, plot_columns=[1000,
     x = numpy.repeat(x, cent._data.shape[0]).reshape(-1, cent._data.shape[0])
     out = numpy.zeros(img._dim) + numpy.nan
 
-    for i in tqdm(plot_columns):
-        A = _gen_mexhat_basis(x, cent._data[:, i], width._data[:, i], fiber_radius=1.4, oversampling_factor=100)
-        spec = numpy.dot(A, rss._data[:, i])
-        out[:, i] = spec
+    npixels = 15
+    fiber_radius = 1.4
+    profile_cache = FiberProfileCache(fiber_radius, 100, npixels)
+
+    for i in tqdm(plot_columns, unit="column", ascii=True):
+        A = profile_cache(cent._data[:, i], width._data[:, i])
+
+        xx = numpy.repeat(numpy.arange(rss._fibers, dtype="int"), 2*npixels+1)
+        # pixel ranges of fiber images
+        pos_t = numpy.trunc(cent._data[:, i])
+        yyv = numpy.linspace(pos_t-npixels, pos_t+npixels, 2*npixels+1, endpoint=True)
+
+        yyv = yyv.T.ravel()
+        A = A.T.ravel()
+        B = sparse.csc_matrix((A, (yyv, xx)), shape=(len(img._data), rss._fibers))
+
+        out[:, i] = B @ rss._data[:, i]
 
     model = copy(img)
     model._data = out
