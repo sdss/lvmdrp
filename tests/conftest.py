@@ -10,6 +10,7 @@ import pytest
 import lvmdrp
 import importlib
 
+import matplotlib
 import numpy as np
 import pandas as pd
 from astropy.io import fits
@@ -27,6 +28,13 @@ underlying directories. See
 https://docs.pytest.org/en/latest/how-to/writing_plugins.html#conftest-py-plugins for
 more information.
 """
+
+
+@pytest.fixture(autouse=True, scope='session')
+def _disable_tex():
+    """Disable LaTeX rendering so tests pass without a TeX installation."""
+    matplotlib.rcParams['text.usetex'] = False
+    yield
 
 
 @pytest.fixture(autouse=True, scope='session')
