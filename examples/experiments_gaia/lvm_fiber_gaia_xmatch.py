@@ -91,7 +91,19 @@ def _default_output():
 
 def find_sframes(input_dir):
     """Find lvmSFrame-????????.fits files recursively."""
-    return sorted(Path(input_dir).rglob("lvmSFrame-????????.fits"))
+    _info(f"Scanning {input_dir} ...")
+    t0 = time.time()
+    files = sorted(Path(input_dir).rglob("lvmSFrame-????????.fits"))
+    _info(f"Found {len(files)} SFrame files in {time.time()-t0:.1f}s")
+    return files
+
+
+def load_file_list(path):
+    """Read file paths from a text file (one per line)."""
+    lines = Path(path).read_text().strip().splitlines()
+    files = [Path(l.strip()) for l in lines if l.strip() and not l.startswith("#")]
+    _info(f"Loaded {len(files)} paths from {path}")
+    return files
 
 
 def query_gaia(slitmap, tap):
@@ -171,7 +183,7 @@ class ColorHelpCommand(click.Command):
             click.style("\nGaia DR3 cross-match for LVM SFrame files", fg="bright_blue", bold=True),
             "",
             *self._section("WORKFLOW", [
-                "  For each lvmSFrame-????????.fits found in INPUT_DIR:",
+                "  For each lvmSFrame-????????.fits found in INPUT_DIR (or --file-list):",
                 "    1) Read the SLITMAP extension (fiberid, ra, dec)",
                 "    2) Upload fiber positions to Gaia TAP (ARI Heidelberg)",
                 "    3) Cross-match against gaiadr3.gaia_source_lite",
@@ -217,7 +229,12 @@ class ColorHelpCommand(click.Command):
     "--input-dir", "-i", default=None,
     type=click.Path(exists=True, file_okay=False),
     help="Directory containing lvmSFrame-????????.fits files (searched recursively). "
-         "If not given, resolved from $SAS_BASE_DIR.",
+         "If not given, resolved from $SAS_BASE_DIR. Ignored if --file-list is used.",
+)
+@click.option(
+    "--file-list", "-l", default=None,
+    type=click.Path(exists=True, dir_okay=False),
+    help="Text file with SFrame paths (one per line). Skips directory scanning.",
 )
 @click.option(
     "--output-dir", "-o", default=None,
@@ -244,7 +261,7 @@ class ColorHelpCommand(click.Command):
     "-v", "--verbose", is_flag=True,
     help="Print per-file query time, source count, and saved file sizes.",
 )
-def main(input_dir, output_dir, formats, test_limit, workers, verbose):
+def main(input_dir, file_list, output_dir, formats, test_limit, workers, verbose):
     """Batch-fetch Gaia sources for LVM SFrame files."""
     def _resolve(val, default_fn, err_msg):
         if val:
@@ -255,22 +272,26 @@ def main(input_dir, output_dir, formats, test_limit, workers, verbose):
             sys.exit(1)
         return resolved
 
-    input_dir = _resolve(
-        input_dir, _default_input,
-        "$SAS_BASE_DIR is not set. Provide --input-dir or set $SAS_BASE_DIR.",
-    )
     output_dir = _resolve(
         output_dir, _default_output,
         "Neither $LVM_SANDBOX nor $SAS_BASE_DIR is set. Provide --output-dir.",
     )
-
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    files = find_sframes(input_dir)
+    if file_list:
+        files = load_file_list(file_list)
+    else:
+        input_dir = _resolve(
+            input_dir, _default_input,
+            "$SAS_BASE_DIR is not set. Provide --input-dir, --file-list, or set $SAS_BASE_DIR.",
+        )
+        files = find_sframes(input_dir)
+
     if test_limit is not None:
         files = files[:test_limit]
 
-    _info(f"input:   {input_dir}")
+    src = file_list if file_list else input_dir
+    _info(f"source:  {src}")
     _info(f"output:  {output_dir}")
     _info(f"formats: {','.join(formats)}  workers: {workers}  files: {len(files)}")
 
