@@ -22,6 +22,7 @@ FIBER_RADIUS_DEG = (FIBER_DIAMETER_ARCSEC / 2) / 3600.0
 TAP_URL = "https://gaia.ari.uni-heidelberg.de/tap"
 TAP_MAXREC = 10000000
 DEFAULT_WORKERS = 5
+DEFAULT_TIMEOUT = 600
 
 ADQL_TEMPLATE = f"""\
 SELECT
@@ -106,15 +107,19 @@ def load_file_list(path):
     return files
 
 
-def query_gaia(slitmap, tap):
-    """Upload fiber table and cross-match against Gaia."""
+def query_gaia(slitmap, tap, timeout=DEFAULT_TIMEOUT):
+    """Upload fiber table and cross-match against Gaia with timeout."""
     buf = BytesIO()
     slitmap["fiberid", "ra", "dec"].write(buf, format="votable")
     buf.seek(0)
     t0 = time.time()
-    result = tap.run_async(
-        ADQL_TEMPLATE, uploads={"fiber_upload": buf}, maxrec=TAP_MAXREC
-    ).to_table()
+    job = tap.submit_job(ADQL_TEMPLATE, uploads={"fiber_upload": buf}, maxrec=TAP_MAXREC)
+    job.execution_duration = timeout
+    job.run()
+    job.wait(phases=["COMPLETED", "ERROR", "ABORTED"], timeout=timeout)
+    job.raise_if_error()
+    result = job.fetch_result().to_table()
+    job.delete()
     return result, time.time() - t0
 
 
@@ -130,7 +135,7 @@ def save_table(table, output_base, formats, verbose=False):
             _ok(f"    {ext} {mb:.2f} MB ({time.time()-t0:.3f}s)")
 
 
-def _process_one(filepath, output_dir, formats, tap, verbose=False):
+def _process_one(filepath, output_dir, formats, tap, timeout, verbose=False):
     """Read one SFrame, query Gaia, and save results."""
     expnum = filepath.stem.split("-")[-1]
     fail = (expnum, 0, False)
@@ -146,7 +151,7 @@ def _process_one(filepath, output_dir, formats, tap, verbose=False):
         return fail
 
     try:
-        result, dt = query_gaia(slitmap, tap)
+        result, dt = query_gaia(slitmap, tap, timeout)
     except Exception as e:
         _err(f"[{expnum}] query failed: {e}")
         return fail
@@ -258,10 +263,20 @@ class ColorHelpCommand(click.Command):
     help="Number of parallel threads for TAP queries.",
 )
 @click.option(
+    "--timeout", "-t", default=DEFAULT_TIMEOUT, type=int,
+    show_default=True,
+    help="TAP query timeout per frame in seconds.",
+)
+@click.option(
+    "--fail-log", default=None,
+    type=click.Path(dir_okay=False),
+    help="Path for failed-frames log. Default: {output_dir}/failed_frames.txt",
+)
+@click.option(
     "-v", "--verbose", is_flag=True,
     help="Print per-file query time, source count, and saved file sizes.",
 )
-def main(input_dir, file_list, output_dir, formats, test_limit, workers, verbose):
+def main(input_dir, file_list, output_dir, formats, test_limit, workers, timeout, fail_log, verbose):
     """Batch-fetch Gaia sources for LVM SFrame files."""
     def _resolve(val, default_fn, err_msg):
         if val:
@@ -301,12 +316,13 @@ def main(input_dir, file_list, output_dir, formats, test_limit, workers, verbose
 
     tap = pyvo.dal.TAPService(TAP_URL)
     ok_count = 0
+    failed = []
     t_total = time.time()
 
     with ThreadPoolExecutor(max_workers=workers) as executor:
         futures = {
             executor.submit(
-                _process_one, fp, output_dir, formats, tap, verbose
+                _process_one, fp, output_dir, formats, tap, timeout, verbose
             ): fp
             for fp in files
         }
@@ -321,11 +337,21 @@ def main(input_dir, file_list, output_dir, formats, test_limit, workers, verbose
                 if success:
                     ok_count += 1
                     pbar.set_postfix_str(f"{expnum}: {nsrc} src")
+                else:
+                    failed.append(str(fp))
             except Exception as e:
                 _err(f"unexpected error {fp}: {e}")
+                failed.append(str(fp))
 
     dt = time.time() - t_total
-    _ok(f"Done: {ok_count}/{len(files)} frames in {dt:.0f}s")
+
+    if failed:
+        fail_path = Path(fail_log) if fail_log else output_dir / "failed_frames.txt"
+        fail_path.write_text("\n".join(failed) + "\n")
+        _warn(f"{len(failed)} failed frames saved to {fail_path}")
+        _info(f"  retry with: python {Path(__file__).name} -l {fail_path} -o {output_dir}")
+
+    _ok(f"Done: {ok_count}/{len(files)} frames ({len(failed)} failed) in {dt:.0f}s")
 
 
 if __name__ == "__main__":
