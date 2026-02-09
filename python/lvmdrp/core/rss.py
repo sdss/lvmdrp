@@ -3362,7 +3362,11 @@ class RSS(FiberRows):
             return flux_slit.squeeze(), rss._slitmap["xpmm"].data, rss._slitmap["ypmm"].data
         return flux_slit.squeeze()
 
-    def fit_ifu_gradient(self, cwave, dwave=8, guess_coeffs=[1,2,3,0], fixed_coeffs=[3], groupby="spec", coadd_method="average", axs=None):
+    def fit_ifu_gradient(self,
+                         cwave, dwave=8,
+                         guess_coeffs=[1,2,3,0], fixed_coeffs=[3], groupby="spec",
+                         coadd_method="average", norm_method=lambda x: biweight_location(x, ignore_nan=True),
+                         axs=None):
 
         if coadd_method == "average":
             z, x, y = self.coadd_flux(cwave=cwave, dwave=dwave, comb_stat=bn.nanmean, return_xy=True, telescope="Sci")
@@ -3373,7 +3377,7 @@ class RSS(FiberRows):
         else:
             raise ValueError(f"Invalid value for `coadd_method`: {coadd_method}. Expected either 'average', 'integrate' or 'fit'")
 
-        mu = biweight_location(z, ignore_nan=True)
+        mu = norm_method(z)
         z_ = z / mu
 
         # define guess and boundary values
@@ -3444,7 +3448,8 @@ class RSS(FiberRows):
     def measure_skyline_flatfield(self, mflat,
                                   sky_cwave, cont_cwave, dwave=8, quantiles=(5, 97),
                                   guess_coeffs=[1,2,3,0], fixed_coeffs=[3], groupby="spec",
-                                  coadd_method="fit", axs=None, labels=False):
+                                  coadd_method="fit", norm_method=lambda x: biweight_location(x, ignore_nan=True),
+                                  axs=None, labels=False):
         expnum = self._header["EXPOSURE"]
         imagetyp = self._header["IMAGETYP"]
 
@@ -3472,7 +3477,8 @@ class RSS(FiberRows):
 
         log.info(f"  fitting gradient and factors around sky line @ {sky_cwave:.2f} Angstroms for '{imagetyp}' exposure {expnum = }")
         x, y, z, coeffs, factor = fscience.fit_ifu_gradient(cwave=sky_cwave, dwave=dwave, groupby=groupby,
-                                                            guess_coeffs=guess_coeffs, fixed_coeffs=fixed_coeffs, coadd_method=coadd_method)
+                                                            guess_coeffs=guess_coeffs, fixed_coeffs=fixed_coeffs,
+                                                            coadd_method=coadd_method, norm_method=norm_method)
         gradient_model = IFUGradient.ifu_gradient(coeffs, x=x, y=y, normalize=True)
         log.info(f"  factors          = {numpy.round(factor, 4)}")
         log.info(f"  gradient across  = {bn.nanmax(gradient_model)/bn.nanmin(gradient_model):.4f}")

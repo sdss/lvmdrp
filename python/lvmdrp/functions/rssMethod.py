@@ -17,7 +17,7 @@ from astropy.io import fits
 from astropy.table import Table
 from astropy.time import Time
 from astropy.wcs import WCS
-from astropy.stats import biweight_scale
+from astropy.stats import biweight_location, biweight_scale
 from numpy import polynomial
 from scipy import interpolate, ndimage
 
@@ -1624,7 +1624,9 @@ def correctTraceMask_drp(trace_in, trace_out, logfile, ref_file, poly_smooth="")
 def apply_fiberflat(in_rss: str, out_frame: str, in_flat: str,
                     sky_cwaves: Dict[str, float] = SKYLINES_FIBERFLAT,
                     cont_cwaves: Dict[str, float] = CONTINUUM_FIBERFLAT,
-                    groupby: str = "spec", quantiles: Tuple[float, float] = (5.0, 97.0), display_plots: bool = False) -> RSS:
+                    groupby: str = "spec", quantiles: Tuple[float, float] = (5.0, 97.0),
+                    coadd_method="fit", norm_method=lambda x: biweight_location(x, ignore_nan=True),
+                    display_plots: bool = False) -> RSS:
     """applies fiberflat correction to target RSS file
 
     This function applies a fiberflat correction to a target RSS file. The
@@ -1684,6 +1686,7 @@ def apply_fiberflat(in_rss: str, out_frame: str, in_flat: str,
     x, y, skyline_slit, coeffs, factor, _ = rss.measure_skyline_flatfield(
             mflat=mflat, sky_cwave=sky_cwave, cont_cwave=cont_cwave, dwave=dwave,
             quantiles=quantiles, guess_coeffs=[1,0,0,0], fixed_coeffs=[0,1,2,3], groupby=groupby,
+            coadd_method=coadd_method, norm_method=norm_method,
             axs=axs, labels=True)
 
     log.info("applying flatfield correction")
