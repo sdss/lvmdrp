@@ -32,6 +32,7 @@ import numpy as np
 import bottleneck as bn
 import pandas as pd
 from itertools import product
+from tqdm import tqdm
 from pprint import pformat
 from copy import deepcopy as copy
 from datetime import datetime
@@ -49,7 +50,7 @@ from lvmdrp.utils import hdrfix
 from lvmdrp.utils.convert import tileid_grp
 from lvmdrp.utils.paths import get_calib_paths, group_calib_paths, get_frames_paths
 from lvmdrp.utils import pixshifts
-from lvmdrp.core.plot import save_fig
+from lvmdrp.core.plot import save_fig, slit
 from lvmdrp.core import dataproducts as dp
 from lvmdrp.core.constants import (
     LVM_NFIBERS,
@@ -71,10 +72,11 @@ from lvmdrp.core.constants import (
 from lvmdrp.core.tracemask import TraceMask
 from lvmdrp.core.image import loadImage
 from lvmdrp.core.rss import RSS, lvmFrame
-from lvmdrp.core.fit_profile import gaussians
+from lvmdrp.core.fit_profile import gaussians, IFUGradient
 
 from lvmdrp.functions import imageMethod as image_tasks
 from lvmdrp.functions import rssMethod as rss_tasks
+from lvmdrp.functions import sky_qa as sky
 from lvmdrp.main import start_logging, get_config_options, read_fibermap, reduce_2d, reduce_1d
 from lvmdrp.functions.run_twilights import lvmFlat, to_native_wave, fit_fiberflat, combine_twilight_sequence, fit_skyline_flatfield
 
@@ -98,6 +100,99 @@ FIBER_SMOOTHING_CONFIG = {
 
 
 CALIBRATION_EPOCHS_PATH = os.path.join(os.getenv("LVMCORE_DIR"), "calibrations", "calibration-epochs.yaml")
+
+
+def _extract_ffactors(header):
+    channel = header["CCD"][0]
+    columns = [
+        "obstime", "smjd", "tile_id", "exposure", "scira", "scidec",
+        f"{channel}1 fiberflat corr", f"{channel}2 fiberflat corr", f"{channel}3 fiberflat corr"]
+
+    metadata_row = {k.replace(" ", "_"): header.get(k) for k in columns}
+    metadata_sky = sky.create_overview(header)
+    metadata_row.update(metadata_sky)
+
+    return metadata_row
+
+
+def _read_ffactors(drpver, channel):
+    frame_paths: list[str] = sorted(path.expand("lvm_frame", drpver=drpver, tileid="*", mjd="*", expnum="????????", kind=f"Frame-{channel}"))
+
+    metadata = []
+    for p in tqdm(frame_paths, desc=f"extracting factors for {drpver = } | {channel = }", ascii=True, unit="exposure"):
+        hdr = fits.getheader(p)
+
+        metadata.append(_extract_ffactors(hdr))
+    return pd.DataFrame(metadata)
+
+
+def _measure_ffactors(mjd, drpver, channel, norm_stat=bn.nanmean, label=None, write_table=False):
+    label = label or norm_stat.__name__
+
+    # define general parameters
+    dwave = 20.0
+    quantiles = (5.0, 97.0)
+    groupby = "spec"
+
+    # grab all relevant DRP products: before/ after fiber flat fielding
+    channel_ = "?" if channel == "all" else channel
+    wframe_paths = sorted(path.expand("lvm_anc", drpver=drpver, tileid="*", mjd=mjd, expnum="????????", imagetype="object", kind="w", camera=channel_))
+    # grab master fiber flat fields
+    mflat_paths = get_calib_paths(mjd=mjd, flavors={"fiberflat_twilight"}, from_sandbox=True)["fiberflat_twilight"]
+
+    # measure/fit flat-field factors using given normalization statistic
+    metadata = []
+    for wframe_path in wframe_paths:
+        rss = RSS.from_file(wframe_path)
+
+        channel_current = rss._header["CCD"][0]
+        sky_cwave = SKYLINES_FIBERFLAT[channel_current]
+        cont_cwave = CONTINUUM_FIBERFLAT[channel_current]
+        mflat = RSS.from_file(mflat_paths[channel_current])
+
+        fig = plt.figure(figsize=(14,3*2))
+        fig.suptitle(f"Fiber flatfield correction for {channel = } around sky line @ {sky_cwave:.2f} Angstroms", fontsize="xx-large")
+        gs_gra = GridSpec(2, 5, hspace=0.01, wspace=0.01, left=0.07, right=0.99, figure=fig)
+        gs_cor = GridSpec(2, 5, hspace=0.5, wspace=0.01, left=0.07, right=0.99, figure=fig)
+        axs = [fig.add_subplot(gs_gra[0, j]) for j in range(5)]
+        x, y, skyline_slit, coeffs, factor, _ = rss.measure_skyline_flatfield(
+            mflat=mflat,
+            sky_cwave=sky_cwave,
+            cont_cwave=cont_cwave,
+            dwave=dwave,
+            quantiles=quantiles, guess_coeffs=[1,0,0,0], fixed_coeffs=[0,1,2,3], groupby=groupby,
+            axs=axs, labels=True)
+
+        log.info("applying flatfield correction")
+        fiber_groups = mflat._get_fiber_groups(by="spec")
+        flatfield_corr = IFUGradient.ifu_factors(factor, fiber_groups)
+        mflat *= flatfield_corr[:, None]
+        rss /= mflat
+        skyline_slit /= flatfield_corr
+
+        # update pixel mask
+        rss._mask = np.isnan(rss._data)|np.isnan(rss._error)
+
+        ax_cor = fig.add_subplot(gs_cor[-1, :])
+        ax_cor.set_title(f"Flatfielded skyline @ {sky_cwave:.2f}+/-{dwave:.2f} Angstroms", loc="left")
+        ax_cor.set_xlabel("Fiber ID", fontsize="large")
+        ax_cor.set_ylabel("Normalized counts", fontsize="large")
+        ax_cor.set_ylim(0.92, 1.08)
+        slit(x=rss._slitmap["fiberid"].data, y=skyline_slit, data=rss._data, ax=ax_cor)
+
+        rss._header[f"HIERARCH {channel.upper()}1 FIBERFLAT CORR"] =  (np.round(factor[0], 5), "fiberflat corr. spec. 1")
+        rss._header[f"HIERARCH {channel.upper()}2 FIBERFLAT CORR"] =  (np.round(factor[1], 5), "fiberflat corr. spec. 2")
+        rss._header[f"HIERARCH {channel.upper()}3 FIBERFLAT CORR"] =  (np.round(factor[2], 5), "fiberflat corr. spec. 3")
+
+        # extract flat field factors and additional information
+        metadata.append(_extract_ffactors(rss._header))
+
+    metadata = pd.DataFrame(metadata)
+    metadata.sort_values("exposure", inplace=True)
+    if write_table:
+        metadata.to_csv(f"ffactors-{drpver}-{channel}-{label}.csv")
+
+    return metadata
 
 
 def _reject_pixelshifted(frames, pixelshifts_path=PIXELSHIFTS_PATH):
@@ -921,6 +1016,9 @@ def tag_longterm_calibrations(mjd, version, flavors=None, dry_run=False):
     dry_run : bool, optional
         Logs useful information abaut the current setup without actually tagging, by default False
     """
+
+    # TODO: clean all MJD directories from the calib
+
     # handle possible acceptable flavors
     if isinstance(flavors, (list, tuple, set, np.ndarray)):
         flavors = set(flavors)
