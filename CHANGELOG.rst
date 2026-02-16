@@ -6,8 +6,16 @@ Change Log
 
 This document records the main changes to the drp code.
 
-1.2.1dev (unreleased)
----------------------
+1.2.1 (16-02-2026)
+------------------
+
+- Implemented tellurics correction
+- Fixed issues with wavelength solutions
+- Fixed issues with straylight subtraction
+- Fixed bugs in astrometric solutions
+- Added flux calibration summary to drpall
+- First stab at documentation
+- A few more bug fixes and improvements
 
 
 1.2.0 (15-11-2025)
