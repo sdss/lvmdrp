@@ -19,7 +19,7 @@ from astropy.table import Table
 from filelock import FileLock, Timeout
 from tqdm import tqdm
 
-from lvmdrp.core.constants import CALIBRATION_NEEDS, ARC_LAMPS, CON_LAMPS
+from lvmdrp.core.constants import CALIBRATION_NEEDS, ARC_LAMPS, CON_LAMPS, CAMERAS
 from lvmdrp.utils.bitmask import (
     QualityFlag,
     ReductionStage,
@@ -89,6 +89,81 @@ MASTER_METADATA_COLUMNS = [
     ("name", str),
     ("tilegrp", str)
 ]
+
+
+def _sort_key_exposure(rpath):
+    return int(rpath.replace(".fits.gz", "").split("-")[-1])
+
+
+def _check_header_values(header):
+    keywords = ["IMAGETYP", "CCD"] + CON_LAMPS + ARC_LAMPS
+    values = [{"bias", "dark", "flat", "arc", "object"}, CAMERAS] + [{"ON", "OFF"}] * len(CON_LAMPS) + [{"ON", "OFF"}] * len(ARC_LAMPS)
+
+    validations = {}
+    for kw, vl in zip(keywords, values):
+        camera = header.get("CCD")
+
+        x = header.get(kw)
+
+        validations[f"{camera}_{kw}_value"] = x
+        validations[f"{camera}_{kw}_valid"] = x in vl
+
+    return validations
+
+
+def _check_exposure_header(rpaths):
+
+    IGNORE_KEYWORDS = ['CCD', 'CCDID', 'CCDTEMP1', 'CCDTEMP2', 'CHECKSUM', 'DATASUM', 'FILENAME',
+    'GAIN1', 'GAIN2', 'GAIN4', 'PRESSURE', 'RDNOISE1', 'RDNOISE2', 'RDNOISE3', 'RDNOISE4',
+    'ARCHBACK', 'BUFFER', 'GAIN3', 'INTEND', 'INTSTART', 'LABHUMID', 'LABTEMP', 'LMST',
+    'OBSTIME', 'SPEC']
+
+    header_consistency = {}
+    for i, rpath in enumerate(rpaths):
+        if i == 0:
+            try:
+                header_ref = fits.getheader(rpath)
+            except Exception as e:
+                log.error(f"While reading {rpath}: {e}")
+                continue
+            header = header_ref.copy()
+        else:
+            try:
+                header = fits.getheader(rpath)
+            except Exception as e:
+                log.error(f"While reading {rpath}: {e}")
+                continue
+
+        camera = header.get("CCD")
+
+        diff = fits.HeaderDiff(header_ref, header, ignore_keywords=IGNORE_KEYWORDS)
+
+        header_consistency.update(_check_header_values(header))
+        header_consistency[f"{camera}_identical"] = diff.identical
+        header_consistency[f"{camera}_diff_keyword_values"] = diff.diff_keyword_values
+        header_consistency[f"{camera}_diff_keywords"] = diff.diff_keywords
+
+    return header_consistency
+
+
+def _get_header_consistency_summary(mjd, to_csv=True):
+    root_path = os.path.join(os.getenv("SAS_BASE_DIR"), "sdsswork", "data", "lvm", "lco", f"{mjd}")
+    if not os.path.isdir(root_path):
+        log.info(f"No raw data for MJD={mjd}, nothing to do.")
+        return
+
+    rpaths_mjd = sorted([os.path.join(root_path, r) for r in os.listdir(root_path) if ".fits.gz" in r], key=_sort_key_exposure)
+    groups = itertools.groupby(rpaths_mjd, _sort_key_exposure)
+
+    header_consistency_summary = {}
+    for expnum, rpaths in tqdm(groups, desc="processing exposures", unit="exposure", ascii=True):
+        header_consistency_summary[expnum] = _check_exposure_header(sorted(rpaths))
+
+    header_consistency_summary = pd.DataFrame.from_dict(header_consistency_summary, orient="index")
+    if to_csv:
+        header_consistency_summary.to_csv(f"{mjd}_header_consistency.csv", index=True)
+
+    return header_consistency_summary
 
 
 def _decode_string(metadata):
