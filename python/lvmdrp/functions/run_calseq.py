@@ -1061,7 +1061,7 @@ def fix_raw_pixel_shifts(mjd, expnums=None, ref_expnums=None, specs="123", image
     list of 2D frames. This routine will store the fixed frames in the
     corresponding calibration directory in the `use_longterm_cals` or by default `mjd`.
 
-    Parameters:
+    Parameters
     ----------
     mjd : float
         MJD to reduce
@@ -1234,7 +1234,7 @@ def create_bias(mjd, epochs=None, use_longterm_cals=True, skip_done=True, dry_ru
     Given a set of MJDs and (optionally) exposure numbers, reduce the
     bias frames.
 
-    Parameters:
+    Parameters
     ----------
     mjd : int
         MJD to reduce
@@ -1445,7 +1445,7 @@ def create_traces(mjd, epochs=None, cameras=CAMERAS, ring="primary",
     If the corresponding master dome flats do not exist, they will be created
     first. Otherwise they will be read from disk.
 
-    Parameters:
+    Parameters
     ----------
     mjd : int
         MJD to reduce
@@ -1873,7 +1873,7 @@ def create_illumination_corrections(mjd, use_longterm_cals=True, expnums=None):
     If the corresponding master dome and twilight flats do not exist, they
     will be created first. Otherwise they will be read from disk.
 
-    Parameters:
+    Parameters
     ----------
     mjd : int
         MJD to reduce
@@ -2038,7 +2038,7 @@ def reduce_nightly_sequence(mjd, use_longterm_cals=False, reject_cr=True, only_c
     This routine will create *nightly* (not long-term) master calibrations
     at $LVM_SPECTRO_REDUX/{drpver}/0011XX/11111/{mjd}/calib
 
-    Parameters:
+    Parameters
     ----------
     mjd : int
         MJD to reduce
@@ -2118,7 +2118,7 @@ def reduce_longterm_sequence(mjd, epochs=None, use_longterm_cals=True,
     This routine will create *long-term* master calibrations
     at $LVM_SANDBOX/calib/{mjd}
 
-    Parameters:
+    Parameters
     ----------
     mjd : int
         MJD to reduce

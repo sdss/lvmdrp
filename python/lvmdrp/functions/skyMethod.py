@@ -88,7 +88,8 @@ def configureSkyModel_drp(
         > preplinetrans
 
     Additionally, the ESO routine for updating the multiple scattering corrections component
-    will be executed if run_multiscat=True
+    will be executed if run_multiscat=True::
+
         > estmultiscat
 
     If method='download', this function will download the neccessary files to run the
@@ -351,7 +352,7 @@ def createMasterSky_drp(
     in_rss : string
         Input RSS FITS file with a pixel table for the spectral resolution
     out_sky : string
-        Output Sky spectrum. Either in FITS format (if *.fits) or in ASCII format (if *.txt)
+        Output Sky spectrum. Either in FITS format (if \*.fits) or in ASCII format (if \*.txt)
     clip_sigma : string of float, optional with default: '3.0'
         Sigma value used to reject outlier sky spectra identified in the collapsed median value
         along the dispersion axis. Only used if the nsky value is set to 0 and clip_sigma>0

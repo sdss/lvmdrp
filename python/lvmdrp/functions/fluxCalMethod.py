@@ -352,22 +352,23 @@ def prepare_spec(in_rss, width=3):
     :param in_rss:
     :param width:
     :return:
-    w:
-        wavelength array
-    gaia_ids:
-        gaia_ids (needed for QA plots)
-    fibers
-        fiber ids (P1-1,P1-2, etc; needed for QA plots)
-    std_spectra_all_bands:
-        standard star spectra for all bands (uncolvolved, unnormalized, needed for sens. curves), ext. corrected
-    normalized_spectra_unconv_all_bands:
-        normalized unconvolved std spectra (needed for QA model matching plots), ext. corrected
-    normalized_spectra_all_bands:
-        normalizes std spectra convolved to 2.3A (needed for model matching), ext. corrected
-    std_errors_all_bands:
-        error array
-    lsf_all_bands:
-        LVM spectrograph LSFs for standard star fibers (needed to convolve good res. models before calculation of the sens. curve)
+
+        w:
+            wavelength array
+        gaia_ids:
+            gaia_ids (needed for QA plots)
+        fibers:
+            fiber ids (P1-1,P1-2, etc; needed for QA plots)
+        std_spectra_all_bands:
+            standard star spectra for all bands (uncolvolved, unnormalized, needed for sens. curves), ext. corrected
+        normalized_spectra_unconv_all_bands:
+            normalized unconvolved std spectra (needed for QA model matching plots), ext. corrected
+        normalized_spectra_all_bands:
+            normalizes std spectra convolved to 2.3A (needed for model matching), ext. corrected
+        std_errors_all_bands:
+            error array
+        lsf_all_bands:
+            LVM spectrograph LSFs for standard star fibers (needed to convolve good res. models before calculation of the sens. curve)
     '''
     w = [] # wavelength arrays
     ext = []
@@ -854,11 +855,13 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
     Shift the standard star spectrum in logscale and find the best-fit model using chi-square
     Mask regions with high chi-square values and find the best-fit model using chi-square
     Find the conversion coefficient between model units and Gaia units:
-        Read the best-fit model with good resolution, non-normalised
-        Convolve with Gaia LSF
-        Calculate median fot stdflux/model_convolved_to_gaia - we will use this coefficient
-    QA plots
-    Calculate the sensitivity curves
+
+        Read the best-fit model with good resolution, non-normalised.
+        Convolve with Gaia LSF.
+        Calculate median fot stdflux/model_convolved_to_gaia - we will use this coefficient.
+
+    QA plots.
+    Calculate the sensitivity curves.
 
     :param in_rss:
     :param GAIA_CACHE_DIR:
@@ -1352,12 +1355,13 @@ def chi2_model_matching(std_spectra, std_errors, model_norm, mask):
     :param model_norm:
     :param mask:
     :return:
-    best_id:
-        id of the best fit model
-    chi2_bestfit:
-        reduced chi square
-    chi2_wave_bestfit:
-        chi2 values by wavelength
+
+        best_id:
+            id of the best fit model
+        chi2_bestfit:
+            reduced chi square
+        chi2_wave_bestfit:
+            chi2 values by wavelength
     """
     chi2 = [np.nansum((std_spectra[mask] - model_norm[model_ind][mask]) ** 2 / (std_errors[mask] ** 2
                                                             + (0.05 * model_norm[model_ind][mask]) ** 2)) /

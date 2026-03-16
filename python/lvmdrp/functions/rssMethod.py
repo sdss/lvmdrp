@@ -1166,8 +1166,9 @@ def resample_wavelength(in_rss: str, out_rss: str, method: str = "spline",
     method : string, optional with default: 'spline'
         Interpolation scheme used for the spectral resampling of the data.
         Available options are:
-            - linear
-            - spline
+
+        - linear
+        - spline
     wave_range : string of float, optional with default: None
         Wavelength range of the common resampled wavelength solution. If the
         parameter is empty, the wavelength range of the input RSS is used.
