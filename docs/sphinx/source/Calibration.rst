@@ -16,17 +16,17 @@ The LVM DRP distinguishes between two kinds of calibration work:
    invoked via the ``drp long-term`` or ``drp nightly`` CLI commands.
 
 2. **Calibration application** — loading the pre-built master files and applying
-   them to each science exposure during ``science_reduction()``. No calibration
-   is re-derived from the science frames themselves (except for a per-exposure
-   thermal wavelength shift correction using sky lines; see
+   them to each science exposure during :func:`~lvmdrp.main.science_reduction`.
+   No calibration is re-derived from the science frames themselves (except for a
+   per-exposure thermal wavelength shift correction using sky lines; see
    :ref:`thermal-shift`).
 
 Master calibrations are stored under::
 
     $SAS_BASE_DIR/sdsswork/lvm/calib/<mjd>/
 
-and are selected at science-reduction time by ``get_calib_paths()``, which
-searches for the most appropriate epoch given the science MJD.
+and are selected at science-reduction time by :func:`~lvmdrp.utils.paths.get_calib_paths`,
+which searches for the most appropriate epoch given the science MJD.
 
 Calibration Types and Dependencies
 -----------------------------------
@@ -88,7 +88,8 @@ reused across multiple science MJDs until conditions change significantly.
 
 **Nightly calibrations** are derived fresh each night and use the ``lvm-n*``
 prefix. They are selected when ``use_longterm_cals=False`` is passed to
-``science_reduction()`` or when the ``--nightly`` flag is used with the CLI.
+:func:`~lvmdrp.main.science_reduction` or when the ``--nightly`` flag is used
+with the CLI.
 
 Both modes produce identical calibration products; the distinction is in their
 cadence and reuse policy.
@@ -96,7 +97,7 @@ cadence and reuse policy.
 Master Bias
 -----------
 
-**Function**: ``create_bias()`` in ``run_calseq.py``
+**Function**: :func:`~lvmdrp.functions.run_calseq.create_bias`
 
 **Inputs**: A set of bias exposures (typically 7–9 frames) taken at the
 calibration epoch.
@@ -114,7 +115,8 @@ calibration epoch.
 Fiber Traces
 ------------
 
-**Function**: ``create_traces()`` / ``create_nightly_traces()`` in ``run_calseq.py``
+**Functions**: :func:`~lvmdrp.functions.run_calseq.create_traces` /
+:func:`~lvmdrp.functions.run_calseq.create_nightly_traces`
 
 **Inputs**: Dome flat exposures illuminated by two different continuum lamps —
 LDLS (broad-spectrum, used for b/r channels) and Quartz (used for z channel).
@@ -142,8 +144,8 @@ These traces are used during science reduction for stray light subtraction
 Wavelength Solution and LSF
 ----------------------------
 
-**Function**: ``create_wavelengths()`` in ``run_calseq.py``, which calls
-``determine_wavelength_solution()`` from ``rssMethod.py``
+**Functions**: :func:`~lvmdrp.functions.run_calseq.create_wavelengths`, which calls
+:func:`~lvmdrp.functions.rssMethod.determine_wavelength_solution`
 
 **Inputs**: Arc lamp exposures (typically 24 frames: 12 at 10 s exposure and
 12 at 50 s) covering all three spectral channels. Multiple lamp types are used
@@ -173,12 +175,13 @@ to ensure adequate line coverage across the full wavelength range.
 - ``lvm-mlsf-<camera>.fits`` — per-fiber LSF (FWHM in Å) as polynomial
   coefficients and evaluated pixel table
 
-**Application to science**: During science reduction, ``create_pixel_table()``
-loads these master files and evaluates the polynomial coefficients at each
-fiber's native pixel positions to produce a 2D array (nfibers × npixels) of
-wavelength and FWHM values. During wavelength resampling, the LSF array is
-linearly interpolated onto the new common wavelength grid and propagated
-through to the final ``lvmCFrame`` product as the ``LSF`` FITS extension.
+**Application to science**: During science reduction,
+:func:`~lvmdrp.functions.rssMethod.create_pixel_table` loads these master files
+and evaluates the polynomial coefficients at each fiber's native pixel positions
+to produce a 2D array (nfibers × npixels) of wavelength and FWHM values. During
+wavelength resampling, the LSF array is linearly interpolated onto the new common
+wavelength grid and propagated through to the final ``lvmCFrame`` product as the
+``LSF`` FITS extension.
 
 .. _thermal-shift:
 
@@ -188,16 +191,16 @@ Thermal Wavelength Shift Correction
 The arc-derived wavelength solution is a static calibration and does not
 account for thermal drifts between the calibration epoch and a given science
 exposure. A per-exposure correction is applied during science reduction by
-``shift_wave_skylines()``, which measures the centroid offsets of bright sky
-emission lines (e.g., [O I] 5577 Å) and applies a small, smooth wavelength
-shift to bring each fiber's wavelength grid into agreement with the sky lines.
-This step refines the calibration at the sub-pixel level but does not
-re-derive the full wavelength solution.
+:func:`~lvmdrp.functions.rssMethod.shift_wave_skylines`, which measures the
+centroid offsets of bright sky emission lines (e.g., [O I] 5577 Å) and applies
+a small, smooth wavelength shift to bring each fiber's wavelength grid into
+agreement with the sky lines. This step refines the calibration at the sub-pixel
+level but does not re-derive the full wavelength solution.
 
 Twilight Fiberflat
 ------------------
 
-**Function**: ``create_twilight_fiberflats()`` in ``run_calseq.py``
+**Function**: :func:`~lvmdrp.functions.run_calseq.create_twilight_fiberflats`
 
 **Inputs**: Twilight sky exposures taken near dawn or dusk (typically 12–24
 frames per epoch). Because the twilight sky is a smooth, near-featureless
@@ -224,14 +227,16 @@ fiber at the time of the calibration sequence.
 
 - ``lvm-mfiberflat_twilight-<channel>.fits`` (one per channel: b, r, z)
 
-**Application to science**: Applied by ``apply_fiberflat()`` to the
+**Application to science**: Applied by
+:func:`~lvmdrp.functions.rssMethod.apply_fiberflat` to the
 wavelength-calibrated science RSS to remove fiber-to-fiber throughput
 variations before sky subtraction.
 
 Science Fiberflat Refinement
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-An optional refinement step, ``create_fiberflats_corrections()``, uses sky
+An optional refinement step,
+:func:`~lvmdrp.functions.run_calseq.create_fiberflats_corrections`, uses sky
 emission lines detected in a set of science frames to correct residual
 large-scale throughput errors in the master twilight fiberflat. The correction
 is derived by fitting the ratio of the per-fiber sky line flux to the median,
@@ -262,12 +267,12 @@ Pre-built master calibrations can be downloaded from the SAS::
 Calibration Selection During Science Reduction
 ------------------------------------------------
 
-When ``science_reduction()`` is invoked, it calls ``get_calib_paths()`` to
-locate the appropriate master calibration files for the science MJD. The
-function searches backward in time from the science MJD to find the most
-recent available calibration epoch. Long-term calibrations are preferred by
-default; passing ``use_longterm_cals=False`` selects nightly calibrations
-instead.
+When :func:`~lvmdrp.main.science_reduction` is invoked, it calls
+:func:`~lvmdrp.utils.paths.get_calib_paths` to locate the appropriate master
+calibration files for the science MJD. The function searches backward in time
+from the science MJD to find the most recent available calibration epoch.
+Long-term calibrations are preferred by default; passing
+``use_longterm_cals=False`` selects nightly calibrations instead.
 
 The resolved calibration paths are assembled into a dictionary with the
 following structure::
