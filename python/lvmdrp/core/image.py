@@ -3364,9 +3364,9 @@ class Image(Header):
             electros, when this is down already set gain=1.0 as the default. If ncessary a homegnous bias level can
             be subtracted if necessary but default is 0.0.
 
-                Parameters
-                ----------
-                data: ndarray
+            Parameters
+            ----------
+            data: ndarray
                         Two-dimensional array representing the input image in which cosmic rays are detected.
                 sigma_det: float, default: 5.0
                         Detection limit of edge pixel above the noise in (sigma units) to be detected as comiscs
@@ -3398,15 +3398,15 @@ class Image(Header):
                         a new Image instance with the modified data. In the latter case the mask and error
                         extensions ONLY contain the cosmic-related pixels.
 
-                Output
-                ------
-                out: Image class instance
+            Output
+            ------
+            out: Image class instance
                     Result of the detection process is an Image which contains .data, .error, .mask as attributes for the
                     cleaned image, the internally computed error image and a mask image with flags for cosmic ray pixels.
 
-                Reference
-                ---------
-                Husemann et al. 2012, A&A, Volume 545, A137 (https://ui.adsabs.harvard.edu/abs/2012A%26A...545A.137)
+            Reference
+            ---------
+            Husemann et al. 2012, A&A, Volume 545, A137 (https://ui.adsabs.harvard.edu/abs/2012A%26A...545A.137)
 
         """
 

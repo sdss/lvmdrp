@@ -27,8 +27,8 @@ def collapseSliceCube_drp(cube_in, image_out, mode="mean", start_wave="", end_wa
     """
     Creates a collapsed 2D image from the data cube within given wavelength boundaries
 
-     Parameters
-     --------------
+    Parameters
+    --------------
      cube_in : string
              Name of the INPUT FITS  cube from which a collapsed image is created
      image_out : string
@@ -43,8 +43,8 @@ def collapseSliceCube_drp(cube_in, image_out, mode="mean", start_wave="", end_wa
      end_wave : string of float, optional with default: ''
              End wavelength for the collapsing. If no value is given the end wavelength of the cube is used.
 
-     Examples
-     ----------------
+    Examples
+    ----------------
      user:> lvmdrp cube collapsedSliceCube CUBE.fits IMAGE.fits mode=median
      user:> lvmdrp cube collapsedSliceCube CUBE.fits IMAGE.fits mean start_wave=4000.0 end_wave=7000.0
     """
@@ -86,8 +86,8 @@ def measureDARPeak_drp(
     polynomial fit is performed. The fitted positions are along the entire wavelength of the cube are stored in two FITS files in both, x and y, direction
     seperatly.
 
-     Parameters
-     --------------
+    Parameters
+    --------------
      cube_in : string
              Name of the INPUT FITS  cube for which the DAR will be estimated
      out_prefix : string
@@ -115,8 +115,8 @@ def measureDARPeak_drp(
      verbose : string of integer (0 or 1), optional  with default: 0
              Show information during the processing on the command line (0 - no, 1 - yes)
 
-     Examples
-     ----------------
+    Examples
+    ----------------
      user:> lvmdrp cube measureDARPeak CUBE.fits PREFIX coadd=5 steps=1
     """
     coadd = int(coadd)
@@ -284,8 +284,8 @@ def fitDARPeak_drp(
     polynomial fit is performed. The fitted positions are along the entire wavelength of the cube are stored in two FITS files in both, x and y, direction
     seperatly.
 
-     Parameters
-     --------------
+    Parameters
+    --------------
      cube_in : string
              Name of the INPUT FITS  cube for which the DAR will be estimated
      out_prefix : string
@@ -309,8 +309,8 @@ def fitDARPeak_drp(
      verbose : string of integer (0 or 1), optional  with default: 0
              Show information during the processing on the command line (0 - no, 1 - yes)
 
-     Examples
-     ----------------
+    Examples
+    ----------------
      user:> lvmdrp cube measureDARPeak CUBE.fits PREFIX coadd=5 steps=1
     """
     coadd = int(coadd)
@@ -474,8 +474,8 @@ def aperFluxCube_drp(
     Measures the aperture photometry from the cube for a given position, circular aperture radius and filter curve.
     The results are stored in a header keyword.
 
-     Parameters
-     --------------
+    Parameters
+    --------------
      cube_in : string
              Name of the INPUT FITS  cube to extract the aperture flux/photometry
      cent_x : string of float (>0)
@@ -498,8 +498,8 @@ def aperFluxCube_drp(
      system : string, optional with default: 'AB'
              Photometric magnitude system. Currently only the AB system is available
 
-     Examples
-     ----------------
+    Examples
+    ----------------
      user:> lvmdrp cube aperFluxCube CUBE.fits 15 20 4 sloan_g.dat,0,1 'hiearach PIPE APER G' comment='4 arcsec g-band photometry'
 
     """
@@ -537,8 +537,8 @@ def matchAbsFluxAper_drp(cube_in, cube_out, key_mags, ref_mags, hdrkey, comment)
     A photometrically rescaled cube will be stored including additional header keywords for the ratio in different bands and the
     average ratio used for rescaling.
 
-     Parameters
-     --------------
+    Parameters
+    --------------
      cube_in : string
              Name of the INPUT FITS  cube
      cube_out :
@@ -554,8 +554,8 @@ def matchAbsFluxAper_drp(cube_in, cube_out, key_mags, ref_mags, hdrkey, comment)
      comment : string, optional with default: ''
              Comment string for the header keyword entry
 
-     Examples
-     ----------------
+    Examples
+    ----------------
      user:> lvmdrp cube matchAbsFluxAper CUBE_IN.fits CUBE_out.fits 'hierarch PIPE PHOT g,hierarch PIPE PHOT r' 'g:14.5,r:14.0' 'hierarch PIPE ABS ' "
     """
     cube = loadCube(cube_in)
