@@ -3366,7 +3366,7 @@ class Image(Header):
 
             Parameters
             ----------
-            data: ndarray
+                data: ndarray
                         Two-dimensional array representing the input image in which cosmic rays are detected.
                 sigma_det: float, default: 5.0
                         Detection limit of edge pixel above the noise in (sigma units) to be detected as comiscs
