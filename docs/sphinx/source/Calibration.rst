@@ -189,13 +189,57 @@ Thermal Wavelength Shift Correction
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The arc-derived wavelength solution is a static calibration and does not
-account for thermal drifts between the calibration epoch and a given science
-exposure. A per-exposure correction is applied during science reduction by
-:func:`~lvmdrp.functions.rssMethod.shift_wave_skylines`, which measures the
-centroid offsets of bright sky emission lines (e.g., [O I] 5577 Å) and applies
-a small, smooth wavelength shift to bring each fiber's wavelength grid into
-agreement with the sky lines. This step refines the calibration at the sub-pixel
-level but does not re-derive the full wavelength solution.
+account for thermal drifts or mechanical flexure between the calibration epoch
+and a given science exposure. A per-exposure zero-point correction is applied
+during science reduction by
+:func:`~lvmdrp.functions.rssMethod.shift_wave_skylines`.
+
+The correction procedure is as follows:
+
+1. For each fiber individually, Gaussian profiles are fitted to one or more
+   known sky emission lines (e.g., [O I] 5577 Å). The difference between each
+   fitted line centroid and its known vacuum wavelength gives a per-fiber,
+   per-line offset in Angstroms. Fibers that are dead, belong to the Spec
+   telescope, or have S/N < 10 around the sky lines are skipped.
+
+2. The per-fiber offsets are smoothed along the slit within each spectrograph
+   separately: a median filter is applied first, then a spline is fitted to the
+   surviving fibers. This produces a smooth ``fiber_offset_mod`` array that
+   varies continuously across the 648 fibers of each spectrograph.
+
+3. Only the **zeroth polynomial coefficient** of the stored wavelength trace is
+   adjusted (``wave_trace['COEFF'][:,0] -= fiber_offset_mod``). The higher-order
+   coefficients — which encode how wavelength varies with pixel position along
+   the dispersion axis — are left unchanged from the arc calibration.
+
+The consequence is that the *shape* of the wavelength solution (spectral
+sampling, relative pixel spacing) is entirely determined by the arc lamps.
+The sky-line step corrects only the zero-point of each fiber's wavelength
+array, accounting for any rigid shift since the arc was taken. It does not
+re-derive or re-fit the full wavelength polynomial.
+
+**Reference sky lines** (``REF_SKYLINES`` in ``core/constants.py``, current as
+of this documentation):
+
+.. list-table::
+   :header-rows: 1
+   :widths: 15 40 45
+
+   * - Channel
+     - Wavelengths (Å, vacuum)
+     - Notes
+   * - b
+     - 5577.35
+     - [O I]; sole bright isolated line in the blue channel
+   * - r
+     - 6363.78, 7358.68, 7392.21
+     - [O I]; OH, OH
+   * - z
+     - 8399.18, 8988.38, 9552.55, 9719.84
+     - OH, OH, OH, OH
+
+Lines were hand-picked as bright, isolated (non-doublet) features in the UVES
+sky atlas. The per-fiber offset is the median over all lines in the channel.
 
 Twilight Fiberflat
 ------------------
