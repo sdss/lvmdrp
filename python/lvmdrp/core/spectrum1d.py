@@ -2299,17 +2299,12 @@ class Spectrum1D(Header):
         """
         Determines the maximum data value of the spectrum
 
-        Returns: (max,max_wave,max_pos)
-        -----------
-        max : float
-            Maximum data value
+        Returns:
+            (max, max_wave, max_pos): tuple containing
 
-        max_wave : float
-            Wavelength of maximum data value
-
-        max_pos : int
-            Pixel position of the maximum data value
-
+            - max (float): Maximum data value
+            - max_wave (float): Wavelength of maximum data value
+            - max_pos (int): Pixel position of the maximum data value
         """
         max = bn.nanmax(self._data)  # get max
         select = self._data == max  # select max value
@@ -2321,17 +2316,12 @@ class Spectrum1D(Header):
         """
         Determines the minimum data value of the spectrum
 
-        Returns: (min,min_wave,min_pos)
-        -----------
-        min : float
-            Minimum data value
+        Returns:
+            (min, min_wave, min_pos): tuple containing
 
-        min_wave : float
-            Wavelength of minimum data value
-
-        min_pos : int
-            Pixel position of the minimum data value
-
+            - min (float): Minimum data value
+            - min_wave (float): Wavelength of minimum data value
+            - min_pos (int): Pixel position of the minimum data value
         """
         min = bn.nanmin(self._data)  # get min
         select = self._data == min  # select min value

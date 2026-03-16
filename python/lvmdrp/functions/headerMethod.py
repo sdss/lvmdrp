@@ -332,8 +332,8 @@ def addHvelcorHdr_drp(
             extension : string of integer, optional with default: 0
                     Extension of the FITS file from which the header information is read
 
-    Example:
-            -----------
+    Example::
+
             user:> lvmdrp header addHvelcorHdrFILE1.fits  HVELCOR
             user:> lvmdrp header addHvelcorHdrFILE1.fits  HVELCOR RAUnit=deg  ObsLongKey='OBS Long' ObsLatKey='OBS Lat'
     """

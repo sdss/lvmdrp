@@ -119,8 +119,8 @@ def tileid_grp(tileid: Union[int, str]) -> str:
     ``tilegrp`` function in ``sdss_access.path.path.py``
     also needs updating.
 
-    The raw_metadata code uses a tileid of "*" for
-    pattern matching.  In this case, we use "*XX" for
+    The raw_metadata code uses a tileid of "\*" for
+    pattern matching.  In this case, we use "\*XX" for
     the tile group.
 
     Parameters

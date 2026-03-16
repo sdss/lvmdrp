@@ -106,10 +106,8 @@ class TraceMask(FiberRows):
         """
         Insert data to a slice of the trace mask
 
-        Returns: (round)
-        --------------
-        round : numpy.ndarray (int)
-            Trace position rounded to the nearest integer
+        Returns:
+            round (numpy.ndarray, int): Trace position rounded to the nearest integer
         """
         round = numpy.round(self._data).astype("int16")  # round the traces to integer
         return round

@@ -371,7 +371,7 @@ def interpolate_mask(x, y, mask, kind="linear", fill_value=0):
     :param x, y: numpy arrays, samples and values
     :param mask: boolean mask, True for masked values
     :param method: interpolation method, one of linear, nearest,
-    nearest-up, zero, slinear, quadratic, cubic, previous, or next.
+        nearest-up, zero, slinear, quadratic, cubic, previous, or next.
     :param fill_value: which value to use for filling up data outside the
         convex hull of known pixel values.
         Default is 0, Has no effect for 'nearest'.

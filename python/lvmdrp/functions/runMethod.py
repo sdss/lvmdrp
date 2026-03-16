@@ -10,10 +10,11 @@
 
 The first step is to prepare the configuration file(s) given target frame(s).
 The frame(s) can be targeted using a number of parameters:
-    * MJD
-    * exposure number
-    * spectrograph
-    * camera
+
+* MJD
+* exposure number
+* spectrograph
+* camera
 
 and for each target frame a configuration file will be written specifying the
 corresponding reduction steps. Such steps will depend on the type of frame

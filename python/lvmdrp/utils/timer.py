@@ -10,21 +10,25 @@ class TimerError(Exception):
 @dataclass
 class Timer(ContextDecorator):
     """Time your code using a class, context manager, or decorator
-    Use as
+
+    Use as::
+
         Timer t
         t.start()
-        code() 
+        code()
         t.stop()
 
-        or
+    or::
+
         @Timer()
         def func(...)
 
-        or
+    or::
+
         with Timer(name):
             code()
-        
-        see https://realpython.com/python-timer/
+
+    See https://realpython.com/python-timer/
     """
 
     timers: ClassVar[Dict[str, float]] = {}

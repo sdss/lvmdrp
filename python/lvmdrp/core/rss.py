@@ -927,15 +927,15 @@ class RSS(FiberRows):
         sources, in the following order:
 
             - from the input `wave` array, in which case it expects it to be a
-            one-dimensional array with the same number of elements as the
-            wavelength dimension of the data array.
+              one-dimensional array with the same number of elements as the
+              wavelength dimension of the data array.
 
             - from the header, in which case the wavelength the resulting
-            wavelength will be a one-dimensional array.
+              wavelength will be a one-dimensional array.
 
             - from the wavelength trace, in which case the resulting wavelength
-            array will be a two-dimensional array with the same shape as the
-            data array.
+              array will be a two-dimensional array with the same shape as the
+              data array.
 
         Parameters
         ----------
@@ -1614,16 +1614,16 @@ class RSS(FiberRows):
         wavelength grid can be specified in three different ways:
 
             - by providing a `wave` array, in which case it expects it to be a
-            one-dimensional array with an uniform sampling.
+              one-dimensional array with an uniform sampling.
 
             - by providing a `wave_range` and `wave_disp` values, in which case
-            it expects `wave_range` to be a tuple with the lower and upper
-            limits of the wavelength range, and `wave_disp` to be the
-            wavelength dispersion.
+              it expects `wave_range` to be a tuple with the lower and upper
+              limits of the wavelength range, and `wave_disp` to be the
+              wavelength dispersion.
 
             - by providing a `wave` array, in which case it expects it to be a
-            one-dimensional array with the same number of elements as the
-            wavelength dimension of the data array.
+              one-dimensional array with the same number of elements as the
+              wavelength dimension of the data array.
 
         NOTE: all operations are perfomed in a copy of the RSS object, so the
         original object is not modified.
@@ -1779,13 +1779,13 @@ class RSS(FiberRows):
         wavelength grid can be specified in three different ways:
 
             - by providing a `wave` array, in which case it expects it to be a
-            one-dimensional array with the same number of elements as the
-            wavelength dimension of the data array and with uniform sampling.
+              one-dimensional array with the same number of elements as the
+              wavelength dimension of the data array and with uniform sampling.
 
             - by providing a `wave_range` and `wave_disp` values, in which case
-            it expects `wave_range` to be a tuple with the lower and upper
-            limits of the wavelength range, and `wave_disp` to be the
-            wavelength dispersion.
+              it expects `wave_range` to be a tuple with the lower and upper
+              limits of the wavelength range, and `wave_disp` to be the
+              wavelength dispersion.
 
         NOTE: all operations are perfomed in a copy of the RSS object, so the
         original object is not modified.

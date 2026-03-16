@@ -575,16 +575,12 @@ class FiberRows(Header, PositionTable):
         """
         Return the content of the FiberRows object
 
-        Returns: (data, error mask)
-        -----------
-        data : numpy.ndarray (float)
-            Array of the data value
+        Returns:
+            (data, error, mask): tuple containing
 
-        error : numpy.ndarray (float)
-            Array of the corresponding errors
-
-        mask : numpy.ndarray (bool)
-            Array of the bad pixel mask
+            - data (numpy.ndarray, float): Array of the data value
+            - error (numpy.ndarray, float): Array of the corresponding errors
+            - mask (numpy.ndarray, bool): Array of the bad pixel mask
         """
         data = self._data
         error = self._error

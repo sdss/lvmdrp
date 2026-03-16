@@ -238,7 +238,7 @@ def get_dir_size(path):
 def remove_ancillary_paths(version, mjd=None, dry_run=False):
     """Remove ancillary files
 
-    Parameters:
+    Parameters
     ----------
     version : str
         DRP version to target

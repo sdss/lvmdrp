@@ -10,44 +10,50 @@ _radeg = 180.0 / np.pi
 
 
 def premat(equinox1, equinox2, fk4=False):
-    """
-    NAME:
-          PREMAT
-    PURPOSE:
-          Return the precession matrix needed to go from EQUINOX1 to EQUINOX2.
-    EXPLANTION:
-          This matrix is used by the procedures PRECESS and BARYVEL to precess
-          astronomical coordinates
+    """Return the precession matrix needed to go from EQUINOX1 to EQUINOX2.
 
-    CALLING SEQUENCE:
-          matrix = PREMAT( equinox1, equinox2, [ /FK4 ] )
+    This matrix is used by the procedures PRECESS and BARYVEL to precess
+    astronomical coordinates.
 
-    INPUTS:
-          EQUINOX1 - Original equinox of coordinates, numeric scalar.
-          EQUINOX2 - Equinox of precessed coordinates.
+    IDL/legacy documentation::
 
-    OUTPUT:
-         matrix - double precision 3 x 3 precession matrix, used to precess
-                  equatorial rectangular coordinates
+        NAME:
+              PREMAT
+        PURPOSE:
+              Return the precession matrix needed to go from EQUINOX1 to EQUINOX2.
+        EXPLANTION:
+              This matrix is used by the procedures PRECESS and BARYVEL to precess
+              astronomical coordinates
 
-    OPTIONAL INPUT KEYWORDS:
-          /FK4   - If this keyword is set, the FK4 (B1950.0) system precession
-                  angles are used to compute the precession matrix.   The
-                  default is to use FK5 (J2000.0) precession angles
+        CALLING SEQUENCE:
+              matrix = PREMAT( equinox1, equinox2, [ /FK4 ] )
 
-    EXAMPLES:
-          Return the precession matrix from 1950.0 to 1975.0 in the FK4 system
+        INPUTS:
+              EQUINOX1 - Original equinox of coordinates, numeric scalar.
+              EQUINOX2 - Equinox of precessed coordinates.
 
-          IDL> matrix = PREMAT( 1950.0, 1975.0, /FK4)
+        OUTPUT:
+             matrix - double precision 3 x 3 precession matrix, used to precess
+                      equatorial rectangular coordinates
 
-    PROCEDURE:
-          FK4 constants from "Computational Spherical Astronomy" by Taff (1983),
-          p. 24. (FK4). FK5 constants from "Astronomical Almanac Explanatory
-          Supplement 1992, page 104 Table 3.211.1.
+        OPTIONAL INPUT KEYWORDS:
+              /FK4   - If this keyword is set, the FK4 (B1950.0) system precession
+                      angles are used to compute the precession matrix.   The
+                      default is to use FK5 (J2000.0) precession angles
 
-    REVISION HISTORY
-          Written, Wayne Landsman, HSTX Corporation, June 1994
-          Converted to IDL V5.0   W. Landsman   September 1997
+        EXAMPLES:
+              Return the precession matrix from 1950.0 to 1975.0 in the FK4 system
+
+              IDL> matrix = PREMAT( 1950.0, 1975.0, /FK4)
+
+        PROCEDURE:
+              FK4 constants from "Computational Spherical Astronomy" by Taff (1983),
+              p. 24. (FK4). FK5 constants from "Astronomical Almanac Explanatory
+              Supplement 1992, page 104 Table 3.211.1.
+
+        REVISION HISTORY
+              Written, Wayne Landsman, HSTX Corporation, June 1994
+              Converted to IDL V5.0   W. Landsman   September 1997
     """
 
     deg_to_rad = np.pi / 180.0e0
@@ -134,82 +140,85 @@ def premat(equinox1, equinox2, fk4=False):
 
 
 def precess(ra0, dec0, equinox1, equinox2, doprint=None, fk4=None, radian=False):
-    """
-    NAME:
-         PRECESS
-    PURPOSE:
-         Precess coordinates from EQUINOX1 to EQUINOX2.
-    EXPLANATION:
-         For interactive display, one can use the procedure ASTRO which calls
-         PRECESS or use the /PRINT keyword.   The default (RA,DEC) system is
-         FK5 based on epoch J2000.0 but FK4 based on B1950.0 is available via
-         the /FK4 keyword.
+    """Precess coordinates from EQUINOX1 to EQUINOX2.
 
-         Use BPRECESS and JPRECESS to convert between FK4 and FK5 systems
-    CALLING SEQUENCE:
-         PRECESS, ra, dec, [ equinox1, equinox2, /PRINT, /FK4, /RADIAN ]
+    IDL/legacy documentation::
 
-    INPUT - OUTPUT:
-         RA - Input right ascension (scalar or vector) in DEGREES, unless the
-                 /RADIAN keyword is set
-         DEC - Input declination in DEGREES (scalar or vector), unless the
-                 /RADIAN keyword is set
+        NAME:
+             PRECESS
+        PURPOSE:
+             Precess coordinates from EQUINOX1 to EQUINOX2.
+        EXPLANATION:
+             For interactive display, one can use the procedure ASTRO which calls
+             PRECESS or use the /PRINT keyword.   The default (RA,DEC) system is
+             FK5 based on epoch J2000.0 but FK4 based on B1950.0 is available via
+             the /FK4 keyword.
 
-         The input RA and DEC are modified by PRECESS to give the
-         values after precession.
+             Use BPRECESS and JPRECESS to convert between FK4 and FK5 systems
+        CALLING SEQUENCE:
+             PRECESS, ra, dec, [ equinox1, equinox2, /PRINT, /FK4, /RADIAN ]
 
-    OPTIONAL INPUTS:
-         EQUINOX1 - Original equinox of coordinates, numeric scalar.  If
-                  omitted, then PRECESS will query for EQUINOX1 and EQUINOX2.
-         EQUINOX2 - Equinox of precessed coordinates.
+        INPUT - OUTPUT:
+             RA - Input right ascension (scalar or vector) in DEGREES, unless the
+                     /RADIAN keyword is set
+             DEC - Input declination in DEGREES (scalar or vector), unless the
+                     /RADIAN keyword is set
 
-    OPTIONAL INPUT KEYWORDS:
-         /PRINT - If this keyword is set and non-zero, then the precessed
-                  coordinates are displayed at the terminal.    Cannot be used
-                  with the /RADIAN keyword
-         /FK4   - If this keyword is set and non-zero, the FK4 (B1950.0) system
-                  will be used otherwise FK5 (J2000.0) will be used instead.
-         /RADIAN - If this keyword is set and non-zero, then the input and
-                  output RA and DEC vectors are in radians rather than degrees
+             The input RA and DEC are modified by PRECESS to give the
+             values after precession.
 
-    RESTRICTIONS:
-          Accuracy of precession decreases for declination values near 90
-          degrees.  PRECESS should not be used more than 2.5 centuries from
-          2000 on the FK5 system (1950.0 on the FK4 system).
+        OPTIONAL INPUTS:
+             EQUINOX1 - Original equinox of coordinates, numeric scalar.  If
+                      omitted, then PRECESS will query for EQUINOX1 and EQUINOX2.
+             EQUINOX2 - Equinox of precessed coordinates.
 
-    EXAMPLES:
-          (1) The Pole Star has J2000.0 coordinates (2h, 31m, 46.3s,
-                  89d 15' 50.6"); compute its coordinates at J1985.0
+        OPTIONAL INPUT KEYWORDS:
+             /PRINT - If this keyword is set and non-zero, then the precessed
+                      coordinates are displayed at the terminal.    Cannot be used
+                      with the /RADIAN keyword
+             /FK4   - If this keyword is set and non-zero, the FK4 (B1950.0) system
+                      will be used otherwise FK5 (J2000.0) will be used instead.
+             /RADIAN - If this keyword is set and non-zero, then the input and
+                      output RA and DEC vectors are in radians rather than degrees
 
-          IDL> precess, ten(2,31,46.3)*15, ten(89,15,50.6), 2000, 1985, /PRINT
+        RESTRICTIONS:
+              Accuracy of precession decreases for declination values near 90
+              degrees.  PRECESS should not be used more than 2.5 centuries from
+              2000 on the FK5 system (1950.0 on the FK4 system).
 
-                  ====> 2h 16m 22.73s, 89d 11' 47.3"
+        EXAMPLES:
+              (1) The Pole Star has J2000.0 coordinates (2h, 31m, 46.3s,
+                      89d 15' 50.6"); compute its coordinates at J1985.0
 
-          (2) Precess the B1950 coordinates of Eps Ind (RA = 21h 59m,33.053s,
-          DEC = (-56d, 59', 33.053") to equinox B1975.
+              IDL> precess, ten(2,31,46.3)*15, ten(89,15,50.6), 2000, 1985, /PRINT
 
-          IDL> ra = ten(21, 59, 33.053)*15
-          IDL> dec = ten(-56, 59, 33.053)
-          IDL> precess, ra, dec ,1950, 1975, /fk4
+                      ====> 2h 16m 22.73s, 89d 11' 47.3"
 
-    PROCEDURE:
-          Algorithm from Computational Spherical Astronomy by Taff (1983),
-          p. 24. (FK4). FK5 constants from "Astronomical Almanac Explanatory
-          Supplement 1992, page 104 Table 3.211.1.
+              (2) Precess the B1950 coordinates of Eps Ind (RA = 21h 59m,33.053s,
+              DEC = (-56d, 59', 33.053") to equinox B1975.
 
-    PROCEDURE CALLED:
-          Function PREMAT - computes precession matrix
+              IDL> ra = ten(21, 59, 33.053)*15
+              IDL> dec = ten(-56, 59, 33.053)
+              IDL> precess, ra, dec ,1950, 1975, /fk4
 
-    REVISION HISTORY
-          Written, Wayne Landsman, STI Corporation  August 1986
-          Correct negative output RA values   February 1989
-          Added /PRINT keyword      W. Landsman   November, 1991
-          Provided FK5 (J2000.0)  I. Freedman   January 1994
-          Precession Matrix computation now in PREMAT   W. Landsman June 1994
-          Added /RADIAN keyword                         W. Landsman June 1997
-          Converted to IDL V5.0   W. Landsman   September 1997
-          Correct negative output RA values when /RADIAN used    March 1999
-          Work for arrays, not just vectors  W. Landsman    September 2003
+        PROCEDURE:
+              Algorithm from Computational Spherical Astronomy by Taff (1983),
+              p. 24. (FK4). FK5 constants from "Astronomical Almanac Explanatory
+              Supplement 1992, page 104 Table 3.211.1.
+
+        PROCEDURE CALLED:
+              Function PREMAT - computes precession matrix
+
+        REVISION HISTORY
+              Written, Wayne Landsman, STI Corporation  August 1986
+              Correct negative output RA values   February 1989
+              Added /PRINT keyword      W. Landsman   November, 1991
+              Provided FK5 (J2000.0)  I. Freedman   January 1994
+              Precession Matrix computation now in PREMAT   W. Landsman June 1994
+              Added /RADIAN keyword                         W. Landsman June 1997
+              Converted to IDL V5.0   W. Landsman   September 1997
+              Correct negative output RA values when /RADIAN used    March 1999
+              Work for arrays, not just vectors  W. Landsman    September 2003
     """
     if isinstance(ra0, np.ndarray):
         ra = ra0.copy()
@@ -283,43 +292,46 @@ def precess(ra0, dec0, equinox1, equinox2, doprint=None, fk4=None, radian=False)
 
 
 def daycnv(xjd):
-    """
-    NAME:
-          DAYCNV
-    PURPOSE:
-          Converts Julian dates to Gregorian calendar dates
+    """Convert Julian dates to Gregorian calendar dates.
 
-    CALLING SEQUENCE:
-          DAYCNV, XJD, YR, MN, DAY, HR
+    IDL/legacy documentation::
 
-    INPUTS:
-          XJD = Julian date, positive double precision scalar or vector
+        NAME:
+              DAYCNV
+        PURPOSE:
+              Converts Julian dates to Gregorian calendar dates
 
-    OUTPUTS:
-          YR = Year (Integer)
-          MN = Month (Integer)
-          DAY = Day (Integer)
-          HR = Hours and fractional hours (Real).   If XJD is a vector,
-                  then YR,MN,DAY and HR will be vectors of the same length.
+        CALLING SEQUENCE:
+              DAYCNV, XJD, YR, MN, DAY, HR
 
-    EXAMPLE:
-          IDL> DAYCNV, 2440000.D, yr, mn, day, hr
+        INPUTS:
+              XJD = Julian date, positive double precision scalar or vector
 
-          yields yr = 1968, mn =5, day = 23, hr =12.
+        OUTPUTS:
+              YR = Year (Integer)
+              MN = Month (Integer)
+              DAY = Day (Integer)
+              HR = Hours and fractional hours (Real).   If XJD is a vector,
+                      then YR,MN,DAY and HR will be vectors of the same length.
 
-    WARNING:
-          Be sure that the Julian date is specified as double precision to
-          maintain accuracy at the fractional hour level.
+        EXAMPLE:
+              IDL> DAYCNV, 2440000.D, yr, mn, day, hr
 
-    METHOD:
-          Uses the algorithm of Fliegel and Van Flandern (1968) as reported in
-          the "Explanatory Supplement to the Astronomical Almanac" (1992), p. 604
-          Works for all Gregorian calendar dates with XJD > 0, i.e., dates after
-          -4713 November 23.
-    REVISION HISTORY:
-          Converted to IDL from Yeoman's Comet Ephemeris Generator,
-          B. Pfarr, STX, 6/16/88
-          Converted to IDL V5.0   W. Landsman   September 1997
+              yields yr = 1968, mn =5, day = 23, hr =12.
+
+        WARNING:
+              Be sure that the Julian date is specified as double precision to
+              maintain accuracy at the fractional hour level.
+
+        METHOD:
+              Uses the algorithm of Fliegel and Van Flandern (1968) as reported in
+              the "Explanatory Supplement to the Astronomical Almanac" (1992), p. 604
+              Works for all Gregorian calendar dates with XJD > 0, i.e., dates after
+              -4713 November 23.
+        REVISION HISTORY:
+              Converted to IDL from Yeoman's Comet Ephemeris Generator,
+              B. Pfarr, STX, 6/16/88
+              Converted to IDL V5.0   W. Landsman   September 1997
     """
 
     def _ret():
@@ -362,86 +374,88 @@ def daycnv(xjd):
 
 
 def bprecess(ra0, dec0, mu_radec=None, parallax=None, rad_vel=None, epoch=None):
-    """
-    NAME:
-          BPRECESS
-    PURPOSE:
-          Precess positions from J2000.0 (FK5) to B1950.0 (FK4)
-    EXPLANATION:
-          Calculates the mean place of a star at B1950.0 on the FK4 system from
-          the mean place at J2000.0 on the FK5 system.
+    """Precess positions from J2000.0 (FK5) to B1950.0 (FK4).
 
-    CALLING SEQUENCE:
-          bprecess, ra, dec, ra_1950, dec_1950, [ MU_RADEC = , PARALLAX =
-                                          RAD_VEL =, EPOCH =   ]
+    IDL/legacy documentation::
 
-    INPUTS:
-          RA,DEC - Input J2000 right ascension and declination in *degrees*.
-                  Scalar or N element vector
+        NAME:
+              BPRECESS
+        PURPOSE:
+              Precess positions from J2000.0 (FK5) to B1950.0 (FK4)
+        EXPLANATION:
+              Calculates the mean place of a star at B1950.0 on the FK4 system from
+              the mean place at J2000.0 on the FK5 system.
 
-    OUTPUTS:
-          RA_1950, DEC_1950 - The corresponding B1950 right ascension and
-                  declination in *degrees*.    Same number of elements as
-                  RA,DEC but always double precision.
+        CALLING SEQUENCE:
+              bprecess, ra, dec, ra_1950, dec_1950, [ MU_RADEC = , PARALLAX =
+                                              RAD_VEL =, EPOCH =   ]
 
-    OPTIONAL INPUT-OUTPUT KEYWORDS
-          MU_RADEC - 2xN element double precision vector containing the proper
-                     motion in seconds of arc per tropical *century* in right
-                     ascension and declination.
-          PARALLAX - N_element vector giving stellar parallax (seconds of arc)
-          RAD_VEL  - N_element vector giving radial velocity in km/s
+        INPUTS:
+              RA,DEC - Input J2000 right ascension and declination in degrees.
+                      Scalar or N element vector
 
-          The values of MU_RADEC, PARALLAX, and RADVEL will all be modified
-          upon output to contain the values of these quantities in the
-          B1950 system.  The parallax and radial velocity will have a very
-          minor influence on the B1950 position.
+        OUTPUTS:
+              RA_1950, DEC_1950 - The corresponding B1950 right ascension and
+                      declination in degrees.    Same number of elements as
+                      RA,DEC but always double precision.
 
-          EPOCH - scalar giving epoch of original observations, default 2000.0d
-              This keyword value is only used if the MU_RADEC keyword is not set.
-    NOTES:
-          The algorithm is taken from the Explanatory Supplement to the
-          Astronomical Almanac 1992, page 186.
-          Also see Aoki et al (1983), A&A, 128,263
+        OPTIONAL INPUT-OUTPUT KEYWORDS
+              MU_RADEC - 2xN element double precision vector containing the proper
+                         motion in seconds of arc per tropical century in right
+                         ascension and declination.
+              PARALLAX - N_element vector giving stellar parallax (seconds of arc)
+              RAD_VEL  - N_element vector giving radial velocity in km/s
 
-          BPRECESS distinguishes between the following two cases:
-          (1) The proper motion is known and non-zero
-          (2) the proper motion is unknown or known to be exactly zero (i.e.
-                  extragalactic radio sources).   In this case, the reverse of
-                  the algorithm in Appendix 2 of Aoki et al. (1983) is used to
-                  ensure that the output proper motion is  exactly zero. Better
-                  precision can be achieved in this case by inputting the EPOCH
-                  of the original observations.
+              The values of MU_RADEC, PARALLAX, and RADVEL will all be modified
+              upon output to contain the values of these quantities in the
+              B1950 system.  The parallax and radial velocity will have a very
+              minor influence on the B1950 position.
 
-          The error in using the IDL procedure PRECESS for converting between
-          B1950 and J1950 can be up to 12", mainly in right ascension.   If
-          better accuracy than this is needed then BPRECESS should be used.
+              EPOCH - scalar giving epoch of original observations, default 2000.0d
+                  This keyword value is only used if the MU_RADEC keyword is not set.
+        NOTES:
+              The algorithm is taken from the Explanatory Supplement to the
+              Astronomical Almanac 1992, page 186.
+              Also see Aoki et al (1983), A&A, 128,263
 
-          An unsystematic comparison of BPRECESS with the IPAC precession
-          routine (http://nedwww.ipac.caltech.edu/forms/calculator.html) always
-          gives differences less than 0.15".
-    EXAMPLE:
-          The SAO2000 catalogue gives the J2000 position and proper motion for
-          the star HD 119288.   Find the B1950 position.
+              BPRECESS distinguishes between the following two cases:
+              (1) The proper motion is known and non-zero
+              (2) the proper motion is unknown or known to be exactly zero (i.e.
+                      extragalactic radio sources).   In this case, the reverse of
+                      the algorithm in Appendix 2 of Aoki et al. (1983) is used to
+                      ensure that the output proper motion is  exactly zero. Better
+                      precision can be achieved in this case by inputting the EPOCH
+                      of the original observations.
 
-          RA(2000) = 13h 42m 12.740s      Dec(2000) = 8d 23' 17.69''
-          Mu(RA) = -.0257 s/yr      Mu(Dec) = -.090 ''/yr
+              The error in using the IDL procedure PRECESS for converting between
+              B1950 and J1950 can be up to 12", mainly in right ascension.   If
+              better accuracy than this is needed then BPRECESS should be used.
 
-          IDL> mu_radec = 100D* [ -15D*.0257, -0.090 ]
-          IDL> ra = ten(13, 42, 12.740)*15.D
-          IDL> dec = ten(8, 23, 17.69)
-          IDL> bprecess, ra, dec, ra1950, dec1950, mu_radec = mu_radec
-          IDL> print, adstring(ra1950, dec1950,2)
-                  ===> 13h 39m 44.526s    +08d 38' 28.63"
+              An unsystematic comparison of BPRECESS with the IPAC precession
+              routine (http://nedwww.ipac.caltech.edu/forms/calculator.html) always
+              gives differences less than 0.15".
+        EXAMPLE:
+              The SAO2000 catalogue gives the J2000 position and proper motion for
+              the star HD 119288.   Find the B1950 position.
 
-    REVISION HISTORY:
-          Written,    W. Landsman                October, 1992
-          Vectorized, W. Landsman                February, 1994
-          Treat case where proper motion not known or exactly zero  November 1994
-          Handling of arrays larger than 32767   Lars L. Christensen, march, 1995
-          Converted to IDL V5.0   W. Landsman   September 1997
-          Fixed bug where A term not initialized for vector input
-               W. Landsman        February 2000
+              RA(2000) = 13h 42m 12.740s      Dec(2000) = 8d 23' 17.69''
+              Mu(RA) = -.0257 s/yr      Mu(Dec) = -.090 ''/yr
 
+              IDL> mu_radec = 100D* [ -15D*.0257, -0.090 ]
+              IDL> ra = ten(13, 42, 12.740)*15.D
+              IDL> dec = ten(8, 23, 17.69)
+              IDL> bprecess, ra, dec, ra1950, dec1950, mu_radec = mu_radec
+              IDL> print, adstring(ra1950, dec1950,2)
+                      ===> 13h 39m 44.526s    +08d 38' 28.63"
+
+        REVISION HISTORY:
+              Written,    W. Landsman                October, 1992
+              Vectorized, W. Landsman                February, 1994
+              Treat case where proper motion not known or exactly zero  November 1994
+              Handling of arrays larger than 32767   Lars L. Christensen, march, 1995
+              Converted to IDL V5.0   W. Landsman   September 1997
+              Fixed bug where A term not initialized for vector input
+                   W. Landsman        February 2000
     """
 
     scal = True
@@ -724,68 +738,69 @@ def precess_xyz(x, y, z, equinox1, equinox2):
 
 
 def xyz(date, equinox=None):
-    """
-    NAME:
-          XYZ
-    PURPOSE:
-          Calculate geocentric X,Y, and Z  and velocity coordinates of the Sun
-    EXPLANATION:
-          Calculates geocentric X,Y, and Z vectors and velocity coordinates
-          (dx, dy and dz) of the Sun.   (The positive X axis is directed towards
-          the equinox, the y-axis, towards the point on the equator at right
-          ascension 6h, and the z axis toward the north pole of the equator).
-          Typical position accuracy is <1e-4 AU (15000 km).
+    """Calculate geocentric X,Y, and Z and velocity coordinates of the Sun.
 
-    CALLING SEQUENCE:
-          XYZ, date, x, y, z, [ xvel, yvel, zvel, EQUINOX = ]
+    IDL/legacy documentation::
 
-    INPUT:
-          date: reduced julian date (=JD - 2400000), scalar or vector
+        NAME:
+              XYZ
+        PURPOSE:
+              Calculate geocentric X,Y, and Z  and velocity coordinates of the Sun
+        EXPLANATION:
+              Calculates geocentric X,Y, and Z vectors and velocity coordinates
+              (dx, dy and dz) of the Sun.   (The positive X axis is directed towards
+              the equinox, the y-axis, towards the point on the equator at right
+              ascension 6h, and the z axis toward the north pole of the equator).
+              Typical position accuracy is <1e-4 AU (15000 km).
 
-    OUTPUT:
-          x,y,z: scalars or vectors giving heliocentric rectangular coordinates
-                    (in A.U) for each date supplied.    Note that sqrt(x^2 + y^2
-                    + z^2) gives the Earth-Sun distance for the given date.
-          xvel, yvel, zvel: velocity vectors corresponding to X, Y and Z.
+        CALLING SEQUENCE:
+              XYZ, date, x, y, z, [ xvel, yvel, zvel, EQUINOX = ]
 
-    OPTIONAL KEYWORD INPUT:
-          EQUINOX: equinox of output. Default is 1950.
+        INPUT:
+              date: reduced julian date (=JD - 2400000), scalar or vector
 
-    EXAMPLE:
-          What were the rectangular coordinates and velocities of the Sun on
-          Jan 22, 1999 0h UT (= JD 2451200.5) in J2000 coords? NOTE:
-          Astronomical Almanac (AA) is in TDT, so add 64 seconds to
-          UT to convert.
+        OUTPUT:
+              x,y,z: scalars or vectors giving heliocentric rectangular coordinates
+                        (in A.U) for each date supplied.    Note that sqrt(x^2 + y^2
+                        + z^2) gives the Earth-Sun distance for the given date.
+              xvel, yvel, zvel: velocity vectors corresponding to X, Y and Z.
 
-          IDL> xyz,51200.5+64.d/86400.d,x,y,z,xv,yv,zv,equinox = 2000
+        OPTIONAL KEYWORD INPUT:
+              EQUINOX: equinox of output. Default is 1950.
 
-          Compare to Astronomical Almanac (1999 page C20)
-                      X  (AU)        Y  (AU)     Z (AU)
-          XYZ:      0.51456871   -0.76963263  -0.33376880
-          AA:       0.51453130   -0.7697110   -0.3337152
-          abs(err): 0.00003739    0.00007839   0.00005360
-          abs(err)
-              (km):   5609          11759         8040
+        EXAMPLE:
+              What were the rectangular coordinates and velocities of the Sun on
+              Jan 22, 1999 0h UT (= JD 2451200.5) in J2000 coords? NOTE:
+              Astronomical Almanac (AA) is in TDT, so add 64 seconds to
+              UT to convert.
 
-          NOTE: Velocities in AA are for Earth/Moon barycenter
-                (a very minor offset) see AA 1999 page E3
-                     X VEL (AU/DAY) YVEL (AU/DAY)   Z VEL (AU/DAY)
-          XYZ:      -0.014947268   -0.0083148382    -0.0036068577
-          AA:       -0.01494574    -0.00831185      -0.00360365
-          abs(err):  0.000001583    0.0000029886     0.0000032077
-          abs(err)
-           (km/sec): 0.00265        0.00519          0.00557
+              IDL> xyz,51200.5+64.d/86400.d,x,y,z,xv,yv,zv,equinox = 2000
 
-    PROCEDURE CALLS:
-          PRECESS_XYZ
-    REVISION HISTORY
-          Original algorithm from Almanac for Computers, Doggett et al. USNO 1978
-          Adapted from the book Astronomical Photometry by A. Henden
-          Written  W. Landsman   STX       June 1989
-          Correct error in X coefficient   W. Landsman HSTX  January 1995
-          Added velocities, more terms to positions and EQUINOX keyword,
-             some minor adjustments to calculations
-             P. Plait/ACC March 24, 1999
+              Compare to Astronomical Almanac (1999 page C20)
+                          X  (AU)        Y  (AU)     Z (AU)
+              XYZ:      0.51456871   -0.76963263  -0.33376880
+              AA:       0.51453130   -0.7697110   -0.3337152
+              abs(err): 0.00003739    0.00007839   0.00005360
+              abs(err)  (km): 5609   11759         8040
+
+              NOTE: Velocities in AA are for Earth/Moon barycenter
+                    (a very minor offset) see AA 1999 page E3
+                         X VEL (AU/DAY) YVEL (AU/DAY)   Z VEL (AU/DAY)
+              XYZ:      -0.014947268   -0.0083148382    -0.0036068577
+              AA:       -0.01494574    -0.00831185      -0.00360365
+              abs(err):  0.000001583    0.0000029886     0.0000032077
+              abs(err)  (km/sec): 0.00265  0.00519       0.00557
+
+        PROCEDURE CALLS:
+              PRECESS_XYZ
+        REVISION HISTORY
+              Original algorithm from Almanac for Computers, Doggett et al. USNO 1978
+              Adapted from the book Astronomical Photometry by A. Henden
+              Written  W. Landsman   STX       June 1989
+              Correct error in X coefficient   W. Landsman HSTX  January 1995
+              Added velocities, more terms to positions and EQUINOX keyword,
+                 some minor adjustments to calculations
+                 P. Plait/ACC March 24, 1999
     """
 
     n_params = 7
@@ -932,66 +947,71 @@ def xyz(date, equinox=None):
 
 
 def helio_jd(date, ra, dec, b1950=False, time_diff=False):
-    """
-    NAME:
-         HELIO_JD
-    PURPOSE:
-         Convert geocentric (reduced) Julian date to heliocentric Julian date
-    EXPLANATION:
-         This procedure correct for the extra light travel time between the Earth
-         and the Sun.
+    """Convert geocentric (reduced) Julian date to heliocentric Julian date.
 
-          An online calculator for this quantity is available at
-          http://www.physics.sfasu.edu/astro/javascript/hjd.html
-    CALLING SEQUENCE:
-          jdhelio = HELIO_JD( date, ra, dec, /B1950, /TIME_DIFF)
+    IDL/legacy documentation::
 
-    INPUTS
-          date - reduced Julian date (= JD - 2400000), scalar or vector, MUST
-                  be double precision
-          ra,dec - scalars giving right ascension and declination in DEGREES
-                  Equinox is J2000 unless the /B1950 keyword is set
+        NAME:
+             HELIO_JD
+        PURPOSE:
+             Convert geocentric (reduced) Julian date to heliocentric Julian date
+        EXPLANATION:
+             This procedure correct for the extra light travel time between the Earth
+             and the Sun.
 
-    OUTPUTS:
-          jdhelio - heliocentric reduced Julian date.  If /TIME_DIFF is set, then
-                    HELIO_JD() instead returns the time difference in seconds
-                    between the geocentric and heliocentric Julian date.
+              An online calculator for this quantity is available at
+              http://www.physics.sfasu.edu/astro/javascript/hjd.html
+        CALLING SEQUENCE:
+              jdhelio = HELIO_JD( date, ra, dec, /B1950, /TIME_DIFF)
 
-    OPTIONAL INPUT KEYWORDS
-          /B1950 - if set, then input coordinates are assumed to be in equinox
-                   B1950 coordinates.
-          /TIME_DIFF - if set, then HELIO_JD() returns the time difference
-                   (heliocentric JD - geocentric JD ) in seconds
+        INPUTS
+              date - reduced Julian date (= JD - 2400000), scalar or vector, MUST
+                      be double precision
+              ra,dec - scalars giving right ascension and declination in DEGREES
+                      Equinox is J2000 unless the /B1950 keyword is set
 
-    EXAMPLE:
-          What is the heliocentric Julian date of an observation of V402 Cygni
-          (J2000: RA = 20 9 7.8, Dec = 37 09 07) taken June 15, 1973 at 11:40 UT?
+        OUTPUTS:
+              jdhelio - heliocentric reduced Julian date.  If /TIME_DIFF is set, then
+                        HELIO_JD() instead returns the time difference in seconds
+                        between the geocentric and heliocentric Julian date.
 
-          IDL> juldate, [1973,6,15,11,40], jd      ;Get geocentric Julian date
-          IDL> hjd = helio_jd( jd, ten(20,9,7.8)*15., ten(37,9,7) )
+        OPTIONAL INPUT KEYWORDS
+              /B1950 - if set, then input coordinates are assumed to be in equinox
+                       B1950 coordinates.
+              /TIME_DIFF - if set, then HELIO_JD() returns the time difference
+                       (heliocentric JD - geocentric JD ) in seconds
 
-          ==> hjd = 41848.9881
+        EXAMPLE:
+              What is the heliocentric Julian date of an observation of V402 Cygni
+              (J2000: RA = 20 9 7.8, Dec = 37 09 07) taken June 15, 1973 at 11:40 UT?
 
-    Wayne Warren (Raytheon ITSS) has compared the results of HELIO_JD with the
-    FORTRAN subroutines in the STARLINK SLALIB library (see
-    http://star-www.rl.ac.uk/).
-                                                     Time Diff (sec)
-         Date               RA(2000)   Dec(2000)  STARLINK      IDL
+              IDL> juldate, [1973,6,15,11,40], jd      ;Get geocentric Julian date
+              IDL> hjd = helio_jd( jd, ten(20,9,7.8)*15., ten(37,9,7) )
 
-    1999-10-29T00:00:00.0  21 08 25.  -67 22 00.  -59.0        -59.0
-    1999-10-29T00:00:00.0  02 56 33.4 +00 26 55.  474.1        474.1
-    1940-12-11T06:55:00.0  07 34 41.9 -00 30 42.  366.3        370.2
-    1992-02-29T03:15:56.2  12 56 27.4 +42 10 17.  350.8        350.9
-    2000-03-01T10:26:31.8  14 28 36.7 -20 42 11.  243.7        243.7
-    2100-02-26T09:18:24.2  08 26 51.7 +85 47 28.  104.0        108.8
-    PROCEDURES CALLED:
-          bprecess, xyz, zparcheck
+              ==> hjd = 41848.9881
 
-    REVISION HISTORY:
-          Algorithm from the book Astronomical Photometry by Henden, p. 114
-          Written,   W. Landsman       STX     June, 1989
-          Make J2000 default equinox, add B1950, /TIME_DIFF keywords, compute
-          variation of the obliquity      W. Landsman   November 1999
+        Wayne Warren (Raytheon ITSS) has compared the results of HELIO_JD with the
+        FORTRAN subroutines in the STARLINK SLALIB library (see
+        http://star-www.rl.ac.uk/).
+
+                                                         Time Diff (sec)
+             Date               RA(2000)   Dec(2000)  STARLINK      IDL
+
+        1999-10-29T00:00:00.0  21 08 25.  -67 22 00.  -59.0        -59.0
+        1999-10-29T00:00:00.0  02 56 33.4 +00 26 55.  474.1        474.1
+        1940-12-11T06:55:00.0  07 34 41.9 -00 30 42.  366.3        370.2
+        1992-02-29T03:15:56.2  12 56 27.4 +42 10 17.  350.8        350.9
+        2000-03-01T10:26:31.8  14 28 36.7 -20 42 11.  243.7        243.7
+        2100-02-26T09:18:24.2  08 26 51.7 +85 47 28.  104.0        108.8
+
+        PROCEDURES CALLED:
+              bprecess, xyz, zparcheck
+
+        REVISION HISTORY:
+              Algorithm from the book Astronomical Photometry by Henden, p. 114
+              Written,   W. Landsman       STX     June, 1989
+              Make J2000 default equinox, add B1950, /TIME_DIFF keywords, compute
+              variation of the obliquity      W. Landsman   November 1999
     """
 
     # Because XYZ uses default B1950 coordinates, we'll convert everything to B1950
@@ -1027,75 +1047,77 @@ def helio_jd(date, ra, dec, b1950=False, time_diff=False):
 
 
 def baryvel(dje, deq=0):
-    """
-    NAME:
-          BARYVEL
-    PURPOSE:
-          Calculates heliocentric and barycentric velocity components of Earth.
+    """Calculate heliocentric and barycentric velocity components of Earth.
 
-    EXPLANATION:
-          BARYVEL takes into account the Earth-Moon motion, and is useful for
-          radial velocity work to an accuracy of  ~1 m/s.
+    IDL/legacy documentation::
 
-    CALLING SEQUENCE:
-          dvel_hel, dvel_bary = baryvel(dje, deq)
+        NAME:
+              BARYVEL
+        PURPOSE:
+              Calculates heliocentric and barycentric velocity components of Earth.
 
-    INPUTS:
-          DJE - (scalar) Julian ephemeris date.
-          DEQ - (scalar) epoch of mean equinox of dvelh and dvelb. If deq=0
-                  then deq is assumed to be equal to dje.
-    OUTPUTS:
-          DVELH: (vector(3)) heliocentric velocity component. in km/s
-          DVELB: (vector(3)) barycentric velocity component. in km/s
+        EXPLANATION:
+              BARYVEL takes into account the Earth-Moon motion, and is useful for
+              radial velocity work to an accuracy of  ~1 m/s.
 
-          The 3-vectors DVELH and DVELB are given in a right-handed coordinate
-          system with the +X axis toward the Vernal Equinox, and +Z axis
-          toward the celestial pole.
+        CALLING SEQUENCE:
+              dvel_hel, dvel_bary = baryvel(dje, deq)
 
-    OPTIONAL KEYWORD SET:
-          JPL - if /JPL set, then BARYVEL will call the procedure JPLEPHINTERP
-                to compute the Earth velocity using the full JPL ephemeris.
-                The JPL ephemeris FITS file JPLEPH.405 must exist in either the
-                current directory, or in the directory specified by the
-                environment variable ASTRO_DATA.   Alternatively, the JPL keyword
-                can be set to the full path and name of the ephemeris file.
-                A copy of the JPL ephemeris FITS file is available in
-                    http://idlastro.gsfc.nasa.gov/ftp/data/
-    PROCEDURES CALLED:
-          Function PREMAT() -- computes precession matrix
-          JPLEPHREAD, JPLEPHINTERP, TDB2TDT - if /JPL keyword is set
-    NOTES:
-          Algorithm taken from FORTRAN program of Stumpff (1980, A&A Suppl, 41,1)
-          Stumpf claimed an accuracy of 42 cm/s for the velocity.    A
-          comparison with the JPL FORTRAN planetary ephemeris program PLEPH
-          found agreement to within about 65 cm/s between 1986 and 1994
+        INPUTS:
+              DJE - (scalar) Julian ephemeris date.
+              DEQ - (scalar) epoch of mean equinox of dvelh and dvelb. If deq=0
+                      then deq is assumed to be equal to dje.
+        OUTPUTS:
+              DVELH: (vector(3)) heliocentric velocity component. in km/s
+              DVELB: (vector(3)) barycentric velocity component. in km/s
 
-          If /JPL is set (using JPLEPH.405 ephemeris file) then velocities are
-          given in the ICRS system; otherwise in the FK4 system.
-    EXAMPLE:
-          Compute the radial velocity of the Earth toward Altair on 15-Feb-1994
-             using both the original Stumpf algorithm and the JPL ephemeris
+              The 3-vectors DVELH and DVELB are given in a right-handed coordinate
+              system with the +X axis toward the Vernal Equinox, and +Z axis
+              toward the celestial pole.
 
-          IDL> jdcnv, 1994, 2, 15, 0, jd          ;==> JD = 2449398.5
-          IDL> baryvel, jd, 2000, vh, vb          ;Original algorithm
-                  ==> vh = [-17.07243, -22.81121, -9.889315]  ;Heliocentric km/s
-                  ==> vb = [-17.08083, -22.80471, -9.886582]  ;Barycentric km/s
-          IDL> baryvel, jd, 2000, vh, vb, /jpl   ;JPL ephemeris
-                  ==> vh = [-17.07236, -22.81126, -9.889419]  ;Heliocentric km/s
-                  ==> vb = [-17.08083, -22.80484, -9.886409]  ;Barycentric km/s
+        OPTIONAL KEYWORD SET:
+              JPL - if /JPL set, then BARYVEL will call the procedure JPLEPHINTERP
+                    to compute the Earth velocity using the full JPL ephemeris.
+                    The JPL ephemeris FITS file JPLEPH.405 must exist in either the
+                    current directory, or in the directory specified by the
+                    environment variable ASTRO_DATA.   Alternatively, the JPL keyword
+                    can be set to the full path and name of the ephemeris file.
+                    A copy of the JPL ephemeris FITS file is available in
+                        http://idlastro.gsfc.nasa.gov/ftp/data/
+        PROCEDURES CALLED:
+              Function PREMAT() -- computes precession matrix
+              JPLEPHREAD, JPLEPHINTERP, TDB2TDT - if /JPL keyword is set
+        NOTES:
+              Algorithm taken from FORTRAN program of Stumpff (1980, A&A Suppl, 41,1)
+              Stumpf claimed an accuracy of 42 cm/s for the velocity.    A
+              comparison with the JPL FORTRAN planetary ephemeris program PLEPH
+              found agreement to within about 65 cm/s between 1986 and 1994
 
-          IDL> ra = ten(19,50,46.77)*15/!RADEG    ;RA  in radians
-          IDL> dec = ten(08,52,3.5)/!RADEG        ;Dec in radians
-          IDL> v = vb[0]*np.cos(dec)*np.cos(ra) + $   ;Project velocity toward star
-                  vb[1]*np.cos(dec)*np.sin(ra) + vb[2]*np.sin(dec)
+              If /JPL is set (using JPLEPH.405 ephemeris file) then velocities are
+              given in the ICRS system; otherwise in the FK4 system.
+        EXAMPLE:
+              Compute the radial velocity of the Earth toward Altair on 15-Feb-1994
+                 using both the original Stumpf algorithm and the JPL ephemeris
 
-    REVISION HISTORY:
-          Jeff Valenti,  U.C. Berkeley    Translated BARVEL.FOR to IDL.
-          W. Landsman, Cleaned up program sent by Chris McCarthy (SfSU) June 1994
-          Converted to IDL V5.0   W. Landsman   September 1997
-          Added /JPL keyword  W. Landsman   July 2001
-          Documentation update W. Landsman Dec 2005
-          Converted to Python S. Koposov 2009-2010
+              IDL> jdcnv, 1994, 2, 15, 0, jd          ;==> JD = 2449398.5
+              IDL> baryvel, jd, 2000, vh, vb          ;Original algorithm
+                      ==> vh = [-17.07243, -22.81121, -9.889315]  ;Heliocentric km/s
+                      ==> vb = [-17.08083, -22.80471, -9.886582]  ;Barycentric km/s
+              IDL> baryvel, jd, 2000, vh, vb, /jpl   ;JPL ephemeris
+                      ==> vh = [-17.07236, -22.81126, -9.889419]  ;Heliocentric km/s
+                      ==> vb = [-17.08083, -22.80484, -9.886409]  ;Barycentric km/s
+
+              IDL> ra = ten(19,50,46.77)*15/!RADEG    ;RA  in radians
+              IDL> dec = ten(08,52,3.5)/!RADEG        ;Dec in radians
+              IDL> v = vb[0]*cos(dec)*cos(ra) + vb[1]*cos(dec)*sin(ra) + vb[2]*sin(dec)
+
+        REVISION HISTORY:
+              Jeff Valenti,  U.C. Berkeley    Translated BARVEL.FOR to IDL.
+              W. Landsman, Cleaned up program sent by Chris McCarthy (SfSU) June 1994
+              Converted to IDL V5.0   W. Landsman   September 1997
+              Added /JPL keyword  W. Landsman   July 2001
+              Documentation update W. Landsman Dec 2005
+              Converted to Python S. Koposov 2009-2010
     """
 
     # Define constants

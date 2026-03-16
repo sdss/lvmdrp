@@ -331,7 +331,7 @@ def interpolate_mask(x, y, mask, kind="linear", fill_value=0):
     :param x, y: numpy arrays, samples and values
     :param mask: boolean mask, True for masked values
     :param method: interpolation method, one of linear, nearest,
-    nearest-up, zero, slinear, quadratic, cubic, previous, or next.
+        nearest-up, zero, slinear, quadratic, cubic, previous, or next.
     :param fill_value: which value to use for filling up data outside the
         convex hull of known pixel values.
         Default is 0, Has no effect for 'nearest'.
@@ -962,17 +962,18 @@ class Image(Header):
         Changes the orientation of the Image. This is also applied to the error and mask images if present.
 
         Parameters
-        --------------
+        ----------
         orient : string
             Defines how the image should be oriented. Possible values are 'S','T','X','Y','90','180'', and 270'
             Their meaning are:
-                'S' : orientation is unchanged
-                'T' : the x and y axes are swapped
-                'X' : mirrored along the x axis
-                'Y' : mirrored along the y axis
-                '90' : rotated by 90 degrees
-                '180' : rotated by 180 degrees
-                '270' : rotated by 270 degrees
+
+            - 'S' : orientation is unchanged
+            - 'T' : the x and y axes are swapped
+            - 'X' : mirrored along the x axis
+            - 'Y' : mirrored along the y axis
+            - '90' : rotated by 90 degrees
+            - '180' : rotated by 180 degrees
+            - '270' : rotated by 270 degrees
         """
         if orient == "S":
             pass  # no change of orietnation
@@ -3364,7 +3365,7 @@ class Image(Header):
             be subtracted if necessary but default is 0.0.
 
                 Parameters
-                --------------
+                ----------
                 data: ndarray
                         Two-dimensional array representing the input image in which cosmic rays are detected.
                 sigma_det: float, default: 5.0
@@ -3397,14 +3398,14 @@ class Image(Header):
                         a new Image instance with the modified data. In the latter case the mask and error
                         extensions ONLY contain the cosmic-related pixels.
 
-                Ouput
-                -------------
+                Output
+                ------
                 out: Image class instance
                     Result of the detection process is an Image which contains .data, .error, .mask as attributes for the
                     cleaned image, the internally computed error image and a mask image with flags for cosmic ray pixels.
 
                 Reference
-                --------------
+                ---------
                 Husemann et al. 2012, A&A, Volume 545, A137 (https://ui.adsabs.harvard.edu/abs/2012A%26A...545A.137)
 
         """

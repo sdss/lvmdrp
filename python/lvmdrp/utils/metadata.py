@@ -1011,7 +1011,7 @@ def get_calibrations_metadata(mjds, calibration, camera=None, expnums=None, expt
     metadata for the given sequence. This routine will return the frames
     metadata for the given MJDs and the MJD for the master frames.
 
-    Parameters:
+    Parameters
     ----------
     mjds : int|list[int]
         Single MJD or a list of MJDs
@@ -1026,7 +1026,7 @@ def get_calibrations_metadata(mjds, calibration, camera=None, expnums=None, expt
     extract_metadata : bool
         Whether to extract metadata or not, by default False
 
-    Returns:
+    Returns
     -------
     frames : pd.DataFrame
         Frames metadata
@@ -1110,9 +1110,11 @@ def get_analog_groups(
 
     the given metadata dataframe is grouped in analog frames using
     the following criteria:
-        * mjd
-        * imagetyp
-        * camera
+
+    * mjd
+    * imagetyp
+    * camera
+
     Optionally, these criteria can be expanded using the `include_fields`.
     The final critaria will always include the above mentioned fields.
 
