@@ -1560,7 +1560,7 @@ def subtract_straylight(
     select_nrows: int = 20,
     margin: int = 7,
     x_bins: int = 70,
-    nsigma: float = 5.0,
+    nsigma: float = 3.0,
     clip: Tuple[float,float]|None = (0.0, None),
     median_box: int|None = None,
     display_plots: bool = False,
@@ -1634,7 +1634,7 @@ def subtract_straylight(
 
     log.info(f"fitting straylight model with parameters: {clip = }")
     fig, axs = create_straylight_axes(img_median, len(strips))
-    img_stray = img_median.fit_straylight(samples, strips, X, Y, clip=clip, axs=axs)
+    img_stray = img_median.fit_straylight(samples, strips, X, Y, smoothing=1.0, clip=clip, axs=axs)
 
     # subtract smoothed background signal from original image
     log.info("subtracting the smoothed background signal from the original image")

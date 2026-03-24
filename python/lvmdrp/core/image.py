@@ -14,7 +14,7 @@ import pandas as pd
 from astropy.table import Table
 from astropy.io import fits as pyfits
 from astropy.modeling import fitting, models
-from astropy.stats.biweight import biweight_location, biweight_scale
+from astropy.stats import biweight_location, biweight_scale, sigma_clip
 from astropy.visualization import simple_norm
 from scipy import ndimage
 from scipy import interpolate
@@ -2103,23 +2103,24 @@ class Image(Header):
 
                 xs.append(x_centers[ibin])
                 ys.append(numpy.mean(Y[:, cols][sel][valid]))
-                zs.append(bn.nanmedian(values[valid]))
-                es.append(numpy.sqrt(bn.nanmedian(vars[valid])))
+                zs.append(biweight_location(values[valid], ignore_nan=True))
+                es.append(numpy.sqrt(biweight_location(vars[valid], ignore_nan=True)))
 
-            if xs:
-                samples.append(
-                    dict(
-                        strip_id=k,
-                        x=numpy.array(xs),
-                        y=numpy.array(ys),
-                        z=numpy.array(zs),
-                        e=numpy.array(es)
-                    )
-                )
+            xs = numpy.asarray(xs)
+            ys = numpy.asarray(ys)
+            zs = numpy.asarray(zs)
+            es = numpy.asarray(es)
+            bad = sigma_clip(zs, sigma=nsigma, maxiters=2).mask
+
+            zs[bad] = numpy.interp(xs[bad], xs[~bad], zs[~bad])
+            es[bad] = numpy.interp(xs[bad], xs[~bad], es[~bad])
+
+            if len(xs) > 0:
+                samples.append(dict(strip_id=k, x=xs, y=ys, z=zs, e=es))
 
         return samples, strips, X, Y
 
-    def fit_straylight(self, samples, strips, X, Y, clip=None, axs=None):
+    def fit_straylight(self, samples, strips, X, Y, smoothing, clip=None, axs=None):
 
         x_pixels = X[0]
         y_pixels = Y[:, 0]
@@ -2127,13 +2128,22 @@ class Image(Header):
         x_all = numpy.concatenate([s["x"] for s in samples])
         y_all = numpy.concatenate([s["y"] for s in samples])
         z_all = numpy.concatenate([s["z"] for s in samples])
+        # e_all = numpy.concatenate([s["e"] for s in samples])
         y_cent = numpy.mean([s["y"] for s in samples], axis=1)
         y_nbins = y_cent.size
 
-        model = interpolate.CloughTocher2DInterpolator(numpy.column_stack((x_all, y_all)), z_all)
+        select = ~sigma_clip(z_all, sigma=3, maxiters=3).mask
+
+        # model = interpolate.CloughTocher2DInterpolator(numpy.column_stack((x_all, y_all)), z_all)
+        model = interpolate.RBFInterpolator(numpy.column_stack((x_all[select], y_all[select])), z_all[select], smoothing=smoothing)
+        # w = numpy.divide(1, numpy.sqrt(e_all), where=e_all>0, out=numpy.zeros_like(e_all))
+        # model = interpolate.SmoothBivariateSpline(x_all, y_all, z_all, w=w, bbox=[0, 4086, 0, 4080], kx=3, ky=2, s=smoothing)
 
         # evaluate model
-        model_data = model(X, Y)
+        # model_data = model(X, Y)
+        model_data = model(numpy.column_stack((X.ravel(), Y.ravel()))).reshape(self._dim)
+        # model_data = model(X, Y, grid=False)
+
         # extrapolate empty rows
         good = numpy.isfinite(model_data).all(axis=1)
         idx = numpy.where(good)[0]
