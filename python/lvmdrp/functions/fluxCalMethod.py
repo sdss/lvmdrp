@@ -10,6 +10,7 @@
 import os
 import time
 import warnings
+import requests
 # from os import listdir
 # from os.path import isfile, join
 import numpy as np
@@ -1118,8 +1119,7 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
                 job = Gaia.launch_job(f"SELECT teff_gspspec, logg_gspspec, mh_gspspec FROM gaiadr3.astrophysical_parameters WHERE source_id = {gaia_ids[i]} ")
                 r = job.get_results()
                 teff, logg, z = r['teff_gspspec'][0], r['logg_gspspec'][0], r['mh_gspspec'][0]
-
-        except fluxcal.GaiaStarNotFound as e:
+        except (fluxcal.GaiaStarNotFound, requests.exceptions.HTTPError) as e:
             stdflux = np.full_like(std_wave_all, np.nan)
             teff, logg, z = np.nan, np.nan, np.nan
             model_to_gaia_median.append(np.nan)
