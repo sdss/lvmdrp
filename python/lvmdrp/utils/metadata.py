@@ -1577,6 +1577,9 @@ def _collect_header_data(filename: str) -> dict:
                         'std_mean_senb': 'STDSENMB', 'std_mean_senr': 'STDSENMR', 'std_mean_senz': 'STDSENMZ',
                         'sci_mean_senb': 'SCISENMB', 'sci_mean_senr': 'SCISENMR', 'sci_mean_senz': 'SCISENMZ',
                         'mod_mean_senb': 'MODSENMB', 'mod_mean_senr': 'MODSENMR', 'mod_mean_senz': 'MODSENMZ',
+                        'std_rms_senb': 'STDSENRB', 'std_rms_senr': 'STDSENRR', 'std_rms_senz': 'STDSENRZ',
+                        'sci_rms_senb': 'SCISENRB', 'sci_rms_senr': 'SCISENRR', 'sci_rms_senz': 'SCISENRZ',
+                        'mod_rms_senb': 'MODSENRB', 'mod_rms_senr': 'MODSENRR', 'mod_rms_senz': 'MODSENRZ',
                         'fluxcal': 'FLUXCAL',
                         # sci
                         'sci_ra': 'SCIRA', 'sci_dec': 'SCIDEC',
