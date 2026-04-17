@@ -111,7 +111,7 @@ def create_masters(flavor: str, frames: pd.DataFrame):
 
     Create the master calibration frames for a given flavor
     or imagetyp.  These files live in the "calib" subdirectory
-    with the "lvm-m(flavor)-*" prefix.
+    with the ``lvm-m(flavor)-*`` prefix.
 
     Parameters
     ----------
@@ -1364,7 +1364,7 @@ def reduce_2d(mjds, calibrations, expnums=None, exptime=None, cameras=CAMERAS,
     straylight-subtracted frames in the corresponding calibration directory in
     the `masters_mjd` or by default in the smallest MJD in `mjds`.
 
-    Parameters:
+    Parameters
     ----------
     mjds : int|list[int]
         Single MJD or a list of MJDs
@@ -1461,14 +1461,10 @@ def reduce_2d(mjds, calibrations, expnums=None, exptime=None, cameras=CAMERAS,
             # subtract straylight
             if sub_straylight:
                 with Timer(name='Straylight '+lframe_path, logger=log.info):
-                    straylight_pars = dict(
-                        select_nrows=(0,0), use_weights=True, aperture=11,
-                        x_bins=20, x_bounds=(None,None), y_bounds=(None,None),
-                        x_nbound=20, y_nbound=5, clip=(0.0,None),
-                        nsigma=1.0, smoothing=40, median_box=None)
+                    straylight_pars = dict(x_bins=20)
                     straylight_pars.update(cfg_straylight)
                     subtract_straylight(in_image=dframe_path, out_image=lframe_path, out_stray=lstr_path,
-                                        in_cent_trace=calibrations.get("centroids", {}).get(camera), parallel=parallel_run, **straylight_pars)
+                                        in_cent_trace=calibrations.get("centroids", {}).get(camera), **straylight_pars)
 
 
 def reduce_1d(mjd, calibrations, expnums=None, cameras=CAMERAS, replace_with_nan=True, sub_straylight=True, skip_done=True, keep_ancillary=False):
@@ -2018,6 +2014,10 @@ def create_drpall(drp_version: str = None, overwrite: bool = False) -> None:
             continue
 
     log.info(f"finished summarizing {nframes-nfailed} lvmSFrames in {drpall_h5}")
+    if nfailed == nframes:
+        log.error("all attempted frames failed:")
+        log.error(f"{failed = }")
+        return
     if nfailed != 0:
         log.warning(f"with {nfailed} failed frames:")
         log.warning(f"{failed = }")

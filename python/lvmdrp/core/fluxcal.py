@@ -35,6 +35,8 @@ from lvmdrp.utils.paths import get_calib_paths
 from lvmdrp.core.spectrum1d import Spectrum1D, convolution_matrix
 from lvmdrp.core.rss import RSS
 
+from scipy.sparse import csr_matrix
+
 
 def get_mean_sens_curves(sens_dir):
     return {'b':pd.read_csv(f'{sens_dir}/mean-sens-b.csv', names=['wavelength', 'sens']),
@@ -65,8 +67,9 @@ def retrieve_header_stars(rss):
             c = SkyCoord(float(h[stdi + "RA"]), float(h[stdi + "DE"]), unit="deg")
             stdT = c.transform_to(AltAz(obstime=obstime, location=lco))
             secz = stdT.secz.value
+            zenith_angle = 90 - stdT.alt.value
             # print(gid, fib, et, secz)
-            stddata.append((i + 1, fiber, gaia_id, exptime, secz))
+            stddata.append((i + 1, fiber, gaia_id, exptime, secz, zenith_angle))
     return stddata
 
 
@@ -404,6 +407,102 @@ def lsf_convolve(data, diff_fwhm, wave_lsf_interp):
     return new_data
 
 
+def lsf_convolve_fast(data, diff_fwhm, waves=None, n_sigma=4, edges_reflect=True):
+    """
+    Degrade spectrum resolution using sparse matrix convolution (~40x faster than lsf_convolve).
+
+    Parameters
+    ----------
+    data : np.ndarray
+        Input flux array
+    diff_fwhm : np.ndarray
+        FWHM array for each pixel (same length as data); in pixels, or in wavelength units if waves provided
+    waves : np.ndarray, optional
+        Wavelength array; if provided, converts diff_fwhm from wavelength units to pixels
+    n_sigma : int, optional
+        Kernel size in units of sigma
+    edges_reflect : bool, optional
+        If True, reflect edges to avoid edge effects in convolution
+
+    Returns
+    -------
+    np.ndarray
+        Convolved flux array
+    """
+    # convert FWHM from wavelength units to pixels if wavelength array provided
+    if waves is not None:
+        # this calculates the sizes of pixels in wavelength units, can be used for irregular grids
+        delta_wave = np.diff(edges_from_centers(waves))
+        sigmas = (diff_fwhm / delta_wave) / 2.3548 # 2*np.sqrt(2*np.log(2))
+    else:
+        sigmas = diff_fwhm / 2.3548
+
+    # determine kernel size based on maximum sigma (nsigma-sigma coverage)
+    max_sigma = np.max(sigmas)
+    npix_half = int(np.ceil(n_sigma * max_sigma))
+    npix = 2 * npix_half + 1  # full size of the kernel
+
+    # handle edge reflection to avoid edge effects
+    if edges_reflect:
+        # get kernel sizes at edges
+        npix_half_left = int(np.ceil(n_sigma * sigmas[0]))
+        npix_half_right = int(np.ceil(n_sigma * sigmas[-1]))
+
+        # reflect edges
+        data_extended = np.concatenate([
+            data[npix_half_left:0:-1],  # left reflection (reversed)
+            data,
+            data[-2:-npix_half_right-2:-1]  # right reflection (reversed)
+        ])
+
+        # extend sigmas array using edge values
+        sigmas_extended = np.concatenate([
+            np.full(npix_half_left, sigmas[0]),
+            sigmas,
+            np.full(npix_half_right, sigmas[-1])
+        ])
+
+        offset = npix_half_left
+    else:
+        data_extended = data
+        sigmas_extended = sigmas
+        offset = 0
+
+    # create pixel grid for kernel
+    x_px = np.arange(-npix_half, npix_half + 1, dtype=float)
+
+    # compute Gaussian kernels for all pixels using broadcasting
+    # shape: (n_pixels, npix)
+    yy = x_px[None, :] / sigmas_extended[:, None]
+
+    kernels = np.exp(-0.5 * yy**2)
+    # normalize kernels numerically
+    kernels = kernels / kernels.sum(axis=1, keepdims=True)
+
+    # build sparse matrix indices
+    x_size = data_extended.size
+    rows2d = np.broadcast_to(np.arange(x_size)[:, None], (x_size, npix))
+    cols2d = rows2d + x_px.astype(int)
+
+    # clip columns to valid range [0, x_size)
+    valid_mask = (cols2d >= 0) & (cols2d < x_size)
+    rows_flat = rows2d[valid_mask]
+    cols_flat = cols2d[valid_mask]
+    data_flat = kernels[valid_mask]
+
+    # construct sparse convolution matrix
+    matrix_csr = csr_matrix((data_flat, (rows_flat, cols_flat)), shape=(x_size, x_size))
+
+    # apply convolution
+    new_data = matrix_csr @ data_extended
+
+    # remove reflected edges if they were added
+    if edges_reflect:
+        new_data = new_data[offset:offset + data.size]
+
+    return new_data
+
+
 def get_worst_resolution(delta_fwhm=1.0):
     """Get worst possible resolution + delta_fwhm from available LVM long-term calibrations
     """
@@ -657,3 +756,149 @@ def galExtinct(wave, Rv):
     Arat = (ax + (bx / Rv)).astype(np.float32)
     spec = Spectrum1D(wave=wave, data=Arat)
     return spec
+
+
+def edges_from_centers(centers):
+    """
+    Ancillary function for fluxconserve_rebin to calculate bin edges from bin centers.
+    """
+    centers = np.asarray(centers, dtype=float)
+    edges = np.empty(centers.size + 1, dtype=float)
+    edges[1:-1] = 0.5*(centers[1:] + centers[:-1])
+    edges[0]  = centers[0]  - 0.5*(centers[1] - centers[0])
+    edges[-1] = centers[-1] + 0.5*(centers[-1] - centers[-2])
+    return edges
+
+
+def fluxconserve_rebin(output_wave, input_wave, input_flux, normalize=True):
+    """
+    Flux-conserving rebin using linear inteprolation of the commulative function.
+    Preserves input data type while performing calculations in float64.
+    Returns np.nan if output_wave is outside the range of input_wave.
+    """
+    # Store original dtype
+    original_dtype = input_flux.dtype
+
+    # Convert to float64 for calculations
+    input_flux_f64 = input_flux.astype(np.float64)
+
+    edges_out = edges_from_centers(output_wave)
+    edges_in = edges_from_centers(input_wave)
+    cdf_in = np.r_[0.0, np.cumsum(input_flux_f64, dtype=np.float64)]
+    cdf_out = np.interp(edges_out, edges_in, cdf_in)
+
+    if normalize:
+        # in this case output spectrum will be on the same level of the input
+        x_edges_in = np.arange(len(edges_in))
+        x_edges_out = np.interp(edges_out, edges_in, x_edges_in, left=np.nan, right=np.nan)
+        norm_factors = np.diff(x_edges_out)
+    else:
+        # spectrum level will be higer because of integration over pixels
+        norm_factors = np.diff(edges_out)
+
+    output = np.diff(cdf_out) / norm_factors
+
+    # Convert back to original dtype
+    return output.astype(original_dtype)
+
+
+def rebin_and_convolve(wave_target, wave_source, flux_source, lsf, lsf_in_wavelength=False):
+    """
+    Rebin and convolve spectrum to target wavelength grid.
+    """
+    rebinned = fluxconserve_rebin(wave_target, wave_source, flux_source)
+    if lsf_in_wavelength:
+        convolved = lsf_convolve_fast(rebinned, lsf, waves=wave_target)
+    else:
+        convolved = lsf_convolve_fast(rebinned, lsf)
+    return convolved
+
+
+class TelluricCalculator:
+    """
+    Handles telluric transmission calculations using a precomputed high resolution
+    transmission curve generated with the Palace and SkyModel models.
+
+    Encapsulates the sky model data and provides methods to compute atmospheric
+    transmission as a function of precipitable water vapor (PWV) and zenith angle.
+    """
+
+    def __init__(self, skymodel_path=None):
+        """
+        Initialize TelluricCalculator by loading the Palace Sky Model.
+
+        Parameters
+        ----------
+        skymodel_path : str, optional
+            Full path to the SkyModel transmission FITS table.
+            If None, uses default: MASTERS_DIR/stellar_models/lvm-model_transmission_Palace_SkyModel_step0.2-all.fits
+        """
+        self._load_sky_model(skymodel_path)
+
+    def _load_sky_model(self, skymodel_path=None):
+        """Load the Palace Sky Model transmission table."""
+        if skymodel_path is None:
+            model_path = os.path.join(MASTERS_DIR, 'stellar_models', 'lvm-model_transmission_Palace_SkyModel_step0.2-all.fits')
+        else:
+            model_path = skymodel_path
+
+        log.info(f"Loading telluric transmission model from '{model_path}'")
+
+        skytab = fits.getdata(model_path)
+        # Store full model data
+        self._wave_air_full = skytab['wave_air']
+        self._trans_ma_full = skytab['trans_ma']
+        self._fH2O_full = skytab['fH2O']
+
+        # Initialize working arrays to full model
+        self.wave_air = self._wave_air_full
+        self.trans_ma = self._trans_ma_full
+        self.fH2O = self._fH2O_full
+        self._wave_range_set = False
+
+    def set_wave_range(self, wave_min, wave_max):
+        """
+        Set working wavelength range to improve computational efficiency.
+        """
+        mask = (self._wave_air_full >= wave_min) & (self._wave_air_full <= wave_max)
+        self.wave_air = self._wave_air_full[mask]
+        self.trans_ma = self._trans_ma_full[mask]
+        self.fH2O = self._fH2O_full[mask]
+        self._wave_range_set = True
+
+    def reset_wave_range(self):
+        """Reset wavelength range to full model coverage."""
+        self.wave_air = self._wave_air_full
+        self.trans_ma = self._trans_ma_full
+        self.fH2O = self._fH2O_full
+        self._wave_range_set = False
+
+    def calc_transmission(self, pwv, zenith_angle=None, airmass=None):
+        """
+        Calculate atmospheric transmission for given PWV and zenith angle or airmass.
+
+        According to formulae 4 and 5 from Noll et al. 2025
+        PALACE v1.0: Paranal Airglow Line And Continuum Emission model
+        """
+        if zenith_angle is None and airmass is None:
+            raise ValueError("Either zenith_angle or airmass must be provided")
+
+        if airmass is None:
+            cosz = np.cos(np.deg2rad(zenith_angle))
+            airmass = 1.0 / (cosz + 0.025 * np.exp(-11.0 * cosz))
+
+        rpwv = pwv / 2.5 - 1
+        return np.power(self.trans_ma, (1.0 + rpwv * self.fH2O) * airmass)
+
+    def match_to_data(self, wave_target, lsf, pwv, zenith_angle=None, airmass=None, lsf_in_wavelength=False):
+        """
+        Calculate telluric transmission and match to observed data wavelength grid,
+        including rebinning and convolution with LSF.
+        """
+        # Calculate transmission at high resolution model grid
+        trans_hr = self.calc_transmission(pwv, zenith_angle=zenith_angle, airmass=airmass)
+
+        # Rebin and convolve to target wavelength grid
+        trans_rebinned = rebin_and_convolve(wave_target, self.wave_air, trans_hr, lsf, lsf_in_wavelength=lsf_in_wavelength)
+
+        return trans_rebinned

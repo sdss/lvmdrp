@@ -13,8 +13,8 @@
 # serve to show the default.
 
 import sphinx_bootstrap_theme
-from drp import __version__
-from pkg_resources import parse_version
+from lvmdrp import __version__
+from packaging.version import parse as parse_version
 
 
 # Importing matplotlib here with agg to prevent tkinter error in readthedocs
@@ -80,7 +80,7 @@ release = __version__
 #
 # This is also used if you do content translation via gettext catalogs.
 # Usually you set "language" from the command line for these cases.
-language = None
+language = 'en'
 
 # List of patterns, relative to source directory, that match files and
 # directories to ignore when looking for source files.
@@ -121,7 +121,7 @@ intersphinx_mapping = {
     "numpy": ("http://docs.scipy.org/doc/numpy/", None),
 }
 
-autodoc_mock_imports = ["_tkinter"]
+autodoc_mock_imports = ["_tkinter", "tkinter"]
 autodoc_member_order = "groupwise"
 
 napoleon_use_rtype = False

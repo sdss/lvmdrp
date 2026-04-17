@@ -35,7 +35,7 @@ from itertools import product
 from pprint import pformat
 from copy import deepcopy as copy
 from datetime import datetime
-from shutil import copy2, copytree, rmtree
+from shutil import copy2, copytree
 from astropy.io import fits
 from astropy.table import Table
 from typing import Union, Tuple, List, Dict
@@ -98,12 +98,6 @@ FIBER_SMOOTHING_CONFIG = {
 
 
 CALIBRATION_EPOCHS_PATH = os.path.join(os.getenv("LVMCORE_DIR"), "calibrations", "calibration-epochs.yaml")
-
-STRAYLIGHT_PARS = dict(
-    select_nrows=(10,10), use_weights=True, aperture=11,
-    x_bins=60, x_bounds=("data","data"), y_bounds=(0.0,0.0),
-    x_nbound=10, y_nbound=5, clip=(0.0,None),
-    nsigma=1.0, smoothing=90, median_box=11)
 
 
 def _reject_pixelshifted(frames, pixelshifts_path=PIXELSHIFTS_PATH):
@@ -527,6 +521,42 @@ def create_qaqual_bad_hdrfix(mjd, expnums):
         hdrfix.write_hdrfix_file(mjd=mjd, fileroot=f"sdR-*-*-{expnum:>08d}", keyword="QAQUAL", value="BAD")
 
 
+def create_lamps_on_hdrfix(mjd, lamps_on, expnum):
+    """Creates header fixes for lamps status in calibration frames
+
+    Parameters
+    ----------
+    mjd : int
+        MJD of the night to analyse
+    lamps_on : list_like
+        A list of valid (case-insensitive) lamp names, for which status will be set to 'ON'. Lamps not listed will be set to 'OFF'
+    expnum : int
+        Exposure number to create header fix for
+
+    Raises
+    ------
+    ValueError
+        If all values in `lamps_on` are invalid names of lamps
+    """
+
+    lamps_all = CON_LAMPS + ARC_LAMPS
+    lamps_status = dict.fromkeys(lamps_all, "OFF")
+    lamps_ = set(lamps_all).intersection(map(str.upper, lamps_on))
+    if not lamps_:
+        raise ValueError(f"Invalid value(s) in `lamps_on`: {lamps_on}. Expected a subset of {lamps_all}")
+    lamps_status.update(dict.fromkeys(lamps_, "ON"))
+
+    frames = [md.get_calibrations_metadata(mjds=mjd, expnums=[expnum], calibration=calibration) for calibration in CALIBRATION_TYPES]
+    frames = pd.concat(frames, ignore_index=True)
+    if frames.empty:
+        log.info(f"no need to apply header fixes for lamps status on MJD = {mjd}, {expnum = }")
+        return
+    log.info(f"going to write header fixes for lamps status on MJD = {mjd}, {expnum = }: {lamps_on = }")
+
+    for lamp, status in lamps_status.items():
+        hdrfix.write_hdrfix_file(mjd=mjd, fileroot=f"sdR-*-*-{expnum:>08d}", keyword=lamp, value=status)
+
+
 def _parse_list(items_str):
     # handle list
     if isinstance(items_str, str) and "," in items_str:
@@ -577,42 +607,6 @@ def get_calibration_epoch(mjd, flavors=None, trigger=None, comment=None):
 
     calibs_mjds = {flavor: _parse_list(source_mjd) for flavor, source_mjd in flavors.items()}
     return calibs_mjds
-
-
-def _clean_ancillary(mjd, expnums=None, flavors="all"):
-    """Clean ancillary files
-
-    Given a set of MJDs and (optionally) exposure numbers, clean the ancillary
-    files for the given flavor of frames. This routine will remove the ancillary
-    files for the given flavor of frames in the corresponding calibration
-    directory in the `masters_mjd` or by default in the smallest MJD in `mjds`.
-
-    Parameters:
-    ----------
-    mjd : int
-        MJD to clean
-    expnums : list
-        List of exposure numbers to clean
-    flavors : list, tuple, set or str
-        type of, defaults to "all"
-    """
-    # filter by target image types
-    all_flavors = {"bias", "dark", "flat", "arc", "cent", "amp", "width", "stray"}
-    if not set(flavors).issubset(flavors):
-        raise ValueError(f"Invalid flavor: '{flavors}'. Must be one of {all_flavors} or 'all'")
-
-    ancillary_dir = os.path.join(os.getenv("LVM_SPECTRO_REDUX"), drpver, "0011XX", "11111", str(mjd), "ancillary")
-    if flavors == "all":
-        rmtree(ancillary_dir)
-        return
-
-    for flavor in flavors:
-        # remove ancillary files
-        ancillary_paths = path.expand("lvm_anc", drpver=drpver, mjd=mjd, tileid=11111, kind='*', imagetype=flavor, camera="*", expnum="*")
-        [os.remove(ancillary_path) for ancillary_path in ancillary_paths]
-
-    if not os.listdir(ancillary_dir):
-        os.rmdir(ancillary_dir)
 
 
 def _link_pixelmasks():
@@ -925,7 +919,7 @@ def tag_longterm_calibrations(mjd, version, flavors=None, dry_run=False):
     flavors : str, optional
         Types of calibration (e.g., wave, bias), by default None (all calibrations)
     dry_run : bool, optional
-        log information about source and
+        Logs useful information abaut the current setup without actually tagging, by default False
     """
     # handle possible acceptable flavors
     if isinstance(flavors, (list, tuple, set, np.ndarray)):
@@ -1399,7 +1393,7 @@ def create_nightly_traces(mjd, use_longterm_cals=False, expnums_ldls=None, expnu
                 log.info(f"skipping {lflat_path}, file already exist")
             else:
                 image_tasks.subtract_straylight(in_image=cflat_path, out_image=lflat_path, out_stray=dstray_path,
-                                                in_cent_trace=cent_guess_path, parallel=1, **STRAYLIGHT_PARS)
+                                                in_cent_trace=cent_guess_path)
 
             if skip_done and os.path.isfile(flux_path) and os.path.isfile(cent_path) and os.path.isfile(fwhm_path):
                 log.info(f"skipping {flux_path}, {cent_path} and {fwhm_path}, files already exist")
@@ -1546,7 +1540,7 @@ def create_traces(mjd, epochs=None, cameras=CAMERAS, ring="primary",
                 log.info(f"skipping {lflat_path}, file already exist")
             else:
                 image_tasks.subtract_straylight(in_image=dflat_path, out_image=lflat_path, out_stray=dstray_path,
-                                                in_cent_trace=guess_paths["centroids"], parallel=1, **STRAYLIGHT_PARS)
+                                                in_cent_trace=guess_paths["centroids"])
 
             log.info(f"going to trace std fiber {std_fiberid} in {camera} within {block_idxs = }")
             fitted_params, img, model, _ = image_tasks.fit_fibers_params(in_image=lflat_path, in_fiber_guess=guess_paths, coadd=20,
@@ -1749,8 +1743,9 @@ def create_twilight_fiberflats(mjd: int, epochs: dict[int, dict] = None, cals_mj
         return
 
     # 2D reduction of twilight sequence
-    reduce_2d(mjds=mjds, calibrations=calibs, expnums=expnums, reject_cr=True,
-              add_astro=False, sub_straylight=True, skip_done=skip_done, **STRAYLIGHT_PARS)
+    reduce_2d(mjds=mjds, calibrations=calibs, expnums=expnums,
+              reject_cr=True, add_astro=False, sub_straylight=True,
+              skip_done=skip_done, **{"x_bins": 70})
 
     for flat in frames.to_dict("records"):
         camera = flat["camera"]
