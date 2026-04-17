@@ -42,6 +42,7 @@ from lvmdrp.utils.metadata import (get_frames_metadata, update_metadata, get_mas
 from lvmdrp.utils.convert import tileid_grp
 from lvmdrp.utils.paths import get_master_mjd, mjd_from_expnum, get_calib_paths, group_calib_paths
 from lvmdrp.utils.timer import Timer
+from lvmdrp.utils.ignores import is_excluded
 
 from lvmdrp import config, log, path, __version__ as drpver
 
@@ -1871,7 +1872,13 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
 
     # generate the MJD metadata
     frames = get_frames_metadata(mjd=mjd)
-    sub = frames.copy()
+    # sub = frames.copy()
+
+    # skip this reduction if the MJD is in a list of excluded (bad, engineering, tests...) MJDs
+    sub, excluded = is_excluded(frames)
+    if excluded is not None:
+        log.info(f"{excluded.target} = {excluded.value} was excluded from regular reductions due to {excluded.reason}, skipping ...")
+        return
 
     # remove bad or test quality frames
     if force_run and (sub.qaqual == "BAD").all():
