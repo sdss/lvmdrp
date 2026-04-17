@@ -45,7 +45,7 @@ import matplotlib.pyplot as plt
 
 from lvmdrp import log, path, __version__ as drpver
 from lvmdrp.utils import metadata as md
-from lvmdrp.utils import hdrfix
+from lvmdrp.utils import hdrfix, parse_list
 from lvmdrp.utils.convert import tileid_grp
 from lvmdrp.utils.paths import get_calib_paths, group_calib_paths, get_frames_paths
 from lvmdrp.utils import pixshifts
@@ -557,24 +557,6 @@ def create_lamps_on_hdrfix(mjd, lamps_on, expnum):
         hdrfix.write_hdrfix_file(mjd=mjd, fileroot=f"sdR-*-*-{expnum:>08d}", keyword=lamp, value=status)
 
 
-def _parse_list(items_str):
-    # handle list
-    if isinstance(items_str, str) and "," in items_str:
-        items = [int(i) for i in items_str.split(",") if i]
-    # handle range
-    elif isinstance(items_str, str) and "-" in items_str:
-        item_i, item_f = items_str.split("-")
-        if not item_i or not item_f:
-            items = []
-        else:
-            items = list(range(int(item_i), int(item_f)+1))
-    # handle rest
-    else:
-        items = [int(items_str)]
-
-    return items
-
-
 def load_calibration_epochs(epochs_path=None, filter_by=None, verbose=True):
     epochs_path = epochs_path or CALIBRATION_EPOCHS_PATH
     if not os.path.exists(epochs_path):
@@ -603,9 +585,9 @@ def load_calibration_epochs(epochs_path=None, filter_by=None, verbose=True):
 
 def get_calibration_epoch(mjd, flavors=None, trigger=None, comment=None):
     if flavors is None:
-        return {flavor: _parse_list(mjd) for flavor in CALIBRATION_TYPES}
+        return {flavor: parse_list(mjd) for flavor in CALIBRATION_TYPES}
 
-    calibs_mjds = {flavor: _parse_list(source_mjd) for flavor, source_mjd in flavors.items()}
+    calibs_mjds = {flavor: parse_list(source_mjd) for flavor, source_mjd in flavors.items()}
     return calibs_mjds
 
 
