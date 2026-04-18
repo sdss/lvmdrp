@@ -39,10 +39,10 @@ from lvmdrp.functions.fluxCalMethod import fluxcal_standard_stars, fluxcal_sci_i
 from lvmdrp.utils.metadata import (get_frames_metadata, update_metadata, get_master_metadata, extract_metadata,
                                    get_analog_groups, match_master_metadata, create_master_path,
                                    update_summary_file, convert_h5_to_fits)
+from lvmdrp.utils.excludes import load_excludes, remove_excluded_frames
 from lvmdrp.utils.convert import tileid_grp
 from lvmdrp.utils.paths import get_master_mjd, mjd_from_expnum, get_calib_paths, group_calib_paths
 from lvmdrp.utils.timer import Timer
-from lvmdrp.utils.ignores import is_excluded
 
 from lvmdrp import config, log, path, __version__ as drpver
 
@@ -1855,25 +1855,26 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
         log.warning(f'{mjd = } is not valid raw data directory.')
         return
 
-    # skip this reduction if the MJD is in a list of excluded (bad, engineering...) MJDs
-    exclude_file = os.getenv('LVMCORE_DIR') + '/etc/exclude_mjds.txt'
-    with open(exclude_file) as exclude_mjd_file:
-        exclude = [tuple(map(int, line.split(','))) for line in exclude_mjd_file]
-    if any([m[0] <= mjd <= m[1] for m in exclude]):
-        log.info(f"MJD {mjd} falls within excluded period in {exclude_file}, skipping ...")
-        return
-
     # update metadata if there are new paths to cache
     update_metadata(mjd=mjd)
 
     # generate the MJD metadata
     frames = get_frames_metadata(mjd=mjd)
-    # sub = frames.copy()
+    sub = frames.copy()
 
-    # skip this reduction if the MJD is in a list of excluded (bad, engineering, tests...) MJDs
-    sub, excluded = is_excluded(frames)
-    if excluded is not None:
-        log.info(f"{excluded.target} = {excluded.value} was excluded from regular reductions due to {excluded.reason}, skipping ...")
+    # filter on exposure number
+    if expnum:
+        log.info(f'Filtering on exposure number {expnum}.')
+        sub = filter_expnum(sub, expnum)
+        if sub.empty:
+            log.error(f"exposure {expnum = } not found in metadata for MJD = {mjd}")
+            return
+
+    # remove excluded exposures
+    excludes = load_excludes()
+    sub = remove_excluded_frames(sub, excludes)
+    if sub.empty:
+        log.error(f"no frames found for MJD {mjd} after removing excluded exposures")
         return
 
     # remove bad or test quality frames
@@ -1891,14 +1892,6 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
             return
         if sub.empty:
             log.error(f"exposure {expnum = } was flagged as 'BAD' by the raw data quality pipeline")
-            return
-
-    # filter on exposure number
-    if expnum:
-        log.info(f'Filtering on exposure number {expnum}.')
-        sub = filter_expnum(sub, expnum)
-        if sub.empty:
-            log.error(f"exposure {expnum = } not found in metadata for MJD = {mjd}")
             return
 
     # sort the frames

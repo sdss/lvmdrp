@@ -8,7 +8,7 @@ from lvmdrp import log
 from lvmdrp.utils import parse_list
 
 
-EXCLUDES_PATH = os.path.join(os.path.expandvars("$LVMCORE_DIR"), "etc", "exclude-mjds.yaml")
+EXCLUDES_PATH = os.path.join(os.path.expandvars("$LVMCORE_DIR"), "etc", "exclude-exposures.yaml")
 
 
 def load_excludes(excludes_path=EXCLUDES_PATH):
@@ -83,13 +83,15 @@ def remove_excluded_frames(frames, excludes):
         items = parse_list(exclude.value)
         if exclude.keyword == "mjd":
             to_exclude |= np.isin(frames.mjd.values, items)
+            log.debug(f"{idx}: excluding exposures with {exclude.keyword} in {items}.")
         elif exclude.keyword == "tileid":
             to_exclude |= np.isin(frames.tileid.values, items)
+            log.debug(f"{idx}: excluding exposures with {exclude.keyword} in {items}.")
         elif exclude.keyword == "expnum":
             to_exclude |= np.isin(frames.expnum.values, items)
+            log.debug(f"{idx}: excluding exposures with {exclude.keyword} in {items}.")
 
-        log.debug(f"{idx}: Excluding frames with {exclude.keyword} in {items}.")
-
-    log.info(f"Excluding {to_exclude.sum()} frames based on excludes table.")
+    log.info(f"excluding {to_exclude.sum()//9} exposure(s):")
+    log.info(f"  {frames[to_exclude].expnum.unique()}")
 
     return frames[~to_exclude].reset_index(drop=True)
