@@ -19,7 +19,7 @@ from astropy.table import Table
 from filelock import FileLock, Timeout
 from tqdm import tqdm
 
-from lvmdrp.core.constants import FRAMES_CALIB_NEEDS, CAMERAS
+from lvmdrp.core.constants import CALIBRATION_NEEDS, ARC_LAMPS, CON_LAMPS, CAMERAS
 from lvmdrp.utils.bitmask import (
     QualityFlag,
     ReductionStage,
@@ -28,6 +28,9 @@ from lvmdrp.utils.bitmask import (
 from lvmdrp import log, __version__, path
 from lvmdrp.utils.hdrfix import apply_hdrfix
 from lvmdrp.utils.convert import dateobs_to_sjd, correct_sjd, tileid_grp
+
+pd.set_option('io.hdf.default_format', 'table')
+pd.set_option('future.no_silent_downcasting', True)
 
 
 DRPVER = __version__
@@ -52,6 +55,7 @@ RAW_METADATA_COLUMNS = [
     ("argon", bool),
     ("ldls", bool),
     ("quartz", bool),
+    ("calibfib", str),
     ("hartmann", str),
     ("qaqual", str),
     ("stage", ReductionStage),
@@ -75,6 +79,7 @@ MASTER_METADATA_COLUMNS = [
     ("argon", bool),
     ("ldls", bool),
     ("quartz", bool),
+    ("calibfib", str),
     ("hartmann", str),
     ("qaqual", str),
     ("stage", ReductionStage),
@@ -84,6 +89,81 @@ MASTER_METADATA_COLUMNS = [
     ("name", str),
     ("tilegrp", str)
 ]
+
+
+def _sort_key_exposure(rpath):
+    return int(rpath.replace(".fits.gz", "").split("-")[-1])
+
+
+def _check_header_values(header):
+    keywords = ["IMAGETYP", "CCD"] + CON_LAMPS + ARC_LAMPS
+    values = [{"bias", "dark", "flat", "arc", "object"}, CAMERAS] + [{"ON", "OFF"}] * len(CON_LAMPS) + [{"ON", "OFF"}] * len(ARC_LAMPS)
+
+    validations = {}
+    for kw, vl in zip(keywords, values):
+        camera = header.get("CCD")
+
+        x = header.get(kw)
+
+        validations[f"{camera}_{kw}_value"] = x
+        validations[f"{camera}_{kw}_valid"] = x in vl
+
+    return validations
+
+
+def _check_exposure_header(rpaths):
+
+    IGNORE_KEYWORDS = ['CCD', 'CCDID', 'CCDTEMP1', 'CCDTEMP2', 'CHECKSUM', 'DATASUM', 'FILENAME',
+    'GAIN1', 'GAIN2', 'GAIN4', 'PRESSURE', 'RDNOISE1', 'RDNOISE2', 'RDNOISE3', 'RDNOISE4',
+    'ARCHBACK', 'BUFFER', 'GAIN3', 'INTEND', 'INTSTART', 'LABHUMID', 'LABTEMP', 'LMST',
+    'OBSTIME', 'SPEC']
+
+    header_consistency = {}
+    for i, rpath in enumerate(rpaths):
+        if i == 0:
+            try:
+                header_ref = fits.getheader(rpath)
+            except Exception as e:
+                log.error(f"While reading {rpath}: {e}")
+                continue
+            header = header_ref.copy()
+        else:
+            try:
+                header = fits.getheader(rpath)
+            except Exception as e:
+                log.error(f"While reading {rpath}: {e}")
+                continue
+
+        camera = header.get("CCD")
+
+        diff = fits.HeaderDiff(header_ref, header, ignore_keywords=IGNORE_KEYWORDS)
+
+        header_consistency.update(_check_header_values(header))
+        header_consistency[f"{camera}_identical"] = diff.identical
+        header_consistency[f"{camera}_diff_keyword_values"] = diff.diff_keyword_values
+        header_consistency[f"{camera}_diff_keywords"] = diff.diff_keywords
+
+    return header_consistency
+
+
+def _get_header_consistency_summary(mjd, to_csv=True):
+    root_path = os.path.join(os.getenv("SAS_BASE_DIR"), "sdsswork", "data", "lvm", "lco", f"{mjd}")
+    if not os.path.isdir(root_path):
+        log.info(f"No raw data for MJD={mjd}, nothing to do.")
+        return
+
+    rpaths_mjd = sorted([os.path.join(root_path, r) for r in os.listdir(root_path) if ".fits.gz" in r], key=_sort_key_exposure)
+    groups = itertools.groupby(rpaths_mjd, _sort_key_exposure)
+
+    header_consistency_summary = {}
+    for expnum, rpaths in tqdm(groups, desc="processing exposures", unit="exposure", ascii=True):
+        header_consistency_summary[expnum] = _check_exposure_header(sorted(rpaths))
+
+    header_consistency_summary = pd.DataFrame.from_dict(header_consistency_summary, orient="index")
+    if to_csv:
+        header_consistency_summary.to_csv(f"{mjd}_header_consistency.csv", index=True)
+
+    return header_consistency_summary
 
 
 def _decode_string(metadata):
@@ -355,7 +435,6 @@ def _load_or_create_store(drpver=None, tileid=None, mjd=None, kind="raw", mode="
     )
 
     stores = []
-    log.info(f"loading/creating metadata store with parameters {tileid = }, {mjd = } and {kind = }")
     for metadata_path in metadata_paths:
         # create the directory if needed
         metadata_path.parent.mkdir(parents=True, exist_ok=True)
@@ -522,13 +601,13 @@ def get_frames_metadata(
 
     metadata_paths = _get_metadata_paths(tileid="*", mjd=mjd, kind="raw", filter_exist=True)
     if any(metadata_paths) and not overwrite:
-        log.info("Loading existing metadata store.")
+        log.info(f"Loading existing metadata store for MJD = {mjd}.")
         meta = get_metadata(mjd=mjd, tileid="*")
     else:
         if overwrite:
             _del_store(mjd=mjd, tileid="*")
 
-        log.info("Creating new metadata store.")
+        log.info(f"Creating new metadata store for MJD = {mjd}.")
         meta = extract_metadata(frames, kind="raw")
 
     return meta
@@ -557,11 +636,15 @@ def extract_metadata(frames_paths: list, kind: str = "raw") -> pd.DataFrame:
         columns = MASTER_METADATA_COLUMNS
     else:
         pass
+
+    # define default output
+    default_output = pd.DataFrame(columns=[column for column, _ in columns])
+
     # extract metadata
     nframes = len(frames_paths)
     if nframes == 0:
         log.warning("zero paths given, nothing to do")
-        return pd.DataFrame(columns=[column for column, _ in columns])
+        return default_output
     log.info(f"going to extract metadata from {nframes} frames")
     new_metadata = {}
     iterator = tqdm(
@@ -615,6 +698,7 @@ def extract_metadata(frames_paths: list, kind: str = "raw") -> pd.DataFrame:
                 header.get("ARGON", "OFF") in onlamp,
                 header.get("LDLS", "OFF") in onlamp,
                 header.get("QUARTZ", "OFF") in onlamp,
+                header.get("CALIBFIB", "None") or "None",
                 header.get("HARTMANN", "0 0"),
                 # header.get("QUALITY", "excellent"),
                 # QC pipeline keywords
@@ -643,6 +727,7 @@ def extract_metadata(frames_paths: list, kind: str = "raw") -> pd.DataFrame:
                 header.get("ARGON", "OFF") in onlamp,
                 header.get("LDLS", "OFF") in onlamp,
                 header.get("QUARTZ", "OFF") in onlamp,
+                header.get("CALIBFIB", "None") or "None",
                 header.get("HARTMANN", "0 0"),
                 # TODO: QUALITY may be redundant, double check and remove if it is
                 # header.get("QUALITY", "excellent"),
@@ -658,6 +743,8 @@ def extract_metadata(frames_paths: list, kind: str = "raw") -> pd.DataFrame:
 
     # define dataframe
     new_metadata = pd.DataFrame.from_dict(new_metadata, orient="index")
+    if new_metadata.empty:
+        return default_output
     new_metadata.columns = list(zip(*columns))[0]
 
     # store metadata in HDF5 store
@@ -933,10 +1020,9 @@ def get_metadata(
         metadatas.append(metadata)
 
     if not metadatas:
-        return
+        return default_output
 
     metadata = pd.concat(metadatas, axis="index", ignore_index=True)
-    log.info(f"found {len(metadata)} frames in stores")
     # filter by exposure number, spectrograph and/or camera
     metadata = _filter_metadata(
         metadata=metadata,
@@ -958,12 +1044,42 @@ def get_metadata(
         status=status,
         drpqual=drpqual,
     )
-    log.info(f"number of frames after filtering {len(metadata)}")
 
     return metadata
 
 
-def get_sequence_metadata(mjd, expnums=None, exptime=None, cameras=CAMERAS, for_cals={"bias", "trace", "wave", "dome", "twilight"}, extract_metadata=False):
+def update_metadata(mjd):
+
+    paths = np.asarray(sorted(path.expand("lvm_raw", hemi="s", camspec="*", mjd=mjd, expnum="????????")))
+    names = np.asarray([os.path.basename(p).replace(".gz", "") for p in paths])
+
+    metadata = get_metadata(mjd=mjd, tileid="*")
+    old_names = np.asarray(sorted(metadata["name"].tolist()))
+
+    new_selection = ~np.isin(names, old_names)
+    npaths = new_selection.sum()
+    if npaths > 0:
+        log.info(f"going to update metadata stores for MJD = {mjd}. Found {npaths} new paths")
+
+        new_paths = paths[new_selection]
+        extract_metadata(new_paths)
+
+
+def get_calibration_selection(frames, calibration):
+    # definitions of calibration frames
+    if calibration == "bias":
+        return frames.imagetyp.values == "bias"
+    elif calibration in ["trace", "dome"]:
+        return ((frames.ldls|frames.quartz) & ~(frames.neon|frames.hgne|frames.argon|frames.xenon)).values
+    elif calibration == "wave":
+        return ((frames.neon|frames.hgne|frames.argon|frames.xenon) & ~(frames.ldls|frames.quartz)).values
+    elif calibration == "twilight":
+        return ((frames.imagetyp == "flat") & ~(frames.ldls|frames.quartz) & ~(frames.neon|frames.hgne|frames.argon|frames.xenon)).values
+    else:
+        return np.zeros(len(frames), dtype="bool")
+
+
+def get_calibrations_metadata(mjds, calibration, camera=None, expnums=None, exptime=None, lamps=None, hartmann="0 0", extract_metadata=False):
     """Get frames metadata for a given sequence
 
     Given a set of MJDs and (optionally) exposure numbers, get the frames
@@ -972,16 +1088,16 @@ def get_sequence_metadata(mjd, expnums=None, exptime=None, cameras=CAMERAS, for_
 
     Parameters:
     ----------
-    mjd : int
-        MJD to reduce
+    mjds : int|list[int]
+        Single MJD or a list of MJDs
+    calibration : str
+        Only return frames meant to produce given calibrations, {'bias', 'trace', 'wave', 'dome', 'twilight'}
+    camera : str
+        Camera (e.g., 'b1', 'r3', 'z2') to filter by
     expnums : list
         List of exposure numbers to reduce
     exptime : int
         Filter frames metadata by exposure
-    cameras : list
-        List of cameras (e.g., "b1", "r3") to filter by
-    for_cals : list, tuple or set, optional
-        Only return frames meant to produce given calibrations, {'bias', 'trace', 'wave', 'dome', 'twilight'}
     extract_metadata : bool
         Whether to extract metadata or not, by default False
 
@@ -992,52 +1108,52 @@ def get_sequence_metadata(mjd, expnums=None, exptime=None, cameras=CAMERAS, for_
     masters_mjd : float
         MJD for master frames
     """
-    # get frames metadata
-    frames = get_frames_metadata(mjd=mjd, overwrite=extract_metadata)
-    frames.query("imagetyp in ['bias', 'flat', 'arc']", inplace=True)
-    if len(frames) == 0:
-        log.error(f"no calibration frames found for MJD = {mjd}")
-        return frames, {}
+    LAMPS = list(map(str.lower, ARC_LAMPS + CON_LAMPS))
+    if hartmann is not None and hartmann not in {"0 0", "1 0", "0 1", "1 1"}:
+        raise ValueError(f"Invalid value for `hartmann`: {hartmann}. Expected either '0 0', '1 0', '0 1' or '1 1'")
+    if lamps is not None and not np.isin(lamps, LAMPS).all():
+        raise ValueError(f"Invalid value for `lamps`: {lamps}. Expected values in {LAMPS}")
 
+    if lamps is not None and not isinstance(lamps, (tuple, list, set)):
+        lamps = [lamps]
+    if not isinstance(mjds, (tuple, list, set)):
+        mjds = [mjds]
+
+    # remove repeated MJDs and sort
+    mjds = sorted(set(mjds))
+
+    # get frames metadata
+    frames = [get_frames_metadata(mjd=mjd, overwrite=extract_metadata) for mjd in mjds]
+    frames = pd.concat([f for f in frames if not f.empty], ignore_index=True)
+    # remove bad exposures
+    frames.query("qaqual == 'GOOD'", inplace=True)
+    # group calibrations according to their type
+    selection = get_calibration_selection(frames, calibration=calibration)
+    frames = frames.loc[selection]
+    if frames.empty:
+        return pd.DataFrame(columns=list(zip(*RAW_METADATA_COLUMNS))[0])
+
+    # filter by hartmann door status
+    if hartmann is not None:
+        frames.query("hartmann == @hartmann", inplace=True)
     # filter by given expnums
     if expnums is not None:
         frames.query("expnum in @expnums", inplace=True)
-
     # filter by given exptime
     if exptime is not None:
         frames.query("exptime == @exptime", inplace=True)
-
-    if cameras:
-        frames.query("camera in @cameras", inplace=True)
-
-    # simple fix of imagetyp, some images have the wrong type in the header
-    bias_selection = (frames.imagetyp == "bias")
-    twilight_selection = (frames.imagetyp == "flat") & ~(frames.ldls|frames.quartz) & ~(frames.neon|frames.hgne|frames.argon|frames.xenon)
-    domeflat_selection = (frames.ldls|frames.quartz) & ~(frames.neon|frames.hgne|frames.argon|frames.xenon)
-    arc_selection = (frames.neon|frames.hgne|frames.argon|frames.xenon) & ~(frames.ldls|frames.quartz)
-    frames.loc[twilight_selection, "imagetyp"] = "flat"
-    frames.loc[domeflat_selection, "imagetyp"] = "flat"
-    frames.loc[arc_selection, "imagetyp"] = "arc"
-
-    found_cals = {'bias', 'trace', 'wave', 'dome', 'twilight'}
-    if bias_selection.sum() == 0 and "bias" in for_cals:
-        log.error("no bias exposures found")
-        found_cals.remove("bias")
-    elif domeflat_selection.sum() == 0 and "trace" in for_cals:
-        log.error("no dome flat exposures found")
-        found_cals.remove("trace")
-    elif arc_selection.sum() == 0 and "wave" in for_cals:
-        log.error("no arc exposures found")
-        found_cals.remove("wave")
-    elif domeflat_selection.sum() == 0 and "dome" in for_cals:
-        log.error("no dome flat exposures found")
-    elif twilight_selection.sum() == 0 and "twilight" in for_cals:
-        log.error("no twilight exposures found")
-        found_cals.remove("twilight")
+    # filter by given camera
+    if camera is not None:
+        frames.query("camera == @camera", inplace=True)
+    # filter by lamp ON status
+    if lamps is not None:
+        lamps_selection = np.logical_and.reduce([frames[lamp] for lamp in lamps], axis=0)
+        frames = frames.loc[lamps_selection]
 
     frames.sort_values(["expnum", "camera"], inplace=True)
+    frames.reset_index(drop=True, inplace=True)
 
-    return frames, found_cals
+    return frames
 
 
 # TODO: implement matching of analogs and calibration masters
@@ -1258,7 +1374,7 @@ def match_master_metadata(
     """return the matched master calibration frames given a target frame metadata
 
     Depending on the type of the target frame, a set of calibration frames may
-    be needed. These are stored in lvmdrp.core.constants.FRAMES_CALIB_NEEDS.
+    be needed. These are stored in lvmdrp.core.constants.CALIBRATION_NEEDS.
     This function retrieves the closest in time set of calibration frames
     according to that mapping.
 
@@ -1307,7 +1423,7 @@ def match_master_metadata(
         target_imagetyp = "flat"
 
     # locate calibration needs
-    frame_needs = FRAMES_CALIB_NEEDS.get(target_imagetyp)
+    frame_needs = CALIBRATION_NEEDS.get(target_imagetyp)
     log.info(
         f"target frame of type '{target_imagetyp}' "
         f"needs calibration frames: {', '.join(frame_needs) or None}"
@@ -1347,7 +1463,7 @@ def match_master_metadata(
     # filter by exposure number, spectrograph and/or camera
     log.info(f"final number of master frames after filtering {len(masters_metadata)}")
 
-    # raise error in case current frame is not recognized in FRAMES_CALIB_NEEDS
+    # raise error in case current frame is not recognized in CALIBRATION_NEEDS
     if frame_needs is None:
         log.error(f"no calibration frames found for '{target_imagetyp}' type")
         return calib_frames
@@ -1457,22 +1573,35 @@ def _collect_header_data(filename: str) -> dict:
     """
     hdr_dict_mapping = {'drpver': 'DRPVER', 'drpqual': 'DRPQUAL', 'dpos': 'DPOS', 'object': 'OBJECT',
                         'obstime': 'OBSTIME',
+                        # flux calibration parameters
+                        'std_mean_senb': 'STDSENMB', 'std_mean_senr': 'STDSENMR', 'std_mean_senz': 'STDSENMZ',
+                        'sci_mean_senb': 'SCISENMB', 'sci_mean_senr': 'SCISENMR', 'sci_mean_senz': 'SCISENMZ',
+                        'mod_mean_senb': 'MODSENMB', 'mod_mean_senr': 'MODSENMR', 'mod_mean_senz': 'MODSENMZ',
+                        'std_rms_senb': 'STDSENRB', 'std_rms_senr': 'STDSENRR', 'std_rms_senz': 'STDSENRZ',
+                        'sci_rms_senb': 'SCISENRB', 'sci_rms_senr': 'SCISENRR', 'sci_rms_senz': 'SCISENRZ',
+                        'mod_rms_senb': 'MODSENRB', 'mod_rms_senr': 'MODSENRR', 'mod_rms_senz': 'MODSENRZ',
+                        'fluxcal': 'FLUXCAL',
                         # sci
-                        'sci_ra': 'TESCIRA', 'sci_dec': 'TESCIDE', 'sci_amass': 'TESCIAM',
-                        'sci_kmpos': 'TESCIKM', 'sci_focpos': 'TESCIFO',
-                        'sci_sh_hght': 'GEOCORONAL SCI_SH_HGHT', 'sci_moon_sep': 'SKYMODEL SCI_RHO',
+                        'sci_ra': 'SCIRA', 'sci_dec': 'SCIDEC',
+                        'sci_pa': 'SCIPA', 'sci_amass': 'SCIAM', 'sci_astsrc': 'SCIASRC',
+                        'sci_kmpos': 'TESCIKM', 'sci_focpos': 'TESCIFO', 'sci_alt': 'SKY SCI_ALT',
+                        'sci_sh_hght': 'SKY SCI_SH_HGHT', 'sci_moon_sep': 'SKY SCI_MOON_SEP',
                         # skye
-                        'skye_ra': 'TESKYERA', 'skye_dec': 'TESKYEDE', 'skye_amass': 'TESKYEAM',
+                        'skye_ra': 'SKYERA', 'skye_dec': 'SKYEDEC',
+                        'skye_pa': 'SKYEPA', 'skye_amass': 'SKYEAM', 'skye_astsrc': 'SKYEASRC',
                         'skye_kmpos': 'TESKYEKM', 'skye_focpos': 'TESKYEFO', 'skye_name': 'SKYENAME',
-                        'skye_sh_hght': 'GEOCORONAL SKYE_SH_HGHT', 'skye_moon_sep': 'SKYMODEL SKYE_RHO',
+                        'skye_alt': 'SKY SKYE_ALT', 'sci_skye_sep': 'SKY SCI_SKYE_SEP',
+                        'skye_sh_hght': 'SKY SKYE_SH_HGHT', 'skye_moon_sep': 'SKY SKYE_MOON_SEP',
                         # skyw
-                        'skyw_ra': 'TESKYWRA', 'skyw_dec': 'TESKYWDE', 'skyw_amass': 'TESKYWAM',
+                        'skyw_ra': 'SKYWRA', 'skyw_dec': 'SKYWDEC',
+                        'skyw_pa': 'SKYWPA', 'skyw_amass': 'SKYWAM', 'skyw_astsrc': 'SKYWASRC',
                         'skyw_kmpos': 'TESKYWKM', 'skyw_focpos': 'TESKYWFO', 'skyw_name': 'SKYWNAME',
-                        'skyw_sh_hght': 'GEOCORONAL SKYW_SH_HGHT', 'skyw_moon_sep': 'SKYMODEL SKYW_RHO',
+                        'skyw_alt': 'SKY SKYW_ALT', 'sci_skyw_sep': 'SKY SCI_SKYW_SEP',
+                        'skyw_sh_hght': 'SKY SKYW_SH_HGHT', 'skyw_moon_sep': 'SKY SKYW_MOON_SEP',
                         # sky parameters
-                        'moon_ra': 'SKYMODEL MOON_RA', 'moon_dec': 'SKYMODEL MOON_DEC',
-                        'moon_phase': 'SKYMODEL MOON_PHASE', 'moon_fli': 'SKYMODEL MOON_FLI',
-                        'sun_alt': 'SKYMODEL SUNALT', 'moon_alt': 'SKYMODEL MOONALT'
+                        'moon_ra': 'SKY MOON_RA', 'moon_dec': 'SKY MOON_DEC',
+                        'moon_phase': 'SKY MOON_PHASE', 'moon_fli': 'SKY MOON_FLI',
+                        'sun_alt': 'SKY SUN_ALT', 'moon_alt': 'SKY MOON_ALT'
                         }
 
     with fits.open(filename) as hdulist:
@@ -1481,6 +1610,23 @@ def _collect_header_data(filename: str) -> dict:
         hdrrow = {k: hdr.get(v) for k, v in hdr_dict_mapping.items()}
 
         return hdrrow
+
+
+def safe_hdf_append(df: pd.DataFrame, h5file: str, key: str = "summary",
+                    min_itemsize: dict = None, data_columns: bool = True):
+    for col in df.select_dtypes(include=["object"]).columns:
+        df[col] = df[col].astype(str)
+
+    if os.path.exists(h5file):
+        existing_df = pd.read_hdf(h5file, key=key)
+        df = pd.concat([existing_df, df], ignore_index=True)
+        df.drop_duplicates(subset=("expnum",), keep="last", inplace=True)
+        df.reset_index(drop=True, inplace=True)
+        os.remove(h5file)
+
+    df.to_hdf(h5file, key=key, format="table",
+                data_columns=data_columns,
+                min_itemsize=min_itemsize)
 
 
 def update_summary_file(filename: str, tileid: int = None, mjd: int = None, expnum: int = None,
@@ -1540,7 +1686,7 @@ def update_summary_file(filename: str, tileid: int = None, mjd: int = None, expn
     tels = {'sci', 'skye', 'skyw'}
     keys = {'ra', 'dec', 'amass', 'kmpos', 'focpos', 'sh_hght', 'moon_sep'}
     dtypes = {f'{i}_{j}': 'float64' for i, j in itertools.product(tels, keys)}
-    dtypes.update({colname: 'float64' for colname in ('moon_ra', 'moon_dec', 'moon_phase', 'moon_fli', 'sun_alt', 'moon_alt')})
+    dtypes.update({colname: 'float64' for colname in ('moon_ra', 'moon_dec', 'moon_phase', 'moon_fli', 'sun_alt', 'moon_alt', 'sci_pa')})
     dtypes['calib_mjd'] = 'int64'
     df = df.astype(dtypes)
 
@@ -1559,12 +1705,14 @@ def update_summary_file(filename: str, tileid: int = None, mjd: int = None, expn
 
     # set min column sizes for some columns
     min_itemsize = {'skye_name': 20, 'skyw_name': 20, 'location': 120, 'agcam_location': 120,
-                    'object': 24, 'obstime': 23}
+                    'object': 24, 'filename': 120, 'obstime': 23, 'drpver': 15,
+                    'fluxcal': 5, 'sci_astsrc': 15, 'skye_astsrc': 15, 'skyw_astsrc': 15}
 
     # write to pytables hdf5
     try:
         with lock:
-            df.to_hdf(drpall, key='summary', mode='a', append=True, data_columns=True, min_itemsize=min_itemsize)
+            safe_hdf_append(df, drpall, key="summary",
+                    min_itemsize=min_itemsize, data_columns=True)
     except ImportError:
         log.error('Missing pytables dependency. Install with `pip install "pandas[hdf5]"`. '
                       'On macs, you may first need to first run "brew install hdf5".')

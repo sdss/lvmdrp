@@ -15,6 +15,7 @@ import pandas as pd
 from astropy.io import fits
 
 from lvmdrp.core.image import _parse_ccd_section
+from lvmdrp.core.constants import LVM_NPRE
 from lvmdrp.functions.imageMethod import DEFAULT_BIASSEC, DEFAULT_TRIMSEC
 
 
@@ -126,7 +127,7 @@ def multimeta(make_multi):
 
 
 def create_fake_raw_fits(path, tileid=11111, mjd=61234, expnum=6817, cameras=None,
-                         bias_levels=[980, 960, 1000, 1020], sci_level=60000,
+                         pre_levels=[500, 200], bias_levels=[980, 960, 1000, 1020], sci_level=60000,
                          leak=False, shift_rows=[]):
     """ create a fake raw frame FITS file """
     out = {}
@@ -155,6 +156,10 @@ def create_fake_raw_fits(path, tileid=11111, mjd=61234, expnum=6817, cameras=Non
             # simulate leaks in overscan region
             if leak:
                 data[:, (os_ix if iquad in {0,2} else os_fx-1)] += sci_level
+
+        # simulate pre-scan regions
+        data[:, :LVM_NPRE] = pre_levels[0]
+        data[:, -LVM_NPRE:] = pre_levels[1]
 
         # simulate pixel shifts
         for irow in shift_rows:
@@ -192,19 +197,25 @@ def create_fake_frame_fits(path, kind='S', tileid=11111, mjd=61234, expnum=6817,
 
     hdr = {'TILE_ID': tileid, 'MJD': mjd, 'EXPOSURE': expnum, 'FILENAME': filename,
            'OBSTIME': '2023-12-19T00:47:39.095', 'OBSERVAT': 'LCO', 'DRPVER': '0.1.1',
-           'TELESCOP': 'SDSS 0.16m', 'SURVEY': 'LVM', 'DPOS': 0, 'DRPQUAL': 0,
-           'OBJECT': f'tile_id={tileid}', 'TESCIRA': 65.949555, 'TESCIDE': 15.348684, 'TESCIAM': 1.857,
-           'TESCIKM': -87.5, 'TESCIFO': 36.58, 'GEOCORONAL SCI_SH_HGHT': 165.52885, 'SKYMODEL SCI_RHO': 29.8097,
-           'TESKYERA': 21.008216, 'TESKYEDE': -22.933382, 'TESKYEAM': 1.013, 'TESKYEKM': -37.5,
-           'TESKYEFO': 36.19, 'SKYENAME': 'WHAM_south_02',
-           'GEOCORONAL SKYE_SH_HGHT': 164.79533, 
-           'SKYMODEL SKYE_RHO': 18.4705, 'TESKYWRA': 58.011871, 'TESKYWDE': 11.817184,
-           'TESKYWAM': 1.555, 'TESKYWKM': -54.51, 'TESKYWFO': 37.11, 'SKYWNAME': 'grid087',
-           'GEOCORONAL SKYW_SH_HGHT': 165.41738, 'SKYMODEL SKYW_RHO': 27.7977, 
-           'SKYMODEL MOON_RA': 348.42157, 'SKYMODEL MOON_DEC': -7.55955, 
-           'SKYMODEL MOON_PHASE': 79.91, 'SKYMODEL MOON_FLI': 0.4136, 
-           'SKYMODEL MOONALT': 46.8744, 'SKYMODEL SUNALT': -13.3779}
-    
+           'TELESCOP': 'SDSS 0.16m', 'SURVEY': 'LVM', 'DPOS': 0, 'DRPQUAL': 0, 'OBJECT': f'tile_id={tileid}',
+           'SCIRA': 65.949555, 'SCIDEC': 15.348684, 'SCIPA': 66.7, 'SCIALT': 32.5605, 'SCIAM': 1.857,
+           'SCIASRC': 'GDR coadd', 'TESCIKM': -87.5, 'TESCIFO': 36.58,
+           'SKY SCI_ALT': 32.5605, 'SKY SCI_SH_HGHT': 165.52885, 'SKY SCI_MOON_SEP': 29.8097,
+           'SKYERA': 21.008216, 'SKYEDEC': -22.933382, 'SKYEPA': 0.0, 'SKYEALT': 80.9755, 'SKYEAM': 1.013,
+           'SKYEASRC': 'GDR coadd', 'TESKYEKM': -37.5, 'TESKYEFO': 36.19, 'SKYENAME': 'WHAM_south_02',
+           'SKY SKYE_ALT': 80.9755, 'SKY SCI_SKYE_SEP': 58.2987, 'SKY SKYE_SH_HGHT': 164.79533,
+           'SKY SKYE_MOON_SEP': 18.4705,
+           'SKYWRA': 58.011871, 'SKYWDEC': 11.817184, 'SKYWPA': 0.0, 'SKYWALT': 40.0142, 'SKYWAM': 1.555,
+           'SKYWASRC': 'GDR coadd', 'TESKYWKM': -54.51, 'TESKYWFO': 37.11, 'SKYWNAME': 'grid087',
+           'SKY SKYW_ALT': 40.0142, 'SKY SCI_SKYW_SEP': 8.4839,'SKY SKYW_SH_HGHT': 165.41738,
+           'SKY SKYW_MOON_SEP': 27.7977, 'SKY MOON_RA': 348.42157, 'SKY MOON_DEC': -7.55955,
+           'SKY MOON_PHASE': 79.91, 'SKY MOON_FLI': 0.4136,
+           'SKY MOON_ALT': 46.8744, 'SKY SUN_ALT': -13.3779,
+           'STDSENMB': 2.0e-14, 'STDSENMR': 2.0e-14, 'STDSENMZ': 2.0e-14,
+           'SCISENMB': 2.0e-14, 'SCISENMR': 2.0e-14, 'SCISENMZ': 2.0e-14,
+           'MODSENMB': 2.0e-14, 'MODSENMR': 2.0e-14, 'MODSENMZ': 2.0e-14,
+           'FLUXCAL': "MOD"}
+
     # create fake file
     prim = fits.PrimaryHDU(header=fits.Header(hdr))
     full = path / filename

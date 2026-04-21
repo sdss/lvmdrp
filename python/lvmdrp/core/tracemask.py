@@ -26,8 +26,10 @@ class TraceMask(FiberRows):
         """
         header = None
         data, error, mask = None, None, None
-        coeffs, poly_kind, poly_deg = None, None, None
+        coeffs, smoothing_kind = None, None
         samples = None
+        samples_error = None
+        slitmap = None
         with pyfits.open(in_tracemask, uint=True, do_not_scale_image_data=True, memmap=False) as hdus:
             header = hdus["PRIMARY"].header
             for hdu in hdus:
@@ -38,13 +40,26 @@ class TraceMask(FiberRows):
                 if hdu.name == "BADPIX":
                     mask = hdu.data.astype("bool")
                 if hdu.name == "SAMPLES":
-                    samples = Table(hdu.data)
+                    samples = Table.read(hdu)
+                if hdu.name == "SAMPLES_ERROR":
+                    samples_error = Table.read(hdu)
                 if hdu.name == "COEFFS":
                     coeffs = hdu.data.astype("float32")
-                    poly_kind = header.get("POLYKIND")
-                    poly_deg = header.get("POLYDEG")
+                    smoothing_kind = header.get("SMOOKIND")
+                if hdu.name == "SLITMAP":
+                    slitmap = hdu
 
-            trace = cls(data=data, error=error, mask=mask, samples=samples, coeffs=coeffs, poly_kind=poly_kind, poly_deg=poly_deg, header=header)
+            trace = cls(
+                data=data,
+                header=header,
+                error=error,
+                mask=mask,
+                slitmap=slitmap,
+                samples=samples,
+                samples_error=samples_error,
+                coeffs=coeffs,
+                smoothing_kind=smoothing_kind
+            )
 
         return trace
 
@@ -54,7 +69,10 @@ class TraceMask(FiberRows):
         header=None,
         error=None,
         mask=None,
+        slitmap=None,
         samples=None,
+        samples_error=None,
+        samples_columns=None,
         shape=None,
         size=None,
         arc_position_x=None,
@@ -62,25 +80,26 @@ class TraceMask(FiberRows):
         good_fibers=None,
         fiber_type=None,
         coeffs=None,
-        poly_kind=None,
-        poly_deg=None
+        smoothing_kind=None
     ):
         FiberRows.__init__(
             self,
-            data,
-            header,
-            error,
-            mask,
-            samples,
-            shape,
-            size,
-            arc_position_x,
-            arc_position_y,
-            good_fibers,
-            fiber_type,
-            coeffs,
-            poly_kind,
-            poly_deg
+            data=data,
+            header=header,
+            error=error,
+            mask=mask,
+            slitmap=slitmap,
+            samples=samples,
+            samples_error=samples_error,
+            samples_columns=samples_columns,
+            shape=shape,
+            size=size,
+            arc_position_x=arc_position_x,
+            arc_position_y=arc_position_y,
+            good_fibers=good_fibers,
+            fiber_type=fiber_type,
+            coeffs=coeffs,
+            smoothing_kind=smoothing_kind
         )
 
     def getRound(self):
@@ -94,16 +113,6 @@ class TraceMask(FiberRows):
         """
         round = numpy.round(self._data).astype("int16")  # round the traces to integer
         return round
-
-    def getFiberDist(self, slice):
-        cut = self._data[:, slice]
-        dist = cut[1:] - cut[:-1]
-        if self._mask is not None:
-            slice_mask = self._mask[:, slice]
-            dist_mask = numpy.logical_and(slice_mask[1:], slice_mask[:-1])
-            return dist, dist_mask
-        else:
-            return dist, None
 
     def getPixelCoor(self):
         x_cor = numpy.zeros((self._nfibers, self._data.shape[1]), dtype="int16")
@@ -127,23 +136,21 @@ class TraceMask(FiberRows):
         """
         hdus = pyfits.HDUList()
 
-        hdus.append(pyfits.PrimaryHDU(self._data.astype("float32")))
+        hdus.append(pyfits.PrimaryHDU(self._data.astype("float32"), header=self.getHeader()))
         if self._error is not None:
             hdus.append(pyfits.ImageHDU(self._error.astype("float32"), name="ERROR"))
         if self._mask is not None:
             hdus.append(pyfits.ImageHDU(self._mask.astype("uint8"), name="BADPIX"))
         if self._samples is not None:
             hdus.append(pyfits.BinTableHDU(self._samples, name="SAMPLES"))
+        if self._samples_error is not None:
+            hdus.append(pyfits.BinTableHDU(self._samples_error, name="SAMPLES_ERROR"))
         if self._coeffs is not None:
             hdus.append(pyfits.ImageHDU(self._coeffs.astype("float32"), name="COEFFS"))
-            hdus[0].header["POLYKIND"] = (self._poly_kind, "polynomial kind")
-            hdus[0].header["POLYDEG"] = (self._poly_deg, "polynomial degree")
-
-        if len(hdus) > 0:
-            hdu = pyfits.HDUList(hdus)  # create an HDUList object
-            if self._header is not None:
-                hdu[0].header = self.getHeader()  # add the primary header to the HDU
-                hdu[0].update_header()
+            hdus[0].header["SMOOKIND"] = (self._smoothing_kind, "smoothing kind")
+            hdus[0].update_header()
+        if self._slitmap is not None:
+            hdus.append(pyfits.BinTableHDU(self._slitmap, name="SLITMAP"))
 
         os.makedirs(os.path.dirname(out_trace), exist_ok=True)
-        hdu.writeto(out_trace, output_verify="silentfix", overwrite=True)
+        hdus.writeto(out_trace, output_verify="silentfix", overwrite=True)

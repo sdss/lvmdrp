@@ -11,6 +11,11 @@ import os
 from lvmdrp.utils import get_env_lib_directory
 
 
+# LVMi constants
+LVM_ELEVATION = 2380.0 # in m
+LVM_LAT = '29.0146S'
+LVM_LON = '70.6926W'
+
 # sources server URL
 LVM_UNAM_URL = "http://ifs.astroscu.unam.mx/LVM"
 LVM_SRC_URL = f"{LVM_UNAM_URL}/lvmdrp_src.zip"
@@ -66,6 +71,12 @@ EPHEMERIS_DIR = os.path.join(os.getenv("LVMCORE_DIR"), "etc")
 # fiducial calibrations directory
 MASTERS_DIR = os.getenv("LVM_MASTER_DIR")
 
+# path for pixel shifts table
+PIXELSHIFTS_PATH = os.path.join(os.getenv("LVMCORE_DIR"), "etc", "pixel_shifts.parquet")
+
+# path to validated electronic pixel shifts
+PIXELSHIFTS_DIR = os.path.join(os.getenv("LVMCORE_DIR"), "pixelshifts")
+
 SKYCORR_PAR_MAP = {
     "INPUT_OBJECT_SPECTRUM": "objfile",
     "INPUT_SKY_SPECTRUM": "skyfile",
@@ -101,21 +112,26 @@ SKYCORR_PAR_MAP = {
     "PLOT_TYPE": "plotType",
 }
 
-FRAMES_CALIB_NEEDS = {
-    "bias": [],
-    "dark": ["bias"],
-    "pixflat": ["bias", "dark"],
-    "pixmask": ["bias", "dark", "pixflat"],
-    "flat": ["pixmask", "bias", "dark", "pixflat", "trace", "fwhm", "wave", "lsf"],
-    "arc": ["pixmask", "bias", "dark", "pixflat", "trace", "fwhm", "wave", "lsf"],
-    "object": ["pixmask", "bias", "dark", "pixflat", "fiberflat", "trace", "fwhm", "wave", "lsf"],
-}
-CALIBRATION_NAMES = {"pixmask", "pixflat", "bias", "trace_guess", "trace", "width", "amp", "model", "wave", "lsf", "fiberflat_dome", "fiberflat_twilight"}
-CALIBRATION_MATCH = {
-    "trace": ["trace", "width", "model"],
+# high-level calibration types
+CALIBRATION_TYPES = {"bias", "trace", "wave", "dome", "twilight"}
+# calibration products
+CALIBRATION_PRODUCTS = {"pixmask", "pixflat", "bias", "trace_guess", "centroids", "sigmas", "counts", "model", "wave", "lsf", "fiberflat_dome", "fiberflat_twilight"}
+# a map for high-level calibration types and their products
+CALIBRATION_MAPPINGS = {
+    "trace": ["centroids", "sigmas", "model"],
     "wave": ["wave", "lsf"],
     "dome": ["fiberflat_dome"],
     "twilight": ["fiberflat_twilight"]}
+# calibration products needed depending on the type of frame
+CALIBRATION_NEEDS = {
+    "bias": ["pixmask"],
+    "pixflat": ["pixmask", "bias", "dark"],
+    "trace": ["pixmask", "pixflat", "bias"],
+    "wave": ["pixmask", "pixflat", "bias", "centroids", "sigmas", "model"],
+    "dome": ["pixmask", "pixflat", "bias", "centroids", "sigmas", "model", "wave", "lsf"],
+    "twilight": ["pixmask", "pixflat", "bias", "centroids", "sigmas", "model", "wave", "lsf"],
+    "object": ["pixmask", "pixflat", "bias", "centroids", "sigmas", "model", "wave", "lsf", "fiberflat_twilight"],
+}
 
 CAMERAS = ["b1", "b2", "b3", "r1", "r2", "r3", "z1", "z2", "z3"]
 
@@ -127,7 +143,66 @@ SPEC_CHANNELS = {"b": (3600, 5800), "r": (5775, 7570), "z": (7520, 9800)}
 ARC_LAMPS = ["NEON", "HGNE", "ARGON", "XENON"]
 CON_LAMPS = ["LDLS", "QUARTZ"]
 
+# 2D image constants
+LVM_NOVER = 17
+LVM_NPRE = 3
+LVM_NROWS = 4080
+LVM_NCOLS = 4086
+
 LVM_NBLOCKS = 18
+LVM_BLOCKSIZE = 36
+LVM_NFIBERS = LVM_NBLOCKS * LVM_BLOCKSIZE
 LVM_REFERENCE_COLUMN = 2000
 FIDUCIAL_PLATESCALE = 112.36748321030637 # Focal plane platescale in "/mm
 
+# standard fiber labels
+STD_FIBER_LABELS = [
+    'P1-1',
+    'P2-2',
+    'P1-4',
+    'P2-5',
+    'P2-8',
+    'P1-7',
+    'P2-11',
+    'P1-10',
+    'P1-3',
+    'P2-1',
+    'P1-6',
+    'P2-4',
+    'P2-7',
+    'P1-9',
+    'P2-10',
+    'P1-12',
+    'P1-2',
+    'P2-3',
+    'P1-5',
+    'P2-6',
+    'P2-9',
+    'P1-8',
+    'P2-12',
+    'P1-11']
+
+# GB hand picked isolated bright lines across each channel which are not doublest in UVES atlas
+# true wavelengths taken from UVES sky line atlas
+REF_SKYLINES = {
+    "b": [5577.346680],
+    "r": [6363.782715, 7358.680176, 7392.209961],
+    "z": [8399.175781, 8988.383789, 9552.546875, 9719.838867]
+}
+
+# sky lines to fit spec-to-spec flat field factors
+SKYLINES_FIBERFLAT = {
+    "b": 5577.346680,
+    "r": 6363.782715,
+    "z": 8399.175781
+}
+
+# continuum wavelengths
+CONTINUUM_FIBERFLAT = {
+    "b": 4600,
+    "r": 6760,
+    "z": 8170
+}
+
+# stellar templates
+STELLAR_TEMP_PATH = os.path.join(os.getenv("LVM_SANDBOX"), "stellar_models")

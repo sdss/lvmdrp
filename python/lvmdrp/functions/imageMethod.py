@@ -9,7 +9,6 @@ import sys
 from itertools import product
 from copy import deepcopy as copy
 from multiprocessing import Pool
-from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 from matplotlib.gridspec import GridSpec
 
 import numpy
@@ -17,17 +16,14 @@ import bottleneck as bn
 from astropy.table import Table
 from astropy.io import fits as pyfits
 from astropy.visualization import simple_norm
-from astropy.wcs import wcs
-from astropy import units as u
-import astropy.io.fits as fits
-from scipy import interpolate
-from scipy import signal
+from scipy import interpolate, integrate
+from scipy import signal, sparse
 from tqdm import tqdm
 
-from typing import List, Tuple
+from typing import List, Tuple, Dict
 
 from lvmdrp import log, DRP_COMMIT, __version__ as DRPVER
-from lvmdrp.core.constants import CONFIG_PATH, SPEC_CHANNELS, ARC_LAMPS, LVM_REFERENCE_COLUMN, LVM_NBLOCKS, FIDUCIAL_PLATESCALE
+from lvmdrp.core.constants import CONFIG_PATH, SPEC_CHANNELS, ARC_LAMPS, LVM_REFERENCE_COLUMN, LVM_NFIBERS, LVM_NBLOCKS
 from lvmdrp.utils.decorators import skip_on_missing_input_path, drop_missing_input_paths
 from lvmdrp.utils.bitmask import QualityFlag
 from lvmdrp.core.fiberrows import FiberRows, _read_fiber_ypix
@@ -35,16 +31,14 @@ from lvmdrp.core.image import (
     Image,
     _parse_ccd_section,
     _model_overscan,
-    _remove_spikes,
-    _fillin_valleys,
-    _no_stepdowns,
     combineImages,
     glueImages,
     loadImage,
 )
-from lvmdrp.core.plot import plt, create_subplots, plot_detrend, plot_error, plot_strips, plot_image_shift, plot_fiber_thermal_shift, save_fig
+from lvmdrp.core import fit_profile as fp
+from lvmdrp.core.plot import plt, create_subplots, create_straylight_axes, plot_detrend, plot_error, plot_strips, plot_fiber_thermal_shift, save_fig
 from lvmdrp.core.rss import RSS
-from lvmdrp.core.spectrum1d import Spectrum1D, _spec_from_lines, _cross_match
+from lvmdrp.core.spectrum1d import Spectrum1D, _spec_from_lines, _cross_match, FiberProfileCache
 from lvmdrp.core.tracemask import TraceMask
 from lvmdrp.utils.hdrfix import apply_hdrfix
 from lvmdrp.utils.convert import dateobs_to_sjd, correct_sjd
@@ -246,12 +240,10 @@ def _channel_combine_fiber_params(in_cent_traces, in_waves, add_overscan_columns
     """
     channels = "brz"
     # read master trace and wavelength
-    mtraces = [FiberRows() for _ in range(len(in_cent_traces))]
-    mwaves = [FiberRows() for _ in range(len(in_waves))]
+    mtraces = [TraceMask.from_file(in_cent) for in_cent in in_cent_traces]
+    mwaves = [TraceMask.from_file(in_wave) for in_wave in in_waves]
     channel_masks = []
-    for i, (mtrace_path, mwave_path) in enumerate(zip(in_cent_traces, in_waves)):
-        mtraces[i].loadFitsData(mtrace_path)
-        mwaves[i].loadFitsData(mwave_path)
+    for i in range(len(mtraces)):
 
         # add columns for OS region
         if add_overscan_columns:
@@ -271,9 +263,9 @@ def _channel_combine_fiber_params(in_cent_traces, in_waves, add_overscan_columns
 
         mtraces[i]._mask |= channel_mask
         mwaves[i]._mask |= channel_mask
-    mtrace = FiberRows()
+    mtrace = TraceMask()
     mtrace.unsplit(mtraces)
-    mwave = FiberRows()
+    mwave = TraceMask()
     mwave.unsplit(mwaves)
 
     return mtraces, mwaves, mtrace, mwave
@@ -380,14 +372,18 @@ def _fix_fiber_thermal_shifts(image, trace_cent, trace_width=None, trace_amp=Non
     """
     # generate the continuum model using the master traces only along the specific columns
     if fiber_model is None:
-        fiber_model, _ = image.eval_fiber_model(trace_cent, trace_width, trace_amp=trace_amp, columns=columns, column_width=column_width)
+        fiber_model, _, _, _ = image.evaluate_fiber_model(
+            traces={"counts": trace_amp, "centroids": trace_cent, "sigmas": trace_width}, profile="normal",
+            columns=columns, column_width=column_width)
 
     mjd = image._header["SMJD"]
     expnum = image._header["EXPOSURE"]
     camera = image._header["CCD"]
+    channel = camera[0]
+    specid = int(camera[1])
 
     # calculate thermal shifts
-    column_shifts = image.measure_fiber_shifts(fiber_model, trace_cent, columns=columns, column_width=column_width, shift_range=shift_range, axs=axs)
+    column_shifts = image.measure_fiber_shifts(fiber_model, trace_cent, columns=columns, column_width=column_width, shift_range=shift_range, axs=axs[:2])
     # shifts stats
     median_shift = numpy.nan_to_num(bn.nanmedian(column_shifts, axis=0))
     std_shift = numpy.nan_to_num(bn.nanstd(column_shifts, axis=0))
@@ -400,107 +396,20 @@ def _fix_fiber_thermal_shifts(image, trace_cent, trace_width=None, trace_amp=Non
 
     # apply average shift to the zeroth order trace coefficients
     trace_cent_fixed = copy(trace_cent)
-    trace_cent_fixed._coeffs[:, 0] += median_shift
-    trace_cent_fixed.eval_coeffs()
+    if trace_cent_fixed._coeffs is not None:
+        trace_cent_fixed._coeffs[:, 0] += median_shift
+        trace_cent_fixed.eval_coeffs()
+    else:
+        trace_cent_fixed._data += median_shift
+    if trace_cent_fixed._slitmap is not None:
+        trace_cent_fixed._slitmap[f"ypix_{camera[0]}"] = trace_cent_fixed._slitmap[f"ypix_{camera[0]}"].astype("float32")
+        select_spec = trace_cent_fixed._slitmap["spectrographid"] == specid
+        trace_cent_fixed._slitmap[f"ypix_{channel}"][select_spec] += numpy.nan_to_num(median_shift)
+
+    # save columns measured for thermal shifts
+    plot_fiber_thermal_shift(columns, column_shifts, median_shift, std_shift, ax=axs[2])
 
     return trace_cent_fixed, column_shifts, median_shift, std_shift, fiber_model
-
-
-def _apply_electronic_shifts(images, out_images, drp_shifts=None, qc_shifts=None, custom_shifts=None, raw_shifts=None,
-                             which_shifts="drp", apply_shifts=True, dry_run=False, display_plots=False):
-    """Applies the chosen electronic pixel shifts to the images and plots the results
-
-    Parameters
-    ----------
-    images : list
-        list of input images
-    out_images : list
-        list of output images
-    drp_shifts : numpy.ndarray
-        DRP electronic pixel shifts, by default None
-    qc_shifts : numpy.ndarray
-        QC electronic pixel shifts, by default None
-    custom_shifts : numpy.ndarray
-        custom electronic pixel shifts, by default None
-    raw_shifts : numpy.ndarray
-        raw DRP electronic pixel shifts, by default None
-    which_shifts : str
-        chosen electronic pixel shifts, by default "drp"
-    apply_shifts : bool
-        apply the shifts, by default True
-    dry_run : bool
-        dry run mode (does not save corrected images), by default False
-    display_plots : bool
-        display plots, by default False
-
-    Returns
-    -------
-    list
-        list of corrected images
-    numpy.ndarray
-        the chosen electronic pixel shifts
-    str
-        name of the chosen electronic pixel shifts ('drp', 'qc' or 'custom')
-    """
-    images_out = [copy(image) for image in images]
-    for image, image_out, out_image in zip(images, images_out, out_images):
-        mjd = image._header.get("SMJD", image._header["MJD"])
-        expnum, camera = image._header["EXPOSURE"], image._header["CCD"]
-        imagetyp = image._header["IMAGETYP"]
-
-        if which_shifts == "drp":
-            this_shifts = drp_shifts
-            image_color = "Blues"
-        elif which_shifts == "qc":
-            this_shifts = qc_shifts
-            image_color = "Greens"
-        elif which_shifts == "custom":
-            this_shifts = custom_shifts
-            image_color = "Purples"
-        else:
-            this_shifts = drp_shifts
-
-        if apply_shifts and numpy.any(this_shifts != 0):
-            shifted_rows = numpy.where(numpy.gradient(this_shifts) > 0)[0][1::2].tolist()
-            log.info(f"applying shifts from rows {shifted_rows} ({numpy.sum(numpy.abs(this_shifts)>0)} affected rows)")
-            for irow in range(len(this_shifts)):
-                if this_shifts[irow] > 0:
-                    image_out._data[irow, :] = numpy.roll(image._data[irow, :], int(this_shifts[irow]))
-
-            if not dry_run:
-                log.info(f"writing corrected image to {os.path.basename(out_image)}")
-                image_out.writeFitsData(out_image)
-                images_out.append(image_out)
-
-            log.info(f"plotting results for {out_image}")
-            fig, ax = create_subplots(to_display=display_plots, figsize=(15,7), sharex=True, layout="constrained")
-            ax.set_title(f"{mjd = } - {expnum = } - {camera = } - {imagetyp = }", loc="left")
-            y_pixels = numpy.arange(this_shifts.size)
-            if raw_shifts is not None:
-                ax.step(y_pixels, raw_shifts, where="mid", lw=0.5, color="0.9", label="raw DRP")
-            ax.step(y_pixels, this_shifts, where="mid", color="k", lw=3)
-            if drp_shifts is not None:
-                ax.step(y_pixels, drp_shifts, where="mid", lw=1, color="tab:blue", label="DRP")
-            if qc_shifts is not None:
-                ax.step(y_pixels, qc_shifts, where="mid", lw=2, color="tab:green", label="QC")
-            if custom_shifts is not None:
-                ax.step(y_pixels, custom_shifts, where="mid", lw=2, color="tab:purple", label="custom shifts")
-            ax.legend(loc="lower right", frameon=False)
-            ax.set_xlabel("Y (pixel)")
-            ax.set_ylabel("Shift (pixel)")
-            plot_image_shift(ax, image._data, this_shifts, cmap="Reds")
-            axis = plot_image_shift(ax, image_out._data, this_shifts, cmap=image_color, inset_pos=(0.14,1.0-0.32))
-            plt.setp(axis, yticklabels=[], ylabel="")
-            save_fig(
-                fig,
-                product_path=out_image,
-                to_display=display_plots,
-                figure_path="qa",
-                label="pixel_shifts"
-            )
-        else:
-            log.info(f"no shifts to apply, not need to write to {os.path.basename(out_image)}")
-    return images_out, this_shifts, which_shifts
 
 
 def select_lines_2d(in_images, out_mask, in_cent_traces, in_waves, lines_list=None, y_widths=3, wave_widths=0.6*5, image_shape=(4080, 4120), channels="brz", display_plots=False):
@@ -630,209 +539,6 @@ def select_lines_2d(in_images, out_mask, in_cent_traces, in_waves, lines_list=No
     )
 
     return lines_mask_2d, mtrace, mwave
-
-
-def fix_pixel_shifts(in_images, out_images, ref_images, in_mask, report=None,
-                     max_shift=10, threshold_spikes=0.6, flat_spikes=11,
-                     fill_gaps=20, shift_rows=None, interactive=False, display_plots=False):
-    """Corrects pixel shifts in raw frames based on reference frames and a selection of spectral regions
-
-    Given a set of raw frames, reference frames and a mask, this function corrects pixel shifts
-    based on the reference frames and a selection of spectral regions.
-
-    Parameters
-    ----------
-    in_images : list
-        list of input raw images for the same spectrograph (brz)
-    out_images : str
-        output pixel shifts file
-    ref_images : list
-        list of input reference images for the same spectrograph
-    in_mask : str
-        input mask file for the channel stacked frame
-    report : dict, optional
-        input report with keys (spec, expnum) and values (shift_rows, amount), by default None
-    max_shift : int, optional
-        maximum shift in pixels, by default 10
-    threshold_spikes : float, optional
-        threshold for spike removal, by default 0.6
-    flat_spikes : int, optional
-        width of the spike removal, by default 11
-    fill_gaps : int, optional
-        width of the gap filling, by default 20
-    interactive : bool, optional
-        interactive mode, by default False
-    display_plots : bool, optional
-        display plots, by default False
-
-    Returns
-    -------
-    numpy.ndarray
-        pixel shifts
-    numpy.ndarray
-        pixel correlations
-    list
-        list of corrected images
-    """
-    mask = loadImage(in_mask)
-
-    log.info(f"loading reference image from {','.join(ref_images)}")
-    image_ref = Image()
-    image_ref.unsplit([loadImage(ref_image) for ref_image in ref_images])
-    cdata = copy(image_ref._data)
-    cdata = numpy.nan_to_num(cdata, nan=0) * mask._data
-
-    # read all three detrended images and channel combine them
-    log.info(f"loading input image from {','.join(in_images)}")
-    image = Image()
-    image.unsplit([loadImage(in_image) for in_image in in_images])
-    rdata = copy(image._data)
-    rdata = numpy.nan_to_num(rdata, nan=0) * mask._data
-
-    # load input images and initialize output images
-    images = [loadImage(in_image) for in_image in in_images]
-    images_out = images
-
-    # initialize custom shifts
-    raw_shifts = None
-    dshifts = None
-    qshifts = None
-    cshifts = None
-    apply_shifts = True
-    which_shifts = "drp"
-
-    # calculate pixel shifts or use provided ones
-    if shift_rows is not None:
-        log.info("using user provided pixel shifts")
-        cshifts = numpy.zeros(cdata.shape[0])
-        for irow in shift_rows:
-            cshifts[irow:] += 2
-        corrs = numpy.zeros_like(cshifts)
-        which_shifts = "custom"
-    else:
-        log.info("running row-by-row cross-correlation")
-        dshifts, corrs = [], []
-        for irow in range(rdata.shape[0]):
-            cimg_row = cdata[irow]
-            rimg_row = rdata[irow]
-            if numpy.all(cimg_row == 0) or numpy.all(rimg_row == 0):
-                dshifts.append(0)
-                corrs.append(0)
-                continue
-
-            shift = signal.correlation_lags(cimg_row.size, rimg_row.size, mode="same")
-            corr = signal.correlate(cimg_row, rimg_row, mode="same")
-
-            mask = (numpy.abs(shift) <= max_shift)
-            shift = shift[mask]
-            corr = corr[mask]
-
-            max_corr = numpy.argmax(corr)
-            dshifts.append(shift[max_corr])
-            corrs.append(corr[max_corr])
-        dshifts = numpy.asarray(dshifts)
-        corrs = numpy.asarray(corrs)
-
-        dshifts = _remove_spikes(dshifts, width=flat_spikes, threshold=threshold_spikes)
-        dshifts = _fillin_valleys(dshifts, width=fill_gaps)
-        dshifts = _no_stepdowns(dshifts)
-
-        # parse QC reports with the electronic pixel shifts
-        if report is not None:
-            shift_rows, amounts = report
-            qshifts = numpy.zeros(cdata.shape[0])
-            for irow, amount in zip(shift_rows, amounts[::-1]):
-                qshifts[irow:] = amount
-
-        # compare QC reports with the electronic pixel shifts
-        if qshifts is not None:
-            qshifted_rows = numpy.where(numpy.gradient(qshifts) > 0)[0][1::2].tolist()
-            shifted_rows = numpy.where(numpy.gradient(dshifts) > 0)[0][1::2].tolist()
-            log.info(f"QC reports shifted rows: {qshifted_rows}")
-            log.info(f"DRP shifted rows: {shifted_rows}")
-            if not numpy.all(qshifts == dshifts):
-                _apply_electronic_shifts(images=images, out_images=out_images,
-                                         drp_shifts=dshifts, qc_shifts=qshifts, raw_shifts=raw_shifts,
-                                         which_shifts="drp", apply_shifts=True,
-                                         dry_run=True, display_plots=display_plots)
-                log.warning("QC reports and DRP do not agree on the shifted rows")
-                [img.add_header_comment("QC reports and DRP do not agree on the shifted rows") for img in images]
-                if interactive:
-                    log.info("interactive mode enabled")
-                    answer = input("apply [q]c, [d]rp, [c]ustom shifts or [n]one: ")
-                    if answer.lower() == "q":
-                        log.info("choosing QC shifts")
-                        shifts = qshifts
-                        which_shifts = "qc"
-                    elif answer.lower() == "d":
-                        log.info("choosing DRP shifts")
-                        shifts = dshifts
-                        which_shifts = "drp"
-                    elif answer.lower() == "c":
-                        log.info("choosing custom shifts")
-                        answer = input("provide comma-separated custom shifts and press enter: ")
-                        shift_rows = numpy.array([int(_) for _ in answer.split(",")])
-                        cshifts = numpy.zeros(cdata.shape[0])
-                        for irow in shift_rows:
-                            cshifts[irow:] += 2
-                        shifts = cshifts
-                        corrs = numpy.zeros_like(cshifts)
-                        which_shifts = "custom"
-                    elif answer.lower() == "n":
-                        log.info("choosing to apply no shift")
-                        cshifts = numpy.zeros_like(cdata.shape[0])
-                        shifts = cshifts
-                        corrs = numpy.zeros_like(cshifts)
-                        which_shifts = "custom"
-                        apply_shifts = False
-
-                    apply_shifts = numpy.any(numpy.abs(shifts)>0)
-                else:
-                    log.warning(f"no shift will be applied to the images: {in_images}")
-                    [img.add_header_comment("no shift will be applied to the images") for img in images]
-                    apply_shifts = False
-
-        elif (dshifts!=0).any() and interactive:
-            shifted_rows = numpy.where(numpy.gradient(dshifts) > 0)[0][1::2].tolist()
-            log.info(f"DRP shifted rows: {shifted_rows}")
-            _apply_electronic_shifts(images=images, out_images=out_images,
-                                     drp_shifts=dshifts, qc_shifts=qshifts, raw_shifts=raw_shifts,
-                                     which_shifts="drp", apply_shifts=True,
-                                     dry_run=True, display_plots=display_plots)
-            if interactive:
-                log.info("interactive mode enabled")
-                answer = input("apply [d]rp, [c]ustom shifts or [n]one: ")
-                if answer.lower() == "d":
-                    log.info("choosing DRP shifts")
-                    shifts = dshifts
-                    which_shifts = "drp"
-                elif answer.lower() == "c":
-                    log.info("choosing custom shifts")
-                    answer = input("provide comma-separated custom shifts and press enter: ")
-                    shift_rows = numpy.array([int(_) for _ in answer.split(",")])
-                    cshifts = numpy.zeros(cdata.shape[0])
-                    for irow in shift_rows:
-                        cshifts[irow:] += 2
-                    shifts = cshifts
-                    corrs = numpy.zeros_like(cshifts)
-                    which_shifts = "custom"
-                elif answer.lower() == "n":
-                    log.info("choosing to apply no shift")
-                    cshifts = numpy.zeros_like(cdata.shape[0])
-                    shifts = cshifts
-                    corrs = numpy.zeros_like(cshifts)
-                    which_shifts = "custom"
-                    apply_shifts = False
-
-                apply_shifts = numpy.any(numpy.abs(shifts)>0)
-
-    # apply pixel shifts to the images
-    images_out, shifts, _, = _apply_electronic_shifts(images=images, out_images=out_images, raw_shifts=raw_shifts,
-                                                      drp_shifts=dshifts, qc_shifts=qshifts, custom_shifts=cshifts,
-                                                      which_shifts=which_shifts, apply_shifts=apply_shifts,
-                                                      dry_run=False, display_plots=display_plots)
-
-    return shifts, corrs, images_out
 
 
 def addCCDMask_drp(image, mask, replaceError="1e10"):
@@ -969,7 +675,7 @@ def find_peaks_auto(
     # find the subpixel centroids of the peaks from the central 3 pixels using either a hyperbolic approximation
     # or perform a leastsq fit with a Gaussian
     log.info("refining fiber location")
-    centers = cut.measurePeaks(pixels, method, init_sigma, threshold=0, max_diff=1.0)[0]
+    centers = cut.measure_centroids(pixels, method, init_sigma, threshold=0, max_diff=1.0)[0]
     # round the subpixel peak positions to their nearest integer value
     round_cent = numpy.round(centers).astype(int)
     log.info(f"final number of fibers found {len(round_cent)}")
@@ -1096,7 +802,7 @@ def findPeaksOffset_drp(
         #    select = numpy.logical_and(select_good_weak, select_weak)
         #    plt.plot(peaks_weak_good[0][select[select_good_weak]],peaks_weak_good[2] [select[select_good_weak]],'ob')
         peaks = cut.findPeaks(threshold=threshold)
-        centers = cut.measurePeaks(
+        centers = cut.measure_centroids(
             peaks[0], method, init_sigma, threshold=0, max_diff=1.0
         )[0]
         plt.clf()
@@ -1245,7 +951,7 @@ def findPeaksMaster_drp(
             select_good[last_fiber] = False
     npeaks = numpy.sum(select_good)
     peaks_good = cut.findPeaks(threshold=threshold, npeaks=npeaks)
-    centers_good = cut.measurePeaks(
+    centers_good = cut.measure_centroids(
         peaks_good[0], method, init_sigma, threshold=0, max_diff=1.0
     )[0]
     peaks_ref = Spectrum1D(wave=fiber, data=ref_pos)
@@ -1261,7 +967,7 @@ def findPeaksMaster_drp(
     select_weak = fib_qual == "WEAK"
     npeaks = numpy.sum(select_good_weak)
     peaks_weak_good = cut.findPeaks(threshold=threshold_weak, npeaks=npeaks)
-    centers_weak_good = cut.measurePeaks(
+    centers_weak_good = cut.measure_centroids(
         peaks_weak_good[0], method, init_sigma, threshold=0, max_diff=1.0
     )[0]
     offset_weak = centers._data[select_good_weak] - centers_weak_good
@@ -1396,7 +1102,7 @@ def findPeaksMaster2_drp(
             threshold = threshold * 1.05
             # print(threshold,numpy.sum(select_good),len(peaks_good),shift_peaks)
         # break
-    centers_good = cut.measurePeaks(
+    centers_good = cut.measure_centroids(
         peaks_good, method, init_sigma, threshold=0, max_diff=1.0
     )[0]
     peaks_ref = Spectrum1D(wave=fiber, data=ref_pos)
@@ -1524,7 +1230,7 @@ def trace_peaks(
     if in_peaks is None:
         # read slitmap extension
         slitmap = img.getSlitmap()
-        slitmap = slitmap[slitmap["spectrographid"] == int(img._header["CCD"][1])]
+        slitmap = slitmap[slitmap["spectrographid"] == int(img._header["SPEC"][-1])]
 
         channel = img._header["CCD"][0]
         positions = slitmap[f"ypix_{channel}"]
@@ -1588,7 +1294,7 @@ def trace_peaks(
             pix = numpy.round(trace.getData()[0][:, i + steps]).astype("int16")
 
         # measure the peaks for the ref_column and store it in the trace
-        centers = cut_iter.measurePeaks(pix, method, init_sigma, threshold=threshold, max_diff=float(max_diff))
+        centers = cut_iter.measure_centroids(pix, method, init_sigma, threshold=threshold, max_diff=float(max_diff))
         trace.setSlice(i, axis="y", data=centers[0], mask=centers[1])
 
     # iterate towards the last index along dispersion axis
@@ -1608,7 +1314,7 @@ def trace_peaks(
             pix = numpy.round(trace.getData()[0][:, i - steps]).astype("int16")
 
         # measure the peaks for the ref_column and store it in the trace
-        centers = cut_iter.measurePeaks(
+        centers = cut_iter.measure_centroids(
             pix, method, init_sigma, threshold=threshold, max_diff=float(max_diff)
         )
         trace.setSlice(i, axis="y", data=centers[0], mask=centers[1])
@@ -1851,64 +1557,58 @@ def subtract_straylight(
     in_cent_trace: str,
     out_image: str,
     out_stray: str = None,
-    select_nrows: int|Tuple[int,int] = 3,
-    aperture: int = 14,
-    smoothing: int = 20,
-    use_weights : bool = False,
-    median_box: int = 11,
-    gaussian_sigma: int = 20.0,
-    parallel: int|str = "auto",
+    select_nrows: int = 20,
+    margin: int = 7,
+    x_bins: int = 70,
+    nsigma: float = 3.0,
+    clip: Tuple[float,float]|None = (0.0, None),
+    median_box: int|None = None,
     display_plots: bool = False,
-) -> Tuple[Image, Image, Image, Image]:
-    """Subtracts a diffuse background signal (stray light) from the raw data
+) -> Tuple[Image, Image, Image]:
+    """Subtracts diffuse background (stray light) from a raw 2D image using inter-fiber regions.
 
-    It uses the regions between fiber to estimate the stray light signal and
-    smoothes the result by a polyon in cross-disperion direction and afterwards
-    a wide 2D Gaussian filter to reduce the introduction of low frequency
-    noise.
+    The function masks out fiber traces using a trace mask, estimates the background
+    from the remaining pixels (between fibers and optionally at the top/bottom of the CCD),
+    fits a smooth 2D spline to this background, and subtracts it from the original image.
 
     Parameters
     ----------
-    in_image: str
-        Name of the FITS image from which the stray light should be subtracted
-    in_cent_trace: str
-        Name of the  FITS file with the trace mask of the fibers
-    out_image: str
-        Name of the FITS file in which the straylight subtracted image is stored
-    out_stray: str
-        Name of the FITS file in which the pure straylight image is stored
-    select_nrows: int or Tuple[int,int], optional with default: 30
-        Number of rows at the top and bottom of the CCD to be used for the stray light estimation
-    aperture: int, optional  with default: 14
-        Size of the aperture around each fiber in cross-disperion direction assumed to contain signal from fibers
-    smoothing: int, optional with default: 20
-        Smoothing parameter for the spline fit to the background signal
-    use_weights : bool, optional with default: False
-        If True, the error of the image is used as weights in the spline fitting
-    median_box: int, optional with default: 11
-        Width of the median filter used to smooth the image along the dispersion axis
-    gaussian_sigma : float, optional with default :20.0
-        Width of the 2D Gaussian filter to smooth the measured background signal
-    parallel : either int (>0) or  'auto', optional with default: 'auto'
-        Number of CPU cores used in parallel for the computation. If set to auto, the maximum number of CPUs
-    display_plots : bool, optional with default: False
-        If True, the results are plotted and displayed
+    in_image : str
+        Path to the input FITS image from which stray light will be subtracted.
+    in_cent_trace : str
+        Path to the FITS file containing the fiber trace mask.
+    out_image : str
+        Path to the output FITS file for the stray-light-subtracted image.
+    out_stray : str, optional
+        Path to the output FITS file for the stray light model (default: None).
+    x_bins : int, optional
+        Number of bins along the X axis for the spline fit (default: 70).
+    select_nrows : int or tuple of int, optional
+        Number of rows at the top and bottom of the CCD to use for background estimation
+        (default: 20).
+    margin : int, optional
+        Number of pixels to skip before/after fiber centroids (default: 7).
+    nsigma : float, optional
+        Sigma threshold for clipping outlier bins, (default: 5.0).
+    clip : tuple[float,float] | None, optional
+        Valid range of values, out of which data will be clipped, (default: (0.0, None))
+    median_box : int, optional
+        Width of the median filter along the dispersion axis (default: None).
+    display_plots : bool, optional
+        If True, display diagnostic plots (default: False).
 
     Returns
     -------
-    img: Image
-        The original image
-    img_fit: Image
-        The polynomial fit to the background signal
-    img_smooth: Image
-        The smoothed background signal
-    img_out: Image
-        The stray light subtracted image
+    img_median : Image
+        Median-filtered version of the input image.
+    img_stray : Image
+        Fitted stray light background model.
+    img_out : Image
+        Stray-light-subtracted image.
     """
     # load image data
     log.info(f"using image {os.path.basename(in_image)} for stray light subtraction")
     img = loadImage(in_image)
-    unit = img._header["BUNIT"]
 
     # smooth image along dispersion axis with a median filter excluded NaN values
     if median_box is not None:
@@ -1922,117 +1622,46 @@ def subtract_straylight(
 
     # load trace mask
     log.info(f"using centroids trace {os.path.basename(in_cent_trace)} to mask fibers")
-    trace_mask = TraceMask()
-    trace_mask.loadFitsData(in_cent_trace, extension_data=0)
+    trace_mask = TraceMask.from_file(in_cent_trace)
 
     # update mask
     if img_median._mask is None:
         img_median._mask = numpy.zeros(img_median._data.shape, dtype=bool)
     img_median._mask = img_median._mask | numpy.isnan(img_median._data) | numpy.isinf(img_median._data) | (img_median._data == 0)
 
-    # mask regions around each fiber within a given cross-dispersion aperture
-    log.info(f"masking fibers with an aperture of {aperture} pixels")
-    img_median.maskFiberTraces(trace_mask, aperture=aperture, parallel=parallel)
+    log.info(f"binning with parameters: {x_bins = }, {margin = }, {select_nrows = }, {nsigma = }")
+    samples, strips, X, Y = img_median.straylight_binning(trace_mask, x_bins, y_margin=margin, nrows=select_nrows, nsigma=nsigma)
 
-    # mask regions around the top and bottom of the CCD
-    if isinstance(select_nrows, int):
-        select_tnrows = select_nrows
-        select_bnrows = select_nrows
-    else:
-        select_tnrows, select_bnrows = select_nrows
-    log.info(f"selecting top {select_tnrows} and bottom {select_bnrows} rows of the CCD")
-    # define indices for top/bottom fibers
-    tfiber = numpy.ceil(trace_mask._data[0]).astype(int)
-    bfiber = numpy.floor(trace_mask._data[-1]).astype(int)
-
-    for icol in range(img_median._dim[1]):
-        # mask top/bottom rows before/after first/last fiber
-        img_median._mask[tfiber[icol]:, icol] = True
-        img_median._mask[:bfiber[icol], icol] = True
-        # unmask select_nrows around each region
-        img_median._mask[(tfiber[icol]+aperture//2):(tfiber[icol]+aperture//2+select_tnrows), icol] = False
-        img_median._mask[(bfiber[icol]-aperture//2-select_bnrows):(bfiber[icol]-aperture//2), icol] = False
-
-    # fit the signal in unmaksed areas along cross-dispersion axis by a polynomial
-    log.info(f"fitting spline with {smoothing = } to the background signal along cross-dispersion axis")
-    img_fit = img_median.fitSpline(smoothing=smoothing, use_weights=use_weights, clip=(0.0, None))
-
-    # median filter to reject outlying columns
-    img_fit = img_fit.medianImg((1, 7))
-
-    # smooth the results by 2D Gaussian filter of given width
-    log.info(f"smoothing the background signal by a 2D Gaussian filter of width {gaussian_sigma}")
-    img_stray = img_fit.convolveGaussImg(1, gaussian_sigma)
+    log.info(f"fitting straylight model with parameters: {clip = }")
+    fig, axs = create_straylight_axes(img_median, len(strips))
+    img_stray = img_median.fit_straylight(samples, strips, X, Y, smoothing=1.0, clip=clip, axs=axs)
 
     # subtract smoothed background signal from original image
     log.info("subtracting the smoothed background signal from the original image")
-    img_out = loadImage(in_image)
-    img_out._data = img_out._data - img_stray._data
+    img_out = copy(img)
+    img_out.setData(data=img._data-img_stray._data)
 
     # include header and write out file
     log.info(f"writing stray light subtracted image to {os.path.basename(out_image)}")
-    img_out.setHeader(header=img.getHeader())
     img_out.writeFitsData(out_image)
 
     # plot results: polyomial fitting & smoothing, both with masked regions on
-    log.info("plotting results")
-    fig = plt.figure(figsize=(10, 10), layout="constrained")
-    fig.suptitle(f"Stray Light Subtraction for frame {os.path.basename(in_image)}")
-    fig.supxlabel("X (pixel)")
-    fig.supylabel("Y (pixel)")
-    gs = fig.add_gridspec(2, 2,  width_ratios=(4, 1), height_ratios=(1, 4),
-                        left=0.1, right=0.9, bottom=0.1, top=0.9,
-                        wspace=0.05, hspace=0.05)
-
-    ax = fig.add_subplot(gs[1, 0])
-    ax_strayx = fig.add_subplot(gs[0, 0], sharex=ax)
-    ax_strayy = fig.add_subplot(gs[1, 1], sharey=ax)
-    ax_strayx.tick_params(axis="x", labelbottom=False)
-    ax_strayy.tick_params(axis="y", labelleft=False)
-    ax_strayx.set_ylabel(f"Counts ({unit})")
-    ax_strayy.set_xlabel(f"Counts ({unit})")
-    ax_strayx.set_yscale("asinh")
-    ax_strayy.set_xscale("asinh")
-    axins1 = inset_axes(ax, width="30%", height="2%", loc="upper right")
-    axins1.tick_params(labelsize="small", labelcolor="tab:red")
-
-    y_pixels = numpy.arange(img_median._data.shape[0])
-    x_pixels = numpy.arange(img_median._data.shape[1])
-    norm = simple_norm(data=img_stray._data, stretch="asinh")
-    im = ax.imshow(img_stray._data, origin="lower", cmap="Greys_r", norm=norm, interpolation="none")
-    cbar = fig.colorbar(im, cax=axins1, orientation="horizontal")
-    cbar.set_label(f"Counts ({unit})", fontsize="small", color="tab:red")
-    colors_x = plt.cm.coolwarm(numpy.linspace(0, 1, img_median._data.shape[0]))
-    colors_y = plt.cm.coolwarm(numpy.linspace(0, 1, img_median._data.shape[1]))
-    ax_strayx.fill_between(x_pixels, bn.nanmedian(img._error, axis=0), lw=0, fc="0.8")
-    for iy in y_pixels:
-        ax_strayx.plot(x_pixels, img_stray._data[iy], ",", color=colors_x[iy], alpha=0.2)
-    ax_strayy.fill_betweenx(y_pixels, 0, bn.nanmedian(img._error, axis=1), lw=0, fc="0.8")
-    for ix in x_pixels:
-        ax_strayy.plot(img_stray._data[:, ix], y_pixels, ",", color=colors_y[ix], alpha=0.2)
-    save_fig(fig, product_path=out_image, to_display=display_plots, figure_path="qa", label="straylight_model")
+    save_fig(fig, product_path=out_image, to_display=display_plots, figure_path="qa", label="straylight_model", dpi=100, transparent=False)
 
     # write out stray light image
     if out_stray is not None:
         log.info(f"writing stray light image to {os.path.basename(out_stray)}")
-        hdus = pyfits.HDUList()
-        hdus.append(pyfits.PrimaryHDU(img._data, header=img._header))
-        hdus.append(pyfits.ImageHDU(img_out._data, name="CLEANED"))
-        hdus.append(pyfits.ImageHDU(img_median._data, name="MASKED"))
-        hdus.append(pyfits.ImageHDU(img_fit._data, name="SPLINE"))
-        hdus.append(pyfits.ImageHDU(img_stray._data, name="SMOOTH"))
-        hdus.writeto(out_stray, overwrite=True)
+        img_stray.writeFitsData(out_stray)
+        # masked = img_median._data.copy()
+        # masked[img_median._mask] = numpy.nan
+        # hdus = pyfits.HDUList()
+        # hdus.append(pyfits.PrimaryHDU(img_stray._data, header=img._header))
+        # hdus.append(pyfits.ImageHDU(img_out._data, name="CLEANED"))
+        # hdus.append(pyfits.ImageHDU(masked, name="MASKED"))
+        # hdus.append(pyfits.ImageHDU(img_stray._data, name="SPLINE"))
+        # hdus.writeto(out_stray, overwrite=True)
 
-        # stray_model = fits.HDUList()
-        # stray_model.append(fits.PrimaryHDU(data=img._data, header=img._header))
-        # stray_model.append(fits.ImageHDU(data=img_stray._data, name="STRAY_CORR"))
-        # stray_model.append(fits.ImageHDU(data=img._data-img_stray._data, name="STRAYLIGHT"))
-        # stray_model.append(fits.ImageHDU(data=model._data, name="CONT_MODEL"))
-        # stray_model.append(fits.ImageHDU(data=img_stray._data-model._data, name="STRAY_MODEL"))
-        # stray_model.append(fits.ImageHDU(data=img._data-model._data, name="NOSTRAY_MODEL"))
-        # stray_model.writeto(stray_path, overwrite=True)
-
-    return img_median, img_fit, img_stray, img_out
+    return img_median, img_stray, img_out
 
 def traceFWHM_drp(
     in_image,
@@ -2530,9 +2159,10 @@ def extract_spectra(
     in_image: str,
     out_rss: str,
     in_trace: str,
-    in_fwhm: str = None,
+    in_sigma: str = None,
     in_model: str = None,
     in_acorr: str = None,
+    assume_thermal_shift: float = None,
     columns: List[int] = [500, 750, 1000, 1250, 1500, 1750, 2000, 2250, 2500, 2750, 3000],
     column_width: int = 50,
     method: str = "optimal",
@@ -2541,7 +2171,7 @@ def extract_spectra(
     disp_axis: str = "X",
     replace_error: float = 1.0e10,
     display_plots: bool = False,
-    parallel: str = "auto",
+    parallel: str|int = 0,
 ):
     """
     Extracts the flux for each fiber along the dispersion direction which is written into an RSS FITS file format.
@@ -2570,7 +2200,7 @@ def extract_spectra(
                     a spatially resolved FWHM map is provided. Only used if method is set to 'optimal', otherwise this parameter is ignored.
     disp_axis: string of float, optional  with default: 'X'
                     Define the dispersion axis, either 'X','x', or 0 for the  x axis or 'Y','y', or 1 for the y axis.
-    parallel: either string of integer (>0) or  'auto', optional with default: 'auto'
+    parallel: either string of integer (>0) or  'auto', optional with default: 0
             Number of CPU cores used in parallel for the computation. If set to auto, the maximum number of CPUs
             for the given system is used.
 
@@ -2598,6 +2228,14 @@ def extract_spectra(
 
     trace_mask = TraceMask.from_file(in_trace)
 
+    # check if fwhm trace is given and exists
+    if in_sigma is None or not os.path.isfile(in_sigma):
+        trace_sigma = TraceMask()
+        trace_sigma.setData(data=numpy.ones(trace_mask._data.shape) * float(fwhm) / 2.354)
+        trace_sigma._coeffs = numpy.ones((trace_mask._data.shape[0], 1)) * float(fwhm) / 2.354
+    else:
+        trace_sigma = TraceMask.from_file(in_sigma)
+
     # load fiber model if given
     if in_model is not None and os.path.isfile(in_model):
         fiber_model = loadImage(in_model)
@@ -2623,26 +2261,29 @@ def extract_spectra(
     # axs_cc[-1].set_xlim(shift_range)
 
     # fix centroids for thermal shifts
-    log.info(f"measuring fiber thermal shifts @ columns: {','.join(map(str, columns))}")
-    trace_mask, shifts, median_shift, std_shift, _ = _fix_fiber_thermal_shifts(img, trace_mask, 2.5,
-                                                                               fiber_model=fiber_model,
-                                                                               trace_amp=10000,
-                                                                               columns=columns,
-                                                                               column_width=column_width,
-                                                                               shift_range=shift_range, axs=[axs_cc, axs_fb])
-    # save columns measured for thermal shifts
-    plot_fiber_thermal_shift(columns, shifts, median_shift, std_shift, ax=ax_shift)
-    save_fig(fig, product_path=out_rss, to_display=display_plots, figure_path="qa", label="fiber_thermal_shifts")
+    if assume_thermal_shift is not None:
+        log.info(f"assuming fiber thermal shift {assume_thermal_shift:.4f}")
+        median_shift = assume_thermal_shift
+        # std_shift = 0
+        # shifts = numpy.ones_like(columns) * median_shift
+        trace_mask._data += median_shift
+    else:
+        log.info(f"measuring fiber thermal shifts @ columns: {','.join(map(str, columns))}")
+        trace_mask._slitmap[f"ypix_{camera[0]}"] = trace_mask._slitmap[f"ypix_{camera[0]}"].astype("float32")
+        for iblock in range(LVM_NBLOCKS):
+            cent_block = trace_mask.get_block(iblock=iblock)
+            width_block = trace_sigma.get_block(iblock=iblock)
+            cent_block, _, median_shift, _, _ = _fix_fiber_thermal_shifts(img, cent_block, width_block,
+                                                                          fiber_model=fiber_model,
+                                                                          trace_amp=10000,
+                                                                          columns=columns,
+                                                                          column_width=column_width,
+                                                                          shift_range=shift_range, axs=[axs_cc, axs_fb, ax_shift])
+            trace_mask.set_block(iblock=iblock, from_instance=cent_block)
+
+        save_fig(fig, product_path=out_rss, to_display=display_plots, figure_path="qa", label="fiber_thermal_shifts")
 
     if method == "optimal":
-        # check if fwhm trace is given and exists
-        if in_fwhm is None or not os.path.isfile(in_fwhm):
-            trace_fwhm = TraceMask()
-            trace_fwhm.setData(data=numpy.ones(trace_mask._data.shape) * float(fwhm))
-            trace_fwhm._coeffs = numpy.ones((trace_mask._data.shape[0], 1)) * float(fwhm)
-        else:
-            trace_fwhm = TraceMask.from_file(in_fwhm)
-
         # set up parallel run
         if parallel == "auto":
             fragments = multiprocessing.cpu_count()
@@ -2653,7 +2294,7 @@ def extract_spectra(
         if fragments > 1:
             split_img = img.split(fragments)
             split_trace = trace_mask.split(fragments)
-            split_fwhm = trace_fwhm.split(fragments)
+            split_fwhm = trace_sigma.split(fragments)
             pool = Pool()
             threads = []
             data = []
@@ -2683,9 +2324,9 @@ def extract_spectra(
                 mask = None
         else:
             with Timer(name="extract optimal", logger=log.info):
-                (data, error, mask) = img.extractSpecOptimal(trace_mask, trace_fwhm, plot_fig=display_plots)
+                (data, error, mask) = img.extractSpecOptimal(trace_mask, trace_sigma, plot_fig=display_plots)
     elif method == "aperture":
-        trace_fwhm = None
+        trace_sigma = None
 
         (data, error, mask) = img.extractSpecAperture(trace_mask, aperture)
 
@@ -2702,20 +2343,22 @@ def extract_spectra(
 
     # mask non-exposed standard fibers
     slitmap = img.getSlitmap()
-    select_spec = slitmap["spectrographid"] == int(img._header["CCD"][1])
+    select_spec = slitmap["spectrographid"] == int(img._header["SPEC"][-1])
     slitmap_spec = slitmap[select_spec]
     exposed_selection = numpy.array(list(img._header["STD*ACQ"].values()))
     # mask fibers that are not exposed
-    # TODO: use the more reliable routine get_exposed_std_fibers once is merged from addqa branch
+    # TODO: use the more reliable image method get_exposed_std once is merged from addqa branch
     if len(exposed_selection) != 0:
         exposed_std = numpy.array(list(img._header["STD*FIB"].values()))[exposed_selection]
         mask |= (~(numpy.isin(slitmap_spec["orig_ifulabel"], exposed_std))&((slitmap_spec["telescope"] == "Spec")))[:, None]
-        mask |= (slitmap_spec["fibstatus"] == 1)[:, None]
+
+    # mask broken fibers
+    mask |= (slitmap_spec["fibstatus"] == 1)[:, None]
 
     # propagate thermal shift to slitmap
-    channel = img._header['CCD'][0]
-    slitmap[f"ypix_{channel}"] = slitmap[f"ypix_{channel}"].astype("float64")
-    slitmap[f"ypix_{channel}"][select_spec] += numpy.nan_to_num(bn.nanmedian(shifts, axis=0))
+    channel = camera[0]
+    slitmap[f"ypix_{channel}"] = slitmap[f"ypix_{channel}"].astype("float32")
+    slitmap[f"ypix_{channel}"][select_spec] = trace_mask._slitmap[f"ypix_{channel}"][select_spec]
     # propagate bad fibers to slitmap
     slitmap_spec["fibstatus"][mask.all(axis=1)] = 5
     slitmap["fibstatus"][select_spec] = slitmap_spec["fibstatus"]
@@ -2728,25 +2371,26 @@ def extract_spectra(
         error=error,
         good_fibers=trace_mask._good_fibers,
         cent_trace=trace_mask,
-        width_trace=trace_fwhm,
+        width_trace=trace_sigma,
         header=img.getHeader(),
         slitmap=slitmap
     )
     rss.setHdrValue("NAXIS2", data.shape[0])
     rss.setHdrValue("NAXIS1", data.shape[1])
     rss.setHdrValue("DISPAXIS", 1, "axis of spectral dispersion")
+    rss.setHdrValue(f"HIERARCH {camera.upper()} FIBER SHIFT", numpy.round(median_shift, 4), "median fiber shift [pix]")
     rss.setHdrValue(f"HIERARCH {camera.upper()} FIBER CENT_MIN", numpy.round(bn.nanmin(trace_mask._data),4), "min. fiber centroid [pix]")
     rss.setHdrValue(f"HIERARCH {camera.upper()} FIBER CENT_MAX", numpy.round(bn.nanmax(trace_mask._data),4), "max. fiber centroid [pix]")
     rss.setHdrValue(f"HIERARCH {camera.upper()} FIBER CENT_AVG", numpy.round(bn.nanmean(trace_mask._data),4), "avg. fiber centroid [pix]")
     rss.setHdrValue(f"HIERARCH {camera.upper()} FIBER CENT_STD", numpy.round(bn.nanstd(trace_mask._data),4), "stddev. fiber centroid [pix]")
     if method == "optimal":
-        rss.setHdrValue(f"HIERARCH {camera.upper()} FIBER WIDTH_MIN", numpy.round(bn.nanmin(trace_fwhm._data),4), "min. fiber width [pix]")
-        rss.setHdrValue(f"HIERARCH {camera.upper()} FIBER WIDTH_MAX", numpy.round(bn.nanmax(trace_fwhm._data),4), "max. fiber width [pix]")
-        rss.setHdrValue(f"HIERARCH {camera.upper()} FIBER WIDTH_AVG", numpy.round(bn.nanmean(trace_fwhm._data),4), "avg. fiber width [pix]")
-        rss.setHdrValue(f"HIERARCH {camera.upper()} FIBER WIDTH_STD", numpy.round(bn.nanstd(trace_fwhm._data),4), "stddev. fiber width [pix]")
+        rss.setHdrValue(f"HIERARCH {camera.upper()} FIBER WIDTH_MIN", numpy.round(bn.nanmin(trace_sigma._data),4), "min. fiber width [pix]")
+        rss.setHdrValue(f"HIERARCH {camera.upper()} FIBER WIDTH_MAX", numpy.round(bn.nanmax(trace_sigma._data),4), "max. fiber width [pix]")
+        rss.setHdrValue(f"HIERARCH {camera.upper()} FIBER WIDTH_AVG", numpy.round(bn.nanmean(trace_sigma._data),4), "avg. fiber width [pix]")
+        rss.setHdrValue(f"HIERARCH {camera.upper()} FIBER WIDTH_STD", numpy.round(bn.nanstd(trace_sigma._data),4), "stddev. fiber width [pix]")
 
     rss.add_header_comment(f"{in_trace}, fiber centroids used for {camera}")
-    rss.add_header_comment(f"{in_fwhm}, fiber width (FWHM) used for {camera}")
+    rss.add_header_comment(f"{in_sigma}, fiber width (FWHM) used for {camera}")
     rss.add_header_comment(f"{in_model}, fiber model used for {camera}")
     rss.add_header_comment(f"{in_acorr}, fiber aperture correction used for {camera}")
 
@@ -2988,6 +2632,24 @@ def reprojectRSS_drp(
     rep.writeto(f"{out_path}/{out_name}_2d.fits", overwrite=True)
 
 
+def _gen_mexhat_basis(x, centroids, sigmas, fiber_radius, oversampling_factor):
+    dx = x[1, 0] - x[0, 0]
+    x_os = fp.oversample(x, oversampling_factor)
+    dx_os = dx / oversampling_factor
+
+    x_kernel = numpy.arange(0, 2*fiber_radius + dx_os, dx_os)
+    kernel = fp.fiber_profile(centroids=fiber_radius, radii=fiber_radius, x=x_kernel)
+    psfs = fp.gaussians((numpy.ones_like(centroids), centroids, sigmas), x_os.T, alpha=2, collapse=False)[0].T
+
+    profiles = signal.fftconvolve(psfs, kernel.T, mode="same", axes=0)
+    profiles /= integrate.trapezoid(profiles, x_os, axis=0)[None, :]
+
+    # reshape model into oversampled bins: (x, oversampling_factor)
+    profiles_binned = profiles.reshape((x.shape[0], oversampling_factor, x.shape[1]))
+    profiles = integrate.trapezoid(profiles_binned, dx=dx_os, axis=1)
+    return profiles
+
+
 def validate_extraction(in_image, in_cent, in_width, in_rss, plot_columns=[1000, 2000, 3000], display_plots=False):
     """Evaluates the extracted flux into the original 2D pixel grid
 
@@ -3018,54 +2680,54 @@ def validate_extraction(in_image, in_cent, in_width, in_rss, plot_columns=[1000,
     img = Image()
     img._data = numpy.nan_to_num(img._data)
     img.loadFitsData(in_image)
+    channel = img._header["CCD"][0]
+    specid = int(img._header["SPEC"][-1])
 
     log.info(f"loading fiber parameters in {in_cent} and {in_width}")
     cent = TraceMask.from_file(in_cent)
     width = TraceMask.from_file(in_width)
-    width._data /= 2.354
 
     log.info(f"loading extracted flux in {in_rss}")
     rss = RSS.from_file(in_rss)
     rss._data = numpy.nan_to_num(rss._data)
 
-    ypix_cor = rss._slitmap[["spectrographid"] == int(img._header["CCD"][1])]["ypix_z"]
-    ypix_ori = img._slitmap[["spectrographid"] == int(img._header["CCD"][1])]["ypix_z"]
-    thermal_shift = ypix_cor - ypix_ori
-    log.info(f"fiber thermal shift in slitmap: {thermal_shift:.4f}")
-    cent._data += thermal_shift
+    ypix_cor = rss._slitmap[rss._slitmap["spectrographid"] == specid][f"ypix_{channel}"]
+    ypix_ori = img._slitmap[img._slitmap["spectrographid"] == specid][f"ypix_{channel}"]
+    thermal_shift = (ypix_cor.astype("float32") - ypix_ori.astype("float32")).value
+    log.info(f"mean fiber thermal shift in slitmap: {thermal_shift.mean():.4f}")
+    cent._data[:] += thermal_shift[:, None]
 
     log.info(f"evaluating extracted flux into 2D pixel grid for {img._dim[1]} columns")
     x = numpy.arange(img._dim[0])
-    out = numpy.zeros(img._dim)
-    fact = numpy.sqrt(2.0 * numpy.pi)
+    x = numpy.repeat(x, cent._data.shape[0]).reshape(-1, cent._data.shape[0])
+    out = numpy.zeros(img._dim) + numpy.nan
 
-    fig, axs = create_subplots(to_display=display_plots, nrows=len(plot_columns), ncols=1, figsize=(15,5), sharex=True, layout="constrained")
-    for i in range(img._dim[1]):
-        A = (numpy.exp(-0.5 * ((x[:, None] - cent._data[:, i][None, :]) / abs(width._data[:, i][None, :])) ** 2) / (fact * abs(width._data[:, i][None, :])))
-        spec = numpy.dot(A, rss._data[:, i])
-        out[:, i] = spec
-        if i in plot_columns:
-            axs[plot_columns.index(i)].step(x, img._data[:, i], color="k", lw=1, where="mid")
-            axs[plot_columns.index(i)].step(x, spec, color="r", lw=1, where="mid")
+    npixels = 15
+    fiber_radius = 1.4
+    profile_cache = FiberProfileCache(fiber_radius, 100, npixels)
 
-    out_path = os.path.dirname(in_image)
-    out_name = os.path.basename(in_image).split(".fits")[0]
-    out_residual = os.path.join(out_path, f"{out_name}_residual.fits")
-    out_2dimage = os.path.join(out_path, f"{out_name}_2dimage.fits")
-    out_ratio = os.path.join(out_path, f"{out_name}_ratio.fits")
-    save_fig(fig, product_path=out_2dimage, to_display=display_plots, figure_path="qa", label="2D_extracted_model")
+    for i in tqdm(plot_columns, unit="column", ascii=True):
+        A = profile_cache(cent._data[:, i], width._data[:, i])
 
-    log.info(f"writing residual to {out_residual}")
-    hdu = pyfits.PrimaryHDU(img._data - out)
-    hdu.writeto(out_residual, overwrite=True)
+        xx = numpy.repeat(numpy.arange(rss._fibers, dtype="int"), 2*npixels+1)
+        # pixel ranges of fiber images
+        pos_t = numpy.trunc(cent._data[:, i])
+        yyv = numpy.linspace(pos_t-npixels, pos_t+npixels, 2*npixels+1, endpoint=True)
 
-    log.info(f"writing ratio to {out_ratio}")
-    hdu = pyfits.PrimaryHDU(out / img._data)
-    hdu.writeto(out_ratio, overwrite=True)
+        yyv = yyv.T.ravel()
+        A = A.T.ravel()
+        B = sparse.csc_matrix((A, (yyv, xx)), shape=(len(img._data), rss._fibers))
 
-    log.info(f"writing 2D model {out_2dimage}")
-    hdu = pyfits.PrimaryHDU(out)
-    hdu.writeto(out_2dimage, overwrite=True)
+        out[:, i] = B @ rss._data[:, i]
+
+    model = copy(img)
+    model._data = out
+    model._error = None
+    model._mask = None
+
+    ratio = model / img
+
+    return model, ratio, img
 
 
 # TODO: for arcs take short exposures for bright lines & long exposures for faint lines
@@ -3145,18 +2807,18 @@ def preproc_raw_frame(
     # load image
     log.info(f"starting preprocessing of raw image '{os.path.basename(in_image)}'")
     org_img = loadImage(in_image)
-    org_header = org_img.getHeader()
-
-    camera = org_header["CCD"]
 
     # fix the header with header fix file
     # convert real MJD to SJD
     try:
-        sjd = int(dateobs_to_sjd(org_header.get("OBSTIME")))
+        sjd = int(dateobs_to_sjd(org_img._header.get("OBSTIME")))
         sjd = correct_sjd(in_image, sjd)
-        org_header = apply_hdrfix(sjd, hdr=org_header) or org_header
+        org_img._header = apply_hdrfix(sjd, hdr=org_img._header) or org_img._header
     except ValueError as e:
         log.error(f"cannot apply header fix: {e}")
+
+    org_header = org_img.getHeader()
+    camera = org_header["CCD"]
 
     # assume imagetyp or not
     if assume_imagetyp:
@@ -3512,177 +3174,6 @@ def preproc_raw_frame(
     return org_img, os_profiles, os_models, proc_img
 
 
-def add_astrometry(
-    in_image: str,
-    out_image: str,
-    in_agcsci_image: str,
-    in_agcskye_image: str,
-    in_agcskyw_image: str
-):
-    """
-    uses WCS in AG camera coadd image to calculate RA,DEC of
-    each fiber in each telescope and adds these to SLITMAP extension
-    if AGC frames are not available it uses the POtelRA,POtelDEC,POtelPA
-
-    Parameters
-
-    in_image : str
-        path to input image
-    out_image : str
-        path to output image
-    in_agcsci_image : str
-        path to Sci telescope AGC coadd master frame
-    in_agcskye_image : str
-        path to SkyE telescope AGC coadd master frame
-    in_agcskyw_image : str
-        path to SkyW telescope AGC coadd master frame
-    """
-
-    # print("**************************************")
-    # print("**** ADDING ASTROMETRY TO SLITMAP ****")
-    # print("**************************************")
-    log.info(f"loading frame from {in_image}")
-    #print(in_image)
-    #print(out_image)
-    #print(in_agcsci_image)
-    #print(in_agcskye_image)
-    #print(in_agcskyw_image)
-    #print(in_agcspec_image)
-
-    # reading slitmap
-    org_img = loadImage(in_image)
-    slitmap = org_img.getSlitmap()
-    telescope=numpy.array(slitmap['telescope'].data)
-    x=numpy.array(slitmap['xpmm'].data)
-    y=numpy.array(slitmap['ypmm'].data)
-
-    # selection mask for fibers from different telescopes
-    selsci=(telescope=='Sci')
-    selskye=(telescope=='SkyE')
-    selskyw=(telescope=='SkyW')
-    selspec=(telescope=='Spec')
-
-    # read AGC coadd images and get RAobs, DECobs, and PAobs for each telescope
-    agcfiledir={'sci':in_agcsci_image, 'skye':in_agcskye_image, 'skyw':in_agcskyw_image}
-
-    def copy_guider_keyword(gdrhdr, keyword, img):
-        '''Copy a keyword from a guider coadd header to an Image object Header'''
-        inhdr = keyword in gdrhdr
-        comment = gdrhdr.comments[keyword] if inhdr else ''
-        img.setHdrValue(f'HIERARCH GDRCOADD {keyword}', gdrhdr.get(keyword), comment)
-
-    def getobsparam(tel):
-        if tel!='spec':
-            if os.path.isfile(agcfiledir[tel]):
-                mfagc=fits.open(agcfiledir[tel])
-                mfheader=mfagc[1].header
-                outw = wcs.WCS(mfheader)
-                CDmatrix=outw.pixel_scale_matrix
-                posangrad=-1*numpy.arctan(CDmatrix[1,0]/CDmatrix[0,0])
-                PAobs=posangrad*180/numpy.pi
-                IFUcencoords=outw.pixel_to_world(2500,1000)
-                try:
-                    # some very early science data apparently fails here
-                    RAobs=IFUcencoords.ra.value
-                    DECobs=IFUcencoords.dec.value
-                except AttributeError:
-                    RAobs=0
-                    DECobs=0
-                org_img.setHdrValue('ASTRMSRC', 'GDR coadd', comment='source of astrometry: guider')
-                copy_guider_keyword(mfheader, 'FRAME0  ', org_img)
-                copy_guider_keyword(mfheader, 'FRAMEN  ', org_img)
-                copy_guider_keyword(mfheader, 'NFRAMES ', org_img)
-                copy_guider_keyword(mfheader, 'STACK0  ', org_img)
-                copy_guider_keyword(mfheader, 'STACKN  ', org_img)
-                copy_guider_keyword(mfheader, 'NSTACKED', org_img)
-                copy_guider_keyword(mfheader, 'COESTIM ', org_img)
-                copy_guider_keyword(mfheader, 'SIGCLIP ', org_img)
-                copy_guider_keyword(mfheader, 'SIGMA   ', org_img)
-                copy_guider_keyword(mfheader, 'OBSTIME0', org_img)
-                copy_guider_keyword(mfheader, 'OBSTIMEN', org_img)
-                copy_guider_keyword(mfheader, 'FWHM0   ', org_img)
-                copy_guider_keyword(mfheader, 'FWHMN   ', org_img)
-                copy_guider_keyword(mfheader, 'FWHMMED ', org_img)
-                copy_guider_keyword(mfheader, 'COFWHM  ', org_img)
-                copy_guider_keyword(mfheader, 'COFWHMST', org_img)
-                copy_guider_keyword(mfheader, 'PACOEFFA', org_img)
-                copy_guider_keyword(mfheader, 'PACOEFFB', org_img)
-                copy_guider_keyword(mfheader, 'PAMIN   ', org_img)
-                copy_guider_keyword(mfheader, 'PAMAX   ', org_img)
-                copy_guider_keyword(mfheader, 'PADRIFT ', org_img)
-                copy_guider_keyword(mfheader, 'ZEROPT  ', org_img)
-                copy_guider_keyword(mfheader, 'SOLVED  ', org_img)
-                copy_guider_keyword(mfheader, 'WARNPADR', org_img)
-                copy_guider_keyword(mfheader, 'WARNTRAN', org_img)
-                copy_guider_keyword(mfheader, 'WARNMATC', org_img)
-                copy_guider_keyword(mfheader, 'WARNFWHM', org_img)
-            else:
-                RAobs=org_img._header.get(f'PO{tel}RA'.capitalize(), 0) or 0
-                DECobs=org_img._header.get(f'PO{tel}DE'.capitalize(), 0) or 0
-                PAobs=org_img._header.get(f'PO{tel}PA'.capitalize(), 0) or 0
-                if -999.0 in [RAobs, DECobs]:
-                    RAobs, DECobs, PAobs = 0, 0, 0
-                if numpy.any([RAobs, DECobs, PAobs]) == 0:
-                    log.warning(f"some astrometry keywords for telescope '{tel}' are missing: {RAobs = }, {DECobs = }, {PAobs = }")
-                    org_img.add_header_comment(f"no astromentry keywords '{tel}': {RAobs = }, {DECobs = }, {PAobs = }, using commanded")
-                org_img.setHdrValue('ASTRMSRC', 'CMD position', comment='source of astrometry: commanded position')
-        else:
-            RAobs=0
-            DECobs=0
-            PAobs=0
-        return RAobs, DECobs, PAobs
-
-    RAobs_sci, DECobs_sci, PAobs_sci = getobsparam('sci')
-    RAobs_skye, DECobs_skye, PAobs_skye = getobsparam('skye')
-    RAobs_skyw, DECobs_skyw, PAobs_skyw = getobsparam('skyw')
-    RAobs_spec, DECobs_spec, PAobs_spec = getobsparam('spec')
-
-    # Create fake IFU image WCS object for each telescope focal plane and use it to calculate RA,DEC of each fiber
-    telcoordsdir={'sci':(RAobs_sci, DECobs_sci, PAobs_sci), 'skye':(RAobs_skye, DECobs_skye, PAobs_skye), 'skyw':(RAobs_skyw, DECobs_skyw, PAobs_skyw), 'spec':(RAobs_spec, DECobs_spec, PAobs_spec)}
-    seldir={'sci':selsci, 'skye':selskye, 'skyw':selskyw, 'spec':selspec}
-
-    RAfib=numpy.zeros(len(slitmap))
-    DECfib=numpy.zeros(len(slitmap))
-
-    def getfibradec(tel, platescale):
-        RAobs, DECobs, PAobs = telcoordsdir[tel]
-        pscale=0.01 # IFU image pixel scale in mm/pix
-        skypscale=pscale*platescale/3600 # IFU image pixel scale in deg/pix
-        npix=1800 # size of fake IFU image
-        w = wcs.WCS(naxis=2) # IFU image wcs object
-        w.wcs.crpix = [int(npix/2)+1, int(npix/2)+1]
-        posangrad=PAobs*numpy.pi/180
-        w.wcs.cd=numpy.array([[skypscale*numpy.cos(posangrad), -1*skypscale*numpy.sin(posangrad)],[-1*skypscale*numpy.sin(posangrad), -1*skypscale*numpy.cos(posangrad)]])
-        w.wcs.crval = [RAobs,DECobs]
-        w.wcs.ctype = ["RA---TAN", "DEC--TAN"]
-        # Calculate RA,DEC of each individual fiber
-        sel=seldir[tel]
-        xfib=x[sel]/pscale+int(npix/2) # pixel x coordinates of fibers
-        yfib=y[sel]/pscale+int(npix/2) # pixel y coordinates of fibers
-        fibcoords=w.pixel_to_world(xfib,yfib).to_table()
-        RAfib[sel]=fibcoords['ra'].degree
-        DECfib[sel]=fibcoords['dec'].degree
-
-    log.info(f'Using Fiducial Platescale = {FIDUCIAL_PLATESCALE:.2f} "/mm')
-    getfibradec('sci', platescale=FIDUCIAL_PLATESCALE)
-    getfibradec('skye', platescale=FIDUCIAL_PLATESCALE)
-    getfibradec('skyw', platescale=FIDUCIAL_PLATESCALE)
-    getfibradec('spec', platescale=FIDUCIAL_PLATESCALE)
-
-    # add coordinates to slitmap
-    slitmap['ra']=RAfib * u.deg
-    slitmap['dec']=DECfib * u.deg
-    org_img._slitmap=slitmap
-
-    # set header keyword with best knowledge of IFU center
-    org_img.setHdrValue('IFUCENRA', RAobs_sci, 'best SCI IFU RA (ASTRMSRC) [deg]')
-    org_img.setHdrValue('IFUCENDE', DECobs_sci, 'best SCI IFU DEC (ASTRMSRC) [deg]')
-    org_img.setHdrValue('IFUCENPA', PAobs_sci, 'best SCI IFU PA (ASTRMSRC) [deg]')
-
-    log.info(f"writing RA,DEC to slitmap in image '{os.path.basename(out_image)}'")
-    org_img.writeFitsData(out_image)
-
-
 @skip_on_missing_input_path(["in_image"])
 # @skip_if_drpqual_flags(["SATURATED"], "in_image")
 def detrend_frame(
@@ -3697,6 +3188,7 @@ def detrend_frame(
     calculate_error: bool = True,
     replace_with_nan: bool = True,
     reject_cr: bool = True,
+    increase_radius: int = 1,
     median_box: list = [0, 0],
     display_plots: bool = False,
 ):
@@ -3724,6 +3216,8 @@ def detrend_frame(
         whether to replace or not NaN values by zeros, by default True
     reject_cr : bool, optional
         whether to reject or not cosmic rays from detrended image, by default True
+    increase_radius : int, optional
+        Number of pixels by which the mask will be growth through a convolution with box kernel of side 2*increase_radius+1, by default 1
     median_box : tuple, optional
         size of the median box to refine pixel mask, by default [0,0]
     display_plots : str, optional
@@ -3850,7 +3344,8 @@ def detrend_frame(
         log.info("rejecting cosmic rays")
         rdnoise = detrended_img.getHdrValue(f"{camera.upper()} AMP1 RDNOISE")
         detrended_img.reject_cosmics(gain=1.0, rdnoise=rdnoise, rlim=1.3, iterations=5, fwhm_gauss=[2.75, 2.75],
-                                     replace_box=[10,2], replace_error=1e6, verbose=True, inplace=True)
+                                     replace_box=[10,2], replace_error=1e6,
+                                     increase_radius=increase_radius, verbose=True, inplace=True)
 
     # replace masked pixels with NaNs
     if replace_with_nan:
@@ -3979,7 +3474,7 @@ def create_master_frame(in_images: List[str], out_image: str, batch_size: int = 
     # combine images
     log.info(f"combining {nexp} frames into master frame")
     if master_type == "bias":
-        master_img = combineImages(org_imgs, method="median", normalize=False)
+        master_img = combineImages(org_imgs, method="median", normalize=True, normalize_percentile=50)
     elif master_type == "dark":
         master_img = combineImages(org_imgs, method="median", normalize=False)
     elif master_type == "pixflat":
@@ -4324,21 +3819,18 @@ def create_pixelmask(in_short_dark, in_long_dark, out_pixmask, in_flat_a=None, i
     return pixmask, ratio_dark, ratio_flat
 
 
-def trace_centroids(in_image: str,
-        out_trace_cent: str,
-        correct_ref: bool = False,
-        median_box: tuple = (1, 10),
-        coadd: int = 5,
-        method: str = "gauss",
-        guess_fwhm: float = 2.5,
-        counts_threshold: float = 500,
-        max_diff: int = 5.0,
-        ncolumns: int | Tuple[int] = 140,
-        fit_poly: bool = False,
-        poly_deg: int | Tuple[int] = 6,
-        interpolate_missing: bool = True,
-        display_plots: bool = False
-    ) -> Tuple[TraceMask, TraceMask, TraceMask]:
+def guess_fibers_params(in_image: str,
+                        out_fiber_guess: str,
+                        correct_ref: bool = True,
+                        median_box: tuple = (1, 10),
+                        coadd: int = None,
+                        fwhms_guess: float = 2.5,
+                        counts_range: Tuple[float] = [0.0, numpy.inf],
+                        centroids_range: Tuple[float] = [-2.0, +2.0],
+                        fwhms_range: Tuple[float] = [2.0, 3.5],
+                        ncolumns: int | Tuple[int] = 140,
+                        poly_degs: Dict[str, int] = {"centroids": 5, "fwhms": 6},
+                        display_plots: bool = False) -> Tuple[Dict[str, TraceMask], Image]:
 
     # load continuum image  from file
     log.info(f"using flat image {os.path.basename(in_image)} for tracing")
@@ -4350,26 +3842,12 @@ def trace_centroids(in_image: str,
 
     # read slitmap extension
     slitmap = img.getSlitmap()
-    slitmap = slitmap[slitmap["spectrographid"] == int(img._header["CCD"][1])]
-    bad_fibers = slitmap["fibstatus"] == 1
+    slitmap = slitmap[slitmap["spectrographid"] == int(img._header["SPEC"][-1])]
+    # bad_fibers = slitmap["fibstatus"] == 1
 
     # perform median filtering along the dispersion axis to clean cosmic rays
-    median_box = tuple(map(lambda x: max(x, 1), median_box))
-    if median_box != (1, 1):
-        log.info(f"performing median filtering with box {median_box} pixels")
-        img = img.replaceMaskMedian(*median_box, replace_error=None)
-        img._data = numpy.nan_to_num(img._data)
-        img = img.medianImg(median_box, propagate_error=True)
-
-    # coadd images along the dispersion axis to increase the S/N of the peaks
-    if coadd != 0:
-        log.info(f"coadding {coadd} pixels along the dispersion axis")
-        coadd_kernel = numpy.ones((1, coadd), dtype="uint8")
-        img = img.convolveImg(coadd_kernel)
-        counts_threshold = counts_threshold * coadd
-
-    # handle invalid error values
-    img._error[img._mask|(img._error<=0)] = numpy.inf
+    img = img.enhance(median_box=median_box, coadd=coadd, trust_errors=True, apply_mask=False)
+    # fix counts boundaries after coadding columns
 
     # calculate centroids for reference column
     if correct_ref:
@@ -4379,61 +3857,58 @@ def trace_centroids(in_image: str,
 
     # trace centroids in each column
     log.info(f"going to trace fiber centroids using {ncolumns} columns")
-    centroids = img.trace_fiber_centroids(ref_column=LVM_REFERENCE_COLUMN, ref_centroids=ref_cent, mask_fibstatus=1,
-                                          ncolumns=ncolumns, method=method, fwhm_guess=guess_fwhm,
-                                          counts_threshold=counts_threshold, max_diff=max_diff)
+    counts_guess, centroids_guess, fwhms_guess = img.guess_fibers(ref_column=LVM_REFERENCE_COLUMN, ref_centroids=ref_cent, fwhms_guess=fwhms_guess,
+                                                                  counts_range=counts_range, centroids_range=centroids_range, fwhms_range=fwhms_range,
+                                                                  ncolumns=ncolumns, solver="dogbox")
 
-    if fit_poly:
-        # smooth all trace by a polynomial
-        log.info(f"fitting centroid guess trace with {poly_deg}-deg polynomial")
-        table_data, table_poly, table_poly_all = centroids.fit_polynomial(poly_deg, poly_kind="poly", min_samples_frac=0.5)
-        _create_trace_regions(out_trace_cent, table_data, table_poly, table_poly_all, display_plots=display_plots)
+    # apply naive smoothing using a interpolant spline
+    log.info("interpolating counts along X")
+    counts_guess.fit_spline(smoothing=0.0, use_weights=False, min_samples_frac=0.7)
+    log.info("interpolating centroids along X")
+    centroids_guess.fit_polynomial(deg=poly_degs["centroids"], min_samples_frac=0.7)
+    log.info("interpolating FWHMs along X")
+    fwhms_guess.fit_polynomial(deg=poly_degs["fwhms"], min_samples_frac=0.7, clip=fwhms_range)
+    counts_guess._coeffs = None
+    centroids_guess._coeffs = None
+    fwhms_guess._coeffs = None
+    # counts_guess._samples_error = None
+    # centroids_guess._samples_error = None
+    # fwhms_guess._samples_error = None
 
-        # set bad fibers in trace mask
-        centroids._mask[bad_fibers] = True
-        # linearly interpolate coefficients at masked fibers
-        log.info(f"interpolating coefficients at {bad_fibers.sum()} masked fibers")
-        centroids.interpolate_coeffs()
-    else:
-        log.info("interpolating centroid guess trace")
-        centroids.interpolate_data(axis="X")
+    counts_guess.interpolate_data(axis="Y")
+    centroids_guess.interpolate_data(axis="Y")
+    fwhms_guess.interpolate_data(axis="Y")
 
-        # set bad fibers in trace mask
-        centroids._mask[bad_fibers] = True
-        log.info(f"interpolating data at {bad_fibers.sum()} masked fibers")
-        centroids.interpolate_data(axis="Y")
+    # convert to sigma
+    sigmas_guess = copy(fwhms_guess) / 2.354
 
-    # write centroid if requested
-    if out_trace_cent is not None:
-        log.info(f"writing centroid trace to '{os.path.basename(out_trace_cent)}'")
-        centroids.writeFitsData(out_trace_cent)
-    return centroids, img
+    guess_params = {
+        "counts": counts_guess,
+        "centroids": centroids_guess,
+        "fwhms": fwhms_guess,
+        "sigmas": sigmas_guess
+    }
+    for name, out_path in out_fiber_guess.items():
+        guess_params[name].writeFitsData(out_path)
+
+    return guess_params, img
 
 
-def trace_fibers(
+def fit_fibers_params(
     in_image: str,
-    out_trace_cent: str,
-    out_trace_amp: str,
-    out_trace_fwhm: str,
-    in_trace_cent_guess: str,
+    in_fiber_guess: dict,
+    out_fiber_pars: None | dict = None,
     out_model: str = None,
     out_ratio: str = None,
-    correct_ref: bool = False,
     median_box: tuple = (1, 10),
-    coadd: int = 5,
-    method: str = "gauss",
-    guess_fwhm: float = 2.5,
-    counts_threshold: float = 500,
-    max_diff: int = 5.0,
+    coadd: None | int = None,
     ncolumns: int | Tuple[int] = 40,
-    nblocks: int = 18,
-    iblocks: list = [],
-    fwhm_limits: Tuple[float] = (1.0, 3.5),
-    fit_poly: bool = False,
-    poly_deg: int | Tuple[int] = 6,
-    interpolate_missing: bool = True,
-    only_centroids: bool = False,
-    use_given_centroids: bool = False,
+    iblocks: List = range(LVM_NBLOCKS),
+    npixels: int = 5,
+    oversampling_factor: int = 10,
+    niter: int = 2,
+    measuring_conf: Dict = None,
+    smoothing_conf: Dict = None,
     display_plots: bool = False
 ) -> Tuple[TraceMask, TraceMask, TraceMask]:
     """Trace fibers in a given image
@@ -4531,174 +4006,85 @@ def trace_fibers(
     ValueError
         invalid number of columns
     """
-    # parse polynomial degrees
-    if isinstance(poly_deg, (list, tuple)) and len(poly_deg) == 3:
-            deg_amp, deg_cent, deg_fwhm = poly_deg
-    elif isinstance(poly_deg, int):
-        deg_amp = deg_cent = deg_fwhm = poly_deg
-    else:
-        raise ValueError(f"invalid polynomial degree: {poly_deg}")
+
+    if "centroids" not in in_fiber_guess:
+        raise ValueError(f"Missing fiber 'centroids' in fibers guess parameters: {in_fiber_guess.keys()}")
+
+    # define some LVM constants: profile shape and free parameters
+    PROFILE_NAME = "mexhat"
+    PROFILE = fp.PROFILES.get(PROFILE_NAME)
+    PROFILE_PARNAMES = PROFILE.PARNAMES
+    FREE_PARNAMES = ["counts", "centroids", "sigmas"]
+    # define naive guess values
+    GUESS = {"counts": 100e3, "sigmas": 0.5}
+    # define naive bounds
+    BOUNDS = {
+        "counts": {"kind": "absolute", "range": (0.0, 1e7)},
+        "centroids": {"kind": "relative", "range": (-0.5, +0.5)},
+        "sigmas": {"kind": "absolute", "range": (0.1, 1.5)}}
 
     # load continuum image  from file
     log.info(f"using flat image {os.path.basename(in_image)} for tracing")
     img = loadImage(in_image)
+    camera = img._header["CCD"]
+    exposure = img._header["EXPOSURE"]
     img.setData(data=numpy.nan_to_num(img._data), error=numpy.nan_to_num(img._error))
+    # enhance image by interpolating bad pixels with local median & coadding columns for higher SNR
+    log.info(f"interpolating bad pixels with {median_box = } pixels and coadding {coadd} columns")
+    img = img.enhance(median_box=median_box, coadd=coadd, trust_errors=True, apply_mask=True)
 
-    # read slitmap extension
-    slitmap = img.getSlitmap()
-    slitmap = slitmap[slitmap["spectrographid"] == int(img._header["CCD"][1])]
-    bad_fibers = slitmap["fibstatus"] == 1
+    # get fiber guess parameters
+    columns = numpy.linspace(5, 4080, ncolumns, dtype="int")
+    fixed_traces = {}
+    for name in PROFILE_PARNAMES:
+        if os.path.isfile(in_fiber_guess.get(name, "")):
+            log.info(f"loading guess fiber '{name}' from '{os.path.basename(in_fiber_guess[name])}'")
+            fixed_traces[name] = TraceMask.from_file(in_fiber_guess[name])
+            fixed_traces[name].set_samples(columns=columns, from_data=True)
+            fixed_traces[name].set_samples_error(columns=columns, from_error=True)
+        else:
+            fixed_traces[name] = TraceMask.create_empty(data_dim=(LVM_NFIBERS,img._dim[1]), samples_columns=columns, header=img._header, slitmap=img._slitmap)
+            fixed_traces[name].fill(data=GUESS.get(name, numpy.nan), error=1.0, mask=False, samples=GUESS.get(name, numpy.nan), samples_error=1.0)
+    guess_traces = {name: fixed_traces.pop(name) for name in FREE_PARNAMES}
+    bounds = {name: BOUNDS.get(name) for name in FREE_PARNAMES}
+    smoothing_conf["counts"][1]["clip"] = bounds["counts"]["range"]
+    smoothing_conf["sigmas"][1]["clip"] = bounds["sigmas"]["range"]
 
-    # perform median filtering along the dispersion axis to clean cosmic rays
-    median_box = tuple(map(lambda x: max(x, 1), median_box))
-    if median_box != (1, 1):
-        log.info(f"performing median filtering with box {median_box} pixels")
-        img = img.replaceMaskMedian(*median_box, replace_error=None)
-        img._data = numpy.nan_to_num(img._data)
-        img = img.medianImg(median_box, propagate_error=True)
+    fitted_traces = copy(guess_traces)
+    for iblock in iblocks:
+        fitted_traces = img.iterative_block_trace(
+                PROFILE_NAME, fitted_traces, fixed_traces, iblock, columns, bounds, measuring_conf, smoothing_conf,
+                npixels=npixels, oversampling_factor=oversampling_factor, niter=niter)
 
-    # coadd images along the dispersion axis to increase the S/N of the peaks
-    if coadd != 0:
-        log.info(f"coadding {coadd} pixels along the dispersion axis")
-        coadd_kernel = numpy.ones((1, coadd), dtype="uint8")
-        img = img.convolveImg(coadd_kernel)
-        counts_threshold = counts_threshold * coadd
-
-    # handle invalid error values
-    img._error[img._mask|(img._error<=0)] = numpy.inf
-
-    # trace centroids in each column
-    log.info(f"loading guess fiber centroids from '{os.path.basename(in_trace_cent_guess)}'")
-    centroids = TraceMask.from_file(in_trace_cent_guess)
-
-    # initialize flux and FWHM traces
-    trace_cent = copy(centroids)
-    trace_amp = copy(centroids)
-    trace_amp._header["IMAGETYP"] = "trace_amplitude"
-    trace_fwhm = copy(centroids)
-    trace_fwhm._header["IMAGETYP"] = "trace_fwhm"
-
-    trace_amp, trace_cent, trace_fwhm, columns, mod_columns, residuals = img.trace_fiber_widths(centroids, ref_column=LVM_REFERENCE_COLUMN,
-                                                                                                ncolumns=ncolumns, nblocks=LVM_NBLOCKS, iblocks=iblocks,
-                                                                                                max_diff=max_diff,
-                                                                                                fwhm_guess=guess_fwhm, fwhm_range=fwhm_limits,
-                                                                                                counts_threshold=counts_threshold)
-
-    # smooth all trace by a polynomial
-    if fit_poly:
-
-        # plt.figure()
-        # data = copy(numpy.split(trace_amp._data, LVM_NBLOCKS, axis=0)[16][0])
-        # # data[data==0] = numpy.nan
-        # plt.plot(data, label="measured amp")
-
-        log.info(f"fitting peak trace with {deg_amp}-deg polynomial")
-        # constraints = [{'type': 'ineq', 'fun': lambda t, c: interpolate.splev(0, (t, c, deg_amp), der=1)},
-        #                {'type': 'ineq', 'fun': lambda t, c: -interpolate.splev(trace_amp._data.shape[1], (t, c, deg_amp), der=1)}]
-        table_data, table_poly, table_poly_all = trace_amp.fit_polynomial(deg_amp, poly_kind="poly", clip=(0.0,None), min_samples_frac=0.5)
-        # table_data, table_poly, table_poly_all = trace_amp.fit_spline(degree=deg_amp, smoothing=0, constraints=constraints)
-        _create_trace_regions(out_trace_amp, table_data, table_poly, table_poly_all, display_plots=display_plots)
-        # plt.plot(numpy.split(trace_amp._data, LVM_NBLOCKS, axis=0)[16][0], label="fitted amp")
-        # plt.show()
-
-        log.info(f"fitting centroid trace with {deg_cent}-deg polynomial")
-        table_data, table_poly, table_poly_all = trace_cent.fit_polynomial(deg_cent, poly_kind="poly", min_samples_frac=0.5)
-        _create_trace_regions(out_trace_cent, table_data, table_poly, table_poly_all, display_plots=display_plots)
-
-        log.info(f"fitting FWHM trace with {deg_fwhm}-deg polynomial")
-        table_data, table_poly, table_poly_all = trace_fwhm.fit_polynomial(deg_fwhm, poly_kind="poly", clip=fwhm_limits, min_samples_frac=0.5)
-        _create_trace_regions(out_trace_fwhm, table_data, table_poly, table_poly_all, display_plots=display_plots)
-
-        # set bad fibers in trace mask
-        trace_amp._mask[bad_fibers] = True
-        trace_cent._mask[bad_fibers] = True
-        trace_fwhm._mask[bad_fibers] = True
-
-        # linearly interpolate coefficients at masked fibers
-        if interpolate_missing:
-            log.info(f"interpolating coefficients at {bad_fibers.sum()} masked fibers")
-            trace_amp.interpolate_coeffs()
-            trace_cent.interpolate_coeffs()
-            trace_fwhm.interpolate_coeffs()
-    else:
-        # interpolate traces along X axis to fill in missing data
-        log.info("interpolating traces along X axis to fill in missing data")
-        trace_amp.interpolate_data(axis="X")
-        trace_cent.interpolate_data(axis="X")
-        trace_fwhm.interpolate_data(axis="X")
-        # set bad fibers in trace mask
-        trace_amp._mask[bad_fibers] = True
-        trace_cent._mask[bad_fibers] = True
-        trace_fwhm._mask[bad_fibers] = True
-
-        if interpolate_missing:
-            log.info(f"interpolating data at {bad_fibers.sum()} masked fibers")
-            trace_amp.interpolate_data(axis="Y")
-            trace_cent.interpolate_data(axis="Y")
-            trace_fwhm.interpolate_data(axis="Y")
+    # define full set of fiber parameters
+    fiber_params = fitted_traces.copy()
+    fiber_params.update(fixed_traces)
 
     # evaluate model image
+    log.info("evaluating model image")
+    models, ratios = [], []
+    for iblock in iblocks:
+        fig, axs = create_subplots(to_display=display_plots, nrows=5, ncols=1, figsize=(15,7), sharey=True, sharex=True, layout="constrained")
+        fig.suptitle(f"Isolated fibers in {exposure = } | {camera = } | {iblock = }", fontsize="xx-large")
+        fig.supxlabel("Delta Y (pixel)", fontsize="xx-large")
+        fig.supylabel("(model - data) / column counts", fontsize="xx-large")
+        plt.ylim(-0.07, 0.07)
+        model, _, _, _ = img.evaluate_fiber_model(traces=fiber_params, profile=PROFILE_NAME, iblock=iblock, axs=axs)
+        models.append(model)
+        ratios.append(model/img)
+        save_fig(fig, in_image, label=f"fiber_modeling_B{iblock+1}", figure_path="qa", to_display=display_plots)
+
+    model = combineImages(images=models, method="sum", normalize=False, background_subtract=False, replace_with_nan=False)
+    ratio = model / img
+
     if out_model is not None and out_ratio is not None:
-        log.info("evaluating model image")
-        model, mratio = img.eval_fiber_model(trace_cent, trace_fwhm, trace_amp)
         model.writeFitsData(out_model)
-        mratio.writeFitsData(out_ratio)
-    else:
-        model, mratio = None, None
+        ratio.writeFitsData(out_ratio)
 
     # write output traces
-    log.info(f"writing amplitude trace to '{os.path.basename(out_trace_amp)}'")
-    trace_amp.writeFitsData(out_trace_amp)
-    log.info(f"writing centroid trace to '{os.path.basename(out_trace_cent)}'")
-    trace_cent.writeFitsData(out_trace_cent)
-    log.info(f"writing FWHM trace to '{os.path.basename(out_trace_fwhm)}'")
-    trace_fwhm.writeFitsData(out_trace_fwhm)
+    if out_fiber_pars is not None:
+        for name, out_fiber_par in out_fiber_pars.items():
+            log.info(f"writing '{name}' trace to '{out_fiber_par}'")
+            fitted_traces[name].writeFitsData(out_fiber_par)
 
-    # plot results
-    log.info("plotting results")
-    camera = img._header["CCD"]
-    # residuals
-    fig, ax = create_subplots(to_display=display_plots, nrows=1, ncols=1, figsize=(15,7))
-    fig.suptitle(f"Residuals of joint model for {camera = }")
-    ax.plot(columns, residuals, "o", color="tab:red", ms=10)
-    ax.axhline(0, color="0.2", ls="--", lw=1)
-    ax.grid(ls="--", color="0.9", lw=0.5, zorder=0)
-    ax.set_xlabel("X (pixel)")
-    ax.set_ylabel("residuals (%)")
-    save_fig(
-        fig,
-        product_path=out_trace_amp,
-        to_display=display_plots,
-        figure_path="qa",
-        label="residuals_int_columns"
-    )
-
-    # profile models vs data
-    fig, ax = create_subplots(to_display=display_plots, figsize=(15,7))
-    fig.suptitle(f"Profile fitting residuals for {camera = }")
-    fig.supylabel("residuals (%)")
-    fig.supxlabel("Y (pixel)")
-
-    colors = plt.cm.Spectral(numpy.linspace(0, 1, len(columns)))
-    idx = numpy.argsort(columns)
-    img_ = copy(img)
-    for i in idx:
-        icolumn = columns[i]
-
-        img_slice = img_.getSlice(icolumn, axis="y")
-        joint_mod = mod_columns[i](img_slice._pixels)
-        img_slice._data[(img_slice._mask)|(joint_mod<=0)] = numpy.nan
-
-        weights = img_slice._data / bn.nansum(img_slice._data) * 500
-        residuals = (joint_mod - img_slice._data) / img_slice._data * 100
-        ax.scatter(img_slice._pixels, residuals, s=weights, lw=0, color=colors[i])
-        ax.set_ylim(-50, 50)
-    save_fig(
-        fig,
-        product_path=out_trace_amp,
-        to_display=display_plots,
-        figure_path="qa",
-        label="residuals_columns"
-    )
-
-    return centroids, trace_cent, trace_amp, trace_fwhm, img, model, mratio
+    return fitted_traces, img, model, ratio

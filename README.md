@@ -91,7 +91,15 @@ drp get-calibs -m 60255
 
 This command will download the files using `sdss-access` and place them in `$LVM_MASTER_DIR`, which is defined by the
 pipeline as `$LVM_SANDBOX/calib`, mirroring the SAS.  These are defined automatically relative to your root `$SAS_BASE_DIR`.
-You would find the files at `$SAS_BASE_DIR/sdsswork/lvm/sandbox/calib/`
+You would find the files at `$SAS_BASE_DIR/sdsswork/lvm/sandbox/calib/`.
+
+You can download all calibration epochs by running
+
+```bash
+drp get-calibs
+```
+
+**NOTE:** If you want to know what calibration epoch is needed for a specific exposure, always choose the epoch that is closest and earlier than your exposure's MJD.
 
 
 ## Running the DRP
@@ -236,7 +244,19 @@ For those willing to contribute by coding, there are some steps to streamline th
     git push
     ```
 
-7. Finally, if you consider your feature is ready to be merged to the `master` branch, you can create a new [pull request at Github](https://github.com/sdss/lvmdrp/pulls).
+7. If you consider your feature is ready to be merged to the `master` branch, you can create a new [pull request at Github](https://github.com/sdss/lvmdrp/pulls).
+
+8. Finally, it might useful to have different versions of the DRP outputs in separated directories. To achieve this, you can set the environment variable `LVMDRP_VERSION` in your `.bashrc` (or equivalent) to a string representing the version of the DRP you are working on. For example:
+
+    ```bash
+    export LVMDRP_VERSION="my_tests"
+    ```
+
+    This will make the DRP to store the outputs in a directory named `my_tests`, under the usual SAS path:
+
+    ```bash
+    $SAS_BASE_DIR/sdsswork/lvm/spectro/redux/my_tests/<tilegrp>/<tileid>/<mjd>/
+    ```
 
 Regarding commits, I'm trying to go for an *atomic* approach, where each commit has a single purpose. So please try to avoid as much as possible pushing lots of unrelated changes in one commit.
 
