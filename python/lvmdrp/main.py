@@ -1529,7 +1529,9 @@ def science_reduction(expnum: int,
                       clean_ancillary: bool = False,
                       skip_2d: bool = False,
                       skip_1d: bool = False,
-                      skip_post_1d: bool = False,
+                      skip_wavecal: bool = False,
+                      skip_fluxcal: bool = False,
+                      skip_skysub: bool = False,
                       skip_drpall: bool = False,
                       debug_mode: bool = False,
                       force_run: bool = False) -> None:
@@ -1644,8 +1646,8 @@ def science_reduction(expnum: int,
     # per channel reduction
     cframe_path = path.full("lvm_frame", drpver=drpver, tileid=sci_tileid, mjd=sci_mjd, expnum=sci_expnum, kind='CFrame')
     sframe_path = path.full("lvm_frame", mjd=sci_mjd, drpver=drpver, tileid=sci_tileid, expnum=sci_expnum, kind='SFrame')
-    if skip_post_1d:
-        log.info("skipping post 1D reduction")
+    if skip_wavecal:
+        log.info("skipping wavelength calibration and fiber flat fielding")
     else:
         mwave_groups = group_calib_paths(calibs["wave"])
         mlsf_groups = group_calib_paths(calibs["lsf"])
@@ -1699,6 +1701,9 @@ def science_reduction(expnum: int,
                 resample_wavelength(in_rss=ssci_path,  out_rss=hsci_path, wave_range=SPEC_CHANNELS[channel], wave_disp=0.5, convert_to_density=True)
 
 
+    if skip_fluxcal:
+        log.info("skipping flux calibration")
+    else:
         hsci_all_bands = [path.full('lvm_anc', mjd=sci_mjd, tileid=sci_tileid, drpver=drpver, kind='h',
                                 camera=channel, imagetype=sci_imagetyp, expnum=expnum) for channel in "brz"]
 
@@ -1729,6 +1734,9 @@ def science_reduction(expnum: int,
         with Timer(name='Join Channels '+cframe_path, logger=log.info):
             join_spec_channels(in_fframes=fframe_paths, out_cframe=cframe_path, use_weights=True)
 
+    if skip_skysub:
+        log.info("skipping sky subtraction")
+    else:
         # sky subtraction
         with Timer(name='QSky '+sframe_path, logger=log.info):
             quick_sky_subtraction(in_cframe=cframe_path, out_sframe=sframe_path)

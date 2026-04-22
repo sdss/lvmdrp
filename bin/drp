@@ -134,7 +134,9 @@ def cli():
 @click.option('-f', '--fluxcal-method', type=str, help='Use "NONE" or "STD" for standard stars or "MOD" for standard stars with template matching or "SCI" for field stars')
 @click.option('-2d', '--skip-2d', is_flag=True, default=False, help='Skip preprocessing and detrending')
 @click.option('-1d', '--skip-1d', is_flag=True, default=False, help='Skip astrometry, straylight subtraction and extraction')
-@click.option('-p1d', '--skip-post-1d', is_flag=True, default=False, help='Skip wavelength calibration, flatfielding, sky processing and flux calibration')
+@click.option('-wc', '--skip-wavecal', is_flag=True, default=False, help='Skip wavelength calibration and fiber flat fielding')
+@click.option('-fl', '--skip-fluxcal', is_flag=True, default=False, help='Skip flux calibration')
+@click.option('-sk', '--skip-skysub', is_flag=True, default=False, help='Skip sky subtraction')
 @click.option('-da', '--skip-drpall', is_flag=True, default=False, help='Skip create/update drpall summary file')
 @click.option('-c', '--clean-ancillary', is_flag=True, default=False, help='Remove ancillary paths after run')
 @click.option('-d', '--debug-mode', is_flag=True, default=False, help='Set debug mode on to run using aperture extraction and skip CR rejection')
@@ -145,7 +147,7 @@ def cli():
 # @cloup.constraint(RequireExactly(1), ['mjd', 'mjd_list', 'mjd_range'])
 @cloup.constraint(mutually_exclusive, ['expnum', 'exp_list', 'exp_range'])
 def run(mjd, mjd_list, mjd_range, with_cals, no_sci, expnum, exp_list, exp_range, exp_file, fluxcal_method,
-        skip_2d, skip_1d, skip_post_1d, skip_drpall, clean_ancillary, debug_mode, force_run,
+        skip_2d, skip_1d, skip_wavecal, skip_fluxcal, skip_skysub, skip_drpall, clean_ancillary, debug_mode, force_run,
         use_nightly_cals, use_untagged_cals):
     """ Run the DRP reduction for a given MJD or range of MJDs
 
@@ -169,7 +171,9 @@ def run(mjd, mjd_list, mjd_range, with_cals, no_sci, expnum, exp_list, exp_range
     run_drp(mjd=mjd, expnum=expnum, no_sci=no_sci, with_cals=with_cals, fluxcal_method=fluxcal_method,
             skip_2d=skip_2d,
             skip_1d=skip_1d,
-            skip_post_1d=skip_post_1d,
+            skip_wavecal=skip_wavecal,
+            skip_fluxcal=skip_fluxcal,
+            skip_skysub=skip_skysub,
             skip_drpall=skip_drpall,
             clean_ancillary=clean_ancillary,
             use_nightly_cals=use_nightly_cals,
