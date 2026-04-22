@@ -315,15 +315,21 @@ class RSS(FiberRows):
         # update header
         if len(hdrs) > 0:
             hdr_out = hdrs[0]._header.copy()
+            channel = hdr_out["CCD"][0]
             for hdr in hdrs[1:]:
                 hdr_out.update(hdr._header)
-            hdr_out["CCD"] = hdr_out["CCD"][0]
+            hdr_out["CCD"] = channel
         else:
             hdr_out = None
-
+            channel = None
 
         # update slitmap
-        slitmap_out = rss._slitmap
+        slitmap_out = copy(rsss[-1]._slitmap)
+        for i in range(len(rsss)-1):
+            spec_idx = numpy.where(slitmap_out["spectrographid"] == i+1)
+            if channel is not None:
+                slitmap_out[f"ypix_{channel}"][spec_idx] = rsss[i]._slitmap[f"ypix_{channel}"][spec_idx]
+            slitmap_out["fibstatus"][spec_idx] = rsss[i]._slitmap["fibstatus"][spec_idx]
 
         return cls(
             data=data_out,
@@ -551,11 +557,17 @@ class RSS(FiberRows):
             else:
                 new_fluxcal_mod = None
 
-        # create RSS
+        # update header
         new_hdr = rsss[0]._header.copy()
         for rss in rsss[1:]:
             new_hdr.update(rss._header)
 
+        # update slitmap
+        new_slitmap = rsss[0]._slitmap.copy()
+        new_slitmap["ypix_r"] = rsss[1]._slitmap["ypix_r"]
+        new_slitmap["ypix_z"] = rsss[2]._slitmap["ypix_z"]
+
+        # create RSS
         new_rss = RSS(
             data=new_data,
             error=new_error,
@@ -572,7 +584,7 @@ class RSS(FiberRows):
             fluxcal_sci=new_fluxcal_sci,
             fluxcal_mod=new_fluxcal_mod,
             header=new_hdr,
-            slitmap=rsss[0]._slitmap
+            slitmap=new_slitmap
         )
         return new_rss
 

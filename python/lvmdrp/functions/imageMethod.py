@@ -2359,6 +2359,9 @@ def extract_spectra(
     channel = camera[0]
     slitmap[f"ypix_{channel}"] = slitmap[f"ypix_{channel}"].astype("float32")
     slitmap[f"ypix_{channel}"][select_spec] = trace_mask._slitmap[f"ypix_{channel}"][select_spec]
+    # propagate bad fibers to slitmap
+    slitmap_spec["fibstatus"][mask.all(axis=1)] = 5
+    slitmap["fibstatus"][select_spec] = slitmap_spec["fibstatus"]
 
     if error is not None:
         error[mask] = replace_error
