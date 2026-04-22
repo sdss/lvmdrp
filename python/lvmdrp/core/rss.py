@@ -557,11 +557,17 @@ class RSS(FiberRows):
             else:
                 new_fluxcal_mod = None
 
-        # create RSS
+        # update header
         new_hdr = rsss[0]._header.copy()
         for rss in rsss[1:]:
             new_hdr.update(rss._header)
 
+        # update slitmap
+        new_slitmap = rsss[0]._slitmap.copy()
+        new_slitmap["ypix_r"] = rsss[1]._slitmap["ypix_r"]
+        new_slitmap["ypix_z"] = rsss[2]._slitmap["ypix_z"]
+
+        # create RSS
         new_rss = RSS(
             data=new_data,
             error=new_error,
@@ -578,7 +584,7 @@ class RSS(FiberRows):
             fluxcal_sci=new_fluxcal_sci,
             fluxcal_mod=new_fluxcal_mod,
             header=new_hdr,
-            slitmap=rsss[0]._slitmap
+            slitmap=new_slitmap
         )
         return new_rss
 
