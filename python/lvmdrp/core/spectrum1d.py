@@ -778,7 +778,7 @@ class FiberProfileCache(object):
         self.profile_cumsum = numpy.cumsum(self.profile_cache, axis=0) / oversampling_factor
 
     def __call__(self, centroids, sigmas):
-        lines = numpy.clip((numpy.round(self.nprofiles/(self.sigma_max - self.sigma_min)*(sigmas-self.sigma_min))).astype(int), 
+        lines = numpy.clip((numpy.round(self.nprofiles/(self.sigma_max - self.sigma_min)*(sigmas-self.sigma_min))).astype(int),
                             a_min=0, a_max=self.nprofiles-1)
         cumsums = self.profile_cumsum[:,lines]
         # calculate the shift relative to the given fractional centroid
@@ -787,10 +787,10 @@ class FiberProfileCache(object):
         centers = self.x_os[:,lines]+cen_fracs
         bins = self.x[:,lines]
         bin_starts =  numpy.clip(((bins - centers[0,:]) * self.oversampling_factor).astype(int), a_min=0, a_max=None)
-        bin_ends = numpy.clip(bin_starts + self.oversampling_factor, a_min=None, a_max=len(cumsums[:,0])-1)        
+        bin_ends = numpy.clip(bin_starts + self.oversampling_factor, a_min=None, a_max=len(cumsums[:,0])-1)
         cols = numpy.arange(bin_starts.shape[1])[None, :]  # shape (1, M), will broadcast to (N, M)
         return cumsums[bin_ends, cols] - cumsums[bin_starts, cols]
-    
+
     def _gen_mexhat_basis(self, x, centroids, sigmas, fiber_radius, oversampling_factor):
         dx = x[1, 0] - x[0, 0]
         self.x_os = fit_profile.oversample(x, oversampling_factor)
@@ -804,7 +804,7 @@ class FiberProfileCache(object):
         profiles /= integrate.trapezoid(profiles, self.x_os, axis=0)[None, :]
 
         return profiles
-    
+
     def _pixel_integrate(self, pixels, cumsum):
         bins = self.x[:,0]
         # bin_starts = numpy.searchsorted(xx, bins[:-1], side='left')
@@ -812,7 +812,7 @@ class FiberProfileCache(object):
         # numpy.clip(bin_starts, min_value = 0)
         bin_starts[0] = 0 if bin_starts[0] < 0 else bin_starts[0]
         bin_ends   = bin_starts + self.oversampling_factor
-        # numpy.clip(bin_ends, max_value = len(cumsum)-1)        
+        # numpy.clip(bin_ends, max_value = len(cumsum)-1)
         bin_ends[-1] = len(cumsum)-1 if bin_ends[-1] >= len(cumsum) else bin_ends[-1]
         return cumsum[bin_ends] - cumsum[bin_starts]
 
@@ -3684,6 +3684,30 @@ class Spectrum1D(Header):
 
         return model, params, errors
 
+    def fitMultiVoigt(self, centres, init_fwhm_G, init_fwhm_L):
+        select = numpy.zeros(self._dim, dtype = "bool")
+        flux_in = numpy.zeros(len(centres), dtype = numpy.float32)
+        sig_in_G = numpy.ones_like(flux_in) * init_fwhm_G / 2.354
+        sig_in_L = numpy.ones_like(flux_in) * init_fwhm_L / 2.354
+        cent = numpy.zeros(len(centres), dtype = numpy.float32)
+        if self._error is not None:
+            error = self._error
+        else:
+            error = numpy.ones_like(self._dim, dtype = numpy.float32)
+        for i in range(len(centres)):
+            init_fwhm = max(init_fwhm_G, init_fwhm_L)
+            select_line = numpy.logical_and(
+                self._wave > centres[i] - 2 * init_fwhm,
+                self._wave < centres[i] + 2 * init_fwhm,
+            )
+            flux_in[i] = numpy.sum(self._data[select_line])
+            select = numpy.logical_or(select, select_line)
+            cent[i] = centres[i]
+        par = numpy.concatenate([flux_in, cent, sig_in_G, sig_in_L])
+        voigt_multi = fit_profile.Voigts_x(par)
+        voigt_multi.fit(self._wave[select], self._data[select], sigma=error[select], maxfev = 1000000)
+        return voigt_multi, voigt_multi.getPar()
+
     def fitParFile(
         self, par, err_sim=0, ftol=1e-8, xtol=1e-8, method="leastsq", parallel="auto"
     ):
@@ -3816,7 +3840,7 @@ class Spectrum1D(Header):
         return flux, cent, fwhm, bg
 
     def extract_flux(self, centroids, sigmas, fiber_radius=1.4, npixels=15, replace_error=numpy.inf, return_basis=False):
-        ''' 
+        '''
             fiber_radius is the image of the fiber core in pixels
             sigmas is the gaussian kernel sigma
 
