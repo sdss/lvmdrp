@@ -6,1677 +6,899 @@
 # @License: BSD 3-Clause
 # @Copyright: SDSS-V LVM
 
-from collections import namedtuple
-
-import matplotlib.pyplot as plt
-
-# FROM THE MANGA DRP CODE -------------------------------------------------------------------------
+import os
 import numpy as np
-from dust_extinction.parameter_averages import F99
-from pydl.pydlspec2d.spec2d import filter_thru
-from pydl.pydlutils.bspline import bspline
-from pydl.pydlutils.sdss import sdss_flagval
-from scipy.interpolate import BSpline, interp1d, splrep
-from scipy.ndimage import median_filter
-from scipy.optimize import minimize, nnls
-from scipy.special import eval_chebyc, eval_legendre
+from scipy import signal
+from scipy.integrate import simpson
+from scipy import interpolate
+import requests
+import pandas as pd
+import bottleneck as bn
+import os.path as path
+import pathlib
+from tqdm import tqdm
 
 
-f99_ext = F99(Rv=3.1)
+import gaiaxpy
+from astroquery.gaia import Gaia
+
+from astropy.time import Time
+from astropy.io import fits
+from astropy.table import Table
+from astropy.coordinates import SkyCoord, EarthLocation, AltAz
+from astropy import units as u
+
+from lvmdrp import log
+from lvmdrp.core.constants import LVM_ELEVATION, LVM_LON, LVM_LAT, MASTERS_DIR, STELLAR_TEMP_PATH
+from lvmdrp.core.tracemask import TraceMask
+from lvmdrp.utils.paths import get_calib_paths
+from lvmdrp.core.spectrum1d import Spectrum1D, convolution_matrix
+from lvmdrp.core.rss import RSS
+
+from scipy.sparse import csr_matrix
 
 
-# UTILS FUNCTIONS ---------------------------------------------------------------------------------
+def get_mean_sens_curves(sens_dir):
+    return {'b':pd.read_csv(f'{sens_dir}/mean-sens-b.csv', names=['wavelength', 'sens']),
+            'r':pd.read_csv(f'{sens_dir}/mean-sens-r.csv', names=['wavelength', 'sens']),
+            'z':pd.read_csv(f'{sens_dir}/mean-sens-z.csv', names=['wavelength', 'sens'])}
+
+def retrieve_header_stars(rss):
+    """
+    Retrieve fiber, Gaia ID, exposure time and airmass for the 12 standard stars in the header.
+    return a list of tuples of the above quantities.
+    """
+    lco = EarthLocation(lat=LVM_LAT, lon=LVM_LON, height=LVM_ELEVATION * u.m)
+    h = rss._header
+    slitmap = rss._slitmap
+    # retrieve the data for the 12 standards from the header
+    stddata = []
+    for i in range(12):
+        stdi = "STD" + str(i + 1)
+        if h[stdi + "ACQ"] and h[stdi + "FIB"] in slitmap["orig_ifulabel"]:
+            gaia_id = h[stdi + "ID"]
+            if gaia_id is None:
+                log.warning(f"{stdi} acquired but Gaia ID is {gaia_id}")
+                rss.add_header_comment(f"{stdi} acquired but Gaia ID is {gaia_id}")
+                continue
+            fiber = h[stdi + "FIB"]
+            obstime = Time(h[stdi + "T0"])
+            exptime = h[stdi + "EXP"]
+            c = SkyCoord(float(h[stdi + "RA"]), float(h[stdi + "DE"]), unit="deg")
+            stdT = c.transform_to(AltAz(obstime=obstime, location=lco))
+            secz = stdT.secz.value
+            zenith_angle = 90 - stdT.alt.value
+            # print(gid, fib, et, secz)
+            stddata.append((i + 1, fiber, gaia_id, exptime, secz, zenith_angle))
+    return stddata
 
 
-# NOTE: taken from https://svn.sdss.org/public/repo/sdss/idlutils/tags/v5_5_36/pro/misc/djs_laxisnum.pro
-def djs_laxisnum(dimens, iaxis=None):
-    #
-    # Need one parameter
-    #
-    # IF N_PARAMS() LT 1 THEN BEGIN
-    #     PRINT, 'Syntax - result = djs_laxisnum( dimens, [iaxis= ] )'
-    #     RETURN, -1
-    # ENDIF
+class GaiaStarNotFound(Exception):
+    """
+    Signal that the star has no BP-RP spectrum
+    """
 
-    if iaxis is None:
-        iaxis = 0
+    pass
 
-    ndimen = len(dimens)
-    naxis = np.int(dimens)  # convert to type LONG
 
-    if iaxis >= ndimen:
-        print("Invalid axis selection!")
-        return -1
+def retrive_gaia_star(gaiaID, GAIA_CACHE_DIR):
+    """
+    Load or download and load from cache the XP spectrum of a gaia star, converted to erg/s/cm^2/A
+    """
+    # create cache dir if it does not exist
+    pathlib.Path(GAIA_CACHE_DIR).mkdir(parents=True, exist_ok=True)
 
-    result = np.zeros(naxis, dtype=int)
-
-    if ndimen == 1:
-        result[:] = 0
-    elif ndimen == 2:
-        if iaxis == 0:
-            for ii in range(0, naxis[0] - 1):
-                result[ii, :] = ii
-        elif iaxis == 1:
-            for ii in range(0, naxis[1] - 1):
-                result[:, ii] = ii
-    elif ndimen == 3:
-        if iaxis == 0:
-            for ii in range(0, naxis[0] - 1):
-                result[ii, :, :] = ii
-        elif iaxis == 1:
-            for ii in range(0, naxis[1] - 1):
-                result[:, ii, :] = ii
-        elif iaxis == 2:
-            for ii in range(0, naxis[2] - 1):
-                result[:, :, ii] = ii
+    if path.exists(GAIA_CACHE_DIR + "/gaia_spec_" + str(gaiaID) + ".csv") is True:
+        # read the tables from our cache
+        gaiaflux = Table.read(GAIA_CACHE_DIR + "/gaia_spec_" + str(gaiaID) + ".csv", format="csv")
+        gaiawave = Table.read(GAIA_CACHE_DIR + "/gaia_spec_" + str(gaiaID) + "_sampling.csv", format="csv")
     else:
-        print(ndimen, " dimensions not supported!")
-        result = -1
+        # need to download from Gaia archive
+        CSV_URL = ("https://gea.esac.esa.int/data-server/data?RETRIEVAL_TYPE=XP_CONTINUOUS&ID=Gaia+DR3+"
+            + str(gaiaID)
+            + "&format=CSV&DATA_STRUCTURE=RAW")
+        FILE = GAIA_CACHE_DIR + "/XP_" + str(gaiaID) + "_RAW.csv"
 
-    return result
+        with requests.get(CSV_URL, stream=True) as r:
+            r.raise_for_status()
+            if len(r.content) < 2:
+                raise GaiaStarNotFound(f"Gaia DR3 {gaiaID} has no BP-RP spectrum!")
+            with open(FILE, "w") as f:
+                f.write(r.content.decode("utf-8"))
+
+        # convert coefficients to sampled spectrum
+        _, _ = gaiaxpy.calibrate(FILE, output_path=GAIA_CACHE_DIR,\
+                                 output_file="gaia_spec_" + str(gaiaID), output_format="csv")
+        # read the flux and wavelength tables
+        gaiaflux = Table.read(GAIA_CACHE_DIR + "/gaia_spec_" + str(gaiaID) + ".csv", format="csv")
+        gaiawave = Table.read(GAIA_CACHE_DIR + "/gaia_spec_" + str(gaiaID) + "_sampling.csv", format="csv")
+
+    # make numpy arrays from whatever weird objects the Gaia stuff creates
+    wave = np.fromstring(gaiawave["pos"][0][1:-1], sep=",") * 10  # in Angstrom
+    # W/s/micron -> in erg/s/cm^2/A
+    flux = (1e7 * 1e-1 * 1e-4 * np.fromstring(gaiaflux["flux"][0][1:-1], sep=","))
+    return wave, flux
 
 
-# NOTE: taken from https://svn.sdss.org/public/repo/sdss/idlutils/tags/v5_5_36/pro/math/djs_reject.pro
-def djs_reject(
-    ydata,
-    ymodel,
-    outmask=None,
-    inmask=None,
-    sigma=None,
-    invvar=None,
-    upper=None,
-    lower=None,
-    maxdev=None,
-    maxrej=None,
-    groupsize=None,
-    groupdim=None,
-    sticky=None,
-    groupbadpix=None,
-    grow=None,
-):
-    #    if (n_params() LT 2 OR NOT arg_present(outmask)) then begin
-    #       print, 'Syntax: qdone = djs_reject(ydata, ymodel, outmask=, [ inmask=, $'
-    #       print, ' sigma=, invvar=, upper=, lower=, maxdev=, grow= $'
-    #       print, ' maxrej=, groupsize=, groupdim=, /sticky, /groupbadpix] )'
-    #       return, 1
-    #    endif
-
-    ndata = len(ydata)
-    if ndata == 0:
-        print("No data points")
-    if ndata != len(ydata):
-        print("Dimensions of YDATA and YMODEL do not agree")
-
-    if inmask is not None:
-        if ndata != len(inmask):
-            print("Dimensions of YDATA and INMASK do not agree")
-
-    if maxrej is not None:
-        if groupdim is not None:
-            if len(maxrej) != len(groupdim):
-                print("MAXREJ and GROUPDIM must have same number of elements!")
-        if groupsize is not None:
-            if len(maxrej) != len(groupsize):
-                print("MAXREJ and GROUPSIZE must have same number of elements!")
-        else:
-            groupsize = ndata
-
-    # ----------
-    # Create OUTMASK, setting =1 for good data
-
-    if outmask is not None:
-        if ndata != len(outmask):
-            print("Dimensions of YDATA and OUTMASK do not agree")
+def get_XP_spectra(expnum, ra_tile, dec_tile, lim_mag=14.0, n_spec=15, GAIA_CACHE_DIR='./gaia_cache', plot=False):
+    '''
+    mjd, tileid, central ra and dec, query for brightest GAIA stars in the science IFU,
+    cache their IDs, cache their XP spectra, and return a table with all the data
+    '''
+    if GAIA_CACHE_DIR is None or path.exists(GAIA_CACHE_DIR + f'/{expnum}_ids.ecsv') is False:
+        print('querying for ids ...')
+        r_ifu = np.sqrt(3.0)/2 * (30.2/2) / 60.0 # inner radius of hexagon in degrees for margin
+        select_tile = f'DISTANCE({ra_tile}, {dec_tile}, ra, dec) < {r_ifu} '
+        job = Gaia.launch_job(f"SELECT TOP {n_spec} * FROM gaiadr3.gaia_source_lite WHERE "
+                              + select_tile + f"AND phot_g_mean_mag < {lim_mag} AND has_xp_continuous = 'True' ORDER BY phot_g_mean_mag ASC ")
+        r = job.get_results()
+        if GAIA_CACHE_DIR is not None:
+            #print('writing '+GAIA_CACHE_DIR + f'/{expnum}_ids.ecsv')
+            r.write(GAIA_CACHE_DIR + f'/{expnum}_ids.ecsv', overwrite=True)
     else:
-        outmask = np.ones_like(ydata, dtype=bool)
-
-    if ymodel is None:
-        if inmask is not None:
-            outmask[:] = inmask
-        return 0
-
-    if sigma is not None and invvar is not None:
-        print("Cannot set both SIGMA and INVVAR")
-
-    if sigma is None and invvar is None:
-        if inmask is not None:
-            igood = np.where(inmask & outmask)[0]
-        else:
-            igood = np.where(outmask)
-        ngood = igood.size
-
-        if ngood > 1:
-            sigma = np.std(ydata[igood] - ymodel[igood])  # scalar value
-        else:
-            sigma = 0
-
-    #   if (n_elements(sigma) NE 1 AND n_elements(sigma) NE ndata) then $
-    #    message, 'Invalid number of elements for SIGMA'
-
-    ydiff = ydata - ymodel
-
-    # ----------
-    # The working array is BADNESS, which is set to zero for good points
-    # (or points already rejected), and positive values for bad points.
-    # The values determine just how bad a point is, either corresponding
-    # to the number of SIGMA above or below the fit, or to the number of
-    # multiples of MAXDEV away from the fit.
-
-    badness = 0.0 * outmask
-
-    # ----------
-    # Decide how bad a point is according to LOWER
-
-    if lower is not None:
-        if sigma is not None:
-            qbad = ydiff < (-lower * sigma)
-            badness = (((-ydiff / (sigma + (sigma == 0))) > 0) * qbad) + badness
-        else:
-            qbad = ydiff * np.sqrt(invvar) < (-lower)
-            badness = (((-ydiff * np.sqrt(invvar)) > 0) * qbad) + badness
-
-    # ----------
-    # Decide how bad a point is according to UPPER
-
-    if upper is not None:
-        if sigma is not None:
-            qbad = ydiff > (upper * sigma)
-            badness = (((ydiff / (sigma + (sigma == 0))) > 0) * qbad) + badness
-        else:
-            qbad = ydiff * np.sqrt(invvar) > upper
-            badness = (((ydiff * np.sqrt(invvar)) > 0) * qbad) + badness
-
-    # ----------
-    # Decide how bad a point is according to MAXDEV
-
-    if maxdev is not None:
-        qbad = np.abs(ydiff) > maxdev
-        badness = (np.abs(ydiff) / maxdev * qbad) + badness
-
-    # ----------
-    # Do not consider rejecting points that are already rejected by INMASK.
-    # Do not consider rejecting points that are already rejected by OUTMASK
-    #   if /STICKY is set.
-
-    if inmask is not None:
-        badness = badness * inmask
-    if sticky is not None:
-        badness = badness * outmask
-
-    # ----------
-    # Reject a maximum of MAXREJ (additional) points in all the data,
-    # or in each group as specified by GROUPSIZE, and optionally along
-    # each dimension specified by GROUPDIM.
-
-    if maxrej is not None:
-        # Loop over each dimension of GROUPDIM (or loop once if not set)
-        for iloop in range(0, (len(groupdim) > 1) - 1):
-            # Assign an index number in this dimension to each data point
-            if len(groupdim) > 0:
-                yndim = len(ydata.shape)
-                if groupdim[iloop] > yndim:
-                    print("GROUPDIM is larger than number of dimensions for YDATA")
-                dimnum = djs_laxisnum(ydata.shape, iaxis=groupdim[iloop] - 1)
-            else:
-                dimnum = 0
-
-            # Loop over each vector specified by GROUPDIM.  For ex, if
-            # this is a 2-D array with GROUPDIM=1, then loop over each
-            # column of the data.  If GROUPDIM=2, then loop over each row.
-            # If GROUPDIM is not set, then use all whole image.
-            for ivec in range(0, np.max(dimnum)):
-                if dimnum is not None:
-                    indx = np.where(dimnum == ivec)[0]
-                else:
-                    indx = np.linspace(ndata)
-
-                # Within this group of points, break it down into groups
-                # of points specified by GROUPSIZE (if set).
-                nin = len(indx)
-
-                if groupbadpix is not None:
-                    goodtemp = badness == 0
-                    groups_lower = np.where([1, goodtemp] - goodtemp != 1)[0]
-                    groups_upper = np.where([goodtemp[1:], 1] - goodtemp == 1)[0]
-                    ngroups = len(groups_lower)
-                else:
-                    if groupsize is None:
-                        ngroups = 1
-                        groups_lower = 0
-                        groups_upper = nin - 1
-                    else:
-                        ngroups = nin / groupsize + 1
-                        groups_lower = np.linspace(ngroups) * groupsize
-                        groups_upper = (
-                            (np.linspace(ngroups) + 1) * groupsize < nin
-                        ) - 1
-
-                for igroup in range(0, ngroups - 1):
-                    i1 = groups_lower[igroup]
-                    i2 = groups_upper[igroup]
-                    nii = i2 - i1 + 1
-
-                    # Need the test that i1 NE -1 below to prevent a crash condition,
-                    # but why is it that we ever get groups w/out any points?
-                    if nii > 0 and i1 != -1:
-                        jj = indx[i1:i2]
-                        # Test if too many points rejected in this group...
-                        if np.sum(badness[jj] != 0) > maxrej[iloop]:
-                            isort = np.argsort(badness[jj])
-                            # Make the following points good again...
-                            badness[jj[isort[0 : nii - maxrej[iloop] - 1]]] = 0
-                        i1 = i1 + groupsize[iloop]
-
-    # ----------
-    # Now modify OUTMASK, rejecting points specified by INMASK=0,
-    # OUTMASK=0 (if /STICKY is set), or BADNESS>0.
-
-    newmask = badness == 0
-    if grow is not None:
-        rejects = np.where(newmask == 0)[0]
-        if rejects.size != 0:
-            for jj in range(1, grow):
-                newmask[(rejects - jj) > 0] = 0
-                newmask[(rejects + jj) < (ndata - 1)] = 0
-
-    if inmask is not None:
-        newmask = newmask & inmask
-    if sticky is not None:
-        newmask = newmask & outmask
-
-    # Set QDONE if the input OUTMASK is identical to the output OUTMASK
-    qdone = np.sum(newmask != outmask) == 0
-    outmask = newmask
-
-    return qdone
-
-
-# NOTE: taken from https://svn.sdss.org/public/repo/sdss/idlutils/tags/v5_5_36/pro/bspline/cholesky_band.pro
-def cholesky_band(lower, mininf=None, verbose=False):
-    if mininf is None:
-        mininf = 0.0
-    # compute cholesky decomposition of banded matrix
-    #   lower[bandwidth, n]  n is the number of linear equations
-
-    # I'm doing lower cholesky decomposition from lapack, spbtf2.f
-
-    bw = lower.shape[0]
-    n = lower.shape[1] - bw
-
-    negative = np.where(lower[0, 0 : n - 1] <= mininf)[0]
-    if negative.size != 0:
-        if verbose:
-            print("bad entries")
-            print(negative)
-        return negative
-
-    kn = bw - 1
-    spot = 1 + np.linspace(kn)
-    bi = np.linspace(kn)
-    for i in range(1, kn - 1):
-        bi = [bi, np.linspace(kn - i) + (kn + 1) * i]
-
-    for j in range(0, n - 1):
-        lower[0, j] = np.sqrt(lower[0, j])
-        lower[spot, j] = lower[spot, j] / lower[0, j]
-        x = lower[spot, j]
-
-        if np.all(np.isnif(x)):
-            if verbose:
-                print("NaN found in cholesky_band")
-            return j
-
-        hmm = np.transpose(x) @ x
-        here = bi + (j + 1) * bw
-        lower[here] = lower[here] - hmm[bi]
-
-    return -1
-
-
-# NOTE: taken from https://svn.sdss.org/public/repo/sdss/idlutils/tags/v5_5_36/pro/bspline/cholesky_solve.pro
-def cholesky_solve(a, b):
-    bw = a.shape[0]
-    n = b.shape[1] - bw
-
-    kd = bw - 1
-
-    ### first round
-    spot = np.linspace(kd) + 1
-    for j in range(0, n - 1):
-        b[j] = b[j] / a[0, j]
-        b[j + spot] = b[j + spot] - b[j] * a[spot, j]
-
-    #### second round
-
-    spot = kd - np.linspace(kd)
-    for j in range(n - 1, 0, -1):
-        b[j] = (b[j] - np.sum(a[spot, j] * b[j + spot])) / a[0, j]
-
-    return -1
-
-
-# NOTE: taken from https://svn.sdss.org/public/repo/sdss/idlutils/tags/v5_5_36/pro/bspline/intrv.pro
-def intrv(x, fullbkpt, nbkptord):
-    nx = len(x)
-    nbkpt = len(fullbkpt)
-    n = nbkpt - nbkptord
-
-    indx = np.zeros(nx, dtype=int)
-
-    ileft = nbkptord - 1
-    for i in range(0, nx - 1):
-        while x[i] > fullbkpt[ileft + 1] and ileft < n - 1:
-            ileft = ileft + 1
-        indx[i] = ileft
-
-    return indx
-
-
-# NOTE: taken from https://svn.sdss.org/public/repo/sdss/idlutils/tags/v5_5_36/pro/bspline/bsplvn.pro
-def bsplvn(bkpt, nord, x, ileft):
+        #print('reading '+GAIA_CACHE_DIR + f'/{expnum}_ids.ecsv')
+        r = Table.read(GAIA_CACHE_DIR + f'/{expnum}_ids.ecsv')
     #
-    # 	Conversion of slatec utility bsplvn, used only by efc
+    # get XP spectra and cache the calibrated spectra
     #
-    # 	parameter index is not passed, as efc always calls with 1
-    # 	treat x as array for all values between ileft and ileft+1
-    ##
 
-    nx = len(x)
+    cols = r.colnames
+    new_cols = [col.lower() for col in cols]
+    r.rename_columns(cols, new_cols)
 
-    #
-    # 	This is to break up really HUGE arrays into manageable chunks
-    #
-    if nx > 12000000:
-        lower = 0
-        upper = 6399999
-        vnikx = np.zeros(nord) @ x
-
-        while lower < nx:
-            # splog, lower, upper, nx
-            vnikx[lower:upper, :] = bsplvn(
-                bkpt, nord, x[lower:upper], ileft[lower:upper]
-            )
-            lower = upper + 1
-            upper = (upper + 6400000) < (nx - 1)
-
-        return vnikx
-
-    vnikx = np.zeros(nord) @ x
-    deltap = vnikx
-    deltam = vnikx
-    vmprev = x * 0
-    vm = x * 0
-
-    j = 0
-    vnikx[:, 0] = 1.0
-
-    while j < nord - 1:
-        ipj = ileft + j + 1
-        deltap[:, j] = bkpt[ipj] - x
-        imj = ileft - j
-        deltam[:, j] = x - bkpt[imj]
-        vmprev = 0.0
-        for l in range(0, j):
-            vm = vnikx[:, l] / (deltap[:, l] + deltam[:, j - l])
-            vnikx[:, l] = vm * deltap[:, l] + vmprev
-            vmprev = vm * deltam[:, j - l]
-
-        j = j + 1
-        vnikx[:, j] = vmprev
-
-    return vnikx
-
-
-# NOTE: taken from https://svn.sdss.org/public/repo/sdss/idlutils/tags/v5_5_36/pro/bspline/bspline_action.pro
-def bspline_action(x, sset, x2=None):
-    if not isinstance(sset, dict):
-        print("Please send in a proper B-spline structure")
-        return -1, lower, upper
-
-    npoly = 1
-    nx = len(x)
-
-    #
-    # 	Check for the existence of x2
-    #
-    if x2 is not None:
-        if len(x2) != nx:
-            print("dimensions do not match between x and x2")
-            return -1, lower, upper
-
-        if "npoly" in sset.keys():
-            npoly = sset["npoly"]
-
-    nord = sset["nord"]
-    goodbk = np.where(sset["bkmask"] != 0)
-    nbkpt = goodbk.size
-    if nbkpt < 2 * nord:
-        return -2, lower, upper
-    n = nbkpt - nord
-
-    gb = sset["fullbkpt"][goodbk]
-
-    bw = npoly * nord
-    action = np.zeros(bw) @ x
-
-    lower = np.zeros(n - nord + 1)
-    upper = np.zeros(n - nord + 1) - 1
-
-    indx = intrv(x, gb, nord)
-
-    bf1 = bsplvn(gb, nord, x, indx)
-    action = bf1
-
-    # --------------------------------------------------------------
-    #  sneaky way to calculate upper and lower indices when
-    #   x is sorted
-    #
-    aa = np.unique(indx, return_index=True)[1]
-    upper[indx[aa] - nord + 1] = aa
-
-    rindx = indx[::-1]
-    bb = np.unique(rindx, return_index=True)[1]
-    lower[rindx[bb] - nord + 1] = nx - bb - 1
-
-    # ---------------------------------------------------------------
-    #  just attempt this if 2d fit is required
-    #
-    if x2 is not None:
-        x2norm = 2.0 * (x2[:] - sset["xmin"]) / (sset["xmax"] - sset["xmin"]) - 1.0
-        if sset["funcname"] == "poly":
-            temppoly = np.ones(npoly) @ (x2norm * 0.0 + 1.0)
-            for i in range(1, npoly - 1):
-                temppoly[:, i] = temppoly[:, i - 1] * x2norm
-        if sset["funcname"] == "poly1":
-            temppoly = np.ones(npoly) @ x2norm
-            for i in range(1, npoly - 1):
-                temppoly[:, i] = temppoly[:, i - 1] * x2norm
-        if sset["funcname"] == "chebyshev":
-            temppoly = eval_chebyc(npoly - 1, x2norm)
-        if sset["funcname"] == "legendre":
-            temppoly = eval_legendre(npoly - 1, x2norm)
-        else:
-            temppoly = eval_legendre(npoly - 1, x2norm)
-
-        action = np.zeros((nx, bw))
-        counter = -1
-        for ii in range(0, nord - 1):
-            for jj in range(0, npoly - 1):
-                counter = counter + 1
-                action[:, counter] = bf1[:, ii] * temppoly[:, jj]
-
-    return action, lower, upper
-
-
-# NOTE: taken from https://svn.sdss.org/public/repo/sdss/idlutils/tags/v5_5_36/pro/bspline/bspline_maskpoints.pro
-def bspline_maskpoints(sset, errb, npoly=None):
-    if npoly is None:
-        npoly = 1
-
-    goodbk = np.where(sset["bkmask"] != 0)[0]
-    nbkpt = goodbk.size
-    nord = sset["nord"]
-
-    if nbkpt <= 2 * nord:
-        return -2
-
-    hmm = errb[np.unique(errb / npoly, return_index=True)[1]] / npoly
-    n = nbkpt - nord
-
-    if np.where(hmm >= n)[0].size != 0:
-        return -2
-
-    test = np.zeros(nbkpt, dtype=int)
-    for jj in range(-np.ceil(nord / 2.0), (nord / 2.0) - 1):
-        inside = (((hmm + jj) > 0) + nord) < (n - 1)
-        test[inside] = 1
-
-    maskthese = np.where(test == 1)[0]
-
-    if maskthese.size != 0:
-        return -2
-
-    reality = goodbk[maskthese]
-    if np.sum(sset["bkmask"][reality]) == 0:
-        return -2
-
-    sset["bkmask"][reality] = 0
-    return -1
-
-
-# NOTE: taken from https://svn.sdss.org/public/repo/sdss/idlutils/tags/v5_5_36/pro/bspline/bspline_valu.pro
-def bspline_valu(x, sset, x2=None, action=None, upper=None, lower=None):
-    nx = len(x)
-    mask = np.zeros(nx, dtype=int)
-
-    if not isinstance(sset, dict):
-        print("Please send in a proper B-spline structure")
-        return np.zeros_like(x), mask
-
-    xsort = np.argsort(x)
-    npoly = 1
-    xwork = x[xsort]
-
-    if x2 is not None:
-        if "npoly" in sset.keys():
-            npoly = sset["npoly"]
-        x2work = x2[xsort]
+    sampling=np.arange(336., 1021., 2.)
+    ids = [line['source_id'] for line in r]
+    if GAIA_CACHE_DIR is None or path.exists(GAIA_CACHE_DIR + f'/{expnum}_XP_spec.pickle') is False:
+        calibrated_spectra, _ = gaiaxpy.calibrate(ids, truncation=False, save_file=False)
+        if GAIA_CACHE_DIR is not None:
+            #print('writing '+GAIA_CACHE_DIR + f'/{expnum}_XP_spec.pickle')
+            calibrated_spectra.to_pickle(GAIA_CACHE_DIR + f'/{expnum}_XP_spec.pickle')
     else:
-        x2work = 0
+        #print('reading '+GAIA_CACHE_DIR + f'/{expnum}_XP_spec.csv')
+        calibrated_spectra = pd.read_pickle(GAIA_CACHE_DIR + f'/{expnum}_XP_spec.pickle')
 
-    if action is None:
-        action, lower, upper = bspline_action(xwork, sset, x2=x2work)
+    # calibrated_spectra
+    if(plot):
+        gaiaxpy.plot_spectra(calibrated_spectra, sampling=sampling, multi=True, show_plot=True, output_path=None, legend=False)
+    # calibrated_spectra *= 100  # W/m^2 -> erg/s/cm^
+    # astropy.Table ['SOURCE_ID, 'ra', 'dec', ...], ]pandas.DataFrame ['source_id', 'flux', 'flux_error'], np.ndarray
+    return r, calibrated_spectra, sampling
 
-    yfit = x * 0.0
-    nord = sset["nord"]
-    bw = npoly * nord
 
-    spot = np.linspace(bw)
-    goodbk = np.where(sset["bkmask"] != 0)
-    nbkpt = goodbk.size
-    coeffbk = np.where(sset["bkmask"][nord:] != 0)
-    n = nbkpt - nord
+def mean_absolute_deviation(vals):
+    """
+    Robust estimate of RMS
+    - see https://en.wikipedia.org/wiki/Median_absolute_deviation
+    """
+    mval = bn.nanmedian(vals)
+    rms = 1.4826 * bn.nanmedian(np.abs(vals - mval))
+    return mval, rms
+    # ok=np.abs(vals-mval)<4*rms
 
-    sc = len(sset["coeff"])
-    if sc[0] == 2:
-        goodcoeff = sset["coeff"][:, coeffbk]
+
+def butter_lowpass_filter(data, cutoff_freq, nyq_freq, order=4):
+    normal_cutoff = float(cutoff_freq) / nyq_freq
+    b, a = signal.butter(order, normal_cutoff, btype="lowpass")
+    y = signal.filtfilt(b, a, data)
+    return y
+
+
+def cos_apod(nsample, perc=10.):
+    y=np.ones(nsample)
+    nperc=int(np.round(nsample*perc/100))
+    x=np.sin(np.pi/2/nperc*np.arange(nperc))
+    y[:nperc]=x
+    y[-nperc:]=np.flip(x)
+    return y
+
+
+def derive_vecshift(vec, vec_ref, max_ampl=30, oversample_bin=20):
+    """
+    Derive shift of 1D-array vec from vec_ref using cross-correlation;
+    both arrays assumed to be normalized
+    if max_ampl is set then maximum shift is max_ampl
+    """
+    nsamples = min([len(vec), len(vec_ref)])
+    vec[~np.isfinite(vec)] = np.nanmedian(vec)
+    vec_ref[~np.isfinite(vec_ref)] = np.nanmedian(vec_ref)
+    vec = signal.resample_poly(cos_apod(nsamples) * (vec[:nsamples]), oversample_bin, 1)
+    vec_ref = signal.resample_poly(cos_apod(nsamples) * (vec_ref[:nsamples]), oversample_bin, 1)
+    xcorr = signal.correlate(vec, vec_ref)
+    if max_ampl:
+        max_ampl = min([(nsamples * oversample_bin - 1), int(np.floor(max_ampl * oversample_bin))])
+        xcorr = xcorr[nsamples * oversample_bin - (max_ampl + 1): nsamples * oversample_bin + max_ampl]
     else:
-        goodcoeff = sset["coeff"][coeffbk]
-
-    for i in range(0, n - nord):
-        ict = upper[i] - lower[i] + 1
-
-        if ict > 0:
-            yfit[lower[i] : upper[i]] = (
-                goodcoeff[i * npoly + spot] @ action[lower[i] : upper[i], :]
-            )
-
-    yy = yfit
-    yy[xsort] = yfit
-
-    mask[:] = 1
-    gb = sset["fullbkpt"][goodbk]
-
-    outside = np.where((x < gb[nord - 1]) | (x > gb[n]))[0]
-    if outside.size != 0:
-        mask[outside] = 0
-
-    hmm = np.where(goodbk[1:] - goodbk > 2)[0]
-    nhmm = hmm.size
-    for jj in range(0, nhmm - 1):
-        inside = np.where(
-            (x >= sset["fullbkpt"][goodbk[hmm[jj]]])
-            & (x <= sset["fullbkpt"][goodbk[hmm[jj] + 1] - 1])
-        )
-        if inside.size != 0:
-            mask[inside] = 0
-
-    return yy, mask
+        max_ampl = nsamples * oversample_bin - 1
+    dt = np.arange(- max_ampl, max_ampl + 1)
+    shift = dt[xcorr.argmax()] / oversample_bin
+    return shift
 
 
-# NOTE: taken from https://svn.sdss.org/public/repo/sdss/idlutils/tags/v5_5_36/pro/bspline/create_bsplineset.pro
-def create_bsplineset(fullbkpt, nord, npoly=None):
-    numbkpt = len(fullbkpt)
-    numcoeff = numbkpt - nord
 
-    if npoly is None:
-        sset = {
-            "fullbkpt": fullbkpt,
-            "bkmask": np.ones(numbkpt, dtype=bool),
-            "nord": int(nord),
-            "coeff": np.zeros(numcoeff),
-            "icoeff": np.zeros(numcoeff),
-        }
+def filter_channel(w, f, k=3, method='lowpass'):
+    c = np.where(np.isfinite(f))
+    if method == 'lowpass':
+        s = butter_lowpass_filter(f[c], 0.01, 2)
+    elif method == 'savgol':
+        s = signal.savgol_filter(f[c], 5, 3)
+    res = s - f[c]
+    # plt.plot(w[c], f[c], 'k.')
+    # plt.plot(w[c], s, 'b-')
+    mres, rms = mean_absolute_deviation(res)
+    good = np.where(np.abs(res - mres) < k * rms)
+    # plt.plot(w[c][good], f[c][good], 'r.', markersize=5)
+    return w[c][good], f[c][good]
+
+
+sdss_g_w = np.array(
+    [
+        3630,
+        3640,
+        3680,
+        3780,
+        3880,
+        3980,
+        4080,
+        4180,
+        4280,
+        4380,
+        4480,
+        4580,
+        4680,
+        4780,
+        4880,
+        4980,
+        5080,
+        5180,
+        5280,
+        5380,
+        5480,
+        5580,
+        5680,
+        5780,
+        5880,
+        5980,
+    ]
+)
+sdss_g_f = np.array(
+    [
+        0.0000,
+        0.0000,
+        0.0013,
+        0.0055,
+        0.0500,
+        0.1629,
+        0.2609,
+        0.3105,
+        0.3385,
+        0.3596,
+        0.3736,
+        0.3863,
+        0.3973,
+        0.4019,
+        0.4073,
+        0.4147,
+        0.4201,
+        0.4147,
+        0.3233,
+        0.1043,
+        0.0128,
+        0.0024,
+        0.0010,
+        0.0003,
+        0.0000,
+        0.0000,
+    ]
+)
+
+def LVM_phot_filter(channel, w):
+    """
+    LVM photometric system: Gaussian filter with sigma 250A centered in channels
+    at 4500, 6500, and 8500A
+    """
+    if channel == "b":
+        return np.exp(-0.5 * ((w - 4500) / 250) ** 2)
+    elif channel == "r":
+        return np.exp(-0.5 * ((w - 6500) / 250) ** 2)
+    elif channel == "z":
+        return np.exp(-0.5 * ((w - 8500) / 250) ** 2)
     else:
-        sset = {
-            "fullbkpt": fullbkpt,
-            "bkmask": np.ones(numbkpt, dtype=bool),
-            "nord": int(nord),
-            "xmin": 0.0,
-            "xmax": 1.0,
-            "funcname": "legendre",
-            "npoly": int(npoly),
-            "coeff": np.zeros((npoly, numcoeff)),
-            "icoeff": np.zeros((npoly, numcoeff)),
-        }
-
-    return sset
+        raise Exception(f"Unknown filter '{channel}'")
 
 
-# NOTE: taken from https://svn.sdss.org/public/repo/sdss/idlutils/tags/v5_5_36/pro/bspline/bspline_bkpts.pro
-def bspline_bkpts(
-    x,
-    nord,
-    bkpt=None,
-    bkspace=None,
-    nbkpts=None,
-    everyn=None,
-    silent=True,
-    bkspread=None,
-    placed=None,
-):
-    nx = len(x)
+def spec_to_mAB(lam, spec, lamf, filt):
+    """
+    Calculate AB magnitude in filter (lamf, filt) given a spectrum
+    (lam, spec) in ergs/s/cm^2/A
+    """
+    c_AAs = 2.99792458e18  # Speed of light in Angstrom/s
+    filt_int = np.interp(lam, lamf, filt)  # Interpolate to common wavelength axis
+    I1 = simpson(y=spec * filt_int * lam, x=lam)
+    I2 = simpson(y=filt_int / lam, x=lam)
+    fnu = I1 / I2 / c_AAs  # Average flux density
+    mab = -2.5 * np.log10(fnu) - 48.6  # AB magnitude
+    if np.isnan(mab):
+        mab = -9999.9
+    return mab
 
-    if bkpt is None:
-        range = np.max(x) - np.min(x)
-        startx = np.min(x)
-        if placed is not None:
-            w = np.where(placed >= startx and placed <= startx + range)[0]
-            cnt = w.size
-            nbkpts = cnt
-            if nbkpts < 2:
-                nbkpts = 2
-                tempbkspace = np.double(range / (float(nbkpts - 1)))
-                bkpt = (np.linspace(nbkpts)) * tempbkspace + startx
-            else:
-                bkpt = placed[w]
-        elif bkspace is not None:
-            nbkpts = int(range / float(bkspace)) + 1
-            if nbkpts < 2:
-                nbkpts = 2
-            tempbkspace = np.double(range / (float(nbkpts - 1)))
-            bkpt = (np.linspace(nbkpts)) * tempbkspace + startx
-        elif nbkpts is not None:
-            nbkpts = int(nbkpts)
-            if nbkpts < 2:
-                nbkpts = 2
-            tempbkspace = np.double(range / (float(nbkpts - 1)))
-            bkpt = (np.linspace(nbkpts)) * tempbkspace + startx
-        elif everyn is not None:
-            nbkpts = (nx / everyn) > 1
-            if nbkpts == 1:
-                xspot = [0]
-            else:
-                xspot = np.linspace(nbkpts) * (nx / (nbkpts - 1))
-            bkpt = x[xspot]
-        else:
-            print("No information for bkpts")
 
-    bkpt = float(bkpt)
+def integrate_flux_in_filter(lam, spec, lamf, filt):
+    """
+    Calculate average flux in filter (lamf, filt) given a spectrum
+    (lam, spec)
+    """
+    filt_int = np.interp(lam, lamf, filt)  # Interpolate to common wavelength axis
+    return simpson(y=spec * filt_int, x=lam) / simpson(y=filt_int, x=lam)
 
-    if np.min(x) < np.min(bkpt):
-        spot = np.argmin(bkpt)
-        if not silent:
-            print("Lowest breakpoint does not cover lowest x value: changing")
-        bkpt[spot] = min(x)
 
-    if np.max(x) > np.max(bkpt):
-        spot = np.argmax(bkpt)
-        if not silent:
-            print("highest breakpoint does not cover highest x value, changing")
-        bkpt[spot] = max(x)
+def spec_to_LVM_flux(channel, w, f):
+    """
+    Return average flux in the LVM photometric system
+    """
+    return integrate_flux_in_filter(w, f, w, LVM_phot_filter(channel, w))
 
-    nshortbkpt = len(bkpt)
-    fullbkpt = bkpt
+def spec_to_LVM_mAB(channel, w, f):
+    """
+    LVM photometric system: Gaussian filter with sigma 250A centered in channels
+    at 4500, 6500, and 8500A
+    """
+    return spec_to_mAB(w, f, w, LVM_phot_filter(channel, w))
 
-    if bkspread is None:
-        bkspread = 1.0
-    if nshortbkpt == 1:
-        bkspace = bkspread
+
+def sky_flux_in_filter(cam, skyfibs, obswave, percentile=75):
+    '''
+    Given an lvmFrame, calculate the median flux in the LVM photometric system of the
+    lowest 'percentile' of sky fibers.
+
+    Used for sky subtraction of the photometry of stars for sci IFU self calibration.
+    '''
+    nfiber = skyfibs.shape[0]
+    flux = np.full(nfiber, np.nan)
+    for i in range(nfiber):
+        obsflux = skyfibs[i,:]
+        f = np.isfinite(obsflux)
+        if np.any(f):
+            obsflux = interpolate_mask(obswave, obsflux, ~f)
+            flux[i] = spec_to_LVM_flux(cam, obswave, obsflux)
+
+    limidx = int(nfiber*percentile/100.0)
+    skies = np.argsort(flux)[1:limidx]
+    return bn.nanmedian(flux[skies])
+
+
+def interpolate_mask(x, y, mask, kind="linear", fill_value=0):
+    """
+    :param x, y: numpy arrays, samples and values
+    :param mask: boolean mask, True for masked values
+    :param method: interpolation method, one of linear, nearest,
+    nearest-up, zero, slinear, quadratic, cubic, previous, or next.
+    :param fill_value: which value to use for filling up data outside the
+        convex hull of known pixel values.
+        Default is 0, Has no effect for 'nearest'.
+    :return: the image with missing values interpolated
+    """
+    if not np.any(mask):
+        return y
+    known_x, known_v = x[~mask], y[~mask]
+    missing_x = x[mask]
+    missing_idx = np.where(mask)
+
+    f = interpolate.interp1d(known_x, known_v, kind=kind, fill_value=fill_value, bounds_error=False)
+    yy = y.copy()
+    yy[missing_idx] = f(missing_x)
+
+    return yy
+
+
+def lsf_convolve(data, diff_fwhm, wave_lsf_interp):
+    """Degrade resolution of given spectrum
+    """
+
+    new_data = data.copy()
+    sigmas = diff_fwhm / 2.354
+
+    # setup kernel
+    pixels = np.ceil(3 * max(sigmas))
+    pixels = np.arange(-pixels, pixels)
+    kernel = np.asarray([np.exp(-0.5 * (pixels / sigmas[iw]) ** 2) for iw in range(data.size)])
+    kernel = convolution_matrix(kernel)
+    new_data = kernel @ data
+
+    return new_data
+
+
+def lsf_convolve_fast(data, diff_fwhm, waves=None, n_sigma=4, edges_reflect=True):
+    """
+    Degrade spectrum resolution using sparse matrix convolution (~40x faster than lsf_convolve).
+
+    Parameters
+    ----------
+    data : np.ndarray
+        Input flux array
+    diff_fwhm : np.ndarray
+        FWHM array for each pixel (same length as data); in pixels, or in wavelength units if waves provided
+    waves : np.ndarray, optional
+        Wavelength array; if provided, converts diff_fwhm from wavelength units to pixels
+    n_sigma : int, optional
+        Kernel size in units of sigma
+    edges_reflect : bool, optional
+        If True, reflect edges to avoid edge effects in convolution
+
+    Returns
+    -------
+    np.ndarray
+        Convolved flux array
+    """
+    # convert FWHM from wavelength units to pixels if wavelength array provided
+    if waves is not None:
+        # this calculates the sizes of pixels in wavelength units, can be used for irregular grids
+        delta_wave = np.diff(edges_from_centers(waves))
+        sigmas = (diff_fwhm / delta_wave) / 2.3548 # 2*np.sqrt(2*np.log(2))
     else:
-        bkspace = (bkpt[1] - bkpt[0]) * bkspread
+        sigmas = diff_fwhm / 2.3548
 
-    for i in range(1, nord - 1):
-        fullbkpt = [bkpt[0] - bkspace * i, fullbkpt, bkpt[nshortbkpt - 1] + bkspace * i]
+    # determine kernel size based on maximum sigma (nsigma-sigma coverage)
+    max_sigma = np.max(sigmas)
+    npix_half = int(np.ceil(n_sigma * max_sigma))
+    npix = 2 * npix_half + 1  # full size of the kernel
 
-    return fullbkpt, bkpt
+    # handle edge reflection to avoid edge effects
+    if edges_reflect:
+        # get kernel sizes at edges
+        npix_half_left = int(np.ceil(n_sigma * sigmas[0]))
+        npix_half_right = int(np.ceil(n_sigma * sigmas[-1]))
 
+        # reflect edges
+        data_extended = np.concatenate([
+            data[npix_half_left:0:-1],  # left reflection (reversed)
+            data,
+            data[-2:-npix_half_right-2:-1]  # right reflection (reversed)
+        ])
 
-# NOTE: taken from https://svn.sdss.org/public/repo/sdss/idlutils/tags/v5_5_36/pro/bspline/bspline_fit.pro
-def bspline_fit(
-    xdata, ydata, invvar, sset, fullbkpt=None, x2=None, npoly=None, nord=None
-):
-    if nord is None:
-        nord = 4
+        # extend sigmas array using edge values
+        sigmas_extended = np.concatenate([
+            np.full(npix_half_left, sigmas[0]),
+            sigmas,
+            np.full(npix_half_right, sigmas[-1])
+        ])
 
-    if not isinstance(sset, dict):
-        sset = create_bsplineset(fullbkpt, nord, npoly=npoly)
-
-    if "npoly" in sset:
-        npoly = sset["npoly"]
-    if npoly is None:
-        npoly = 1
-
-    goodbk = np.where(sset["bkmask"][nord:] != 0)
-    nbkpt = goodbk.size
-
-    nord = sset["nord"]
-
-    if nbkpt < nord:
-        yfit = np.zeros_like(ydata)
-        return -2, sset, yfit
-
-    nn = nbkpt
-    nfull = nn * npoly
-    bw = npoly * nord  # this is the bandwidth
-
-    #  The next line is REQUIRED to fill a1
-
-    a1, lower, upper = bspline_action(xdata, sset, x2=x2)
-
-    a2 = a1 * (np.ones(bw) @ invvar)
-
-    alpha = np.zeros((bw, nfull + bw), dtype=np.double)
-    beta = np.zeros(nfull + bw, dtype=np.double)
-
-    bi = np.linspace(bw)
-    bo = np.linspace(bw)
-    for i in range(1, bw - 1):
-        bi = [bi, np.linspace(bw - i) + (bw + 1) * i]
-    for i in range(1, bw - 1):
-        bo = [bo, np.linspace(bw - i) + bw * i]
-
-    for i in range(0, nn - nord):
-        itop = i * npoly
-        ibottom = (itop < nfull + bw) - 1
-
-        ict = upper[i] - lower[i] + 1
-
-        if ict > 0:
-            work = a2[lower[i] : upper[i], :] @ np.transpose(a1[lower[i] : upper[i], :])
-            wb = a2[lower[i] : upper[i], :] @ ydata[lower[i] : upper[i]]
-
-            alpha[bo + itop * bw] = alpha[bo + itop * bw] + work[bi]
-            beta[itop:ibottom] = beta[itop:ibottom] + wb
-
-    # Drop break points where minimal influence is located
-
-    min_influence = 1.0e-10 * np.sum(invvar) / nfull
-
-    # This call to cholesky_band operates on alpha and changes contents
-
-    errb = cholesky_band(alpha, mininf=min_influence)
-
-    if errb[0] != -1:
-        yfit, _ = bspline_valu(xdata, sset, x2=x2, action=a1, upper=upper, lower=lower)
-        return bspline_maskpoints(sset, errb, npoly), sset, yfit
-
-    # this changes beta to contain the solution
-
-    errs = cholesky_solve(alpha, beta)
-    if errs[0] != -1:
-        yfit, _ = bspline_valu(xdata, sset, x2=x2, action=a1, upper=upper, lower=lower)
-        return bspline_maskpoints(sset, errs, npoly), sset, yfit
-
-    sc = len(sset["coeff"])
-    if sc[0] == 2:
-        sset["icoeff"][:, goodbk] = np.reshape(
-            alpha[0, np.linspace(nfull)], (npoly, nn)
-        )
-        sset["coeff"][:, goodbk] = np.reshape(beta[np.linspace(nfull)], (npoly, nn))
+        offset = npix_half_left
     else:
-        sset.icoeff[goodbk] = alpha[0, np.linspace(nfull)]
-        sset.coeff[goodbk] = beta[np.linspace(nfull)]
+        data_extended = data
+        sigmas_extended = sigmas
+        offset = 0
 
-    yfit, _ = bspline_valu(xdata, sset, x2=x2, action=a1, upper=upper, lower=lower)
+    # create pixel grid for kernel
+    x_px = np.arange(-npix_half, npix_half + 1, dtype=float)
 
-    return 0, sset, yfit
+    # compute Gaussian kernels for all pixels using broadcasting
+    # shape: (n_pixels, npix)
+    yy = x_px[None, :] / sigmas_extended[:, None]
 
+    kernels = np.exp(-0.5 * yy**2)
+    # normalize kernels numerically
+    kernels = kernels / kernels.sum(axis=1, keepdims=True)
 
-# NOTE: taken from: https://svn.sdss.org/public/repo/sdss/idlutils/tags/v5_5_36/pro/bspline/bspline_iterfit.pro
-def bspline_iterfit(
-    xdata,
-    ydata,
-    invvar=None,
-    nord=None,
-    x2=None,
-    npoly=None,
-    xmin=None,
-    xmax=None,
-    bkpt=None,
-    oldset=None,
-    maxiter=None,
-    upper=None,
-    lower=None,
-    requiren=None,
-    fullbkpt=None,
-    funcname=None,
-    **kwargs,
-):
-    # ----------
-    # Check dimensions of inputs
+    # build sparse matrix indices
+    x_size = data_extended.size
+    rows2d = np.broadcast_to(np.arange(x_size)[:, None], (x_size, npix))
+    cols2d = rows2d + x_px.astype(int)
 
-    nx = len(xdata)
-    if len(ydata) != nx:
-        print("Dimensions of XDATA and YDATA do not agree")
+    # clip columns to valid range [0, x_size)
+    valid_mask = (cols2d >= 0) & (cols2d < x_size)
+    rows_flat = rows2d[valid_mask]
+    cols_flat = cols2d[valid_mask]
+    data_flat = kernels[valid_mask]
 
-    if nord is None:
-        nord = 4
-    if upper is None:
-        upper = 5
-    if lower is None:
-        lower = 5
+    # construct sparse convolution matrix
+    matrix_csr = csr_matrix((data_flat, (rows_flat, cols_flat)), shape=(x_size, x_size))
 
-    if invvar is not None:
-        if len(invvar) != nx:
-            print("Dimensions of XDATA and INVVAR do not agree")
+    # apply convolution
+    new_data = matrix_csr @ data_extended
 
-    if x2 is not None:
-        if len(x2) != nx:
-            print("Dimensions of X and X2 do not agree")
-        if npoly is None:
-            npoly = 2
+    # remove reflected edges if they were added
+    if edges_reflect:
+        new_data = new_data[offset:offset + data.size]
 
-    if maxiter is None:
-        maxiter = 10
-
-    yfit = np.zeros_like(ydata)  # Default return values
-
-    if invvar is None:
-        var = np.std(ydata) ** 2
-        if var == 0:
-            var = 1
-        invvar = np.zeros_like(ydata) + 1.0 / var
-
-    if len(invvar) == 1:
-        outmask = np.asarray([True])
-    else:
-        outmask = np.ones_like(invvar, dtype=bool)
-
-    xsort = np.argsort(xdata)
-    maskwork = (outmask * (invvar > 0)).astype(bool)[xsort]
-    these = np.where(maskwork)[0]
-    nthese = these.size
-
-    # ----------
-    # Determine the break points and create output structure
-
-    if oldset is not None:
-        sset = oldset
-        sset["bkmask"] = 1
-        sset["coeff"] = 0
-        tags = oldset.keys()
-        if "xmin" in tags and x2 is None:
-            print("X2 must be set to be consistent with OLDSET")
-
-    else:
-        if nthese == 0:
-            print("No valid data points")
-            fullbkpt = 0
-            return None, outmask, fullbkpt, yfit
-
-        if fullbkpt is None:
-            fullbkpt = bspline_bkpts(
-                xdata[xsort[these]], nord=nord, bkpt=bkpt, **kwargs
-            )
-
-        sset = create_bsplineset(fullbkpt, nord, npoly=npoly)
-
-        if nthese < nord:
-            print("Number of good data points fewer the NORD")
-            return sset, outmask, fullbkpt, yfit
-
-        # ----------
-        # Condition the X2 dependent variable by the XMIN, XMAX values.
-        # This will typically put X2NORM in the domain [-1,1].
-
-        if x2 is not None:
-            if xmin is None:
-                xmin = np.min(x2)
-            if xmax is None:
-                xmax = np.max(x2)
-            if xmin == xmax:
-                xmax = xmin + 1
-            sset["xmin"] = xmin
-            sset["xmax"] = xmax
-
-            if funcname is not None:
-                sset["funcname"] = funcname
-
-    # ----------
-    # It's okay now if the data fall outside breakpoint regions, the
-    # fit is just set to zero outside.
-
-    # ----------
-    # Sort the data so that X is in ascending order.
-
-    xwork = xdata[xsort]
-    ywork = ydata[xsort]
-    invwork = invvar[xsort]
-    if x2 is not None:
-        x2work = x2[xsort]
-
-    # ----------
-    # Iterate spline fit
-
-    iiter = 0
-    error = 0
-
-    qdone = 0
-    while ((error != 0) or (qdone == 0)) and iiter < maxiter:
-        ngood = np.sum(maskwork)
-        goodbk = np.where(sset["bkmask"] != 0)[0]
-        ngb = goodbk.size
-
-        if ngood < 1 or goodbk[0] != -1:
-            sset["coeff"] = 0
-            iiter = maxiter + 1  # End iterations
-        else:
-            if requiren is not None:
-                # Locate where there are two break points in a row with no good
-                # data points in between, and drop (mask) one of those break points.
-                # The first break point is kept.
-                i = 0
-                while xwork[i] < sset["fullbkpt"][goodbk[nord]] and i < nx - 1:
-                    i = i + 1
-
-                ct = 0
-                for ileft in range(nord, ngb - nord):
-                    while (
-                        xwork[i] >= sset["fullbkpt"][goodbk[ileft]]
-                        and xwork[i] < sset["fullbkpt"][goodbk[ileft + 1]]
-                        and i < nx - 1
-                    ):
-                        ct = ct + (invwork[i] * maskwork[i] > 0)
-                        i = i + 1
-
-                    if ct >= requiren:
-                        ct = 0
-                    else:
-                        sset["bkmask"][goodbk[ileft]] = 0
-
-            # Do the fit.  Return values for ERROR are as follows:
-            #    0 if fit is good
-            #   -1 if all break points are masked
-            #   -2 if everything is screwed
-            error = bspline_fit(
-                xwork,
-                ywork,
-                invwork * maskwork,
-                sset,
-                x2=x2work,
-                yfit=yfit,
-                nord=nord,
-                **kwargs,
-            )
-
-        iiter = iiter + 1
-
-        inmask = maskwork
-
-        if error == -2:
-            # All break points have been dropped.
-            return sset, outmask, fullbkpt, yfit
-        elif error == 0:
-            # Iterate the fit -- next rejection iteration.
-            qdone = djs_reject(
-                ywork,
-                yfit,
-                invvar=invwork,
-                inmask=inmask,
-                outmask=maskwork,
-                upper=upper,
-                lower=lower,
-                **kwargs,
-            )
-
-    # ----------
-    # Re-sort the output arrays OUTMASK and YFIT to agree with the input data.
-
-    outmask[xsort] = maskwork
-
-    temp = yfit
-    yfit[xsort] = temp
-
-    return sset, outmask, fullbkpt, yfit
+    return new_data
 
 
-# -------------------------------------------------------------------------------------------------
+def get_worst_resolution(delta_fwhm=1.0):
+    """Get worst possible resolution + delta_fwhm from available LVM long-term calibrations
+    """
+    # get all available calibration epochs
+    calib_mjds = sorted([int(p) for p in os.listdir(MASTERS_DIR) if p.isdigit() and int(p) >= 60177])
+
+    worst_res = 0
+    for calib_mjd in calib_mjds:
+        calib_paths = get_calib_paths(mjd=calib_mjd, flavors={"lsf"}, from_sanbox=True)
+        for _, lsf_path in calib_paths["lsf"].items():
+            lsf = TraceMask.from_file(lsf_path)
+
+            mask = np.isnan(lsf._data)
+            if lsf._mask is not None:
+                mask |= lsf._mask
+            worst_ = lsf._data[~mask].max()
+            if worst_ > worst_res:
+                worst_res = worst_
+
+    # add 1 Angstrom so that we don't get collapsed Gaussians
+    worst_res += delta_fwhm
+
+    return worst_res
 
 
-def spflux_masklines(loglam, hwidth=None, stellar=True, telluric=True):
-    """Returns a mask"""
+def create_stellar_templates(target_fwhm, models_dir=STELLAR_TEMP_PATH, model_fwhm=0.3, model_sampling=0.05):
+    """Create stellar templates with given resolution in FWHM"""
+    # read the best-fit model and convolve with spectrograph LSF
+    n_steps = int((9800-3600) / model_sampling) + 1
+    model_wave = np.linspace(3600, 9800, n_steps)
+    model_lsf = np.ones_like(model_wave) * target_fwhm
 
-    if hwidth is None:
-        # TODO: set this to whatever is equivalent to 400 km/s
-        hwidth = 5.7e-4  # Default is to mask +/- 5.7 pix = 400 km/sec
+    models_dir = os.path.join(models_dir, 'good_res')
+    models_path = [os.path.join(models_dir, models_name) for models_name in os.listdir(models_dir) if models_name.endswith(".fits")]
+    log.info(f"loading stellar templates from '{models_dir}', found: {len(models_path)} templates")
 
-    # initialize the mask array for wavelengths
-    mask = np.zeros_like(loglam.size, dtype=bool)
+    log.info(f"assuming wavelength sampling of {model_sampling = } and spectral FWHM {model_fwhm = } Angstroms")
 
-    if stellar:
-        starwave = [
-            #       3692.6 ,  # H-16
-            #       3698.2 ,  # H-15
-            3704.9,  # H-14
-            #       3707.1 ,  # Ca-II
-            3713.0,  # H-13
-            3723.0,  # H-12
-            3735.4,  # H-11
-            #       3738.0 ,  # Ca-II
-            3751.2,  # H-10
-            3771.7,  # H-9
-            3799.0,  # H-8
-            3836.5,  # H-7
-            3890.2,  # H-6
-            3934.8,  # Ca_k
-            3969.6,  # Ca_H
-            3971.2,  # H-5
-            4102.9,  # H-delta
-            4300.0,  # G-band
-            4305.0,  # G-band
-            4310.0,  # more G-band
-            4341.7,  # H-gamma
-            4862.7,  # H-beta
-            #       4687.1 ,  # He II
-            5168.8,  # Mg I
-            5174.1,  # Mg I
-            5185.0,  # Mg I
-            5891.6,  # Na I
-            5897.6,  # Na I
-            6564.6,  # H-alpha
-            8500.4,  # Ca II
-            8544.4,  # Ca II
-            8664.5,  # Ca II
-            8752.9,  # H I
-            8865.3,  # H I
-            # RY: commented out the following three lines as these are in telluric absorption regions.
-            #      If we mask them, we get bad bspline interpolation in these regions.
-            #      They are not useful for stellar fitting anyway as they are in telluric regions.
-            #       9017.8 ,  # H I
-            #       9232.2 ,  # H I Pa-6
-            #       9548.8 ,  # H I Pa-5
-            10052.6,
-        ]  # H I (Pa-delta)
-        #  airtovac, starwave #  commented out because wavelengths of features have already been set in vacuum.RY Jul 13, 2015
+    new_models = []
+    iterator = tqdm(models_path, desc="degrading models resolution", ascii=True, unit="spectrum")
+    for model_path in iterator:
+        try:
+            with fits.open(model_path, memmap=False) as hdul:
+                model_flux = hdul[0].data
+        except OSError as e:
+            log.error(f"while reading {model_path}: {e}")
+            continue
+        diff_lsf = np.sqrt(model_lsf**2 - model_fwhm**2)
 
-        for i in range(len(starwave)):
-            mask = mask | (
-                loglam
-                > np.log10(starwave[i]) - hwidth & loglam
-                < np.log10(starwave[i]) + hwidth
-            )
+        # convolve model to spec lsf
+        new_models.append(lsf_convolve(model_flux, diff_lsf, model_wave))
 
-    if telluric:
-        tellwave1 = [6842.0, 7146.0, 7588.0, 8105.0, 8910.0]
-        tellwave2 = [6980.0, 7390.0, 7730.0, 8440.0, 9880.0]
-        for i in range(len(tellwave1)):
-            mask = mask | (
-                loglam > np.log10(tellwave1[i]) & loglam < np.log10(tellwave2[i])
-            )
+    new_header = fits.Header()
+    new_header["MODPATH"] = (models_dir, "directory of original models")
+    new_header["INISAMP"] = (model_sampling, "initial wavelength sampling [Angstrom]")
+    new_header["INIFWHM"] = (model_fwhm, "initial resolution in FWHM [Angstrom]")
+    new_header["FINFWHM"] = (target_fwhm, "final resolution in FWHM [Angstrom]")
 
-    return mask
+    rss_models = RSS(data=np.asarray(new_models), wave=model_wave, lsf=model_lsf, header=new_header)
+
+    out_models = os.path.join(models_dir, "lvm-stellar-templates.fits")
+    log.info(f"writing models to '{out_models}'")
+    rss_models.writeFitsData(out_models)
+
+    return rss_models
 
 
-def spflux_medianfilt(loglam, objflux, objivar, width, **kwargs):
-    dims = objflux.shape
-    ndim = len(dims)
-    npix = dims[0]
-    if ndim == 1:
-        nspec = 1
-    else:
-        nspec = dims[1]
+def extinctLaSilla(wave):
+    # digitized version of LaSilla extinctin curve from
+    w = [
+        3520.83333,
+        3562.50000,
+        3979.16667,
+        4489.58333,
+        4802.08333,
+        5312.50000,
+        5614.58333,
+        5760.41667,
+        6041.66667,
+        6572.91667,
+        7145.83333,
+        7541.66667,
+        8052.08333,
+        8770.83333,
+        9781.25000,
+        10197.91667,
+    ]
+    f = [
+        0.53533,
+        0.52174,
+        0.34511,
+        0.22283,
+        0.18071,
+        0.14402,
+        0.13315,
+        0.14130,
+        0.11685,
+        0.07880,
+        0.05299,
+        0.04348,
+        0.03533,
+        0.02717,
+        0.01902,
+        0.02038,
+    ]
+    spec_raw = Spectrum1D(wave=w, data=f)
+    return spec_raw.resampleSpec(wave)
 
-    # ----------
-    # Loop over each spectrum
 
-    medflux = np.zeros_like(objflux)
-    if objivar is not None:
-        newivar = np.zeros_like(objivar)
-    for ispec in range(nspec):
-        # For the median-filter, ignore points near stellar absorp. features,
-        # but keep points near telluric bands.
-        qgood = np.logical_not(
-            spflux_masklines(
-                loglam[:, ispec], stellar=True, telluric=False, hwidth=8.0e-4
-            )
+def extinctCAHA(wave, extinct_v, type="mean"):
+    if type == "mean":
+        data = 0.0935 * (wave / 5450.0) ** (-4) + (
+            ((0.8 * extinct_v) - 0.0935) * (wave / 5450.0) ** (-0.8)
         )
 
-        # Median-filter, but skipping masked points
-        igood = np.where(qgood)[0]
-        ngood = igood.size
-        thisback = np.zeros(npix)
-        if ngood > 1:
-            thisback[igood] = median_filter(objflux[igood, ispec], size=width, **kwargs)
-        thisback = np.interp(loglam, loglam[~qgood], thisback[~qgood])
+    elif type == "winter" or type == "summer":
+        if type == "winter":
+            (f1, f2, f3) = (1.02, 0.94, 0.29)
 
-        # Force the ends of the background to be the same as the spectrum,
-        # which will force the ratio of the two to be unity.
-        hwidth = np.ceil((width - 1) / 2.0)
-        thisback[0:hwidth] = objflux[0:hwidth, ispec]
-        thisback[npix - 1 - hwidth : npix - 1] = objflux[
-            npix - 1 - hwidth : npix - 1, ispec
+        elif type == "summer":
+            (f1, f2, f3) = (1.18, 4.52, 0.19)
+        k1 = f1 * 7.25e-3 * (wave / 10000.0) ** (-4)
+        k2 = f2 * 0.006 * (wave / 10000.0) ** (-0.8)
+        k3 = f3 * 0.015 * np.exp(-((wave - 6000.0) / 1200.0))
+        data = k1 + k2 + k3
+        scale_idx = np.argsort((wave - 5500.0) ** 2)[0]
+        scale_offset = extinct_v - data[scale_idx]
+        data = data + scale_offset
+
+    spec = Spectrum1D(wave=wave, data=data)
+    return spec
+
+
+def extinctParanal(wave):
+    wave_base = np.concatenate(
+        (
+            np.arange(3325, 6780, 50),
+            np.array([7060, 7450, 7940, 8500, 8675, 8850, 10000]),
+        )
+    )
+    extinct = np.array(
+        [
+            0.686,
+            0.606,
+            0.581,
+            0.552,
+            0.526,
+            0.504,
+            0.478,
+            0.456,
+            0.430,
+            0.409,
+            0.386,
+            0.378,
+            0.363,
+            0.345,
+            0.330,
+            0.316,
+            0.298,
+            0.285,
+            0.274,
+            0.265,
+            0.253,
+            0.241,
+            0.229,
+            0.221,
+            0.212,
+            0.204,
+            0.198,
+            0.190,
+            0.185,
+            0.182,
+            0.176,
+            0.169,
+            0.162,
+            0.157,
+            0.156,
+            0.153,
+            0.146,
+            0.143,
+            0.141,
+            0.139,
+            0.139,
+            0.134,
+            0.133,
+            0.131,
+            0.129,
+            0.127,
+            0.128,
+            0.130,
+            0.134,
+            0.132,
+            0.124,
+            0.122,
+            0.125,
+            0.122,
+            0.117,
+            0.115,
+            0.108,
+            0.104,
+            0.102,
+            0.099,
+            0.095,
+            0.092,
+            0.085,
+            0.086,
+            0.083,
+            0.081,
+            0.076,
+            0.072,
+            0.068,
+            0.064,
+            0.064,
+            0.048,
+            0.042,
+            0.032,
+            0.030,
+            0.029,
+            0.022,
         ]
-        czero2 = np.where(thisback == 0)[0]
-        count2 = czero2.size
-        if count2 > 0:
-            thisback[czero2] = 1.0
-        medflux[:, ispec] = objflux[:, ispec] / thisback
-        if objivar is not None:
-            newivar[:, ispec] = objivar[:, ispec] * thisback**2
-
-    return medflux, newivar
-
-
-def spflux_bestmodel(
-    loglam, objflux, objivar, dispimg, plottitle="", template="kurucz"
-):
-    filtsz = 99  # the size of the window used in median-filter the spectra.
-    cspeed = 2.99792458e5
-
-    dims = objflux.shape
-    ndim = len(dims)
-    npix = dims[0]
-    if ndim == 1:
-        nspec = 1
-    else:
-        nspec = dims[1]
-
-    # ----------
-    # Median-filter the object fluxes
-
-    medflux, medivar = spflux_medianfilt(
-        loglam, objflux, objivar, width=filtsz, mode="reflect"
     )
-    sqivar = np.sqrt(medivar)
+    spec_raw = Spectrum1D(wave=wave_base, data=extinct)
+    spec = spec_raw.resampleSpec(wave)
+    return spec
 
-    # ----------
-    # Mask out the telluric bands
 
-    sqivar = sqivar * np.logical_not(
-        spflux_masklines(loglam, telluric=True, stellar=False)
+def galExtinct(wave, Rv):
+    m = wave / 10000.0
+    x = 1.0 / m
+    y = x - 1.82
+    ax = (
+        1
+        + (0.17699 * y)
+        - (0.50447 * y**2)
+        - (0.02427 * y**3)
+        + (0.72085 * y**4)
+        + (0.01979 * y**5)
+        - (0.77530 * y**6)
+        + (0.32999 * y**7)
+    )
+    bx = (
+        (1.41338 * y)
+        + (2.28305 * y**2)
+        + (1.07233 * y**3)
+        - (5.38434 * y**4)
+        - (0.62251 * y**5)
+        + (5.30260 * y**6)
+        - (2.09002 * y**7)
     )
 
-    # ----------
-    # Load the Kurucz models into memory
+    Arat = (ax + (bx / Rv)).astype(np.float32)
+    spec = Spectrum1D(wave=wave, data=Arat)
+    return spec
 
-    # TODO: define functions spflux_read_x to read stellar spectra models
-    #   CALLING SEQUENCE:
-    #   spflux_read_bosz
-    #   modelflux = spflux_read_bosz( loglam, dispimg, [ iselect=,
-    #    kindx_return= ,dslgpsize=dslgpsize ] )
-    #
-    # INPUTS:
-    #   loglam     - Log10 wavelengths (vacuum Angstroms) [NPIX]
-    #   dispimg    - Dispersion image, in units of pixels [NPIX]
-    #
-    # OPTIONAL INPUTS:
-    #   iselect    - If set, then only return these model numbers# default to
-    #                returning all models
-    #
-    # OUTPUTS:
-    #   modelflux  - Model fluxes [NPIX,NMODEL]
-    #
-    # OPTIONAL OUTPUTS:
-    #   kindx_return- Structure with model parameters for each model
-    #   thekfile- Return which reference file was used (does NOT set which TO use!)
-    #
-    # NOTE: what is dslgpsize?
-    if template == "kurucz":
-        _, kindx, dslgpsize = spflux_read_kurucz()  ##Yanping test
-    elif template == "munari":
-        _, kindx, dslgpsize = spflux_read_munari()  ##Yanping added
-    elif template == "BOSZ":
-        _, kindx, dslgpsize = spflux_read_bosz()  ##Yanping added
+
+def edges_from_centers(centers):
+    """
+    Ancillary function for fluxconserve_rebin to calculate bin edges from bin centers.
+    """
+    centers = np.asarray(centers, dtype=float)
+    edges = np.empty(centers.size + 1, dtype=float)
+    edges[1:-1] = 0.5*(centers[1:] + centers[:-1])
+    edges[0]  = centers[0]  - 0.5*(centers[1] - centers[0])
+    edges[-1] = centers[-1] + 0.5*(centers[-1] - centers[-2])
+    return edges
+
+
+def fluxconserve_rebin(output_wave, input_wave, input_flux, normalize=True):
+    """
+    Flux-conserving rebin using linear inteprolation of the commulative function.
+    Preserves input data type while performing calculations in float64.
+    Returns np.nan if output_wave is outside the range of input_wave.
+    """
+    # Store original dtype
+    original_dtype = input_flux.dtype
+
+    # Convert to float64 for calculations
+    input_flux_f64 = input_flux.astype(np.float64)
+
+    edges_out = edges_from_centers(output_wave)
+    edges_in = edges_from_centers(input_wave)
+    cdf_in = np.r_[0.0, np.cumsum(input_flux_f64, dtype=np.float64)]
+    cdf_out = np.interp(edges_out, edges_in, cdf_in)
+
+    if normalize:
+        # in this case output spectrum will be on the same level of the input
+        x_edges_in = np.arange(len(edges_in))
+        x_edges_out = np.interp(edges_out, edges_in, x_edges_in, left=np.nan, right=np.nan)
+        norm_factors = np.diff(x_edges_out)
     else:
-        print(
-            "Flux calibration templates has to be specified and be one of the three: 'kurucz','munari', 'BOSZ'."
-        )
+        # spectrum level will be higer because of integration over pixels
+        norm_factors = np.diff(edges_out)
 
-    nmodel = len(kindx)
+    output = np.diff(cdf_out) / norm_factors
 
-    # ----------
-    # Fit the redshift just by using a canonical model
+    # Convert back to original dtype
+    return output.astype(original_dtype)
 
-    ifud = np.where(kindx.teff == 6000 & kindx.g == 4 & kindx.feh == -1.5)[0]
-    if ifud.size == 0:
-        print("Could not find fiducial model!")
-    nshift = (
-        np.ceil(1000.0 / cspeed / np.log(10.0) / dslgpsize / 2) * 2
-    )  # set this to cover +/-500 km/s
-    logshift = (-nshift / 2.0 + np.arange(nshift)) * dslgpsize  ##Yanping test
-    chivec = np.zeros(nshift)
-    for ishift in range(nshift):
-        if template == "kurucz":
-            modflux, kindx, dslgpsize = spflux_read_kurucz(
-                loglam - logshift[ishift], dispimg, iselect=ifud
-            )  ##Yanping test
-        elif template == "munari":
-            modflux, kindx, dslgpsize = spflux_read_munari(
-                loglam - logshift[ishift], dispimg, iselect=ifud
-            )  ##Yanping added
-        elif template == "BOSZ":
-            modflux, kindx, dslgpsize = spflux_read_bosz(
-                loglam - logshift[ishift], dispimg, iselect=ifud
-            )  ##Yanping added
+
+def rebin_and_convolve(wave_target, wave_source, flux_source, lsf, lsf_in_wavelength=False):
+    """
+    Rebin and convolve spectrum to target wavelength grid.
+    """
+    rebinned = fluxconserve_rebin(wave_target, wave_source, flux_source)
+    if lsf_in_wavelength:
+        convolved = lsf_convolve_fast(rebinned, lsf, waves=wave_target)
+    else:
+        convolved = lsf_convolve_fast(rebinned, lsf)
+    return convolved
+
+
+class TelluricCalculator:
+    """
+    Handles telluric transmission calculations using a precomputed high resolution
+    transmission curve generated with the Palace and SkyModel models.
+
+    Encapsulates the sky model data and provides methods to compute atmospheric
+    transmission as a function of precipitable water vapor (PWV) and zenith angle.
+    """
+
+    def __init__(self, skymodel_path=None):
+        """
+        Initialize TelluricCalculator by loading the Palace Sky Model.
+
+        Parameters
+        ----------
+        skymodel_path : str, optional
+            Full path to the SkyModel transmission FITS table.
+            If None, uses default: MASTERS_DIR/stellar_models/lvm-model_transmission_Palace_SkyModel_step0.2-all.fits
+        """
+        self._load_sky_model(skymodel_path)
+
+    def _load_sky_model(self, skymodel_path=None):
+        """Load the Palace Sky Model transmission table."""
+        if skymodel_path is None:
+            model_path = os.path.join(MASTERS_DIR, 'stellar_models', 'lvm-model_transmission_Palace_SkyModel_step0.2-all.fits')
         else:
-            print(
-                "Flux calibration templates has to be specified and be one of the three: 'kurucz','munari', 'BOSZ'."
-            )
+            model_path = skymodel_path
 
-        # Median-filter this model
-        medmodel, _ = spflux_medianfilt(loglam, modflux, width=filtsz, mode="reflect")
-        for ispec in range(nspec):
-            # NOTE: originally used computechi2
-            chivec[ishift] = chivec[ishift] + nnls(
-                medflux[:, ispec] / sqivar[:, ispec],
-                medmodel[:, ispec] / sqivar[:, ispec],
-            )
+        log.info(f"Loading telluric transmission model from '{model_path}'")
 
-    zshift = 10**logshift - 1  # Convert log-lambda shift to redshift
-    # NOTE: originally used find_nminima
-    result = minimize(interp1d(zshift, chivec), x0=0)
-    zpeak = result.x
-    print("Best-fit velocity for std star = ", zpeak * cspeed, " km/s")
-    if result.status != 0:
-        print("Warning: Error code ", result.status, " fitting std star")
-    # Warning messages
-    if np.isnan(chivec).any():
-        if (medivar < 0).any():
-            print(
-                "There are negative ivar values causing chi-square to be NaN or the likes."
-            )
-        else:
-            print("chi-square are NaN or the likes, but not caused by negative ivar.")
+        skytab = fits.getdata(model_path)
+        # Store full model data
+        self._wave_air_full = skytab['wave_air']
+        self._trans_ma_full = skytab['trans_ma']
+        self._fH2O_full = skytab['fH2O']
 
-    # ----------
-    # Generate the Kurucz models at the specified wavelengths + dispersions,
-    # using the best-fit redshift
+        # Initialize working arrays to full model
+        self.wave_air = self._wave_air_full
+        self.trans_ma = self._trans_ma_full
+        self.fH2O = self._fH2O_full
+        self._wave_range_set = False
 
-    # modflux = spflux_read_kurucz(loglam-np.log10(1.+zpeak), dispimg)
+    def set_wave_range(self, wave_min, wave_max):
+        """
+        Set working wavelength range to improve computational efficiency.
+        """
+        mask = (self._wave_air_full >= wave_min) & (self._wave_air_full <= wave_max)
+        self.wave_air = self._wave_air_full[mask]
+        self.trans_ma = self._trans_ma_full[mask]
+        self.fH2O = self._fH2O_full[mask]
+        self._wave_range_set = True
 
-    if template == "kurucz":
-        modflux, kindx, dslgpsize = spflux_read_kurucz(
-            loglam - np.log10(1 + zpeak), dispimg
-        )  ##Yanping test
-    elif template == "munari":
-        modflux, kindx, dslgpsize = spflux_read_munari(
-            loglam - np.log10(1 + zpeak), dispimg
-        )  ##Yanping added
-    elif template == "BOSZ":
-        modflux, kindx, dslgpsize = spflux_read_bosz(
-            loglam - np.log10(1 + zpeak), dispimg
-        )  ##Yanping added
-    else:
-        print(
-            "Flux calibration templates has to be specified and be one of the three: 'kurucz','munari', 'BOSZ'."
-        )
+    def reset_wave_range(self):
+        """Reset wavelength range to full model coverage."""
+        self.wave_air = self._wave_air_full
+        self.trans_ma = self._trans_ma_full
+        self.fH2O = self._fH2O_full
+        self._wave_range_set = False
 
-    # Need to redo median-filter for the data with the correct redshift
-    medflux, medivar = spflux_medianfilt(
-        loglam - np.log10(1.0 + zpeak), objflux, objivar, size=filtsz, mode="reflect"
-    )
-    sqivar = np.sqrt(medivar)
-    # ----------
-    # Mask out the telluric bands
-    sqivar = sqivar * np.logical_not(
-        spflux_masklines(loglam, telluric=True, stellar=False)
-    )
+    def calc_transmission(self, pwv, zenith_angle=None, airmass=None):
+        """
+        Calculate atmospheric transmission for given PWV and zenith angle or airmass.
 
-    # ----------
-    # Loop through each model, computing the best chi**2
-    # as the sum of the best-fit chi**2 to each of the several spectra
-    # for this same object. Counting only the regions around stellar absorption features.
-    # We do this after a median-filtering of both the spectra + the models.
+        According to formulae 4 and 5 from Noll et al. 2025
+        PALACE v1.0: Paranal Airglow Line And Continuum Emission model
+        """
+        if zenith_angle is None and airmass is None:
+            raise ValueError("Either zenith_angle or airmass must be provided")
 
-    chiarr = np.zeros((nmodel, nspec))
-    chivec = np.zeros(nmodel)
-    medmodelarr = np.zeros_like(modflux)
+        if airmass is None:
+            cosz = np.cos(np.deg2rad(zenith_angle))
+            airmass = 1.0 / (cosz + 0.025 * np.exp(-11.0 * cosz))
 
-    mlines = spflux_masklines(
-        loglam - np.log10(1.0 + zpeak), hwidth=12e-4, stellar=True, telluric=False
-    )
-    linesqivar = sqivar * mlines
-    linechiarr = np.zeros((nmodel, nspec))
-    linechivec = np.zeros(nmodel)
+        rpwv = pwv / 2.5 - 1
+        return np.power(self.trans_ma, (1.0 + rpwv * self.fH2O) * airmass)
 
-    for imodel in range(nmodel):
-        # Median-filter this model
-        medmodelarr[:, :, imodel] = spflux_medianfilt(
-            loglam - np.log10(1.0 + zpeak),
-            modflux[:, :, imodel],
-            size=filtsz,
-            mode="reflect",
-        )
+    def match_to_data(self, wave_target, lsf, pwv, zenith_angle=None, airmass=None, lsf_in_wavelength=False):
+        """
+        Calculate telluric transmission and match to observed data wavelength grid,
+        including rebinning and convolution with LSF.
+        """
+        # Calculate transmission at high resolution model grid
+        trans_hr = self.calc_transmission(pwv, zenith_angle=zenith_angle, airmass=airmass)
 
-        for ispec in range(nspec):
-            chiarr[imodel, ispec] = np.sum(
-                (medflux[:, ispec] - medmodelarr[:, ispec, imodel]) ** 2
-                * sqivar[:, ispec]
-                * sqivar[:, ispec]
-            )
-            linechiarr[imodel, ispec] = np.sum(
-                (medflux[:, ispec] - medmodelarr[:, ispec, imodel]) ** 2
-                * linesqivar[:, ispec]
-                * linesqivar[:, ispec]
-            )
-        chivec[imodel] = np.sum(chiarr[imodel, :])
-        linechivec[imodel] = np.sum(linechiarr[imodel, :])
+        # Rebin and convolve to target wavelength grid
+        trans_rebinned = rebin_and_convolve(wave_target, self.wave_air, trans_hr, lsf, lsf_in_wavelength=lsf_in_wavelength)
 
-    # ----------
-    # Return the best-fit model
-    # Computed both full spectra chi**2 and line chi**2, but use the line chi**2 to select the best model.
-    ibest = np.argmin(linechivec)
-    linechi2 = linechivec[ibest]
-    linedof = np.sum(linesqivar != 0)
-    print("Best-fit line chi2/DOF = ", linechi2 / (linedof > 1))
-    bestflux = modflux[:, :, ibest]
-    medmodel = spflux_medianfilt(
-        loglam - np.log10(1.0 + zpeak), bestflux, size=filtsz, mode="reflects"
-    )
-
-    # ----------
-    # Compute the median S/N for all the spectra of this object,
-    # and for those data just near the absorp. lines
-
-    indx = np.where(objivar > 0)[0]
-    ct = indx.size
-    if ct > 1:
-        sn_median = np.median(objflux[indx] * np.sqrt(objivar[indx]))
-    else:
-        sn_median = 0
-
-    indx = np.where(mlines)[0]
-    ct = indx.size
-    if ct > 1:
-        linesn_median = np.median(objflux[indx] * np.sqrt(objivar[indx]))
-    else:
-        linesn_median = 0.0
-    print("Full median S/N = ", sn_median)
-    print("Line median S/N = ", linesn_median)
-
-    Parameters = namedtuple(
-        "Parameters",
-        list(kindx.__dict__.keys())
-        + ["IMODEL", "Z", "SN_MEDIAN", "LINESN_MEDIAN", "LINECHI2", "LINEDOF"],
-    )
-    kindx1 = Parameters(
-        list(kindx.__dict__.values())
-        + [ibest, zpeak, float(sn_median), linesn_median, linechi2, linedof]
-    )
-
-    # ----------
-    # Plot the filtered object spectrum, overplotting the best-fit Kurucz/Munari model ##Yanping edited
-
-    # TODO: implement LVM 3 channels
-    # Select the observation to plot that has the highest S/N,
-    # and one that goes blueward of 4000 Ang.
-    snvec = np.sum(objflux * np.sqrt(objivar), 1) * (
-        10 ** loglam[0, :] < 4000 | 10.0 ** loglam[npix - 1, :] < 4000
-    )
-    iplot = np.argmax(snvec, axis=1)  # Best blue exposure
-
-    snvec = np.sum(objflux * np.sqrt(objivar), axis=1) * (
-        10.0 ** loglam[0, :] > 8600 | 10.0 ** loglam[npix - 1, :] > 8600
-    )
-    jplot = np.argmax(snvec, axis=1)  # Best red exposure
-
-    csize = 0.85
-    _, ax = plt.subplots()
-    ax.set_xlim(3840.0, 4120.0)
-    ax.set_ylim(0.0, 1.4)
-    ax.set_ylabel("Wavelength [Ang]")
-    ax.set_ylabel("Normalized Flux")
-    ax.set_title(plottitle)
-    ax.plot(10 ** loglam[:, iplot], medflux[:, iplot])
-    ax.plot(10 ** loglam[:, iplot], medmodel[:, iplot], color="red")
-
-    ax.text(3860, 1.25, kindx1.model, fontsize=csize, transform=ax.transAxes)
-    ax.text(
-        4000,
-        0.2,
-        f"Lines \chi^2/DOF={linechi2/(linedof>1):.2f}",
-        fontsize=csize,
-        transform=ax.transAxes,
-    )
-    ax.text(
-        3860,
-        0.1,
-        f"Fe/H={kindx1.feh:.1f}, T_{{eff}}={kindx1.teff:.0f}, g={kindx1.g:.1f}, cz={zpeak*cspeed:.0f}",
-        fontsize=csize,
-        transform=ax.transAxes,
-    )
-
-    _, ax = plt.subplots()
-    ax.set_xlim(8440.0, 9160.0)
-    ax.set_ylim(0.0, 1.4)
-    ax.set_ylabel("Wavelength [Ang]")
-    ax.set_ylabel("Normalized Flux")
-    ax.set_title(plottitle)
-    ax.plot(10 ** loglam[:, jplot], medflux[:, jplot])
-    ax.plot(10 ** loglam[:, jplot], medmodel[:, jplot], color="red")
-
-    return bestflux, kindx1
-
-
-def spflux_goodfiber(pixmask):
-    qgood = (
-        "NOPLUG" not in pixmask
-        and "BADTRACE" not in pixmask
-        and "BADFLAT" not in pixmask
-        and "BADARC" not in pixmask
-        and "MANYBADCOLUMNS" not in pixmask
-        and "NEARWHOPPER" not in pixmask
-        and "MANYREJECTED" not in pixmask
-    )
-    return qgood
-
-
-def spflux_bspline(
-    loglam,
-    mratio,
-    mrativar,
-    inmask=None,
-    return_outmask=True,
-    everyn=10,
-    disp=None,
-    hwidth=None,
-    mask_stellar=True,
-    mask_telluric=True,
-):
-    # TODO: figure out which default for everyn is best
-    isort = np.argsort(loglam)
-    nord = 3
-
-    if hwidth is None:
-        hwidth = 12.0e-4
-
-    if inmask is None:
-        # Choose the break points using the EVERYN option, but masking
-        # out more pixels near stellar features and/or telluric just when selecting them.
-        mask1 = np.logical_not(
-            spflux_masklines(
-                loglam, hwidth=hwidth, stellar=mask_stellar, telluric=mask_telluric
-            )
-        )
-    else:
-        mask1 = np.logical_not(inmask)
-
-    ii = np.where((mrativar[isort] > 0) & mask1[isort])
-    # BUG: this is actually done by bspline_bkpts
-    fullbkpt = splrep(
-        loglam[isort[ii]],
-        mratio[isort[ii]],
-        w=np.sqrt(mrativar[isort[ii]]),
-        k=nord,
-        t=loglam[isort[ii]][np.arange(everyn, dtype=int)],
-        quiet=1,
-    )
-
-    outmask1 = 0
-    if disp is not None:
-        x2 = disp[isort]
-    else:
-        pass
-
-    # BUG: this is actually done by bspline_iterfit
-    sset = BSpline(*fullbkpt)
-
-    if np.max(sset.c) == 0:
-        print("B-spline fit failed!!")
-
-    if return_outmask:
-        outmask = np.zeros_like(loglam)
-        outmask[isort] = outmask1
-        return sset, outmask
-
-    return sset
-
-
-def typingmodule(
-    objflux,
-    loglam,
-    objivar,
-    dispimg,
-    sfd_ebv,
-    psfmag,
-    plottitle="",
-    template="kurucz",
-    thekfile="",
-    targetflag=None,
-):
-    npix, nspec = objflux.shape
-    # ----------
-    # For each star, find the best-fit model.
-
-    unreddenfactor = 1 / f99_ext.extinguish(10.0**loglam, Ebv=1.0)
-
-    #   !p.multi = [0,1,2]
-    modflux = np.zeros_like(objflux)
-    # Find the best-fit model -- evaluated for each exposure [NPIX,NEXP]
-    thismodel, kindx = spflux_bestmodel(
-        loglam,
-        objflux * unreddenfactor**sfd_ebv,
-        objivar / unreddenfactor ** (2 * sfd_ebv),
-        plottitle=plottitle,
-        template=template,
-    )
-
-    # Also evaluate this model over a big wavelength range [3000,11000] Ang.
-    # BUG: verify these hard-coded values
-    tmploglam = 3.4771e0 + np.linspace(5644) * 1e-4
-    tmpdispimg = np.ones_like(tmploglam)  # initializing this resolution vector
-    bluedispimg = tmpdispimg
-    reddispimg = tmpdispimg
-    bside = np.where(tmploglam < np.log10(6300.0))
-    rside = np.where(tmploglam > np.log10(5900.0))
-    middle = np.where((tmploglam < np.log10(6300.0)) & (tmploglam > np.log10(5900.0)))
-    bluedispimg[bside] = np.interp(tmploglam[bside], dispimg[:, 0], loglam[:, 0])
-    reddispimg[rside] = np.interp(tmploglam[rside], dispimg[:, 1], loglam[:, 1])
-    tmpdispimg[bside] = bluedispimg[bside]
-    tmpdispimg[rside] = reddispimg[rside]
-    tmpdispimg[middle] = (bluedispimg[middle] + reddispimg[middle]) / 2.0
-
-    # tmpflux = spflux_read_kurucz(tmploglam-np.log10(1+kindx.z), tmpdispimg,
-    #    iselect=kindx.imodel)
-
-    if template == "kurucz":
-        tmpflux = spflux_read_kurucz(
-            tmploglam - np.log10(1 + kindx.z),
-            tmpdispimg,
-            iselect=kindx.imodel,
-            thekfile=thekfile,
-        )
-    elif template == "munari":
-        tmpflux = spflux_read_munari(
-            tmploglam - np.log10(1 + kindx.z),
-            tmpdispimg,
-            iselect=kindx.imodel,
-            thekfile=thekfile,
-        )
-    elif template == "BOSZ":
-        tmpflux = spflux_read_bosz(
-            tmploglam - np.log10(1 + kindx.z),
-            tmpdispimg,
-            iselect=kindx.imodel,
-            thekfile=thekfile,
-        )
-    else:
-        print("Template is not specified correctly.")
-
-    # The returned models are redshifted, but not fluxed or
-    # reddened.  Do that now...  we compare data vs. model reddened.
-    #   extcurve1 = ext_odonnell(10.**loglam, 3.1)
-    #   extinct,10.**loglam,extcurve1,/ccm,Rv=3.1 # extcurve1 is A_lambda for Av=1
-    #   thismodel = thismodel * 10.**(-extcurve1 * 3.1 * sfd_ebv / 2.5)
-    reddenfactor = f99_ext.extinguish(10**loglam, Ebv=1.0)
-    # fluxreddened contain the reddening vector for E(B-V)=1.0
-    thismodel = thismodel * reddenfactor**sfd_ebv
-    #   extcurve2 = ext_odonnell(10.**tmploglam, 3.1)
-    #   extinct,10.**tmploglam,extcurve2,/ccm,Rv=3.1
-    #   tmpflux = tmpflux * 10.**(-extcurve2 * 3.1 * sfd_ebv / 2.5)
-    reddenfactor2 = f99_ext.extinguish(10**tmploglam, Ebv=1.0)
-    tmpflux = tmpflux * reddenfactor2**sfd_ebv
-
-    # Now integrate the apparent magnitude for this spectrum,
-    # The units of FTHRU are such that m = -2.5*np.log10(FTHRU) + (48.6-2.5*17)
-    # Note that these computed magnitudes, THISMAG, should be equivalent
-    # to THISINDX.MAG in the case of no reddening.
-    wavevec = 10e0**tmploglam
-    flambda2fnu = wavevec**2 / 2.99792e18
-
-    photometry = "sdss"  # Both APASS and SDSS are using sdss photometry system
-    if (
-        targetflag
-        and sdss_flagval("MANGA_TARGET2", ["STELLIB_PS1", "STD_PS1_COM"]) != 0
-    ):
-        photometry = "ps1"
-    if targetflag and sdss_flagval("MANGA_TARGET2", "STELLIB_GAIA") != 0:
-        photometry = "gaiadr1"
-    if targetflag and sdss_flagval("MANGA_TARGET2", "STELLIB_GAIADR2") != 0:
-        photometry = "gaiadr2"
-
-    if photometry == "ps1":
-        fthru = filter_thru(
-            tmpflux * flambda2fnu,
-            waveimg=wavevec,
-            toair=True,
-            filternames=["ps1_g.txt", "ps1_r.txt", "ps1_i.txt", "ps1_z.txt"],
-        )
-        thismag = -2.5 * np.log10(fthru) - (48.6 - 2.5 * 17)
-        thismag = np.asarray([[-999.0], [thismag]])
-    elif photometry == "gaiadr1":
-        # Using the passbands from Gaia DR2 to compute the mag, which is not quite appropriate for DR1. Better to avoid using gaiadr1
-        fthru = filter_thru(
-            tmpflux * flambda2fnu,
-            waveimg=wavevec,
-            toair=True,
-            filternames=["gaia_G.dat"],
-        )
-        thismag = -2.5 * np.log10(fthru) - (48.6 - 2.5 * 17)
-    elif photometry == "gaiadr2":
-        fthru = filter_thru(
-            tmpflux * flambda2fnu,
-            waveimg=wavevec,
-            toair=True,
-            filternames=["gaia_G.dat", "gaia_BP.dat", "gaia_RP.dat"],
-        )
-        thismag = -2.5 * np.log10(fthru) - (48.6 - 2.5 * 17)
-        # Convert from AB system using revised passband to Vega system in the Gaia DR2 as-released system. The zeropoints are from Evans et al. (2018)
-        thismag = thismag + np.asarray(
-            [[25.6884 - 25.7916], [25.3514 - 25.3862], [24.7619 - 25.1162]]
-        )
-        thismag = np.asarray([[-999.0], [thismag], [-999.0]])
-    elif photometry == "sdss":  # this applies to both SDSS and APASS standards.
-        fthru = filter_thru(tmpflux * flambda2fnu, waveimg=wavevec, toair=True)
-        thismag = -2.5 * np.log10(fthru) - (48.6 - 2.5 * 17)
-    else:
-        pass
-    # !!!!!! IMPORTANT !!!!!!!!!
-    # !!!!!! THIS IS NOT THE ONLY PLACE WHERE THE MODEL SPECTRUM IS NORMALIZED.!!!!
-    # !!!!!! For MaStar plates, we renormalize them again after putting in
-    #        individual extinction.!!!!!
-
-    # Compute SCALEFAC = (plugmap flux) / (flux of the model spectrum)
-    if photometry == "gaiadr1":
-        scalefac = 10.0 ** ((thismag - psfmag[1]) / 2.5)
-        kindx.mag[1] = psfmag[1]
-    elif photometry == "gaiadr2":
-        scalefac = 10.0 ** ((thismag[1] - psfmag[1]) / 2.5)
-        kindx.mag[1:3] = (thismag[1:3]).flatten() + psfmag[1] - thismag[1]
-    elif photometry == "ps1":
-        scalefac = 10.0 ** ((thismag[2] - psfmag[2]) / 2.5)
-        kindx.mag[1:4] = (thismag[1:4]).flatten() + psfmag[2] - thismag[2]
-    elif photometry == "sdss":
-        scalefac = 10.0 ** ((thismag[2] - psfmag[2]) / 2.5)
-        kindx.mag = (thismag).flatten() + psfmag[2] - thismag[2]
-
-    thismodel = thismodel * scalefac
-
-    modflux = thismodel
-    splog, prelog = ""
-    # !p.multi = 0
-    return kindx, modflux
-
-
-# -------------------------------------------------------------------------------------------------
+        return trans_rebinned

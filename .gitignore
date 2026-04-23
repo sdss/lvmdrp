@@ -44,7 +44,12 @@ test_redux-*
 *.pdf
 tests/htmlcov
 tests/*coverage*
-
+*.fits
+*.fits.gz
+*.reg
+*.csv
+*.dylib
+*.so
 # Mac OSX
 .DS_Store
 
@@ -58,3 +63,5 @@ de421.bsp
 
 # notebooks
 *checkpoint*
+
+gaia_cache/

@@ -1,6 +1,7 @@
 import numpy
 from astropy.io import fits as pyfits
 from scipy import ndimage
+import bottleneck as bn
 
 from lvmdrp.core.header import Header, combineHdr
 from lvmdrp.core.image import Image
@@ -180,7 +181,7 @@ class Cube(Header, PositionTable):
             if self._wave is None:
                 try:
                     crpix = self.getHdrValue("CRPIX3") - 1
-                except:
+                except KeyError:
                     crpix = 0
                 try:
                     self._wave = (
@@ -220,7 +221,7 @@ class Cube(Header, PositionTable):
                 self._dim_x = self._cover.shape[2]
             try:
                 crpix = self.getHdrValue("CRPIX3") - 1
-            except:
+            except KeyError:
                 crpix = 0
             try:
                 self._wave = (
@@ -393,8 +394,8 @@ class Cube(Header, PositionTable):
 
         if self._mask is not None:
             data = self._data * numpy.logical_not(self._mask)
-            if self._error is not None:
-                error = self._error * numpy.logical_not(self._mask)
+            # if self._error is not None:
+            #     error = self._error * numpy.logical_not(self._mask)
         else:
             data = self._data
 
@@ -412,7 +413,7 @@ class Cube(Header, PositionTable):
                 mask = None
         elif mode == "median":
             if numpy.sum(select_wave) > 0:
-                image = numpy.median(data[select_wave, :, :], 0)
+                image = bn.median(data[select_wave, :, :], 0)
                 mask = image == 0
             else:
                 image = None
@@ -532,8 +533,8 @@ class Cube(Header, PositionTable):
                 wave = numpy.arange(wave1[0], wave2[-1] + disp2, disp2)
                 select1 = wave1 < wave2[0]
                 select2 = wave2 > wave1[-1]
-                select_overlap1 = wave1 >= wave2[0]
-                select_overlap2 = wave2 <= wave1[-1]
+                # select_overlap1 = wave1 >= wave2[0]
+                # select_overlap2 = wave2 <= wave1[-1]
             else:
                 raise ValueError("The wavelength ranges do not match with each other")
         else:
@@ -599,7 +600,7 @@ class Cube(Header, PositionTable):
         for i in range(self._data.shape[2]):
             for j in range(self._data.shape[1]):
                 if (
-                    rescale_region is not []
+                    rescale_region != []
                     and slice1._data[j + crpix2_1 - crpix2, i + crpix1_1 - crpix1] != 0
                 ):
                     ratio = (
@@ -676,7 +677,7 @@ class Cube(Header, PositionTable):
                         )
                     )
 
-        if mergeHdr == True:
+        if mergeHdr is True:
             hdrs = [cube1, cube2]
             combined_header = combineHdr(hdrs)
             self.setHeader(combined_header.getHeader())

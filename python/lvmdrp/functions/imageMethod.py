@@ -8,28 +8,26 @@ import os
 import sys
 from itertools import product
 from copy import deepcopy as copy
-from multiprocessing import Pool, cpu_count
+from multiprocessing import Pool
+from matplotlib.gridspec import GridSpec
 
 import numpy
 import bottleneck as bn
-from astropy import units as u
 from astropy.table import Table
 from astropy.io import fits as pyfits
-from astropy.nddata import CCDData, StdDevUncertainty
-from astropy.stats.biweight import biweight_location
 from astropy.visualization import simple_norm
-from ccdproc import cosmicray_lacosmic
-from scipy import interpolate
+from scipy import interpolate, integrate
+from scipy import signal, sparse
 from tqdm import tqdm
 
-from typing import List, Tuple
+from typing import List, Tuple, Dict
 
 from lvmdrp.core import fit_profile as fp
 
-from lvmdrp import log
-from lvmdrp.utils.decorators import skip_on_missing_input_path, drop_missing_input_paths, skip_if_drpqual_flags
+from lvmdrp import log, DRP_COMMIT, __version__ as DRPVER
+from lvmdrp.core.constants import CONFIG_PATH, SPEC_CHANNELS, ARC_LAMPS, LVM_REFERENCE_COLUMN, LVM_NFIBERS, LVM_NBLOCKS
+from lvmdrp.utils.decorators import skip_on_missing_input_path, drop_missing_input_paths
 from lvmdrp.utils.bitmask import QualityFlag
-from lvmdrp.core.fit_profile import Gaussians
 from lvmdrp.core.fit_profile import Voigts
 from lvmdrp.core.fiberrows import FiberRows, _read_fiber_ypix
 from lvmdrp.core.image import (
@@ -40,12 +38,14 @@ from lvmdrp.core.image import (
     glueImages,
     loadImage,
 )
-from lvmdrp.core.plot import plt, create_subplots, plot_detrend, plot_strips, save_fig
+from lvmdrp.core import fit_profile as fp
+from lvmdrp.core.plot import plt, create_subplots, create_straylight_axes, plot_detrend, plot_error, plot_strips, plot_fiber_thermal_shift, save_fig
 from lvmdrp.core.rss import RSS
-from lvmdrp.core.spectrum1d import Spectrum1D, _spec_from_lines, _cross_match
+from lvmdrp.core.spectrum1d import Spectrum1D, _spec_from_lines, _cross_match, FiberProfileCache
 from lvmdrp.core.tracemask import TraceMask
 from lvmdrp.utils.hdrfix import apply_hdrfix
 from lvmdrp.utils.convert import dateobs_to_sjd, correct_sjd
+from lvmdrp.utils.timer import Timer
 
 
 NQUADS = 4
@@ -68,18 +68,26 @@ DEFAULT_BGSEC = [
     "[1:2043, 1991:2000]",
     "[1:2043, 1991:2000]",
 ]
+# PAVAN'S FIT OF GAIN
+DEFAULT_GAIN = {
+    "b1": [2.71, 2.71, 2.69, 2.68],
+    "b2": [2.62, 2.69, 2.69, 2.68],
+    "b3": [2.71, 2.77, 2.73, 2.69],
+    "r1": [2.75, 2.79, 2.74, 2.68],
+    "r2": [2.64, 2.79, 2.67, 2.68],
+    "r3": [2.74, 2.76, 2.81, 2.73],
+    "z1": [2.76, 2.65, 2.78, 2.89],
+    "z2": [2.70, 2.76, 2.81, 2.71],
+    "z3": [2.75, 2.85, 2.79, 2.74]
+}
 DEFAULT_PTC_PATH = os.path.join(os.environ["LVMCORE_DIR"], "metrology", "PTC_fit.txt")
-
-LVM_NBLOCKS = 18
-LVM_REFERENCE_COLUMN = 2000
 
 description = "Provides Methods to process 2D images"
 
 __all__ = [
-    "LACosmic_drp",
     "find_peaks_auto",
     "trace_peaks",
-    "subtractStraylight_drp",
+    "subtract_straylight",
     "traceFWHM_drp",
     "extract_spectra",
     "preproc_raw_frame",
@@ -121,8 +129,8 @@ def _nonlinearity_correction(ptc_params: None | numpy.ndarray, nominal_gain: flo
         gain_map = Image(data=1 / (a1 + a2*a3 * quadrant._data**(a3-1)))
         gain_map.setData(data=nominal_gain, select=numpy.isnan(gain_map._data), inplace=True)
 
-        gain_med = numpy.nanmedian(gain_map._data)
-        gain_min, gain_max = numpy.nanmin(gain_map._data), numpy.nanmax(gain_map._data)
+        gain_med = bn.nanmedian(gain_map._data)
+        gain_min, gain_max = bn.nanmin(gain_map._data), bn.nanmax(gain_map._data)
         log.info(f"gain map stats: {gain_med = :.2f} [{gain_min = :.2f}, {gain_max = :.2f}] ({nominal_gain = :.2f} e-/ADU)")
     else:
         log.warning("cannot apply non-linearity correction")
@@ -161,624 +169,379 @@ def _create_peaks_regions(fibermap: Table, column: int = 2000) -> None:
                 )
 
 
-def detCos_drp(
-    image,
-    out_image,
-    rdnoise="2.9",
-    sigma_det="5",
-    rlim="1.2",
-    iter="5",
-    fwhm_gauss="2.0",
-    replace_box="5,5",
-    error_box="5,5",
-    replace_error="1e10",
-    increase_radius="0",
-    gain="1.0",
-    verbose="0",
-    parallel="auto",
-):
-    """
-    Detects and removes cosmics from astronomical images based on Laplacian edge
-    detection scheme combined with a PSF convolution approach (Husemann  et al. in prep.).
-
-    IMPORTANT:
-    The image and the readout noise are assumed to be in units of electrons.
-    The image also needs to be BIAS subtracted! The gain can be entered to convert the image from ADUs to electros, when this is down already set gain=1.0 as the default.
+def _create_trace_regions(out_trace, table_data, table_poly, table_poly_all, label=None, display_plots=False):
+    """Creates three DS9 region files with the trace data
 
     Parameters
     ----------
-    image: string
-        Name of the FITS file for which the comsics should be detected
-    out_mask: string
-        Name of the  FITS file with the bad pixel mask
-    out_clean: string
-        Name of the  FITS file with the cleaned image
-    rdnoise: float or string of header keyword
-        Value or FITS header keyword for the readout noise in electrons
-    sigma_det: float, optional  with default: 5.0
-        Detection limit of edge pixel above the noise in (sigma units) to be detected as comiscs
-    rlim: float, optional  with default: 1.2
-        Detection threshold between Laplacian edged and Gaussian smoothed image
-    iter: integer, optional with default: 5
-        Number of iterations. Should be >1 to fully detect extended cosmics
-    fwhm_gauss: float, optional with default: 2.0
-        FWHM of the Gaussian smoothing kernel in x and y direction on the CCD
-    replace_box: array of two integers, optional with default: [5,5]
-        median box size in x and y to estimate replacement values from valid pixels
-    replace_error: float, optional with default: 1e10
-        Error value for bad pixels in the comupted error image, will be ignored if empty
-    increase_radius: integer, optional with default: 0
-        Increase the boundary of each detected cosmic ray pixel by the given number of pixels.
-    verbose: bollean, optional  with default: True
-        Show information during the processing on the command line (0 - no, 1 - yes)
+    out_trace : str
+        output trace file
+    table_data : numpy.ndarray
+        trace data (measurements)
+    table_poly : numpy.ndarray
+        trace polynomial evaluated at the trace data
+    table_poly_all : numpy.ndarray
+        trace polynomial evaluated at all pixels
+    label : str, optional
+        label for the trace, by default None
+    display_plots : bool, optional
+        display plots, by default False
+    """
+    if len(table_data) == 0 or len(table_poly) == 0:
+        return
+    coords_file = out_trace.replace("calib", "ancillary").replace(".fits", "_coords.txt")
+    os.makedirs(os.path.dirname(coords_file), exist_ok=True)
+    poly_file = coords_file.replace("_coords.txt", "_poly.txt")
+    poly_all_file = coords_file.replace("_coords.txt", "_poly_all.txt")
+    log.info(f"writing trace data to files: {os.path.basename(coords_file)}, {os.path.basename(poly_file)} and {os.path.basename(poly_all_file)}")
+    numpy.savetxt(coords_file, 1+table_data, fmt="%.5f")
+    numpy.savetxt(poly_file, 1+table_poly, fmt="%.5f")
+    numpy.savetxt(poly_all_file, 1+table_poly_all, fmt="%.5f")
+
+    # plot trace fitting residuals
+    if label is None:
+        label = os.path.basename(out_trace).replace(".fits", "")
+
+    fig, ax = create_subplots(1, 1, figsize=(10, 10))
+    ax.axhspan(-1, 1, color="k", alpha=0.1)
+    ax.axhspan(-10, 10, color="k", alpha=0.1)
+    residuals = (table_poly[:, 1] - table_data[:, 1]) / table_data[:, 1] * 100
+    ax.plot(table_data[:, 0], residuals, "o", ms=1, color="k")
+    ax.set_ylim(-25, 25)
+    ax.set_xlabel("y (pixel)")
+    ax.set_ylabel("residuals (%)")
+    ax.set_title(f"{label} residuals")
+    save_fig(fig, out_trace, label="residuals", figure_path="qa", to_display=display_plots)
 
 
-    References
+def _channel_combine_fiber_params(in_cent_traces, in_waves, add_overscan_columns=True):
+    """Combines fiber centroid traces and wavelength model for a given spectrograph along the x-axis
+
+    Given a set of centroid traces and wavelength models for a given spectrograph, this function
+    combines them along the x-axis, adding overscan columns if requested. Additionally the regions
+    past the dichroic are masked.
+
+    Parameters
     ----------
-    B. Husemann et al. 2012  "", A&A, ??, ???
+    in_cent_traces : list
+        list of input centroid trace files for the same spectrograph
+    in_waves : list
+        list of input wavelength files for the same spectrograph
+    add_overscan_columns : bool, optional
+        add overscan columns, by default True
+
+    Returns
+    -------
+    list
+        list of fiber centroid traces
+    list
+        list of wavelength models
+    FiberRows
+        channel stacked fiber centroid trace data
+    FiberRows
+        channel stacked wavelength data
     """
-    # convert all parameters to proper type
-    sigma_det = float(sigma_det)
-    rlim = float(rlim)
-    iterations = int(iter)
-    sigma = float(fwhm_gauss) / 2.354
-    error_box = replace_box.split(",")
-    err_box_x = int(error_box[0])
-    err_box_y = int(error_box[1])
-    replace_box = replace_box.split(",")
-    box_x = int(replace_box[0])
-    box_y = int(replace_box[1])
-    increase_radius = int(increase_radius)
-    verbose = bool(verbose)
-    try:
-        replace_error = float(replace_error)
-    except Exception:
-        replace_error = None
+    channels = "brz"
+    # read master trace and wavelength
+    mtraces = [TraceMask.from_file(in_cent) for in_cent in in_cent_traces]
+    mwaves = [TraceMask.from_file(in_wave) for in_wave in in_waves]
+    channel_masks = []
+    for i in range(len(mtraces)):
 
-    # load image from FITS file
-    img = loadImage(image)
-    try:
-        gain = img.getHdrValue(gain)
-    except KeyError:
-        pass
-    gain = float(gain)
+        # add columns for OS region
+        if add_overscan_columns:
+            os_region = numpy.zeros((mtraces[i]._data.shape[0], 34), dtype=int)
+            trace_data = numpy.split(mtraces[i]._data, 2, axis=1)
+            trace_mask = numpy.split(mtraces[i]._mask, 2, axis=1)
+            mtraces[i]._data = numpy.concatenate([trace_data[0], os_region, trace_data[1]], axis=1)
+            mtraces[i]._mask = numpy.concatenate([trace_mask[0], ~os_region.astype(bool), trace_mask[1]], axis=1)
+            wave_data = numpy.split(mwaves[i]._data, 2, axis=1)
+            wave_mask = numpy.split(mwaves[i]._mask, 2, axis=1)
+            mwaves[i]._data = numpy.concatenate([wave_data[0], os_region, wave_data[1]], axis=1)
+            mwaves[i]._mask = numpy.concatenate([wave_mask[0], ~os_region.astype(bool), wave_mask[1]], axis=1)
 
-    if gain != 1.0 and verbose:
-        print("Convert image from ADUs to electrons using a gain factor of %f" % (gain))
+        # get pixels where spectropgraph is not blocked
+        channel_mask = (SPEC_CHANNELS[channels[i]][0]>=mwaves[i]._data)|(mwaves[i]._data>=SPEC_CHANNELS[channels[i]][1])
+        channel_masks.append(channel_mask)
 
-    img = img * gain
-    # img.writeFitsData('test.fits')
+        mtraces[i]._mask |= channel_mask
+        mwaves[i]._mask |= channel_mask
+    mtrace = TraceMask()
+    mtrace.unsplit(mtraces)
+    mwave = TraceMask()
+    mwave.unsplit(mwaves)
 
-    # create empty mask if no mask is present in original image
-    if img._mask is not None:
-        mask_orig = img.getMask()
-    else:
-        mask_orig = numpy.zeros(img.getDim(), dtype=bool)
-
-    # create a new Image instance to store the initial data array
-    img_original = Image(
-        data=img.getData(), header=img.getHeader(), error=img.getError(), mask=mask_orig
-    )
-    img.setData(mask=numpy.zeros(img.getDim(), dtype=bool))
-    img.removeError()
-
-    # estimate Poisson noise after roughly cleaning cosmics using a median filter
-    try:
-        rdnoise = float(img.getHdrValue(rdnoise))
-    except KeyError:
-        rdnoise = float(rdnoise)
-    if verbose:
-        print("A value of %f is used for the electron read-out noise." % (rdnoise))
-
-    # create empty mask
-    select = numpy.zeros(img.getDim(), dtype=bool)
-
-    # define Laplacian convolution kernal
-    LA_kernel = (
-        numpy.array(
-            [
-                [
-                    0,
-                    -1,
-                    0,
-                ],
-                [-1, 4, -1],
-                [0, -1, 0],
-            ]
-        )
-        / 4.0
-    )
-    out = img
-
-    if parallel:
-        try:
-            from multiprocessing import Pool, cpu_count
-
-            cpus = cpu_count()
-            if cpus > 1:
-                cpus = 2
-        except Exception:
-            cpus = 1
-
-    else:
-        cpus = 1
-    # start iteration
-    if verbose:
-        print("Start the detection process using %d CPU cores." % (cpus))
-    for i in range(iterations):
-        if verbose:
-            print("Start iteration %i" % (i + 1))
-        # follow the LACosmic scheme to select pixel
-        noise = out.medianImg((err_box_x, err_box_y))
-        select_neg2 = noise.getData() <= 0
-        noise.setData(data=0, select=select_neg2)
-        noise = (noise + rdnoise**2).sqrt()
-        result = []
-        if cpus > 1:
-            fine = out.convolveGaussImg(sigma, sigma, mask=True)
-            fine_norm = out / fine
-            select_neg = fine_norm < 0
-            fine_norm.setData(data=0, select=select_neg)
-            pool = Pool(cpus)
-            result.append(pool.apply_async(out.subsampleImg, args=([2])))
-            result.append(pool.apply_async(fine_norm.subsampleImg, args=([2])))
-            pool.close()
-            pool.join()
-            sub = result[0].get()
-            sub_norm = result[1].get()
-            pool.terminate()
-            pool = Pool(cpus)
-            result[0] = pool.apply_async(sub.convolveImg, args=([LA_kernel]))
-            result[1] = pool.apply_async(sub_norm.convolveImg, args=([LA_kernel]))
-            pool.close()
-            pool.join()
-            conv = result[0].get()
-            select_neg = conv < 0
-            conv.setData(
-                data=0, select=select_neg
-            )  # replace all negative values with 0
-            Lap2 = result[1].get()
-            pool.terminate()
-            pool = Pool(cpus)
-            result[0] = pool.apply_async(conv.rebin, args=(2, 2))
-            result[1] = pool.apply_async(Lap2.rebin, args=(2, 2))
-            pool.close()
-            pool.join()
-            Lap = result[0].get()
-            Lap2 = result[1].get()
-            pool.terminate()
-            S = Lap / (noise * 2)  # normalize Laplacian image by the noise
-            S_prime = S - S.medianImg(
-                (5, 5)
-            )  # cleaning of the normalized Laplacian image
-        else:
-            sub = out.subsampleImg(2)  # subsample image
-            conv = sub.convolveImg(LA_kernel)  # convolve subsampled image with kernel
-            select_neg = conv < 0
-            conv.setData(
-                data=0, select=select_neg
-            )  # replace all negative values with 0
-            Lap = conv.rebin(2, 2)  # rebin the data to original resolution
-            S = Lap / (noise * 2)  # normalize Laplacian image by the noise
-            S_prime = S - S.medianImg(
-                (5, 5)
-            )  # cleaning of the normalized Laplacian image
-            fine = out.convolveGaussImg(
-                sigma, sigma, mask=True
-            )  # convolve image with a 2D Gaussian
-
-            fine_norm = out / fine
-            select_neg = fine_norm < 0
-            fine_norm.setData(data=0, select=select_neg)
-            sub_norm = fine_norm.subsampleImg(2)  # subsample image
-            Lap2 = (sub_norm).convolveImg(LA_kernel)
-            Lap2 = Lap2.rebin(2, 2)  # rebin the data to original resolution
-
-        select = numpy.logical_or(
-            numpy.logical_and((Lap2) > rlim, S_prime > sigma_det), select
-        )
-
-        # print information on the screen if demanded
-        if verbose:
-            dim = img_original.getDim()
-            # det_pix = numpy.sum(select)
-            print(
-                "Total number of detected cosmics: %i out of %i pixels"
-                % (numpy.sum(select), dim[0] * dim[1])
-            )
-
-        if i == iterations - 1:
-            img_original.setData(mask=True, select=select)  # set the new mask
-            if increase_radius > 0:
-                mask_img = Image(data=img_original._mask)
-                mask_new = mask_img.convolveImg(
-                    kernel=numpy.ones(
-                        (2 * increase_radius + 1, 2 * increase_radius + 1)
-                    )
-                )
-                img_original.setData(mask=mask_new._data)
-            out = img_original.replaceMaskMedian(
-                box_x, box_y, replace_error=replace_error
-            )  # replace possible corrput pixel with zeros for final output
-        else:
-            out.setData(mask=True, select=select)  # set the new mask
-            out = out.replaceMaskMedian(
-                box_x, box_y, replace_error=None
-            )  # replace possible corrput pixel with zeros
-    out.writeFitsData(out_image)
+    return mtraces, mwaves, mtrace, mwave
 
 
-def LACosmic_drp(
-    in_image,
-    out_image,
-    sigma_det="5",
-    flim="1.1",
-    iter="3",
-    sig_gauss="0.8,0.8",
-    error_box="20,1",
-    replace_box="20,1",
-    replace_error="1e10",
-    increase_radius="0",
-    parallel="2",
-):
-    """
-    Detects and removes cosmic rays from astronomical images based on a modified Laplacian edge
-    detection method introduced by van Dokkum (2005) and modified by B. Husemann (2012, in prep.).
+def _get_fiber_selection(traces, image_shape=(4080, 4120), y_widths=3):
+    """Returns a mask with selected fibers within a given width
 
-    IMPORTANT:
-    The image and the readout noise are assumed to be in units of electrons.
-    The image also need to be bias subtracted so that the proper Poisson noise image can be estimated.
+    Given a set of centroid traces, this function returns a mask with selected fibers
+    within a given width.
 
     Parameters
-    --------------
-    image: string
-                    Name of the FITS file for which the comsics should be detected
-    out_image: string
-                    Name of the  FITS file containing the cleaned image, a bad pixel mask extension and the error image if contained in the  input
-    sigma_det: string of float, optional  with default: '5.0'
-                    Detection limit of edge pixel above the noise in (sigma units) to be detected as comiscs
-    flim: string of float, optional  with default: '1.1'
-                    Detection threshold between Laplacian edged and Gaussian smoothed image (should be >1)
-    iter: string of integer, optional with default: '3'
-                    Number of iterations. Should be >1 to fully detect extended cosmics
-    sig_gauss: string of two comma separated floats, optional with default: '0.8,0.8'
-                    Sigma width of the Gaussian smoothing kernel in x and y direction on the CCD
-    error_box: string of two comma separated integers, optional with default: '20,1'
-                    Pixel box width (x and y width on raw image) used to estimate the electron counts for a given pixel by taken a median to estimate the noise level.
-                    It may be elongated along the dispersion axis of the CCD.
-    replace_box: string of two comma separated integers, optional with default: '5,5'
-                    median box size in x and y to estimate replacement values from valid pixels
-    replace_error: strong of float, optional with default: '1e10'
-                    Error value for bad pixels in the comupted error image, will be ignored if empty
-    rdnoise: string of float or string of header keyword, optional with default: 2.9
-                    Value or FITS header keyword for the readout noise in electrons, not used if an error image of a FITS extension is used
-    increase_radius: string of int, optional with default: '0'
-                    Increase the boundary of each detected cosmic ray pixel by the given number of pixels.
-    verbose: string of integer (0 or 1), optional  with default: 1
-                    Show information during the processing on the command line (0 - no, 1 - yes)
+    ----------
+    traces : list
+        list of fiber centroid traces
+    image_shape : tuple, optional
+        shape of the image, by default (4080, 4120)
+    y_widths : int, optional
+        width of the fiber trace, by default 3
 
-    Notes
+    Returns
     -------
-    As described in the article by van Dokkum a fine structure images is created to distinguish
-    between cosmic rays hits and compact real signals that are almost undersampled on the CCD.
-    For IFU data these are mainly emission lines from the sky or more importantly from the
-    target objects itself.
-    We defined a new fine structure map as the ratio between the Lapacian image and a Gaussian
-    smoothed image with a width of the Gaussian matching the PSF of the spectrograph in dispersion
-    AND cross-dispersion direction. If the given PSF is perfectly matching wtih the true PSF, a limit of
-    flim>1 is the cutting line between true signal and cosmic ray hits.
-
-    References
-    --------------
-    van Dokkum, Pieter G. 2001, "Cosmic-Ray Rejection by Laplacian Edge Detection",
-    PASP, 113, 1420
-
-    Examples
-    ----------------
-    user:> lvmdrp image LACosmic IMAGE.fits MASK.fits CLEAN.fits 5 flim=1.1 sig_gauss=0.8,0.8 replace_box=5,5 increase_radius=1
+    numpy.ndarray
+        fiber selection mask
     """
-    # convert all parameters to proper type
-    sigma_det = float(sigma_det)
-    flim = float(flim)
-    iter = int(iter)
-    error_box = replace_box.split(",")
-    error_box = int(error_box[0]), int(error_box[1])
-    sig_gauss = sig_gauss.split(",")
-    sig_gauss = float(sig_gauss[0]), float(sig_gauss[1])
-    replace_box = replace_box.split(",")
-    replace_box = int(replace_box[0]), int(replace_box[1])
-    increase_radius = int(increase_radius)
-    try:
-        replace_error = float(replace_error)
-    except (TypeError, ValueError):
-        replace_error = None
+    images = [Image(data=numpy.zeros(image_shape), mask=numpy.zeros(image_shape, dtype=bool)) for _ in range(len(traces))]
+    for i in range(len(traces)):
+        images[i].maskFiberTraces(traces[i], aperture=y_widths, parallel=1)
+    image = Image()
+    image.unsplit(images)
 
-    # load image from FITS file
-    img = loadImage(in_image)
-
-    # create empty mask if no mask is present in original image
-    if img._mask is not None:
-        mask_orig = img.getMask()
-    else:
-        mask_orig = numpy.zeros(img.getDim(), dtype=bool)
-
-    # create a new Image instance to store the initial data array
-    img_original = Image(
-        data=img.getData(), header=img.getHeader(), error=img.getError(), mask=mask_orig
-    )
-    img.setData(mask=numpy.zeros(img.getDim(), dtype=bool))
-    img.removeError()
-
-    cr_select = img.createCosmicMask(
-        sigma_det=sigma_det,
-        flim=flim,
-        iter=iter,
-        sig_gauss=sig_gauss,
-        error_box=error_box,
-        replace_box=replace_box,
-        parallel=parallel,
-    )
-
-    # update mask in original image
-    img_original.setData(mask=True, select=cr_select)
-
-    # refine CR selection
-    if increase_radius > 0:
-        mask_img = Image(data=img_original._mask)
-        mask_new = mask_img.convolveImg(
-            kernel=numpy.ones((2 * increase_radius + 1, 2 * increase_radius + 1))
-        )
-        mask_new = mask_new._data > 0
-        img_original.setData(mask=mask_new)
-    out = img_original.replaceMaskMedian(
-        replace_box[0], replace_box[1], replace_error=replace_error
-    )
-    out.writeFitsData(out_image)
+    return image._mask
 
 
-def old_LACosmic_drp(
-    in_image,
-    out_image,
-    sigma_det="5",
-    flim="1.1",
-    iter="3",
-    sig_gauss="0.8,0.8",
-    error_box="20,1",
-    replace_box="20,1",
-    replace_error="1e10",
-    rdnoise="2.9",
-    increase_radius="0",
-    verbose="0",
-    parallel="2",
-):
-    """
-    Detects and removes cosmic rays from astronomical images based on a modified Laplacian edge
-    detection method introduced by van Dokkum (2005) and modified by B. Husemann (2012, in prep.).
+def _get_wave_selection(waves, lines_list, window):
+    """Returns selection windows from a list of wavelengths
 
-    IMPORTANT:
-    The image and the readout noise are assumed to be in units of electrons.
-    The image also need to be bias subtracted so that the proper Poisson noise image can be estimated.
+    Given a list of wavelengths, this function returns selection windows
+    based on a given window size.
 
     Parameters
-    --------------
-    image: string
-                    Name of the FITS file for which the comsics should be detected
-    out_image: string
-                    Name of the  FITS file containing the cleaned image, a bad pixel mask extension and the error image if contained in the  input
-    sigma_det: string of float, optional  with default: '5.0'
-                    Detection limit of edge pixel above the noise in (sigma units) to be detected as comiscs
-    flim: string of float, optional  with default: '1.1'
-                    Detection threshold between Laplacian edged and Gaussian smoothed image (should be >1)
-    iter: string of integer, optional with default: '3'
-                    Number of iterations. Should be >1 to fully detect extended cosmics
-    sig_gauss: string of two comma separated floats, optional with default: '0.8,0.8'
-                    Sigma width of the Gaussian smoothing kernel in x and y direction on the CCD
-    error_box: string of two comma separated integers, optional with default: '20,1'
-                    Pixel box width (x and y width on raw image) used to estimate the electron counts for a given pixel by taken a median to estimate the noise level.
-                    It may be elongated along the dispersion axis of the CCD.
-    replace_box: string of two comma separated integers, optional with default: '5,5'
-                    median box size in x and y to estimate replacement values from valid pixels
-    replace_error: strong of float, optional with default: '1e10'
-                    Error value for bad pixels in the comupted error image, will be ignored if empty
-    rdnoise: string of float or string of header keyword, optional with default: 2.9
-                    Value or FITS header keyword for the readout noise in electrons, not used if an error image of a FITS extension is used
-    increase_radius: string of int, optional with default: '0'
-                    Increase the boundary of each detected cosmic ray pixel by the given number of pixels.
-    verbose: string of integer (0 or 1), optional  with default: 1
-                    Show information during the processing on the command line (0 - no, 1 - yes)
+    ----------
+    waves : numpy.ndarray
+        wavelength data
+    lines_list : list
+        list of lines to select
+    window : float
+        window size
 
-    Notes
+    Returns
     -------
-    As described in the article by van Dokkum a fine structure images is created to distinguish
-    between cosmic rays hits and compact real signals that are almost undersampled on the CCD.
-    For IFU data these are mainly emission lines from the sky or more importantly from the
-    target objects itself.
-    We defined a new fine structure map as the ratio between the Lapacian image and a Gaussian
-    smoothed image with a width of the Gaussian matching the PSF of the spectrograph in dispersion
-    AND cross-dispersion direction. If the given PSF is perfectly matching wtih the true PSF, a limit of
-    flim>1 is the cutting line between true signal and cosmic ray hits.
-
-    References
-    --------------
-    van Dokkum, Pieter G. 2001, "Cosmic-Ray Rejection by Laplacian Edge Detection",
-    PASP, 113, 1420
-
-    Examples
-    ----------------
-    user:> lvmdrp image LACosmic IMAGE.fits MASK.fits CLEAN.fits 5 flim=1.1 sig_gauss=0.8,0.8 replace_box=5,5 increase_radius=1
+    numpy.ndarray
+        selection mask
     """
-    # convert all parameters to proper type
-    sigma_det = float(sigma_det)
-    flim = float(flim)
-    iterations = int(iter)
-    error_box = replace_box.split(",")
-    err_box_x = int(error_box[0])
-    err_box_y = int(error_box[1])
-    sig_gauss = sig_gauss.split(",")
-    sigma_x = float(sig_gauss[0])
-    sigma_y = float(sig_gauss[1])
-    replace_box = replace_box.split(",")
-    box_x = int(replace_box[0])
-    box_y = int(replace_box[1])
-    increase_radius = int(increase_radius)
-    verbose = int(verbose)
-    try:
-        replace_error = float(replace_error)
-    except (TypeError, ValueError):
-        replace_error = None
-
-    # load image from FITS file
-    img = loadImage(in_image)
-
-    # create empty mask if no mask is present in original image
-    if img._mask is not None:
-        mask_orig = img.getMask()
+    hw = window / 2
+    wave_selection = numpy.zeros_like(waves, dtype=bool)
+    if len(wave_selection.shape) == 2:
+        for ifiber in range(wave_selection.shape[0]):
+            for wline in lines_list:
+                if wline-hw < waves[ifiber].min() or wline+hw > waves[ifiber].max():
+                    continue
+                wave_selection[ifiber] |= (waves[ifiber] > wline-hw) & (waves[ifiber] < wline+hw)
     else:
-        mask_orig = numpy.zeros(img.getDim(), dtype=bool)
+        wave_selection = (waves > wline-hw) & (waves < wline+hw)
+    return wave_selection
 
-    # create a new Image instance to store the initial data array
-    img_original = Image(
-        data=img.getData(), header=img.getHeader(), error=img.getError(), mask=mask_orig
-    )
-    img.setData(mask=numpy.zeros(img.getDim(), dtype=bool))
-    img.removeError()
 
-    # estimate Poisson noise after roughly cleaning cosmics using a median filter
-    try:
-        rdnoise = float(rdnoise)
-    except (TypeError, ValueError):
-        rdnoise = img.getHdrValue(rdnoise)
+def _fix_fiber_thermal_shifts(image, trace_cent, trace_width=None, trace_amp=None, fiber_model=None,
+                              columns=[500, 1000, 1500, 2000, 2500, 3000],
+                              column_width=25, shift_range=[-5,5], axs=None):
+    """Returns the updated fiber trace centroids after fixing the thermal shifts
 
-    # create empty mask
-    select = numpy.zeros(img.getDim(), dtype=bool)
+    Parameters
+    ----------
+    image : Image
+        the target image
+    trace_cent : TraceMask
+        the fiber trace centroids
+    trace_width : TraceMask
+        the fiber trace widths, defaults to None
+    trace_amp : TraceMask
+        the fiber trace amplitudes, defaults to None
+    fiber_model : Image
+        2D fiber model image, defaults to None
+    columns : list
+        list of columns to evaluate the continuum model, defaults to [500, 1000, 1500, 2000, 2500, 3000, 3500]
+    column_width : int
+        number of columns to add around the given columns, defaults to 25
+    shift_range : list
+        range of shifts to consider, defaults to [-5,5]
 
-    # define Laplacian convolution kernal
-    LA_kernel = (
-        numpy.array(
-            [
-                [
-                    0,
-                    -1,
-                    0,
-                ],
-                [-1, 4, -1],
-                [0, -1, 0],
-            ]
-        )
-        / 4.0
-    )
-    out = img
+    Returns
+    -------
+    numpy.ndarray
+        the calculated column shifts
+    numpy.ndarray
+        the mean shifts
+    numpy.ndarray
+        the standard deviation of the shifts
+    TraceMask
+        the updated fiber trace centroids
+    Image
+        the evaluated continuum model at the given columns
+    """
+    # generate the continuum model using the master traces only along the specific columns
+    if fiber_model is None:
+        fiber_model, _, _, _ = image.evaluate_fiber_model(
+            traces={"counts": trace_amp, "centroids": trace_cent, "sigmas": trace_width}, profile="normal",
+            columns=columns, column_width=column_width)
 
-    if parallel == "auto":
-        cpus = cpu_count()
+    mjd = image._header["SMJD"]
+    expnum = image._header["EXPOSURE"]
+    camera = image._header["CCD"]
+    channel = camera[0]
+    specid = int(camera[1])
+
+    # calculate thermal shifts
+    column_shifts = image.measure_fiber_shifts(fiber_model, trace_cent, columns=columns, column_width=column_width, shift_range=shift_range, axs=axs[:2])
+    # shifts stats
+    median_shift = numpy.nan_to_num(bn.nanmedian(column_shifts, axis=0))
+    std_shift = numpy.nan_to_num(bn.nanstd(column_shifts, axis=0))
+    if numpy.abs(median_shift) > 0.5:
+        log.warning(f"large thermal shift measured: {','.join(map(str, column_shifts))} pixels for {mjd = }, {expnum = }, {camera = }")
+        image.add_header_comment(f"large thermal shift: {','.join(map(str, column_shifts))} pixels {camera = }")
+        log.warning(f"measured shifts median+/-stddev = {median_shift:.4f}+/-{std_shift:.4f} pixels")
     else:
-        cpus = int(parallel)
-    # start iteration
-    for i in range(iterations):
-        if verbose == 1:
-            print("iteration %i" % (i + 1))
-        # follow the LACosmic scheme to select pixel
-        noise = out.medianImg((err_box_y, err_box_x))
-        select_noise = noise.getData() <= 0
-        noise.setData(data=0, select=select_noise)
-        noise = (noise + rdnoise**2).sqrt()
-        result = []
-        if cpus > 1:
-            fine = out.convolveGaussImg(sigma_x, sigma_y)
-            fine_norm = out / fine
-            select_neg = fine_norm < 0
-            fine_norm.setData(data=0, select=select_neg)
-            pool = Pool(cpus)
-            result.append(pool.apply_async(out.subsampleImg))
-            result.append(pool.apply_async(fine_norm.subsampleImg))
-            pool.close()
-            pool.join()
-            sub = result[0].get()
-            sub_norm = result[1].get()
-            pool.terminate()
-            pool = Pool(cpus)
-            result[0] = pool.apply_async(sub.convolveImg, args=([LA_kernel]))
-            result[1] = pool.apply_async(sub_norm.convolveImg, args=([LA_kernel]))
-            pool.close()
-            pool.join()
-            conv = result[0].get()
-            select_neg = conv < 0
-            conv.setData(
-                data=0, select=select_neg
-            )  # replace all negative values with 0
-            Lap2 = result[1].get()
-            pool.terminate()
-            pool = Pool(cpus)
-            result[0] = pool.apply_async(conv.rebin, args=(2, 2))
-            result[1] = pool.apply_async(Lap2.rebin, args=(2, 2))
-            pool.close()
-            pool.join()
-            Lap = result[0].get()
-            Lap2 = result[1].get()
-            pool.terminate()
-            S = Lap / (noise * 4)  # normalize Laplacian image by the noise
-            S_prime = S - S.medianImg(
-                (err_box_y, err_box_x)
-            )  # cleaning of the normalized Laplacian image
+        log.info(f"measured shifts median+/-stddev = {median_shift:.4f}+/-{std_shift:.4f} pixels for {mjd = }, {expnum = }, {camera = }")
 
+    # apply average shift to the zeroth order trace coefficients
+    trace_cent_fixed = copy(trace_cent)
+    if trace_cent_fixed._coeffs is not None:
+        trace_cent_fixed._coeffs[:, 0] += median_shift
+        trace_cent_fixed.eval_coeffs()
+    else:
+        trace_cent_fixed._data += median_shift
+    if trace_cent_fixed._slitmap is not None:
+        trace_cent_fixed._slitmap[f"ypix_{camera[0]}"] = trace_cent_fixed._slitmap[f"ypix_{camera[0]}"].astype("float32")
+        select_spec = trace_cent_fixed._slitmap["spectrographid"] == specid
+        trace_cent_fixed._slitmap[f"ypix_{channel}"][select_spec] += numpy.nan_to_num(median_shift)
+
+    # save columns measured for thermal shifts
+    plot_fiber_thermal_shift(columns, column_shifts, median_shift, std_shift, ax=axs[2])
+
+    return trace_cent_fixed, column_shifts, median_shift, std_shift, fiber_model
+
+
+def select_lines_2d(in_images, out_mask, in_cent_traces, in_waves, lines_list=None, y_widths=3, wave_widths=0.6*5, image_shape=(4080, 4120), channels="brz", display_plots=False):
+    """Selects spectral features based on a list of wavelengths from a 2D raw frame
+
+    Given a list of raw frames, centroid traces and wavelength models for a given spectrograph,
+    this function selects spectral features based on a list of wavelengths, creating a 2D mask
+    with selected lines.
+
+    Parameters
+    ----------
+    in_images : list
+        list of input raw frames for the same spectrograph (brz)
+    out_mask : str
+        output mask file for the channel stacked frame
+    in_cent_traces : list
+        list of input centroid trace files for the same spectrograph
+    in_waves : list
+        list of input wavelength files for the same spectrograph
+    lines_list : list, optional
+        list of lines to select, by default None
+    y_widths : int, optional
+        width of the fiber trace, by default 3
+    wave_widths : float, optional
+        width of the wavelength window, by default 0.6*5
+    image_shape : tuple, optional
+        shape of the image, by default (4080, 4120)
+    channels : str, optional
+        spectrograph channels, by default "brz"
+    display_plots : bool, optional
+        display plots, by default False
+
+    Returns
+    -------
+    numpy.ndarray
+        2D mask with selected lines
+    FiberRows
+        channel stacked fiber centroid trace data
+    FiberRows
+        channel stacked wavelength data
+    """
+    # stack along x-axis traces and wavelengths, adding OS columns
+    log.info(f"stacking centroid traces and wavelengths for {','.join(in_cent_traces)} and {','.join(in_waves)}")
+    mtraces, mwaves, mtrace, mwave = _channel_combine_fiber_params(in_cent_traces, in_waves)
+
+    # get fiber selection mask
+    log.info(f"selecting fibers with {y_widths = } pixel")
+    fiber_selection = _get_fiber_selection(mtraces, y_widths=y_widths, image_shape=image_shape)
+
+    # parse lines list based on the image type
+    if lines_list is None:
+        image = loadImage(in_images[0])
+        imagetyp = image._header["IMAGETYP"]
+        if imagetyp == "arc":
+            lines_list = ",".join([lamp.lower() for lamp in ARC_LAMPS if image._header.get(lamp, False)])
+        elif imagetyp == "flat":
+            lines_list = "sky"
+            wave_widths = 5000
         else:
-            sub = out.subsampleImg()  # subsample image
-            conv = sub.convolveImg(LA_kernel)  # convolve subsampled image with kernel
-            select_neg = conv < 0
-            conv.setData(
-                data=0, select=select_neg
-            )  # replace all negative values with 0
-            Lap = conv.rebin(2, 2)  # rebin the data to original resolution
-            S = Lap / (noise * 4)  # normalize Laplacian image by the noise
-            S_prime = S - S.medianImg(
-                (err_box_y, err_box_x)
-            )  # cleaning of the normalized Laplacian image
-            fine = out.convolveGaussImg(
-                sigma_x, sigma_y
-            )  # convolve image with a 2D Gaussian
-            #        fine.writeFitsData('s_prime.fits')
-            fine_norm = out / fine
-            select_neg = fine_norm < 0
-            fine_norm.setData(data=0, select=select_neg)
-            sub_norm = fine_norm.subsampleImg()  # subsample image
-            Lap2 = (sub_norm).convolveImg(LA_kernel)
-            Lap2 = Lap2.rebin(2, 2)  # rebin the data to original resolution
+            lines_list = "sky"
+        log.info(f"selecting sources for {imagetyp = } frame: {lines_list}")
 
-        ##select = numpy.logical_or(numpy.logical_and(S_prime>sigma_det,(Lap/fine)>flim),select) # select bad pixels
-        select = numpy.logical_or(
-            numpy.logical_and((Lap2) > flim, S_prime > sigma_det), select
-        )
+    # parse lines list base on the given list
+    if isinstance(lines_list, (list, tuple, numpy.ndarray)):
+        log.info(f"selecting lines in given list {','.join(lines_list)}")
+    elif isinstance(lines_list, str):
+        sources = lines_list.split(",")
+        lines_list = []
+        lamps = list(map(str.lower, ARC_LAMPS))
+        for source in sources:
+            if source in lamps:
+                # define reference lines path
+                ref_table = os.path.join(CONFIG_PATH, "wavelength", f"lvm-reflines-{source}.txt")
+                log.info(f"loading reference lines from '{ref_table}")
+                # skip if missing
+                if not os.path.isfile(ref_table):
+                    log.warning(f"missing reference lines for {source = }")
+                    continue
+                table = numpy.genfromtxt(ref_table, usecols=(0, 1), skip_header=1)
+                lines_list.append(table[table[:, 0]>=200, 1])
+            elif source == "sky":
+                ref_table = numpy.genfromtxt(os.path.join(os.getenv('LVMCORE_DIR'), 'etc', 'UVES_sky_lines.txt'), usecols=(1,4))
+                lines_list.append(ref_table[ref_table[:, 1] > 2, 0])
 
-        # print information on the screen if demanded
-        if verbose == 1:
-            dim = img_original.getDim()
-            # det_pix = numpy.sum(select)
-            print(
-                "Detected pixels: %i out of %i " % (numpy.sum(select), dim[0] * dim[1])
-            )
+        lines_list = numpy.unique(numpy.concatenate(lines_list))
+        lines_list.sort()
+        waves = mwave._data[mwave._data>0].flatten()
+        lines_list = lines_list[(lines_list > waves.min()) & (lines_list < waves.max())]
+        log.info(f"selecting lines in given sources {lines_list.tolist()}")
 
-        if i == iterations - 1:
-            img_original.setData(mask=True, select=select)  # set the new mask
-            if increase_radius > 0:
-                # print numpy.sum(img_original._mask)
-                mask_img = Image(data=img_original._mask)
-                mask_new = mask_img.convolveImg(
-                    kernel=numpy.ones(
-                        (2 * increase_radius + 1, 2 * increase_radius + 1)
-                    )
-                )
-                # print numpy.sum(mask_new._data)
-                mask_new = mask_new._data > 0
-                img_original.setData(mask=mask_new)
-            out = img_original.replaceMaskMedian(
-                box_x, box_y, replace_error=replace_error
-            )  # replace possible corrput pixel with zeros for final output
-        else:
-            out.setData(mask=True, select=select)  # set the new mask
-            out = out.replaceMaskMedian(
-                box_x, box_y, replace_error=None
-            )  # replace possible corrput pixel with zeros
-    out.writeFitsData(out_image)
+    # get lines selection mask
+    log.info(f"selecting lines with {wave_widths = } angstrom")
+    lines_mask = _get_wave_selection(mwave._data, lines_list=lines_list, window=wave_widths)
+    lines_mask &= ~mwave._mask
+
+    # make sky mask 2d
+    log.info("interpolating mask into 2D frame")
+    lines_mask_2d = numpy.zeros((image_shape[0], len(in_images)*image_shape[1]), dtype=bool)
+    for icol in range(lines_mask_2d.shape[1]):
+        for ifiber in range(mwave._data.shape[0]):
+            lines_mask_2d[mtrace._data[ifiber, icol].astype(int), icol] = lines_mask[ifiber, icol]
+
+        col = lines_mask_2d[:, icol]
+        y = numpy.arange(lines_mask_2d.shape[0])
+        if numpy.sum(col) == 0:
+            continue
+        f = interpolate.interp1d(y[col], col[col], kind="nearest", bounds_error=False, fill_value=0)
+        lines_mask_2d[:, icol] = f(y).astype(bool)
+
+    lines_mask_2d &= fiber_selection
+
+    # write mask to file
+    log.info(f"writing output mask to {os.path.basename(out_mask)}")
+    mask_image = Image(data=lines_mask_2d.astype(int))
+    mask_image.writeFitsData(out_mask)
+
+    # plot results
+    log.info("plotting results")
+    fig, ax = create_subplots(1, 1, figsize=(15, 5))
+    ax.imshow(lines_mask_2d, origin="lower", aspect="auto", cmap="binary_r")
+    save_fig(
+        fig,
+        product_path=out_mask,
+        to_display=display_plots,
+        figure_path="qa",
+        label="lines_mask_2d"
+    )
+
+    return lines_mask_2d, mtrace, mwave
 
 
 def addCCDMask_drp(image, mask, replaceError="1e10"):
@@ -915,7 +678,7 @@ def find_peaks_auto(
     # find the subpixel centroids of the peaks from the central 3 pixels using either a hyperbolic approximation
     # or perform a leastsq fit with a Gaussian
     log.info("refining fiber location")
-    centers = cut.measurePeaks(pixels, method, init_sigma, threshold=0, max_diff=1.0)[0]
+    centers = cut.measure_centroids(pixels, method, init_sigma, threshold=0, max_diff=1.0)[0]
     # round the subpixel peak positions to their nearest integer value
     round_cent = numpy.round(centers).astype(int)
     log.info(f"final number of fibers found {len(round_cent)}")
@@ -955,7 +718,7 @@ def find_peaks_auto(
     ax.plot(pixels, peaks, "o", color="tab:red", mew=0, ms=5)
     ax.plot(
         centers,
-        numpy.ones(len(centers)) * numpy.nanmax(peaks) * 0.5,
+        numpy.ones(len(centers)) * bn.nanmax(peaks) * 0.5,
         "x",
         mew=1,
         ms=7,
@@ -1042,7 +805,7 @@ def findPeaksOffset_drp(
         #    select = numpy.logical_and(select_good_weak, select_weak)
         #    plt.plot(peaks_weak_good[0][select[select_good_weak]],peaks_weak_good[2] [select[select_good_weak]],'ob')
         peaks = cut.findPeaks(threshold=threshold)
-        centers = cut.measurePeaks(
+        centers = cut.measure_centroids(
             peaks[0], method, init_sigma, threshold=0, max_diff=1.0
         )[0]
         plt.clf()
@@ -1191,7 +954,7 @@ def findPeaksMaster_drp(
             select_good[last_fiber] = False
     npeaks = numpy.sum(select_good)
     peaks_good = cut.findPeaks(threshold=threshold, npeaks=npeaks)
-    centers_good = cut.measurePeaks(
+    centers_good = cut.measure_centroids(
         peaks_good[0], method, init_sigma, threshold=0, max_diff=1.0
     )[0]
     peaks_ref = Spectrum1D(wave=fiber, data=ref_pos)
@@ -1207,7 +970,7 @@ def findPeaksMaster_drp(
     select_weak = fib_qual == "WEAK"
     npeaks = numpy.sum(select_good_weak)
     peaks_weak_good = cut.findPeaks(threshold=threshold_weak, npeaks=npeaks)
-    centers_weak_good = cut.measurePeaks(
+    centers_weak_good = cut.measure_centroids(
         peaks_weak_good[0], method, init_sigma, threshold=0, max_diff=1.0
     )[0]
     offset_weak = centers._data[select_good_weak] - centers_weak_good
@@ -1311,8 +1074,8 @@ def findPeaksMaster2_drp(
     # find location of peaks (local maxima) either above a fixed threshold or to reach a fixed number of peaks
 
     peaks_good = []
-    if numpy.nanmax(cut._data) < threshold:
-        threshold = numpy.nanmax(cut._data) * 0.8
+    if bn.nanmax(cut._data) < threshold:
+        threshold = bn.nanmax(cut._data) * 0.8
     while len(peaks_good) != numpy.sum(select_good):
         (peaks_good, temp, peaks_flux) = cut.findPeaks(threshold=threshold, npeaks=0)
         if peaks_good[0] < border:
@@ -1342,7 +1105,7 @@ def findPeaksMaster2_drp(
             threshold = threshold * 1.05
             # print(threshold,numpy.sum(select_good),len(peaks_good),shift_peaks)
         # break
-    centers_good = cut.measurePeaks(
+    centers_good = cut.measure_centroids(
         peaks_good, method, init_sigma, threshold=0, max_diff=1.0
     )[0]
     peaks_ref = Spectrum1D(wave=fiber, data=ref_pos)
@@ -1470,8 +1233,8 @@ def trace_peaks(
     if in_peaks is None:
         # read slitmap extension
         slitmap = img.getSlitmap()
-        slitmap = slitmap[slitmap["spectrographid"] == int(img._header["CCD"][1])]
-        
+        slitmap = slitmap[slitmap["spectrographid"] == int(img._header["SPEC"][-1])]
+
         channel = img._header["CCD"][0]
         positions = slitmap[f"ypix_{channel}"]
         fibers = positions.size
@@ -1480,7 +1243,7 @@ def trace_peaks(
         profile = img.getSlice(ref_column, axis="y")._data
         if correct_ref:
             ypix = numpy.arange(profile.size)
-            guess_heights = numpy.ones_like(positions) * numpy.nanmax(profile)
+            guess_heights = numpy.ones_like(positions) * bn.nanmax(profile)
             ref_profile = _spec_from_lines(positions, sigma=1.2, wavelength=ypix, heights=guess_heights)
             log.info(f"correcting guess positions for column {ref_column}")
             cc, bhat, mhat = _cross_match(
@@ -1501,7 +1264,7 @@ def trace_peaks(
 
     # create empty trace mask for the image
     trace = TraceMask()
-    trace.createEmpty(data_dim=(fibers, dim[1]), mask_dim=(fibers, dim[1]))
+    trace.createEmpty(data_dim=(fibers, dim[1]))
     trace.setFibers(fibers)
     trace._good_fibers = good_fibers
     # add the positions of the previous identified peaks
@@ -1534,7 +1297,7 @@ def trace_peaks(
             pix = numpy.round(trace.getData()[0][:, i + steps]).astype("int16")
 
         # measure the peaks for the ref_column and store it in the trace
-        centers = cut_iter.measurePeaks(pix, method, init_sigma, threshold=threshold, max_diff=float(max_diff))
+        centers = cut_iter.measure_centroids(pix, method, init_sigma, threshold=threshold, max_diff=float(max_diff))
         trace.setSlice(i, axis="y", data=centers[0], mask=centers[1])
 
     # iterate towards the last index along dispersion axis
@@ -1554,7 +1317,7 @@ def trace_peaks(
             pix = numpy.round(trace.getData()[0][:, i - steps]).astype("int16")
 
         # measure the peaks for the ref_column and store it in the trace
-        centers = cut_iter.measurePeaks(
+        centers = cut_iter.measure_centroids(
             pix, method, init_sigma, threshold=threshold, max_diff=float(max_diff)
         )
         trace.setSlice(i, axis="y", data=centers[0], mask=centers[1])
@@ -1571,15 +1334,8 @@ def trace_peaks(
     trace._mask[bad_fibers] = True
 
     if write_trace_data:
-        coords_file = out_trace.replace("calib", "ancillary").replace(".fits", "_coords.txt")
-        os.makedirs(os.path.dirname(coords_file), exist_ok=True)
-        poly_file = coords_file.replace("_coords.txt", "_poly.txt")
-        poly_all_file = coords_file.replace("_coords.txt", "_poly_all.txt")
-        log.info(f"writing trace data to files: {os.path.basename(coords_file)}, {os.path.basename(poly_file)} and {os.path.basename(poly_all_file)}")
-        numpy.savetxt(coords_file, 1+numpy.asarray(table), fmt="%.5f")
-        numpy.savetxt(poly_file, 1+numpy.asarray(table_poly), fmt="%.5f")
-        numpy.savetxt(poly_all_file, 1+numpy.asarray(table_poly_all), fmt="%.5f")
-    
+        _create_trace_regions(out_trace, table, table_poly, table_poly_all, display_plots=display_plots)
+
     # linearly interpolate coefficients at masked fibers
     log.info(f"interpolating coefficients at {bad_fibers.sum()} masked fibers")
     x_pixels = numpy.arange(trace._data.shape[1])
@@ -1799,107 +1555,116 @@ def combineImages_drp(images, out_image, method="median", k="3.0"):
     combined_img.writeFitsData(out_image)
 
 
-def subtractStraylight_drp(
-    in_image,
-    in_trace,
-    out_stray,
-    out_image,
-    disp_axis="X",
-    aperture="7",
-    poly_cross="4",
-    smooth_disp="5",
-    smooth_gauss="10.0",
-    parallel="auto",
-):
+def subtract_straylight(
+    in_image: str,
+    in_cent_trace: str,
+    out_image: str,
+    out_stray: str = None,
+    select_nrows: int = 20,
+    margin: int = 7,
+    x_bins: int = 70,
+    nsigma: float = 3.0,
+    clip: Tuple[float,float]|None = (0.0, None),
+    median_box: int|None = None,
+    display_plots: bool = False,
+) -> Tuple[Image, Image, Image]:
+    """Subtracts diffuse background (stray light) from a raw 2D image using inter-fiber regions.
+
+    The function masks out fiber traces using a trace mask, estimates the background
+    from the remaining pixels (between fibers and optionally at the top/bottom of the CCD),
+    fits a smooth 2D spline to this background, and subtracts it from the original image.
+
+    Parameters
+    ----------
+    in_image : str
+        Path to the input FITS image from which stray light will be subtracted.
+    in_cent_trace : str
+        Path to the FITS file containing the fiber trace mask.
+    out_image : str
+        Path to the output FITS file for the stray-light-subtracted image.
+    out_stray : str, optional
+        Path to the output FITS file for the stray light model (default: None).
+    x_bins : int, optional
+        Number of bins along the X axis for the spline fit (default: 70).
+    select_nrows : int or tuple of int, optional
+        Number of rows at the top and bottom of the CCD to use for background estimation
+        (default: 20).
+    margin : int, optional
+        Number of pixels to skip before/after fiber centroids (default: 7).
+    nsigma : float, optional
+        Sigma threshold for clipping outlier bins, (default: 5.0).
+    clip : tuple[float,float] | None, optional
+        Valid range of values, out of which data will be clipped, (default: (0.0, None))
+    median_box : int, optional
+        Width of the median filter along the dispersion axis (default: None).
+    display_plots : bool, optional
+        If True, display diagnostic plots (default: False).
+
+    Returns
+    -------
+    img_median : Image
+        Median-filtered version of the input image.
+    img_stray : Image
+        Fitted stray light background model.
+    img_out : Image
+        Stray-light-subtracted image.
     """
-                Subtracts a diffuse background signal (stray light) from the raw data. It uses the regions between fiber to estimate the stray light signal and
-                smoothes the result by a polyon in cross-disperion direction and afterwards a wide 2D Gaussian filter to reduce the introduction of low frequency noise.
-
-                Parameters
-                --------------
-                image: string
-                                Name of the FITS image from which the stray light should be subtracted
-                trace: string
-                                Name of the  FITS file with the trace mask of the fibers
-                stray_image: string
-                                Name of the FITS file in which the pure straylight image is stored
-                clean_img: string
-                                Name of the FITS file in which the straylight subtracted image is stored
-                disp_axis: string of float, optional  with default: 'X'
-                                Define the dispersion axis, either 'X','x', or 0 for the  x axis or 'Y','y', or 1 for the y axis.
-                aperture: string of integer, optional  with default: '7'
-                                Size of the aperture around each fiber in cross-disperion direction assumed to contain signal from fibers
-                poly_cross: string of integer, optional with default: '4'
-                        Order of the polynomial used to interpolate the background signal in cross-dispersion direction (positiv: normal polynomial, negativ: Legandre polynomial)
-                smooth_gauss : string of float, optional with default :'10.0'
-                        Width of the 2D Gaussian filter to smooth the measured background signal
-
-                Examples
-                ----------------
-    user:> lvmdrp image subtractStrylight IMAGE.fits TRACE.fits CLEAN.fits x aperture=9 poly_cross=6 smooth_gauss=20.0
-    """
-    # convert input parameters to proper type
-    aperture = int(aperture)
-    poly_cross = int(poly_cross)
-    smooth_gauss = float(smooth_gauss)
-    smooth_disp = int(smooth_disp)
-
     # load image data
+    log.info(f"using image {os.path.basename(in_image)} for stray light subtraction")
     img = loadImage(in_image)
 
-    # orient image so that the cross-dispersion is along the first and the dispersion is along the second array axis
-    if disp_axis == "X" or disp_axis == "x":
-        pass
-    elif disp_axis == "Y" or disp_axis == "y":
-        img.swapaxes()
+    # smooth image along dispersion axis with a median filter excluded NaN values
+    if median_box is not None:
+        log.info(f"median filtering image along dispersion axis with a median filter of width {median_box}")
+        median_box = (1, max(1, median_box))
+        img_median = img.replaceMaskMedian(*median_box, replace_error=None)
+        img_median._data = numpy.nan_to_num(img_median._data)
+        img_median = img_median.medianImg(median_box)
+    else:
+        img_median = copy(img)
 
     # load trace mask
-    trace_mask = TraceMask()
-    trace_mask.loadFitsData(in_trace, extension_data=0)
-    # trace_mask.clipTrace(img._dim[0])
+    log.info(f"using centroids trace {os.path.basename(in_cent_trace)} to mask fibers")
+    trace_mask = TraceMask.from_file(in_cent_trace)
 
-    # if img._mask is not None:
-    #    img._data[img._mask==1] = numpy.nan
+    # update mask
+    if img_median._mask is None:
+        img_median._mask = numpy.zeros(img_median._data.shape, dtype=bool)
+    img_median._mask = img_median._mask | numpy.isnan(img_median._data) | numpy.isinf(img_median._data) | (img_median._data == 0)
 
-    # smooth image along dispersion axis with a median filter excluded NaN values bas
-    if smooth_disp:
-        smooth_disp = max(1, smooth_disp)
-        img_median = img.medianImg((1, smooth_disp), use_mask=True)
-    else:
-        img_median = img
+    log.info(f"binning with parameters: {x_bins = }, {margin = }, {select_nrows = }, {nsigma = }")
+    samples, strips, X, Y = img_median.straylight_binning(trace_mask, x_bins, y_margin=margin, nrows=select_nrows, nsigma=nsigma)
 
-    # mask regions around each fiber within a given cross-dispersion aperture
-    img_median.maskFiberTraces(trace_mask, aperture=aperture, parallel=parallel)
+    log.info(f"fitting straylight model with parameters: {clip = }")
+    fig, axs = create_straylight_axes(img_median, len(strips))
+    img_stray = img_median.fit_straylight(samples, strips, X, Y, smoothing=1.0, clip=clip, axs=axs)
 
-    # fit the signal in unmaksed areas along cross-dispersion axis independently with a polynom of a given order
-    img_fit = img_median.fitPoly(order=poly_cross, plot=-1)
-
-    # smooth the results by 2D Gaussian filter of given with (cross- and dispersion axis have equal width)
-    img_smooth = img_fit.convolveGaussImg(smooth_gauss, smooth_gauss)
-
-    # subtract smoothed background signal from origianal image
-    img = loadImage(in_image)
-
-    if disp_axis == "X" or disp_axis == "x":
-        pass
-    elif disp_axis == "Y" or disp_axis == "y":
-        img.swapaxes()
-
-    img_out = img - img_smooth
-    ##img_out = img-img_fit
-
-    # restore original orientation of image
-    if disp_axis == "X" or disp_axis == "x":
-        pass
-    elif disp_axis == "Y" or disp_axis == "y":
-        img_out.swapaxes()
-        img_smooth.swapaxes()
+    # subtract smoothed background signal from original image
+    log.info("subtracting the smoothed background signal from the original image")
+    img_out = copy(img)
+    img_out.setData(data=img._data-img_stray._data)
 
     # include header and write out file
-    img_out.setHeader(header=img.getHeader())
+    log.info(f"writing stray light subtracted image to {os.path.basename(out_image)}")
     img_out.writeFitsData(out_image)
-    img_smooth.writeFitsData(out_stray)
 
+    # plot results: polyomial fitting & smoothing, both with masked regions on
+    save_fig(fig, product_path=out_image, to_display=display_plots, figure_path="qa", label="straylight_model", dpi=100, transparent=False)
+
+    # write out stray light image
+    if out_stray is not None:
+        log.info(f"writing stray light image to {os.path.basename(out_stray)}")
+        img_stray.writeFitsData(out_stray)
+        # masked = img_median._data.copy()
+        # masked[img_median._mask] = numpy.nan
+        # hdus = pyfits.HDUList()
+        # hdus.append(pyfits.PrimaryHDU(img_stray._data, header=img._header))
+        # hdus.append(pyfits.ImageHDU(img_out._data, name="CLEANED"))
+        # hdus.append(pyfits.ImageHDU(masked, name="MASKED"))
+        # hdus.append(pyfits.ImageHDU(img_stray._data, name="SPLINE"))
+        # hdus.writeto(out_stray, overwrite=True)
+
+    return img_median, img_stray, img_out
 
 def traceFWHM_drp(
     in_image,
@@ -1985,9 +1750,9 @@ def traceFWHM_drp(
         median_box = max(median_box, 1)
         median_cross = max(median_cross, 1)
         img = img.medianImg((median_cross, median_box))
-    
+
     img._mask[...] = False
-    
+
     # plt.figure(figsize=(20,10))
     # plt.plot(img.getSlice(1300, axis="y")._error.tolist(), lw=0.6, color="0.7")
     # plt.plot(img.getSlice(1200, axis="y")._error.tolist(), lw=1)
@@ -2076,7 +1841,7 @@ def traceFWHM_drp(
 
 
     traceFWHM = TraceMask(data=fwhm, mask=mask | orig_trace._mask)
-   
+
     # smooth the FWHM trace with a polynomial fit along dispersion axis (uncertain pixels are not used)
     # traceFWHM.fit_polynomial(deg=poly_disp, poly_kind=poly_kind, clip=clip)
 
@@ -2159,7 +1924,7 @@ def offsetTrace_drp(
                 offsets = []
             else:
                 offsets.append(
-                    numpy.nanmedian(
+                    bn.nanmedian(
                         numpy.array(log_lines[i + 2].split()[1:]).astype("float32")
                     )
                 )
@@ -2221,11 +1986,11 @@ def offsetTrace_drp(
         for j in range(len(out[0])):
             string_x += " %.3f" % (out[1][j])
             string_y += " %.3f" % (out[0][j])
-            string_pix += " %.3f" % (numpy.nanmedian(block_line_pos[j]))
+            string_pix += " %.3f" % (bn.nanmedian(block_line_pos[j]))
         log.write(string_x + "\n")
         log.write(string_pix + "\n")
         log.write(string_y + "\n")
-    off_trace_median = numpy.nanmedian(numpy.array(off_trace_all))
+    off_trace_median = bn.nanmedian(numpy.array(off_trace_all))
     off_trace_rms = numpy.std(numpy.array(off_trace_all))
     off_trace_rms = "%.4f" % off_trace_rms if numpy.isfinite(off_trace_rms) else "NAN"
     img.setHdrValue(
@@ -2367,12 +2132,12 @@ def offsetTrace2_drp(
         for j in range(len(out[0])):
             string_x += " %.3f" % (out[1][j])
             string_y += " %.3f" % (out[0][j] * -1)
-            string_pix += " %.3f" % (numpy.nanmedian(block_line_pos[j]))
+            string_pix += " %.3f" % (bn.nanmedian(block_line_pos[j]))
         log.write(string_x + "\n")
         log.write(string_pix + "\n")
         log.write(string_y + "\n")
 
-    off_trace_median = numpy.nanmedian(numpy.array(off_trace_all))
+    off_trace_median = bn.nanmedian(numpy.array(off_trace_all))
     off_trace_rms = numpy.std(numpy.array(off_trace_all))
     img.setHdrValue(
         "HIERARCH PIPE FLEX YOFF",
@@ -2397,15 +2162,19 @@ def extract_spectra(
     in_image: str,
     out_rss: str,
     in_trace: str,
-    in_fwhm: str = None,
+    in_sigma: str = None,
+    in_model: str = None,
     in_acorr: str = None,
+    assume_thermal_shift: float = None,
+    columns: List[int] = [500, 750, 1000, 1250, 1500, 1750, 2000, 2250, 2500, 2750, 3000],
+    column_width: int = 50,
     method: str = "optimal",
     aperture: int = 3,
     fwhm: float = 2.5,
     disp_axis: str = "X",
     replace_error: float = 1.0e10,
-    plot_fig: bool = False,
-    parallel: str = "auto",
+    display_plots: bool = False,
+    parallel: str|int = 0,
 ):
     """
     Extracts the flux for each fiber along the dispersion direction which is written into an RSS FITS file format.
@@ -2434,7 +2203,7 @@ def extract_spectra(
                     a spatially resolved FWHM map is provided. Only used if method is set to 'optimal', otherwise this parameter is ignored.
     disp_axis: string of float, optional  with default: 'X'
                     Define the dispersion axis, either 'X','x', or 0 for the  x axis or 'Y','y', or 1 for the y axis.
-    parallel: either string of integer (>0) or  'auto', optional with default: 'auto'
+    parallel: either string of integer (>0) or  'auto', optional with default: 0
             Number of CPU cores used in parallel for the computation. If set to auto, the maximum number of CPUs
             for the given system is used.
 
@@ -2449,6 +2218,10 @@ def extract_spectra(
         log.info(f"extraction using aperture of {aperture} pixels")
 
     img = loadImage(in_image)
+    mjd = img._header["SMJD"]
+    camera = img._header["CCD"]
+    expnum = img._header["EXPOSURE"]
+
 
     # orient image so that the cross-dispersion is along the first and the dispersion is along the second array axis
     if disp_axis == "X" or disp_axis == "x":
@@ -2456,17 +2229,64 @@ def extract_spectra(
     elif disp_axis == "Y" or disp_axis == "y":
         img.swapaxes()
 
-    trace_mask = TraceMask()
-    trace_mask.loadFitsData(in_trace)
-    trace_fwhm = TraceMask()
+    trace_mask = TraceMask.from_file(in_trace)
+
+    # check if fwhm trace is given and exists
+    if in_sigma is None or not os.path.isfile(in_sigma):
+        trace_sigma = TraceMask()
+        trace_sigma.setData(data=numpy.ones(trace_mask._data.shape) * float(fwhm) / 2.354)
+        trace_sigma._coeffs = numpy.ones((trace_mask._data.shape[0], 1)) * float(fwhm) / 2.354
+    else:
+        trace_sigma = TraceMask.from_file(in_sigma)
+
+    # load fiber model if given
+    if in_model is not None and os.path.isfile(in_model):
+        fiber_model = loadImage(in_model)
+    else:
+        fiber_model = None
+
+    shift_range = [-3,3]
+    fig = plt.figure(figsize=(15, 4*len(columns)), layout="constrained")
+    fig.suptitle(f"Thermal fiber shifts for {mjd = }, {camera = }, {expnum = }")
+    gs = GridSpec(len(columns)+1, 15, figure=fig)
+    axs_cc, axs_fb = [], []
+    for icol in range(len(columns)):
+        axs_cc.append(fig.add_subplot(gs[icol, :3], sharex=axs_cc[-1] if icol > 0 else None))
+        axs_fb.append(fig.add_subplot(gs[icol, 3:], sharex=axs_fb[-1] if icol > 0 else None, sharey=axs_fb[-1] if icol > 0 else None))
+
+        if icol != len(columns)-1:
+            axs_cc[-1].tick_params(labelbottom=False)
+            axs_fb[-1].tick_params(labelbottom=False)
+    ax_shift = fig.add_subplot(gs[-1:, :])
+    axs_cc[0].set_title("Cross-correlation")
+    axs_cc[-1].set_xlabel("Shift (pixel)")
+    axs_fb[-1].set_xlabel("Y (pixel)")
+    # axs_cc[-1].set_xlim(shift_range)
+
+    # fix centroids for thermal shifts
+    if assume_thermal_shift is not None:
+        log.info(f"assuming fiber thermal shift {assume_thermal_shift:.4f}")
+        median_shift = assume_thermal_shift
+        # std_shift = 0
+        # shifts = numpy.ones_like(columns) * median_shift
+        trace_mask._data += median_shift
+    else:
+        log.info(f"measuring fiber thermal shifts @ columns: {','.join(map(str, columns))}")
+        trace_mask._slitmap[f"ypix_{camera[0]}"] = trace_mask._slitmap[f"ypix_{camera[0]}"].astype("float32")
+        for iblock in range(LVM_NBLOCKS):
+            cent_block = trace_mask.get_block(iblock=iblock)
+            width_block = trace_sigma.get_block(iblock=iblock)
+            cent_block, _, median_shift, _, _ = _fix_fiber_thermal_shifts(img, cent_block, width_block,
+                                                                          fiber_model=fiber_model,
+                                                                          trace_amp=10000,
+                                                                          columns=columns,
+                                                                          column_width=column_width,
+                                                                          shift_range=shift_range, axs=[axs_cc, axs_fb, ax_shift])
+            trace_mask.set_block(iblock=iblock, from_instance=cent_block)
+
+        save_fig(fig, product_path=out_rss, to_display=display_plots, figure_path="qa", label="fiber_thermal_shifts")
 
     if method == "optimal":
-        # check if fwhm trace is given and exists
-        if in_fwhm is None or not os.path.isfile(in_fwhm):
-            trace_fwhm.setData(data=numpy.ones(trace_mask._data.shape) * float(fwhm))
-        else:
-            trace_fwhm.loadFitsData(in_fwhm, extension_data=0)
-        
         # set up parallel run
         if parallel == "auto":
             fragments = multiprocessing.cpu_count()
@@ -2477,7 +2297,7 @@ def extract_spectra(
         if fragments > 1:
             split_img = img.split(fragments)
             split_trace = trace_mask.split(fragments)
-            split_fwhm = trace_fwhm.split(fragments)
+            split_fwhm = trace_sigma.split(fragments)
             pool = Pool()
             threads = []
             data = []
@@ -2506,12 +2326,13 @@ def extract_spectra(
             else:
                 mask = None
         else:
-            (data, error, mask) = img.extractSpecOptimal(
-                trace_mask, trace_fwhm, plot_fig=plot_fig
-            )
+            with Timer(name="extract optimal", logger=log.info):
+                (data, error, mask) = img.extractSpecOptimal(trace_mask, trace_sigma, plot_fig=display_plots)
     elif method == "aperture":
+        trace_sigma = None
+
         (data, error, mask) = img.extractSpecAperture(trace_mask, aperture)
-        
+
         # apply aperture correction given in in_acorr
         if in_acorr is not None and os.path.isfile(in_acorr):
             log.info(f"applying aperture correction in {os.path.basename(in_acorr)}")
@@ -2521,6 +2342,29 @@ def extract_spectra(
                 error = error * acorr._data
         else:
             log.warning("no aperture correction applied")
+            img.add_header_comment("no aperture correction applied")
+
+    # mask non-exposed standard fibers
+    slitmap = img.getSlitmap()
+    select_spec = slitmap["spectrographid"] == int(img._header["SPEC"][-1])
+    slitmap_spec = slitmap[select_spec]
+    exposed_selection = numpy.array(list(img._header["STD*ACQ"].values()))
+    # mask fibers that are not exposed
+    # TODO: use the more reliable image method get_exposed_std once is merged from addqa branch
+    if len(exposed_selection) != 0:
+        exposed_std = numpy.array(list(img._header["STD*FIB"].values()))[exposed_selection]
+        mask |= (~(numpy.isin(slitmap_spec["orig_ifulabel"], exposed_std))&((slitmap_spec["telescope"] == "Spec")))[:, None]
+
+    # mask broken fibers
+    mask |= (slitmap_spec["fibstatus"] == 1)[:, None]
+
+    # propagate thermal shift to slitmap
+    channel = camera[0]
+    slitmap[f"ypix_{channel}"] = slitmap[f"ypix_{channel}"].astype("float32")
+    slitmap[f"ypix_{channel}"][select_spec] = trace_mask._slitmap[f"ypix_{channel}"][select_spec]
+    # propagate bad fibers to slitmap
+    slitmap_spec["fibstatus"][mask.all(axis=1)] = 5
+    slitmap["fibstatus"][select_spec] = slitmap_spec["fibstatus"]
 
     if error is not None:
         error[mask] = replace_error
@@ -2529,36 +2373,40 @@ def extract_spectra(
         mask=mask,
         error=error,
         good_fibers=trace_mask._good_fibers,
+        cent_trace=trace_mask,
+        width_trace=trace_sigma,
         header=img.getHeader(),
+        slitmap=slitmap
     )
     rss.setHdrValue("NAXIS2", data.shape[0])
     rss.setHdrValue("NAXIS1", data.shape[1])
-    rss.setHdrValue("DISPAXIS", 1)
+    rss.setHdrValue("DISPAXIS", 1, "axis of spectral dispersion")
+    rss.setHdrValue(f"HIERARCH {camera.upper()} FIBER SHIFT", numpy.round(median_shift, 4), "median fiber shift [pix]")
+    rss.setHdrValue(f"HIERARCH {camera.upper()} FIBER CENT_MIN", numpy.round(bn.nanmin(trace_mask._data),4), "min. fiber centroid [pix]")
+    rss.setHdrValue(f"HIERARCH {camera.upper()} FIBER CENT_MAX", numpy.round(bn.nanmax(trace_mask._data),4), "max. fiber centroid [pix]")
+    rss.setHdrValue(f"HIERARCH {camera.upper()} FIBER CENT_AVG", numpy.round(bn.nanmean(trace_mask._data),4), "avg. fiber centroid [pix]")
+    rss.setHdrValue(f"HIERARCH {camera.upper()} FIBER CENT_STD", numpy.round(bn.nanstd(trace_mask._data),4), "stddev. fiber centroid [pix]")
     if method == "optimal":
-        rss.setHdrValue(
-            "HIERARCH PIPE CDISP FWHM MIN",
-            numpy.nanmin(trace_fwhm._data[rss._good_fibers]),
-        )
-        rss.setHdrValue(
-            "HIERARCH PIPE CDISP FWHM MAX",
-            numpy.nanmax(trace_fwhm._data[rss._good_fibers]),
-        )
-        rss.setHdrValue(
-            "HIERARCH PIPE CDISP FWHM AVG",
-            numpy.nanmean(trace_fwhm._data[rss._good_fibers]) if data.size != 0 else 0,
-        )
-        rss.setHdrValue(
-            "HIERARCH PIPE CDISP FWHM MED",
-            numpy.nanmedian(trace_fwhm._data[rss._good_fibers])
-            if data.size != 0
-            else 0,
-        )
-        rss.setHdrValue(
-            "HIERARCH PIPE CDISP FWHM SIG",
-            numpy.std(trace_fwhm._data[rss._good_fibers]) if data.size != 0 else 0,
-        )
-    # propagate slitmap
-    rss.setSlitmap(img.getSlitmap())
+        rss.setHdrValue(f"HIERARCH {camera.upper()} FIBER WIDTH_MIN", numpy.round(bn.nanmin(trace_sigma._data),4), "min. fiber width [pix]")
+        rss.setHdrValue(f"HIERARCH {camera.upper()} FIBER WIDTH_MAX", numpy.round(bn.nanmax(trace_sigma._data),4), "max. fiber width [pix]")
+        rss.setHdrValue(f"HIERARCH {camera.upper()} FIBER WIDTH_AVG", numpy.round(bn.nanmean(trace_sigma._data),4), "avg. fiber width [pix]")
+        rss.setHdrValue(f"HIERARCH {camera.upper()} FIBER WIDTH_STD", numpy.round(bn.nanstd(trace_sigma._data),4), "stddev. fiber width [pix]")
+
+    rss.add_header_comment(f"{in_trace}, fiber centroids used for {camera}")
+    rss.add_header_comment(f"{in_sigma}, fiber width (FWHM) used for {camera}")
+    rss.add_header_comment(f"{in_model}, fiber model used for {camera}")
+    rss.add_header_comment(f"{in_acorr}, fiber aperture correction used for {camera}")
+
+    # create error propagation plot
+    fig = plt.figure(figsize=(15, 5), layout="constrained")
+    gs = GridSpec(1, 14, figure=fig)
+
+    ax_1 = fig.add_subplot(gs[0, :-4])
+    ax_2 = fig.add_subplot(gs[0, -4:])
+
+    plot_error(frame=rss, axs=[ax_1, ax_2], counts_threshold=(3000, 60000), labels=True)
+    save_fig(fig, product_path=out_rss, to_display=display_plots, figure_path="qa", label="extracted_error")
+
     # save extracted RSS
     log.info(f"writing extracted spectra to {os.path.basename(out_rss)}")
     rss.writeFitsData(out_rss)
@@ -2787,52 +2635,103 @@ def reprojectRSS_drp(
     rep.writeto(f"{out_path}/{out_name}_2d.fits", overwrite=True)
 
 
-def testres_drp(image, trace, fwhm, flux):
+def _gen_mexhat_basis(x, centroids, sigmas, fiber_radius, oversampling_factor):
+    dx = x[1, 0] - x[0, 0]
+    x_os = fp.oversample(x, oversampling_factor)
+    dx_os = dx / oversampling_factor
+
+    x_kernel = numpy.arange(0, 2*fiber_radius + dx_os, dx_os)
+    kernel = fp.fiber_profile(centroids=fiber_radius, radii=fiber_radius, x=x_kernel)
+    psfs = fp.gaussians((numpy.ones_like(centroids), centroids, sigmas), x_os.T, alpha=2, collapse=False)[0].T
+
+    profiles = signal.fftconvolve(psfs, kernel.T, mode="same", axes=0)
+    profiles /= integrate.trapezoid(profiles, x_os, axis=0)[None, :]
+
+    # reshape model into oversampled bins: (x, oversampling_factor)
+    profiles_binned = profiles.reshape((x.shape[0], oversampling_factor, x.shape[1]))
+    profiles = integrate.trapezoid(profiles_binned, dx=dx_os, axis=1)
+    return profiles
+
+
+def validate_extraction(in_image, in_cent, in_width, in_rss, plot_columns=[1000, 2000, 3000], display_plots=False):
+    """Evaluates the extracted flux into the original 2D pixel grid
+
+    This routine will evaluate the extracted flux in the original
+    2D grid and compare the resulting 2D model against the original
+    2D image. Three images are stored as outputs:
+
+        - The residual 2D image: model - data
+        - The ratio 2D image: model / data
+        - The 2D model
+
+    Parameters
+    ----------
+    in_image : str
+        Path to the original 2D image of the extracted flux
+    in_cent : str
+        Path to the fiber centroids trace
+    in_width : str
+        Path to the fiber width (FWHM) trace
+    in_rss : str
+        Path to the extracted flux in RSS format
+    plot_columns : array_like, optional
+        columns to show in plot, by default [1000, 2000, 3000]
+    display_plots : bool, optional
+        whether to display plots to screen or not, by dafult False
     """
-    Historic task used for debugging of the the extraction routine...
-    """
+    log.info(f"loading 2D image {in_image}")
     img = Image()
-    # t1 = time.time()
-    img.loadFitsData(image, extension_data=0)
-    trace_mask = TraceMask()
-    trace_mask.loadFitsData(trace, extension_data=0)
-    trace_fwhm = TraceMask()
-    #   trace_fwhm.setData(data=numpy.ones(trace_mask._data.shape)*2.5)
-    trace_fwhm.loadFitsData(fwhm, extension_data=0)
+    img._data = numpy.nan_to_num(img._data)
+    img.loadFitsData(in_image)
+    channel = img._header["CCD"][0]
+    specid = int(img._header["SPEC"][-1])
 
-    trace_flux = TraceMask()
-    trace_flux.loadFitsData(flux, extension_data=0)
+    log.info(f"loading fiber parameters in {in_cent} and {in_width}")
+    cent = TraceMask.from_file(in_cent)
+    width = TraceMask.from_file(in_width)
+
+    log.info(f"loading extracted flux in {in_rss}")
+    rss = RSS.from_file(in_rss)
+    rss._data = numpy.nan_to_num(rss._data)
+
+    ypix_cor = rss._slitmap[rss._slitmap["spectrographid"] == specid][f"ypix_{channel}"]
+    ypix_ori = img._slitmap[img._slitmap["spectrographid"] == specid][f"ypix_{channel}"]
+    thermal_shift = (ypix_cor.astype("float32") - ypix_ori.astype("float32")).value
+    log.info(f"mean fiber thermal shift in slitmap: {thermal_shift.mean():.4f}")
+    cent._data[:] += thermal_shift[:, None]
+
+    log.info(f"evaluating extracted flux into 2D pixel grid for {img._dim[1]} columns")
     x = numpy.arange(img._dim[0])
-    out = numpy.zeros(img._dim)
-    fact = numpy.sqrt(2.0 * numpy.pi)
-    for i in range(img._dim[1]):
-        #  print i
-        A = (
-            1.0
-            * numpy.exp(
-                -0.5
-                * (
-                    (x[:, numpy.newaxis] - trace_mask._data[:, i][numpy.newaxis, :])
-                    / abs(trace_fwhm._data[:, i][numpy.newaxis, :] / 2.354)
-                )
-                ** 2
-            )
-            / (fact * abs(trace_fwhm._data[:, i][numpy.newaxis, :] / 2.354))
-        )
-        spec = numpy.dot(A, trace_flux._data[:, i])
-        out[:, i] = spec
-        if i == 1000:
-            plt.plot(spec, "-r")
-            plt.plot(img._data[:, i], "ok")
-            plt.show()
+    x = numpy.repeat(x, cent._data.shape[0]).reshape(-1, cent._data.shape[0])
+    out = numpy.zeros(img._dim) + numpy.nan
 
-    hdu = pyfits.PrimaryHDU(img._data - out)
-    hdu.writeto("res.fits", overwrite=True)
-    hdu = pyfits.PrimaryHDU(out)
-    hdu.writeto("fit.fits", overwrite=True)
+    npixels = 15
+    fiber_radius = 1.4
+    profile_cache = FiberProfileCache(fiber_radius, 100, npixels)
 
-    hdu = pyfits.PrimaryHDU((img._data - out) / img._data)
-    hdu.writeto("res_rel.fits", overwrite=True)
+    for i in tqdm(plot_columns, unit="column", ascii=True):
+        A = profile_cache(cent._data[:, i], width._data[:, i])
+
+        xx = numpy.repeat(numpy.arange(rss._fibers, dtype="int"), 2*npixels+1)
+        # pixel ranges of fiber images
+        pos_t = numpy.trunc(cent._data[:, i])
+        yyv = numpy.linspace(pos_t-npixels, pos_t+npixels, 2*npixels+1, endpoint=True)
+
+        yyv = yyv.T.ravel()
+        A = A.T.ravel()
+        B = sparse.csc_matrix((A, (yyv, xx)), shape=(len(img._data), rss._fibers))
+
+        out[:, i] = B @ rss._data[:, i]
+
+    model = copy(img)
+    model._data = out
+    model._error = None
+    model._mask = None
+
+    ratio = model / img
+
+    return model, ratio, img
+
 
 # TODO: for arcs take short exposures for bright lines & long exposures for faint lines
 # TODO: Argon: 10s + 300s
@@ -2855,6 +2754,7 @@ def preproc_raw_frame(
     rdnoise_prefix: str = "RDNOISE",
     subtract_overscan: bool = True,
     overscan_stat: str = "biweight",
+    overscan_threshold: float = 3.0,
     overscan_model: str = "spline",
     replace_with_nan: bool = True,
     display_plots: bool = False,
@@ -2898,6 +2798,8 @@ def preproc_raw_frame(
         whether to subtract the overscan for each quadrant or not, by default True
     overscan_stat : str, optional
         statistics to use when coadding pixels along the X axis, by default "biweight"
+    overscan_threshold : float, optional
+        number of standard deviations to reject pixels in overscan, by default 3.0
     overscan_model : str, optional
         model used to fit the overscan profile of each quadrant, by default "spline"
     replace_with_nan : bool, optional
@@ -2908,20 +2810,23 @@ def preproc_raw_frame(
     # load image
     log.info(f"starting preprocessing of raw image '{os.path.basename(in_image)}'")
     org_img = loadImage(in_image)
-    org_header = org_img.getHeader()
 
     # fix the header with header fix file
     # convert real MJD to SJD
     try:
-        sjd = int(dateobs_to_sjd(org_header.get("OBSTIME")))
+        sjd = int(dateobs_to_sjd(org_img._header.get("OBSTIME")))
         sjd = correct_sjd(in_image, sjd)
-        org_header = apply_hdrfix(sjd, hdr=org_header) or org_header
+        org_img._header = apply_hdrfix(sjd, hdr=org_img._header) or org_img._header
     except ValueError as e:
         log.error(f"cannot apply header fix: {e}")
+
+    org_header = org_img.getHeader()
+    camera = org_header["CCD"]
 
     # assume imagetyp or not
     if assume_imagetyp:
         log.warning(f"assuming IMAGETYP = '{assume_imagetyp}'")
+        org_img.add_header_comment(f"assuming IMAGETYP = '{assume_imagetyp}'")
         org_header["IMAGETYP"] = assume_imagetyp
     elif "IMAGETYP" not in org_header:
         log.error(
@@ -2938,24 +2843,26 @@ def preproc_raw_frame(
     # extract TRIMSEC or assume default value
     if assume_trimsec:
         log.info(f"using given TRIMSEC = {assume_trimsec}")
-        sc_sec = [sec for sec in assume_trimsec]
+        sc_sections = [sec for sec in assume_trimsec]
     elif not org_header["TRIMSEC?"]:
         log.warning(f"assuming TRIMSEC = {DEFAULT_TRIMSEC}")
-        sc_sec = DEFAULT_TRIMSEC
+        org_img.add_header_comment(f"assuming default TRIMSEC = {DEFAULT_TRIMSEC}")
+        sc_sections = DEFAULT_TRIMSEC
     else:
-        sc_sec = list(org_header["TRIMSEC?"].values())
-        log.info(f"using header TRIMSEC = {sc_sec}")
+        sc_sections = list(org_header["TRIMSEC?"].values())
+        log.info(f"using header TRIMSEC = {sc_sections}")
 
     # extract BIASSEC or assume default value
     if assume_biassec:
         log.info(f"using given BIASSEC = {assume_biassec}")
-        os_sec = [sec for sec in assume_biassec]
+        os_sections = [sec for sec in assume_biassec]
     elif not org_header["BIASSEC?"]:
         log.warning(f"assuming BIASSEC = {DEFAULT_BIASSEC}")
-        os_sec = DEFAULT_BIASSEC
+        org_img.add_header_comment(f"assuming default BIASSEC = {DEFAULT_BIASSEC}")
+        os_sections = DEFAULT_BIASSEC
     else:
-        os_sec = list(org_header["BIASSEC?"].values())
-        log.info(f"using header BIASSEC = {os_sec}")
+        os_sections = list(org_header["BIASSEC?"].values())
+        log.info(f"using header BIASSEC = {os_sections}")
 
     # extract gain
     gain = numpy.ones(NQUADS)
@@ -2964,8 +2871,38 @@ def preproc_raw_frame(
         gain = numpy.asarray(assume_gain)
     elif not org_header[f"{gain_prefix}?"]:
         log.warning(f"assuming GAIN = {gain.tolist()} (e-/ADU)")
+        org_img.add_header_comment(f"assuming default GAINs = {gain.tolist()}")
     else:
-        gain = numpy.asarray(list(org_header[f"{gain_prefix}?"].values()))
+        # gain = numpy.asarray(DEFAULT_GAIN[org_header["CCD"]])
+        gain = numpy.asarray([org_header[f"{gain_prefix}{iquad+1}"] for iquad in range(NQUADS)])
+
+        if camera == "b1":
+            gain[1] *= 1.036
+        if camera == "b2":
+            gain[1] *= 1.013
+            gain[2] *= 1.011
+        if camera == "b3":
+            gain[1] *= 1.029
+            gain[2] *= 1.012
+        if camera == "r1":
+            gain[1] *= 1.011
+            gain[2] *= 1.027
+        if camera == "r2":
+            gain[1] *= 1.025
+            gain[2] *= 1.017
+        if camera == "r3":
+            gain[1] *= 1.010
+            gain[2] *= 1.020
+        if camera == "z1":
+            gain[1] *= 1.093
+            gain[3] *= 1.063
+        if camera == "z2":
+            gain[0] *= 1.043
+            gain[2] *= 1.089
+        if camera == "z3":
+            gain[3] /= 1.056
+        gain = numpy.round(gain, 2)
+
         log.info(f"using header GAIN = {gain.tolist()} (e-/ADU)")
 
     # initialize overscan stats, quadrants lists and, gains and rnoise
@@ -2973,53 +2910,42 @@ def preproc_raw_frame(
     sc_quads, os_quads = [], []
     os_profiles, os_models = [], []
     # process each quadrant
-    for i, (sc_xy, os_xy) in enumerate(zip(sc_sec, os_sec)):
+    for i, (sc_xy, os_xy) in enumerate(zip(sc_sections, os_sections)):
         # get overscan and science quadrant & convert to electron
         sc_quad = org_img.getSection(section=sc_xy)
         os_quad = org_img.getSection(section=os_xy)
-        # compute overscan stats
-        os_bias_med[i] = numpy.nanmedian(os_quad._data, axis=None)
-        os_bias_std[i] = numpy.nanmedian(numpy.std(os_quad._data, axis=1), axis=None)
-        log.info(
-            f"median and standard deviation in OS quadrant {i+1}: "
-            f"{os_bias_med[i]:.2f} +/- {os_bias_std[i]:.2f} (ADU)"
-        )
         # subtract overscan bias from image if requested
         if subtract_overscan:
-            if overscan_stat == "biweight":
-                os_stat = biweight_location
-            elif overscan_stat == "median":
-                os_stat = numpy.nanmedian
-            else:
-                log.warning(
-                    f"overscan statistic '{overscan_stat}' not implemented, "
-                    "falling back to 'biweight'"
-                )
-                os_stat = biweight_location
-
             if overscan_model not in ["const", "poly", "spline"]:
-                log.warning(
-                    f"overscan model '{overscan_model}' not implemented, "
-                    "falling back to 'spline'"
-                )
+                log.warning(f"overscan model '{overscan_model}' not implemented, using 'spline'")
+                org_img.add_header_comment(f"overscan model '{overscan_model}' not implemented, using 'spline'")
                 overscan_model = "spline"
-            if overscan_model == "const":
-                os_profile, os_model = _model_overscan(
-                    os_quad, axis=1, stat=os_stat, model="const"
-                )
             if overscan_model == "spline":
-                os_profile, os_model = _model_overscan(
-                    os_quad, axis=1, stat=os_stat, nknots=300
-                )
+                os_kwargs = {"nknots": 300}
             elif overscan_model == "poly":
-                os_profile, os_model = _model_overscan(
-                    os_quad, axis=1, stat=os_stat, model="poly", deg=9
-                )
+                os_kwargs = {"deg": 9}
+            else:
+                os_kwargs = {}
+
+            os_data, os_profile, os_model = _model_overscan(os_quad, axis=1, overscan_stat=overscan_stat, threshold=overscan_threshold, **os_kwargs)
+            os_quad._data = os_data
+
+            if numpy.isnan(os_data).any():
+                os_nmask = numpy.isnan(os_data).sum()
+                log.info(f"masked {os_nmask} ({os_nmask/os_data.size*100:.2f}%) pixels in overscan above {overscan_threshold} standard deviations")
 
             sc_quad = sc_quad - os_model
 
             os_profiles.append(os_profile)
             os_models.append(os_model)
+
+        # compute overscan stats
+        os_bias_med[i] = numpy.round(bn.nanmedian(os_quad._data, axis=None), 2)
+        os_bias_std[i] = numpy.round(bn.nanmedian(bn.nanstd(os_quad._data, axis=1), axis=None), 2)
+        log.info(
+            f"median and standard deviation in OS quadrant {i+1}: "
+            f"{os_bias_med[i]:.2f} +/- {os_bias_std[i]:.2f} (ADU)"
+        )
 
         sc_quads.append(sc_quad)
         os_quads.append(os_quad)
@@ -3027,12 +2953,14 @@ def preproc_raw_frame(
     # extract rdnoise
     rdnoise = os_bias_std * gain
     if assume_rdnoise:
-        log.info(f"using given RDNOISE = {assume_rdnoise} (ADU)")
+        log.info(f"using given RDNOISE = {assume_rdnoise} (e-)")
         rdnoise = numpy.asarray(assume_rdnoise)
     elif not org_header[f"{rdnoise_prefix}?"]:
-        log.warning(f"assuming RDNOISE = {rdnoise.tolist()} (ADU)")
+        log.warning(f"assuming RDNOISE = {rdnoise.tolist()} (e-)")
+        org_img.add_header_comment(f"assuming RDNOISE = {rdnoise.tolist()} (e-)")
     else:
-        rdnoise = numpy.asarray(list(org_header[f"{rdnoise_prefix}?"].values()))
+        rdnoise = numpy.asarray([org_header[f"{rdnoise_prefix}{iquad+1}"] for iquad in range(NQUADS)])
+
         log.info(f"using header RDNOISE = {rdnoise.tolist()} (e-)")
 
     # join images
@@ -3050,6 +2978,11 @@ def preproc_raw_frame(
     if ccd.startswith("z") or ccd.startswith("b"):
         log.info("flipping along X-axis")
         proc_img.orientImage("X")
+        # NOTE: need to flip per quadrant quantities 1 <--> 2, 3 <--> 4
+        gain2, gain1, gain4, gain3 = gain
+        gain = [gain1, gain2, gain3, gain4]
+        rdnoise2, rdnoise1, rdnoise4, rdnoise3 = rdnoise
+        rdnoise = [rdnoise1, rdnoise2, rdnoise3, rdnoise4]
 
     # update header
     log.info("updating header with per quadrant stats")
@@ -3057,44 +2990,42 @@ def preproc_raw_frame(
     for i in range(NQUADS):
         ysize, xsize = sc_quads[i]._dim
         x, y = int(QUAD_POSITIONS[i][0]), int(QUAD_POSITIONS[i][1])
-        # flip y-axis
-        y = 1 if y == 0 else 0
         proc_img.setHdrValue(
-            f"HIERARCH AMP{i+1} TRIMSEC",
+            f"HIERARCH {camera.upper()} AMP{i+1} TRIMSEC",
             f"[{x*xsize+1}:{xsize*(x+1)}, {y*ysize+1}:{ysize*(y+1)}]",
-            f"Region of amp. {i+1}",
+            f"region of amp. {i+1}",
         )
     # add gain keywords for the different subimages (CCDs/Amplifiers)
     for i in range(NQUADS):
         proc_img.setHdrValue(
-            f"HIERARCH AMP{i+1} {gain_prefix}",
+            f"HIERARCH {camera.upper()} AMP{i+1} {gain_prefix}",
             gain[i],
-            f"Gain value of amp. {i+1} [electron/adu]",
+            f"gain value of amp. {i+1} [electron/adu]",
         )
     # add read-out noise keywords for the different subimages (CCDs/Amplifiers)
     for i in range(NQUADS):
         proc_img.setHdrValue(
-            f"HIERARCH AMP{i+1} {rdnoise_prefix}",
+            f"HIERARCH {camera.upper()} AMP{i+1} {rdnoise_prefix}",
             rdnoise[i],
-            f"Read-out noise of amp. {i+1} [electron]",
+            f"read-out noise of amp. {i+1} [electron]",
         )
     # add bias of overscan region for the different subimages (CCDs/Amplifiers)
     for i in range(NQUADS):
         proc_img.setHdrValue(
-            f"HIERARCH AMP{i+1} OVERSCAN",
+            f"HIERARCH {camera.upper()} AMP{i+1} OVERSCAN_MED",
             os_bias_med[i],
-            f"Overscan median of amp. {i+1} [adu]",
+            f"overscan median of amp. {i+1} [adu]",
         )
     # add bias std of overscan region for the different subimages (CCDs/Amplifiers)
     for i in range(NQUADS):
         proc_img.setHdrValue(
-            f"HIERARCH AMP{i+1} OVERSCAN_STD",
+            f"HIERARCH {camera.upper()} AMP{i+1} OVERSCAN_STD",
             os_bias_std[i],
-            f"Overscan std of amp. {i+1} [adu]",
+            f"overscan std of amp. {i+1} [adu]",
         )
 
     # load master pixel mask
-    if in_mask and proc_img._header["IMAGETYP"] not in {"bias", "dark", "pixelflat"}:
+    if in_mask and proc_img._header["IMAGETYP"] not in {"bias", "dark", "pixflat"}:
         log.info(f"loading master pixel mask from {os.path.basename(in_mask)}")
         master_mask = loadImage(in_mask)._mask.astype(bool)
     else:
@@ -3106,6 +3037,10 @@ def preproc_raw_frame(
     # convert temp image to ADU for saturated pixel masking
     saturated_mask = proc_img._data >= 2**16
     proc_img._mask |= saturated_mask
+
+    # NOTE: this is a patch to mask first/last 3 columns as they don't have any useful data
+    proc_img._mask[:, :3] |= True
+    proc_img._mask[:, -3:] |= True
 
     # log number of masked pixels
     nmasked = proc_img._mask.sum()
@@ -3121,6 +3056,13 @@ def preproc_raw_frame(
     if saturated_mask.sum() / proc_img._mask.size > 0.01:
         drpqual += "SATURATED"
     proc_img.setHdrValue("DRPQUAL", value=drpqual.value, comment="data reduction quality flag")
+
+    # set drp tag version
+    proc_img.setHdrValue("DRPVER", DRPVER, comment='data reduction pipeline software tag')
+    # set drp commit SHA
+    proc_img.setHdrValue("COMMIT", DRP_COMMIT, comment="data reduction pipeline commit HASH")
+    # add calibrations used to header
+    proc_img.add_header_comment(f"{in_mask}, pixel mask used for {camera}")
 
     # write out FITS file
     log.info(f"writing preprocessed image to {os.path.basename(out_image)}")
@@ -3144,11 +3086,11 @@ def preproc_raw_frame(
             axis=0,
             nstrip=1,
             ax=axs[i],
-            mu_stat=numpy.nanmedian,
-            sg_stat=lambda x, axis: numpy.nanmedian(numpy.std(x, axis=axis)),
+            mu_stat=bn.nanmedian,
+            sg_stat=lambda x, axis: bn.nanmedian(numpy.std(x, axis=axis)),
             labels=True,
         )
-        os_x, os_y = _parse_ccd_section(list(os_sec)[0])
+        os_x, os_y = _parse_ccd_section(list(os_sections)[0])
         axs[i].axvline(os_x[1] - os_x[0], ls="--", color="0.5", lw=1)
         axs[i].set_title(f"overscan for quadrants {['12','34'][i]}", loc="left")
     save_fig(
@@ -3179,11 +3121,12 @@ def preproc_raw_frame(
             axis=1,
             nstrip=1,
             ax=axs[i],
-            mu_stat=numpy.nanmedian,
-            sg_stat=lambda x, axis: numpy.nanmedian(numpy.std(x, axis=axis)),
+            mu_stat=bn.nanmedian,
+            sg_stat=lambda x, axis: bn.nanmedian(numpy.std(x, axis=axis)),
+            show_individuals=True,
             labels=True,
         )
-        os_x, os_y = _parse_ccd_section(list(os_sec)[0])
+        os_x, os_y = _parse_ccd_section(list(os_sections)[0])
         axs[i].axvline(os_y[1] - os_y[0], ls="--", color="0.5", lw=1)
         axs[i].set_title(f"overscan for quadrants {['13','24'][i]}", loc="left")
     save_fig(
@@ -3207,8 +3150,8 @@ def preproc_raw_frame(
             axis=1,
             nstrip=1,
             ax=axs[i],
-            mu_stat=numpy.nanmedian,
-            sg_stat=lambda x, axis: numpy.nanmedian(numpy.std(x, axis=axis)),
+            mu_stat=bn.nanmedian,
+            sg_stat=lambda x, axis: bn.nanmedian(numpy.std(x, axis=axis)),
             labels=True,
         )
         axs[i].step(
@@ -3216,7 +3159,7 @@ def preproc_raw_frame(
         )
         axs[i].step(numpy.arange(os_profiles[i].size), os_models[i], color="k", lw=1)
         axs[i].axhline(
-            numpy.nanmedian(os_quad._data.flatten()) + rdnoise[i],
+            bn.nanmedian(os_quad._data.flatten()) + rdnoise[i],
             ls="--",
             color="tab:purple",
             lw=1,
@@ -3248,6 +3191,7 @@ def detrend_frame(
     calculate_error: bool = True,
     replace_with_nan: bool = True,
     reject_cr: bool = True,
+    increase_radius: int = 1,
     median_box: list = [0, 0],
     display_plots: bool = False,
 ):
@@ -3275,6 +3219,8 @@ def detrend_frame(
         whether to replace or not NaN values by zeros, by default True
     reject_cr : bool, optional
         whether to reject or not cosmic rays from detrended image, by default True
+    increase_radius : int, optional
+        Number of pixels by which the mask will be growth through a convolution with box kernel of side 2*increase_radius+1, by default 1
     median_box : tuple, optional
         size of the median box to refine pixel mask, by default [0,0]
     display_plots : str, optional
@@ -3286,12 +3232,13 @@ def detrend_frame(
     # TODO: Confirm that dark is not being flat fielded in current logic
     # TODO: What is the difference between "flat" and "flatfield"? Pixel flats should not be pixel flatted but regular flats (dome and twilight) yes.
     org_img = loadImage(in_image)
+    camera = org_img._header["CCD"]
     exptime = org_img._header["EXPTIME"]
     img_type = org_img._header["IMAGETYP"].lower()
     log.info(
         "target frame parameters: "
         f"MJD = {org_img._header['MJD']}, "
-        f"exptime = {org_img._header['EXPTIME']}, "
+        f"exptime = {exptime}, "
         f"camera = {org_img._header['CCD']}"
     )
 
@@ -3304,6 +3251,7 @@ def detrend_frame(
     if img_type in ["bias"] or (in_bias is None or not os.path.isfile(in_bias)):
         if in_bias and not os.path.isfile(in_bias):
             log.warning(f"master bias '{in_bias}' not found. Using dummy bias")
+            org_img.add_header_comment(f"master bias '{in_bias}' not found. Using dummy bias")
         mbias_img = Image(data=numpy.zeros_like(org_img._data))
     else:
         log.info(f"using bias calibration frame '{os.path.basename(in_bias)}'")
@@ -3313,17 +3261,20 @@ def detrend_frame(
     if img_type in ["bias", "dark"] or (in_dark is None or not os.path.isfile(in_dark)):
         if in_dark and not os.path.isfile(in_dark):
             log.warning(f"master dark '{in_dark}' not found. Using dummy dark")
+            org_img.add_header_comment(f"master dark '{in_dark}' not found. Using dummy dark")
         mdark_img = Image(data=numpy.zeros_like(org_img._data))
     else:
         log.info(f"using dark calibration frame '{os.path.basename(in_dark)}'")
         mdark_img = loadImage(in_dark)
+        mdark_img = mdark_img / mdark_img._header["EXPTIME"] * exptime
 
     # read master flat
-    if img_type in ["bias", "dark", "pixelflat"] or (
+    if img_type in ["bias", "dark", "pixflat"] or (
         in_pixelflat is None or not os.path.isfile(in_pixelflat)
     ):
         if in_pixelflat and not os.path.isfile(in_pixelflat):
             log.warning(f"master flat '{in_pixelflat}' not found. Using dummy flat")
+            org_img.add_header_comment(f"master flat '{in_pixelflat}' not found. Using dummy flat")
         mflat_img = Image(data=numpy.ones_like(org_img._data))
     else:
         log.info(
@@ -3349,13 +3300,13 @@ def detrend_frame(
     if convert_to_e:
         # calculate Poisson errors
         log.info("applying gain correction per quadrant")
-        for i, quad_sec in enumerate(bcorr_img.getHdrValue("AMP? TRIMSEC").values()):
-            log.info(f"processing quadrant {i+1}")
+        for i, quad_sec in enumerate(bcorr_img.getHdrValue(f"{camera.upper()} AMP? TRIMSEC").values()):
+            log.info(f"processing quadrant {i+1}: {quad_sec}")
             # extract quadrant image
             quad = bcorr_img.getSection(quad_sec)
             # extract quadrant gain and rdnoise values
-            gain = quad.getHdrValue(f"AMP{i+1} GAIN")
-            rdnoise = quad.getHdrValue(f"AMP{i+1} RDNOISE")
+            gain = quad.getHdrValue(f"{camera.upper()} AMP{i+1} GAIN")
+            rdnoise = quad.getHdrValue(f"{camera.upper()} AMP{i+1} RDNOISE")
 
             # non-linearity correction
             gain_map = _nonlinearity_correction(ptc_params, gain, quad, iquad=i+1)
@@ -3366,20 +3317,23 @@ def detrend_frame(
 
             quad.computePoissonError(rdnoise)
             bcorr_img.setSection(section=quad_sec, subimg=quad, inplace=True)
-            log.info(f"median error in quadrant {i+1}: {numpy.nanmedian(quad._error):.2f} (e-)")
+            log.info(f"median error in quadrant {i+1}: {bn.nanmedian(quad._error):.2f} (e-)")
 
-        bcorr_img.setHdrValue("BUNIT", "electron", "physical units of the image")
+        bcorr_img.setHdrValue("BUNIT", "electron", "physical units of the array values")
     else:
         # convert to ADU
         log.info("leaving original ADU units")
-        bcorr_img.setHdrValue("BUNIT", "adu", "physical units of the image")
+        bcorr_img.setHdrValue("BUNIT", "adu", "physical units of the array values")
 
     # complete image detrending
     if in_dark:
         log.info("subtracting master dark")
     elif in_dark and in_pixelflat:
         log.info("subtracting master dark and dividing by master pixelflat")
-    detrended_img = (bcorr_img - mdark_img.convertUnit(to=bcorr_img._header["BUNIT"])) / mflat_img
+
+    detrended_img = (bcorr_img - mdark_img.convertUnit(to=bcorr_img._header["BUNIT"]))
+    # NOTE: this is a hack to avoid the error propagation of the division in Image
+    detrended_img._data = detrended_img._data / numpy.nan_to_num(mflat_img._data, nan=1.0)
 
     # propagate pixel mask
     log.info("propagating pixel mask")
@@ -3389,54 +3343,21 @@ def detrend_frame(
     detrended_img._mask = numpy.logical_or(detrended_img._mask, infpixels)
 
     # reject cosmic rays
-    if convert_to_e and reject_cr:
+    if reject_cr:
         log.info("rejecting cosmic rays")
-        ccd = CCDData(
-            detrended_img._data,
-            uncertainty=StdDevUncertainty(detrended_img._error),
-            unit=u.electron,
-            mask=detrended_img._mask,
-        )
-        array = copy(detrended_img._data)
-        array[detrended_img._mask] = numpy.nan
-        clean_ccd = cosmicray_lacosmic(
-            ccd, sigclip=30.0, objlim=numpy.nanpercentile(array, q=99.9)
-        )
-        cr_mask = clean_ccd.mask
-        cr_mask[detrended_img._mask] = False
-
-        ncosmic = cr_mask.sum()
-        if ncosmic > 100000:
-            log.error(f"found cosmic ray {ncosmic} pixels, ignoring CR")
-            cr_mask[:, :] = False
-        elif ncosmic > 1000:
-            log.warning(f"found cosmic ray {ncosmic} pixels")
-        else:
-            log.info(f"found cosmic ray {ncosmic} pixels")
-        clean_img = Image(data=clean_ccd.data, mask=cr_mask)
-        # update image with cosmic ray mask
-        detrended_img.setData(mask=(detrended_img._mask | clean_img._mask))
-    else:
-        cr_mask = numpy.zeros(detrended_img._dim, dtype=bool)
-        clean_img = Image(
-            data=numpy.ones(detrended_img._dim) * numpy.nan,
-            mask=numpy.zeros(detrended_img._dim),
-        )
+        rdnoise = detrended_img.getHdrValue(f"{camera.upper()} AMP1 RDNOISE")
+        detrended_img.reject_cosmics(gain=1.0, rdnoise=rdnoise, rlim=1.3, iterations=5, fwhm_gauss=[2.75, 2.75],
+                                     replace_box=[10,2], replace_error=1e6,
+                                     increase_radius=increase_radius, verbose=True, inplace=True)
 
     # replace masked pixels with NaNs
     if replace_with_nan:
         log.info(f"replacing {detrended_img._mask.sum()} masked pixels with NaNs")
         detrended_img.apply_pixelmask()
 
-    # refine mask
-    if all(median_box):
-        log.info(f"refining pixel mask with {median_box = }")
-        med_img = detrended_img.medianImg(size=median_box, use_mask=True)
-        detrended_img.setData(mask=(detrended_img._mask | med_img._mask), inplace=True)
-
     # normalize in case of pixel flat calibration
-    # 'pixelflat' is the imagetyp that a pixel flat can have
-    if img_type == "pixelflat":
+    # 'pixflat' is the imagetyp that a pixel flat can have
+    if img_type == "pixflat":
         flat_array = numpy.ma.masked_array(
             detrended_img._data, mask=detrended_img._mask
         )
@@ -3448,6 +3369,13 @@ def detrend_frame(
         detrended_img.setSlitmap(in_slitmap)
     else:
         log.warning("no slitmap information to be added")
+        detrended_img.add_header_comment("no slitmap information to be added")
+
+    # add calibrations used to header
+    detrended_img.add_header_comment(f"{in_bias}, bias used for {camera}")
+    detrended_img.add_header_comment(f"{in_dark}, dark used for {camera}")
+    detrended_img.add_header_comment(f"{in_pixelflat}, pixel flat used for {camera}")
+    detrended_img.add_header_comment(f"{in_nonlinearity}, non-linearity correction used for {camera}")
 
     # save detrended image
     log.info(f"writing detrended image to '{os.path.basename(out_image)}'")
@@ -3456,16 +3384,22 @@ def detrend_frame(
     # show plots
     log.info("plotting results")
     # detrending process
-    fig, axs = create_subplots(
-        to_display=display_plots,
-        nrows=2,
-        ncols=2,
-        figsize=(15, 15),
-        sharex=True,
-        sharey=True,
-    )
-    plt.subplots_adjust(wspace=0.15, hspace=0.1)
-    plot_detrend(ori_image=org_img, det_image=detrended_img, axs=axs, mbias=mbias_img, mdark=mdark_img, labels=True)
+    fig = plt.figure(figsize=(15, 10), layout="constrained")
+    gs = GridSpec(3, 14, figure=fig)
+
+    ax1 = fig.add_subplot(gs[0, :7])
+    ax2 = fig.add_subplot(gs[0, 7:], sharex=ax1, sharey=ax1)
+    ax3 = fig.add_subplot(gs[1, :7], sharex=ax1, sharey=ax1)
+    ax4 = fig.add_subplot(gs[1, 7:], sharex=ax1, sharey=ax1)
+    ax1.tick_params(labelbottom=False)
+    ax2.tick_params(labelbottom=False)
+    ax2.tick_params(labelleft=False)
+    ax4.tick_params(labelleft=False)
+    ax_1 = fig.add_subplot(gs[2, :-4])
+    ax_2 = fig.add_subplot(gs[2, -4:], sharey=ax_1)
+    plot_detrend(ori_image=org_img, det_image=detrended_img, axs=[ax1, ax2, ax3, ax4], mbias=mbias_img, mdark=mdark_img, labels=True)
+    # Poisson error
+    plot_error(frame=detrended_img, axs=[ax_1, ax_2], labels=True)
     save_fig(
         fig,
         product_path=out_image,
@@ -3479,7 +3413,6 @@ def detrend_frame(
         mbias_img,
         mdark_img,
         mflat_img,
-        cr_mask,
         detrended_img,
     )
 
@@ -3527,7 +3460,7 @@ def create_master_frame(in_images: List[str], out_image: str, batch_size: int = 
         log.info(f"selecting {batch_size} random images")
         in_images = numpy.random.choice(in_images, batch_size, replace=False)
     nexp = len(in_images)
-    
+
     # load images
     org_imgs, imagetyps = [], []
     for in_image in in_images:
@@ -3544,16 +3477,17 @@ def create_master_frame(in_images: List[str], out_image: str, batch_size: int = 
     # combine images
     log.info(f"combining {nexp} frames into master frame")
     if master_type == "bias":
-        master_img = combineImages(org_imgs, method="median", normalize=False)
+        master_img = combineImages(org_imgs, method="median", normalize=True, normalize_percentile=50)
     elif master_type == "dark":
         master_img = combineImages(org_imgs, method="median", normalize=False)
-    elif master_type == "pixelflat":
+    elif master_type == "pixflat":
         master_img = combineImages(
-            [img / numpy.nanmedian(img._data) for img in org_imgs],
+            [img / bn.nanmedian(img._data) for img in org_imgs],
             method="median",
             normalize=True,
             normalize_percentile=75,
         )
+        master_img = master_img / master_img.medianImg(size=21, propagate_error=True)
     elif master_type == "arc":
         master_img = combineImages(
             org_imgs, method="median", normalize=True, normalize_percentile=99
@@ -3563,7 +3497,7 @@ def create_master_frame(in_images: List[str], out_image: str, batch_size: int = 
             org_imgs, method="median", normalize=True, normalize_percentile=75
         )
 
-    # write output master 
+    # write output master
     log.info(f"writing master frame to '{os.path.basename(out_image)}'")
     if master_mjd is not None:
         master_img._header["MJD"] = master_mjd
@@ -3770,9 +3704,10 @@ def create_pixelmask(in_short_dark, in_long_dark, out_pixmask, in_flat_a=None, i
 
     # define ratio of darks
     ratio_dark = short_dark / long_dark
-    
+
     # define quadrant sections
-    sections = short_dark.getHdrValue("AMP? TRIMSEC")
+    camera = short_dark.getHdrValue("CCD")
+    sections = short_dark.getHdrValue(f"{camera.upper()} AMP? TRIMSEC")
 
     # define pixelmask image
     pixmask = Image(data=numpy.zeros_like(short_dark._data), mask=numpy.zeros_like(short_dark._data, dtype="bool"))
@@ -3785,7 +3720,7 @@ def create_pixelmask(in_short_dark, in_long_dark, out_pixmask, in_flat_a=None, i
     fig_rat, axs_rat = create_subplots(to_display=display_plots, nrows=2, ncols=2, figsize=(15, 10), sharex=True, sharey=True)
     plt.subplots_adjust(hspace=0.1, wspace=0.1)
     fig_rat.suptitle(os.path.basename(out_pixmask))
-    
+
     log.info(f"creating pixel mask using dark current threshold = {dc_low} {unit}")
     for iquad, section in enumerate(sections.values()):
         log.info(f"processing quadrant = {section}")
@@ -3858,8 +3793,8 @@ def create_pixelmask(in_short_dark, in_long_dark, out_pixmask, in_flat_a=None, i
         fig, ax = create_subplots(to_display=display_plots, figsize=(10,5))
         fig.suptitle(os.path.basename(out_pixmask))
         ax.axvspan(flat_low, flat_high, color="0.7", alpha=0.3)
-        ax.hist(flat_a._data.flatten(), bins=1000, color="tab:blue", alpha=0.5, label=f"flat A ({os.path.basename(in_flat_a)})")
-        ax.hist(flat_b._data.flatten(), bins=1000, color="tab:red", alpha=0.5, label=f"flat B ({os.path.basename(in_flat_b)})")
+        ax.hist(flat_a._data.ravel(), bins=1000, color="tab:blue", alpha=0.5, label=f"flat A ({os.path.basename(in_flat_a)})")
+        ax.hist(flat_b._data.ravel(), bins=1000, color="tab:red", alpha=0.5, label=f"flat B ({os.path.basename(in_flat_b)})")
         ax.axvline(ratio_med, lw=1, ls="--", color="0.2")
         ax.set_xscale("log")
         ax.set_yscale("log")
@@ -3883,31 +3818,101 @@ def create_pixelmask(in_short_dark, in_long_dark, out_pixmask, in_flat_a=None, i
     # write output mask
     log.info(f"writing pixel mask to '{os.path.basename(out_pixmask)}'")
     pixmask.writeFitsData(out_pixmask)
-    
+
     return pixmask, ratio_dark, ratio_flat
 
 
-def trace_fibers(
+def guess_fibers_params(in_image: str,
+                        out_fiber_guess: str,
+                        correct_ref: bool = True,
+                        median_box: tuple = (1, 10),
+                        coadd: int = None,
+                        fwhms_guess: float = 2.5,
+                        counts_range: Tuple[float] = [0.0, numpy.inf],
+                        centroids_range: Tuple[float] = [-2.0, +2.0],
+                        fwhms_range: Tuple[float] = [2.0, 3.5],
+                        ncolumns: int | Tuple[int] = 140,
+                        poly_degs: Dict[str, int] = {"centroids": 5, "fwhms": 6},
+                        display_plots: bool = False) -> Tuple[Dict[str, TraceMask], Image]:
+
+    # load continuum image  from file
+    log.info(f"using flat image {os.path.basename(in_image)} for tracing")
+    img = loadImage(in_image)
+    img.setData(data=numpy.nan_to_num(img._data), error=numpy.nan_to_num(img._error))
+
+    # extract usefull metadata from the image
+    channel = img._header["CCD"][0]
+
+    # read slitmap extension
+    slitmap = img.getSlitmap()
+    slitmap = slitmap[slitmap["spectrographid"] == int(img._header["SPEC"][-1])]
+    # bad_fibers = slitmap["fibstatus"] == 1
+
+    # perform median filtering along the dispersion axis to clean cosmic rays
+    img = img.enhance(median_box=median_box, coadd=coadd, trust_errors=True, apply_mask=False)
+    # fix counts boundaries after coadding columns
+
+    # calculate centroids for reference column
+    if correct_ref:
+        ref_cent = img.match_reference_column(ref_column=LVM_REFERENCE_COLUMN)
+    else:
+        ref_cent = img._slitmap[f"ypix_{channel}"].data
+
+    # trace centroids in each column
+    log.info(f"going to trace fiber centroids using {ncolumns} columns")
+    counts_guess, centroids_guess, fwhms_guess = img.guess_fibers(ref_column=LVM_REFERENCE_COLUMN, ref_centroids=ref_cent, fwhms_guess=fwhms_guess,
+                                                                  counts_range=counts_range, centroids_range=centroids_range, fwhms_range=fwhms_range,
+                                                                  ncolumns=ncolumns, solver="dogbox")
+
+    # apply naive smoothing using a interpolant spline
+    log.info("interpolating counts along X")
+    counts_guess.fit_spline(smoothing=0.0, use_weights=False, min_samples_frac=0.7)
+    log.info("interpolating centroids along X")
+    centroids_guess.fit_polynomial(deg=poly_degs["centroids"], min_samples_frac=0.7)
+    log.info("interpolating FWHMs along X")
+    fwhms_guess.fit_polynomial(deg=poly_degs["fwhms"], min_samples_frac=0.7, clip=fwhms_range)
+    counts_guess._coeffs = None
+    centroids_guess._coeffs = None
+    fwhms_guess._coeffs = None
+    # counts_guess._samples_error = None
+    # centroids_guess._samples_error = None
+    # fwhms_guess._samples_error = None
+
+    counts_guess.interpolate_data(axis="Y")
+    centroids_guess.interpolate_data(axis="Y")
+    fwhms_guess.interpolate_data(axis="Y")
+
+    # convert to sigma
+    sigmas_guess = copy(fwhms_guess) / 2.354
+
+    guess_params = {
+        "counts": counts_guess,
+        "centroids": centroids_guess,
+        "fwhms": fwhms_guess,
+        "sigmas": sigmas_guess
+    }
+    for name, out_path in out_fiber_guess.items():
+        guess_params[name].writeFitsData(out_path)
+
+    return guess_params, img
+
+
+def fit_fibers_params(
     in_image: str,
-    out_trace_amp: str,
-    out_trace_cent: str,
-    out_trace_fwhm: str,
-    out_trace_cent_guess: str = None,
-    correct_ref: bool = False,
+    in_fiber_guess: dict,
+    out_fiber_pars: None | dict = None,
+    out_model: str = None,
+    out_ratio: str = None,
     median_box: tuple = (1, 10),
-    coadd: int = 5,
-    method: str = "gauss",
-    guess_fwhm: float = 3.0,
-    counts_threshold: float = 0.5,
-    max_diff: int = 1.5,
-    ncolumns: int | Tuple[int] = 18,
-    nblocks: int = 18,
-    iblocks: list = [],
-    fwhm_limits: Tuple[float] = (1.0, 3.5),
-    fit_poly: bool = False,
-    poly_deg: int | Tuple[int] = 6,
-    interpolate_missing: bool = True,
-    display_plots: bool = True
+    coadd: None | int = None,
+    ncolumns: int | Tuple[int] = 40,
+    iblocks: List = range(LVM_NBLOCKS),
+    npixels: int = 5,
+    oversampling_factor: int = 10,
+    niter: int = 2,
+    measuring_conf: Dict = None,
+    smoothing_conf: Dict = None,
+    display_plots: bool = False
 ) -> Tuple[TraceMask, TraceMask, TraceMask]:
     """Trace fibers in a given image
 
@@ -3921,11 +3926,11 @@ def trace_fibers(
     header. The reference fiber positions are corrected using a
     cross-correlation between the reference fiber profile and the observed
     fiber profile.
-    
+
     The first measurement of the fiber centroids is performed using individual
     Gaussian fittings per column in a selection of ncolumns across the X-axis.
     This first guess of the centroids is fitted with a polynomial.
-    
+
     The centroids measured and fitted in the previous step are used to fit for
     the fiber profiles in the image along each ncolumns columns in the image. A
     number of nblocks of Gaussians are fitted simultaneously along each column.
@@ -3945,14 +3950,14 @@ def trace_fibers(
     ----------
     in_image : str
         path to input image
-    out_trace_amp : str
-        path to output amplitude trace
     out_trace_cent : str
         path to output centroid trace
+    out_trace_amp : str
+        path to output amplitude trace
     out_trace_fwhm : str
         path to output FWHM trace
-    out_trace_cent_guess : str, optional
-        path to output centroid guess trace, by default None
+    in_trace_cent_guess : str
+        path to input centroid guess trace
     correct_ref : bool, optional
         whether to correct reference fiber positions, by default False
     median_box : tuple, optional
@@ -3981,6 +3986,10 @@ def trace_fibers(
         degree of polynomial(s) to use when fitting amplitude, centroid and FWHM, by default 6
     intrpolate_missing : bool, optional
         whether to interpolate bad/missing fibers, by default True
+    only_centroids : bool, optional
+        whether to only trace centroids, by default False
+    use_given_centroids : bool, optional
+        whether to use given centroids, by default False
     display_plots : bool, optional
         whether to show plots on display or not, by default True
 
@@ -4000,11 +4009,190 @@ def trace_fibers(
     ValueError
         invalid number of columns
     """
+
+    if "centroids" not in in_fiber_guess:
+        raise ValueError(f"Missing fiber 'centroids' in fibers guess parameters: {in_fiber_guess.keys()}")
+
+    # define some LVM constants: profile shape and free parameters
+    PROFILE_NAME = "mexhat"
+    PROFILE = fp.PROFILES.get(PROFILE_NAME)
+    PROFILE_PARNAMES = PROFILE.PARNAMES
+    FREE_PARNAMES = ["counts", "centroids", "sigmas"]
+    # define naive guess values
+    GUESS = {"counts": 100e3, "sigmas": 0.5}
+    # define naive bounds
+    BOUNDS = {
+        "counts": {"kind": "absolute", "range": (0.0, 1e7)},
+        "centroids": {"kind": "relative", "range": (-0.5, +0.5)},
+        "sigmas": {"kind": "absolute", "range": (0.1, 1.5)}}
+
+    # load continuum image  from file
+    log.info(f"using flat image {os.path.basename(in_image)} for tracing")
+    img = loadImage(in_image)
+    camera = img._header["CCD"]
+    exposure = img._header["EXPOSURE"]
+    img.setData(data=numpy.nan_to_num(img._data), error=numpy.nan_to_num(img._error))
+    # enhance image by interpolating bad pixels with local median & coadding columns for higher SNR
+    log.info(f"interpolating bad pixels with {median_box = } pixels and coadding {coadd} columns")
+    img = img.enhance(median_box=median_box, coadd=coadd, trust_errors=True, apply_mask=True)
+
+    # get fiber guess parameters
+    columns = numpy.linspace(5, 4080, ncolumns, dtype="int")
+    fixed_traces = {}
+    for name in PROFILE_PARNAMES:
+        if os.path.isfile(in_fiber_guess.get(name, "")):
+            log.info(f"loading guess fiber '{name}' from '{os.path.basename(in_fiber_guess[name])}'")
+            fixed_traces[name] = TraceMask.from_file(in_fiber_guess[name])
+            fixed_traces[name].set_samples(columns=columns, from_data=True)
+            fixed_traces[name].set_samples_error(columns=columns, from_error=True)
+        else:
+            fixed_traces[name] = TraceMask.create_empty(data_dim=(LVM_NFIBERS,img._dim[1]), samples_columns=columns, header=img._header, slitmap=img._slitmap)
+            fixed_traces[name].fill(data=GUESS.get(name, numpy.nan), error=1.0, mask=False, samples=GUESS.get(name, numpy.nan), samples_error=1.0)
+    guess_traces = {name: fixed_traces.pop(name) for name in FREE_PARNAMES}
+    bounds = {name: BOUNDS.get(name) for name in FREE_PARNAMES}
+    smoothing_conf["counts"][1]["clip"] = bounds["counts"]["range"]
+    smoothing_conf["sigmas"][1]["clip"] = bounds["sigmas"]["range"]
+
+    fitted_traces = copy(guess_traces)
+    for iblock in iblocks:
+        fitted_traces = img.iterative_block_trace(
+                PROFILE_NAME, fitted_traces, fixed_traces, iblock, columns, bounds, measuring_conf, smoothing_conf,
+                npixels=npixels, oversampling_factor=oversampling_factor, niter=niter)
+
+    # define full set of fiber parameters
+    fiber_params = fitted_traces.copy()
+    fiber_params.update(fixed_traces)
+
+    # evaluate model image
+    log.info("evaluating model image")
+    models, ratios = [], []
+    for iblock in iblocks:
+        fig, axs = create_subplots(to_display=display_plots, nrows=5, ncols=1, figsize=(15,7), sharey=True, sharex=True, layout="constrained")
+        fig.suptitle(f"Isolated fibers in {exposure = } | {camera = } | {iblock = }", fontsize="xx-large")
+        fig.supxlabel("Delta Y (pixel)", fontsize="xx-large")
+        fig.supylabel("(model - data) / column counts", fontsize="xx-large")
+        plt.ylim(-0.07, 0.07)
+        model, _, _, _ = img.evaluate_fiber_model(traces=fiber_params, profile=PROFILE_NAME, iblock=iblock, axs=axs)
+        models.append(model)
+        ratios.append(model/img)
+        save_fig(fig, in_image, label=f"fiber_modeling_B{iblock+1}", figure_path="qa", to_display=display_plots)
+
+    model = combineImages(images=models, method="sum", normalize=False, background_subtract=False, replace_with_nan=False)
+    ratio = model / img
+
+    if out_model is not None and out_ratio is not None:
+        model.writeFitsData(out_model)
+        ratio.writeFitsData(out_ratio)
+
+    # write output traces
+    if out_fiber_pars is not None:
+        for name, out_fiber_par in out_fiber_pars.items():
+            log.info(f"writing '{name}' trace to '{out_fiber_par}'")
+            fitted_traces[name].writeFitsData(out_fiber_par)
+
+    return fitted_traces, img, model, ratio
+
+
+def trace_Voigt_fibers(
+    in_image: str,
+    out_trace_amp: str,
+    out_trace_cent: str,
+    out_trace_fwhm_G: str,
+    out_trace_fwhm_L: str,
+    out_trace_cent_guess: str = None,
+    correct_ref: bool = False,
+    median_box: tuple = (1, 10),
+    coadd: int = 5,
+    method: str = "voigt",
+    guess_fwhm_G: float = 3.0,
+    guess_fwhm_L: float = 3.0,
+    counts_threshold: float = 0.5,
+    max_diff: int = 1.5,
+    ncolumns: int | Tuple[int] = 18,
+    nblocks: int = 18,
+    iblocks: list = [],
+    fwhm_G_limits: Tuple[float] = (1.0, 3.5),
+    fwhm_L_limits: Tuple[float] = (1.0, 3.5),
+    fit_poly: bool = False,
+    poly_deg: int | Tuple[int] = 6,
+    interpolate_missing: bool = True,
+    display_plots: bool = True
+) -> Tuple[TraceMask, TraceMask, TraceMask]:
+    '''
+    Parameters
+    ----------
+    in_image : str
+        path to input image
+    out_trace_amp : str
+        path to output amplitude trace
+    out_trace_cent : str
+        path to output centroid trace
+    out_trace_fwhm_G : str
+        path to output FWHM gaussian trace
+    out_trace_fwhm_L : str
+        path to output FWHM lorentz trace
+    out_trace_cent_guess : str, optional
+        path to output centroid guess trace, by default None
+    correct_ref : bool, optional
+        whether to correct reference fiber positions, by default False
+    median_box : tuple, optional
+        median box to use for cleaning cosmic rays, by default (1, 10)
+    coadd : int, optional
+        number of pixels to coadd along dispersion axis, by default 5
+    method : str, optional
+        method to use for tracing, by default "voigt"
+    guess_fwhm_G : float, optional
+        guess FWHM gaussian of fiber profiles, by default 3.0
+    guess_fwhm_L : float, optional
+        guess FWHM lorentzian of fiber profiles, by default 3.0
+    counts_threshold : float, optional
+        threshold to use for fiber detection, by default 0.5
+    max_diff : int, optional
+        maximum difference between consecutive fiber positions, by default 1.5
+    ncolumns : int or 2-tuple, optional
+        number of columns to use for tracing, by default 18
+    nblocks : int, optional
+        number of blocks to use for tracing, by default 18
+    iblocks : list, optional
+        list of blocks to trace, by default []
+    fwhm_G_limits: tuple, optional
+        limits to use for FWHM fitting, by default (1.0, 3.5)
+    fwhm_L_limits: tuple, optional
+        limits to use for FWHM fitting, by default (1.0, 3.5)
+    fit_poly : bool, optional
+        whether to fit a polynomial to the dispersion solution, by default False (interpolate in X axis)
+    poly_deg : int or 3-tuple, optional
+        degree of polynomial(s) to use when fitting amplitude, centroid FWHM gaussian and FWHM lorentzian, by default 8
+    intrpolate_missing : bool, optional
+        whether to interpolate bad/missing fibers, by default True
+    display_plots : bool, optional
+        whether to show plots on display or not, by default True
+
+    Returns
+    -------
+    centroids : TraceMask
+        fiber centroids
+    flux : TraceMask
+        fiber flux
+    fwhm_G : TraceMask
+        fiber FWHM gaussian
+    fwhm_L : TraceMask
+        fiber FWHM lorentzian
+
+    Raises
+    ------
+    ValueError
+        invalid polynomial degree
+    ValueError
+        invalid number of columns
+    """
+    '''
+
     # parse polynomial degrees
-    if isinstance(poly_deg, (list, tuple)) and len(poly_deg) == 3:
-            deg_amp, deg_cent, deg_fwhm = poly_deg
-    elif isinstance(poly_deg, int):
-        deg_amp = deg_cent = deg_fwhm = poly_deg
+    if isinstance(poly_deg, (list, tuple)) and len(poly_deg) == 4: # si poly_def es una lista o tupla y si tiene len = 3
+            deg_amp, deg_cent, deg_fwhm_G, deg_fwhm_L = poly_deg
+    elif isinstance(poly_deg, int): # si es un entero
+        deg_amp = deg_cent = deg_fwhm_G = deg_fwhm_L= poly_deg
     else:
         raise ValueError(f"invalid polynomial degree: {poly_deg}")
 
@@ -4018,6 +4206,8 @@ def trace_fibers(
     # load continuum image  from file
     log.info(f"using flat image {os.path.basename(in_image)} for tracing")
     img = loadImage(in_image)
+    camera = img._header["CCD"]
+    exposure = img._header["EXPOSURE"]
     img.setData(data=numpy.nan_to_num(img._data), error=numpy.nan_to_num(img._error))
 
     # extract usefull metadata from the image
@@ -4050,7 +4240,7 @@ def trace_fibers(
     if correct_ref:
         pixels = numpy.arange(pixels.size)
         guess_heights = numpy.ones_like(ref_cent) * numpy.nanmax(profile._data)
-        ref_profile = _spec_from_lines(ref_cent, sigma=1.2, wavelength=pixels, heights=guess_heights)
+        ref_profile = _spec_from_lines(ref_cent, sigma=1.2, wavelength=pixels, heights=guess_heights) # independiente del modelo de ajuste
         log.info(f"correcting guess positions for column {LVM_REFERENCE_COLUMN}")
         cc, bhat, mhat = _cross_match(
             ref_spec=ref_profile,
@@ -4073,12 +4263,15 @@ def trace_fibers(
     centroids._good_fibers = good_fibers
     centroids.setHeader(img._header.copy())
     centroids._header["IMAGETYP"] = "trace_centroid"
-    # initialize flux and FWHM traces
+
+    # initialize flux and FWHMs traces
     trace_cent = copy(centroids)
     trace_amp = copy(centroids)
     trace_amp._header["IMAGETYP"] = "trace_amplitude"
-    trace_fwhm = copy(centroids)
-    trace_fwhm._header["IMAGETYP"] = "trace_fwhm"
+    trace_fwhm_G = copy(centroids)
+    trace_fwhm_G._header["IMAGETYP"] = "trace_fwhm_G"
+    trace_fwhm_L = copy(centroids)
+    trace_fwhm_L._header["IMAGETYP"] = "trace_fwhm_L"
 
     # set positions of fibers along reference column
     centroids.setSlice(LVM_REFERENCE_COLUMN, axis="y", data=ref_cent, mask=numpy.zeros_like(ref_cent, dtype="bool"))
@@ -4094,7 +4287,7 @@ def trace_fibers(
     for i, icolumn in iterator:
         # extract column profile
         img_slice = img.getSlice(icolumn, axis="y")
-        
+
         # get fiber positions along previous column
         if icolumn == LVM_REFERENCE_COLUMN:
             # trace reference column first or skip if already traced
@@ -4104,7 +4297,7 @@ def trace_fibers(
                 continue
         else:
             cent_guess, _, mask_guess = centroids.getSlice(columns[i-1], axis="y")
-        
+
         # update masked fibers
         mask_guess |= numpy.isnan(cent_guess)
 
@@ -4114,7 +4307,8 @@ def trace_fibers(
         cent_guess = cent_guess.round().astype("int16")
 
         # measure fiber positions
-        cen_slice, msk_slice = img_slice.measurePeaks(cent_guess, method, init_sigma=guess_fwhm / 2.354, threshold=counts_threshold, max_diff=max_diff)
+
+        cen_slice, msk_slice = img_slice.measurePeaks(cent_guess, method, init_sigma = guess_fwhm_G / 2.354, threshold=counts_threshold, max_diff=max_diff)
 
         centroids.setSlice(icolumn, axis="y", data=cen_slice, mask=msk_slice)
 
@@ -4127,13 +4321,13 @@ def trace_fibers(
     # linearly interpolate coefficients at masked fibers
     log.info(f"interpolating coefficients at {bad_fibers.sum()} masked fibers")
     centroids.interpolate_coeffs()
-    
+
     # select columns to fit for amplitudes, centroids and FWHMs per fiber block
     step = img._dim[1] // ncolumns_full
     columns = numpy.concatenate((numpy.arange(LVM_REFERENCE_COLUMN, 0, -step), numpy.arange(LVM_REFERENCE_COLUMN+step, img._dim[1], step)))
     log.info(f"tracing fibers in {len(columns)} columns: {','.join(map(str, columns))}")
 
-    # fit peaks, centroids and FWHM in each column
+    # fit peaks, centroids and FWHMs in each column
     for i, icolumn in enumerate(columns):
         log.info(f"tracing column {icolumn} ({i+1}/{len(columns)})")
         # get slice of data and trace
@@ -4156,143 +4350,167 @@ def trace_fibers(
             # apply flux threshold
             cen_idx = cen_block.round().astype("int16")
             msk_block |= (img_slice._data[cen_idx] < counts_threshold)
-            
+
             # mask bad fibers
             cen_block = cen_block[~msk_block]
             # initialize parameters with the full block size
-            par_block = numpy.ones(3 * msk_block.size) * numpy.nan
-            par_mask = numpy.tile(msk_block, 3)
+            par_block = numpy.ones(4 * msk_block.size) * numpy.nan
+            par_mask = numpy.tile(msk_block, 4)
 
             # skip block if all fibers are masked
             if msk_block.sum() > 0.5 * msk_block.size:
                 log.info(f"skipping fiber block {j+1}/{nblocks} (most fibers masked)")
             else:
-                # fit gaussian models to each fiber profile
+                # fit voigt models to each fiber profile
                 log.info(f"fitting fiber block {j+1}/{nblocks} ({cen_block.size}/{msk_block.size} good fibers)")
-                _, par_block[~par_mask] = img_slice.fitMultiGauss(cen_block, init_fwhm=guess_fwhm)
+                _, par_block[~par_mask] = img_slice.fitMultiVoigt(cen_block, init_fwhm_G=guess_fwhm_G, init_fwhm_L = guess_fwhm_L)
 
             par_blocks.append(par_block)
 
         # combine all parameters in a single array
-        par_joint = numpy.asarray([numpy.split(par_block, 3) for par_block in par_blocks])
-        par_joint = par_joint.transpose(1, 0, 2).reshape(3, -1)
+        par_joint = numpy.asarray([numpy.split(par_block, 4) for par_block in par_blocks])
+        par_joint = par_joint.transpose(1, 0, 2).reshape(4, -1)
         # define joint gaussian model
-        mod_joint = Gaussians(par=par_joint.ravel())
+        mod_joint = Voigts(par=par_joint.ravel())
 
         # store joint model
         mod_columns.append(mod_joint)
-    
+
         # get parameters of joint model
         amp_slice = par_joint[0]
         cent_slice = par_joint[1]
-        fwhm_slice = par_joint[2] * 2.354
+        fwhm_G_slice = par_joint[2] * 2.354
+        fwhm_L_slice = par_joint[3] * 2.354
 
         # mask fibers with invalid values
         amp_off = (amp_slice <= counts_threshold)
         log.info(f"masking {amp_off.sum()} samples with amplitude < {counts_threshold} {unit}")
         cent_off = numpy.abs(1 - cent_slice / numpy.concatenate(cen_blocks)) > 0.01
         log.info(f"masking {cent_off.sum()} samples with centroids refined by > 1 %")
-        fwhm_off = (fwhm_slice < fwhm_limits[0]) | (fwhm_slice > fwhm_limits[1])
-        log.info(f"masking {fwhm_off.sum()} samples with FWHM outside {fwhm_limits} pixels")
-        amp_mask = numpy.isnan(amp_slice) | amp_off | cent_off | fwhm_off
-        cent_mask = numpy.isnan(cent_slice) | amp_off | cent_off | fwhm_off
-        fwhm_mask = numpy.isnan(fwhm_slice) | amp_off | cent_off | fwhm_off
+        fwhm_G_off = (fwhm_G_slice < fwhm_G_limits[0]) | (fwhm_G_slice > fwhm_G_limits[1])
+        log.info(f"masking {fwhm_G_off.sum()} samples with FWHM_G outside {fwhm_G_limits} pixels")
+        fwhm_L_off = (fwhm_L_slice < fwhm_L_limits[0]) | (fwhm_L_slice > fwhm_L_limits[1])
+        log.info(f"masking {fwhm_L_off.sum()} samples with FWHM_L outside {fwhm_L_limits} pixels")
+        amp_mask = numpy.isnan(amp_slice) | amp_off | cent_off | fwhm_G_off | fwhm_L_off
+        cent_mask = numpy.isnan(cent_slice) | amp_off | cent_off | fwhm_G_off | fwhm_L_off
+        fwhm_G_mask = numpy.isnan(fwhm_G_slice) | amp_off | cent_off | fwhm_G_off | fwhm_L_off
+        fwhm_L_mask = numpy.isnan(fwhm_L_slice) | amp_off | cent_off | fwhm_G_off | fwhm_L_off
 
         if amp_slice.size != trace_amp._data.shape[0]:
             dummy_amp = numpy.split(numpy.zeros(trace_amp._data.shape[0]), LVM_NBLOCKS)
             dummy_cent = numpy.split(numpy.zeros(trace_cent._data.shape[0]), LVM_NBLOCKS)
-            dummy_fwhm = numpy.split(numpy.zeros(trace_fwhm._data.shape[0]), LVM_NBLOCKS)
+            dummy_fwhm_G = numpy.split(numpy.zeros(trace_fwhm_G._data.shape[0]), LVM_NBLOCKS)
+            dummy_fwhm_L = numpy.split(numpy.zeros(trace_fwhm_L._data.shape[0]), LVM_NBLOCKS)
             dummy_amp_mask = numpy.split(numpy.ones(trace_amp._data.shape[0], dtype=bool), LVM_NBLOCKS)
             dummy_cent_mask = numpy.split(numpy.ones(trace_cent._data.shape[0], dtype=bool), LVM_NBLOCKS)
-            dummy_fwhm_mask = numpy.split(numpy.ones(trace_fwhm._data.shape[0], dtype=bool), LVM_NBLOCKS)
+            dummy_fwhm_G_mask = numpy.split(numpy.ones(trace_fwhm_G._data.shape[0], dtype=bool), LVM_NBLOCKS)
+            dummy_fwhm_L_mask = numpy.split(numpy.ones(trace_fwhm_L._data.shape[0], dtype=bool), LVM_NBLOCKS)
 
             amp_split = numpy.split(amp_slice, len(iblocks))
             cent_split = numpy.split(cent_slice, len(iblocks))
-            fwhm_split = numpy.split(fwhm_slice, len(iblocks))
+            fwhm_G_split = numpy.split(fwhm_G_slice, len(iblocks))
+            fwhm_L_split = numpy.split(fwhm_L_slice, len(iblocks))
             amp_mask_split = numpy.split(amp_mask, len(iblocks))
             cent_mask_split = numpy.split(cent_mask, len(iblocks))
-            fwhm_mask_split = numpy.split(fwhm_mask, len(iblocks))
+            fwhm_G_mask_split = numpy.split(fwhm_G_mask, len(iblocks))
+            fwhm_L_mask_split = numpy.split(fwhm_L_mask, len(iblocks))
             for j, iblock in enumerate(iblocks):
                 dummy_amp[iblock] = amp_split[j]
                 dummy_cent[iblock] = cent_split[j]
-                dummy_fwhm[iblock] = fwhm_split[j]
+                dummy_fwhm_G[iblock] = fwhm_G_split[j]
+                dummy_fwhm_L[iblock] = fwhm_L_split[j]
                 dummy_amp_mask[iblock] = amp_mask_split[j]
                 dummy_cent_mask[iblock] = cent_mask_split[j]
-                dummy_fwhm_mask[iblock] = fwhm_mask_split[j]
-            
+                dummy_fwhm_G_mask[iblock] = fwhm_G_mask_split[j]
+                dummy_fwhm_L_mask[iblock] = fwhm_L_mask_split[j]
+
             # update traces
             trace_amp.setSlice(icolumn, axis="y", data=numpy.concatenate(dummy_amp), mask=numpy.concatenate(dummy_amp_mask))
             trace_cent.setSlice(icolumn, axis="y", data=numpy.concatenate(dummy_cent), mask=numpy.concatenate(dummy_cent_mask))
-            trace_fwhm.setSlice(icolumn, axis="y", data=numpy.concatenate(dummy_fwhm), mask=numpy.concatenate(dummy_fwhm_mask))
+            trace_fwhm_G.setSlice(icolumn, axis="y", data=numpy.concatenate(dummy_fwhm_G), mask=numpy.concatenate(dummy_fwhm_G_mask))
+            trace_fwhm_L.setSlice(icolumn, axis="y", data=numpy.concatenate(dummy_fwhm_L), mask=numpy.concatenate(dummy_fwhm_L_mask))
             trace_amp._good_fibers = numpy.arange(trace_amp._fibers)[~numpy.all(trace_amp._mask, axis=1)]
             trace_cent._good_fibers = numpy.arange(trace_cent._fibers)[~numpy.all(trace_cent._mask, axis=1)]
-            trace_fwhm._good_fibers = numpy.arange(trace_fwhm._fibers)[~numpy.all(trace_fwhm._mask, axis=1)]
+            trace_fwhm_G._good_fibers = numpy.arange(trace_fwhm_G._fibers)[~numpy.all(trace_fwhm_G._mask, axis=1)]
+            trace_fwhm_L._good_fibers = numpy.arange(trace_fwhm_L._fibers)[~numpy.all(trace_fwhm_L._mask, axis=1)]
         else:
             # update traces
             trace_amp.setSlice(icolumn, axis="y", data=amp_slice, mask=amp_mask)
             trace_cent.setSlice(icolumn, axis="y", data=cent_slice, mask=cent_mask)
-            trace_fwhm.setSlice(icolumn, axis="y", data=fwhm_slice, mask=fwhm_mask)
-        
+            trace_fwhm_G.setSlice(icolumn, axis="y", data=fwhm_G_slice, mask=fwhm_G_mask)
+            trace_fwhm_L.setSlice(icolumn, axis="y", data=fwhm_L_slice, mask=fwhm_L_mask)
+
         # compute residuals
         integral_mod = numpy.trapz(mod_joint(img_slice._pixels), img_slice._pixels) or numpy.nan
         integral_dat = numpy.trapz(img_slice._data, img_slice._pixels)
         residuals.append((integral_dat - integral_mod) / integral_dat * 100)
-    
+
         # compute fitted model stats
         chisq_red = bn.nansum((mod_joint(img_slice._pixels) - img_slice._data)[~img_slice._mask]**2 / img_slice._error[~img_slice._mask]**2) / (img._dim[0] - 1 - 3)
         log.info(f"joint model {chisq_red = :.2f}")
-        if amp_mask.all() or cent_mask.all() or fwhm_mask.all():
+        if amp_mask.all() or cent_mask.all() or fwhm_G_mask.all() or fwhm_L_mask.all():
             continue
         min_amp, max_amp, median_amp = bn.nanmin(amp_slice[~amp_mask]), bn.nanmax(amp_slice[~amp_mask]), bn.nanmedian(amp_slice[~amp_mask])
         min_cent, max_cent, median_cent = bn.nanmin(cent_slice[~cent_mask]), bn.nanmax(cent_slice[~cent_mask]), bn.nanmedian(cent_slice[~cent_mask])
-        min_fwhm, max_fwhm, median_fwhm = bn.nanmin(fwhm_slice[~fwhm_mask]), bn.nanmax(fwhm_slice[~fwhm_mask]), bn.nanmedian(fwhm_slice[~fwhm_mask])
+        min_fwhm_G, max_fwhm_G, median_fwhm_G = bn.nanmin(fwhm_G_slice[~fwhm_G_mask]), bn.nanmax(fwhm_G_slice[~fwhm_G_mask]), bn.nanmedian(fwhm_G_slice[~fwhm_G_mask])
+        min_fwhm_L, max_fwhm_L, median_fwhm_L = bn.nanmin(fwhm_L_slice[~fwhm_L_mask]), bn.nanmax(fwhm_L_slice[~fwhm_L_mask]), bn.nanmedian(fwhm_L_slice[~fwhm_L_mask])
         log.info(f"joint model amplitudes: {min_amp = :.2f}, {max_amp = :.2f}, {median_amp = :.2f}")
         log.info(f"joint model centroids: {min_cent = :.2f}, {max_cent = :.2f}, {median_cent = :.2f}")
-        log.info(f"joint model FWHMs: {min_fwhm = :.2f}, {max_fwhm = :.2f}, {median_fwhm = :.2f}")
-    
+        log.info(f"joint model FWHM_Gs: {min_fwhm_G = :.2f}, {max_fwhm_G = :.2f}, {median_fwhm_G = :.2f}")
+        log.info(f"joint model FWHM_Ls: {min_fwhm_L = :.2f}, {max_fwhm_L = :.2f}, {median_fwhm_L = :.2f}")
+
     # smooth all trace by a polynomial
     if fit_poly:
         log.info(f"fitting peak trace with {deg_amp}-deg polynomial")
         trace_amp.fit_polynomial(deg_amp, poly_kind="poly")
         log.info(f"fitting centroid trace with {deg_cent}-deg polynomial")
         trace_cent.fit_polynomial(deg_cent, poly_kind="poly")
-        log.info(f"fitting FWHM trace with {deg_fwhm}-deg polynomial")
-        trace_fwhm.fit_polynomial(deg_fwhm, poly_kind="poly")
+        log.info(f"fitting FWHM_G trace with {deg_fwhm_G}-deg polynomial")
+        trace_fwhm_G.fit_polynomial(deg_fwhm_G, poly_kind="poly")
+        log.info(f"fitting FWHM_L trace with {deg_fwhm_L}-deg polynomial")
+        trace_fwhm_L.fit_polynomial(deg_fwhm_L, poly_kind="poly")
         # set bad fibers in trace mask
         trace_amp._mask[bad_fibers] = True
         trace_cent._mask[bad_fibers] = True
-        trace_fwhm._mask[bad_fibers] = True
+        trace_fwhm_G._mask[bad_fibers] = True
+        trace_fwhm_L._mask[bad_fibers] = True
 
         # linearly interpolate coefficients at masked fibers
         if interpolate_missing:
             log.info(f"interpolating coefficients at {bad_fibers.sum()} masked fibers")
             trace_amp.interpolate_coeffs()
             trace_cent.interpolate_coeffs()
-            trace_fwhm.interpolate_coeffs()
+            trace_fwhm_G.interpolate_coeffs()
+            trace_fwhm_L.interpolate_coeffs()
     else:
         # interpolate traces along X axis to fill in missing data
         log.info("interpolating traces along X axis to fill in missing data")
         trace_amp.interpolate_data(axis="X")
         trace_cent.interpolate_data(axis="X")
-        trace_fwhm.interpolate_data(axis="X")
+        trace_fwhm_G.interpolate_data(axis="X")
+        trace_fwhm_L.interpolate_data(axis="X")
         # set bad fibers in trace mask
         trace_amp._mask[bad_fibers] = True
         trace_cent._mask[bad_fibers] = True
-        trace_fwhm._mask[bad_fibers] = True
+        trace_fwhm_G._mask[bad_fibers] = True
+        trace_fwhm_L._mask[bad_fibers] = True
 
         if interpolate_missing:
             log.info("interpolating bad fibers")
             trace_amp.interpolate_data(axis="Y")
             trace_cent.interpolate_data(axis="Y")
-            trace_fwhm.interpolate_data(axis="Y")
-    
+            trace_fwhm_G.interpolate_data(axis="Y")
+            trace_fwhm_L.interpolate_data(axis="Y")
+
     # write output traces
     log.info(f"writing amplitude trace to '{os.path.basename(out_trace_amp)}'")
     trace_amp.writeFitsData(out_trace_amp)
     log.info(f"writing centroid trace to '{os.path.basename(out_trace_cent)}'")
     trace_cent.writeFitsData(out_trace_cent)
-    log.info(f"writing FWHM trace to '{os.path.basename(out_trace_fwhm)}'")
-    trace_fwhm.writeFitsData(out_trace_fwhm)
+    log.info(f"writing FWHM_G trace to '{os.path.basename(out_trace_fwhm_G)}'")
+    trace_fwhm_G.writeFitsData(out_trace_fwhm_G)
+    log.info(f"writing FWHM_L trace to '{os.path.basename(out_trace_fwhm_L)}'")
+    trace_fwhm_L.writeFitsData(out_trace_fwhm_L)
     if out_trace_cent_guess is not None:
         log.info(f"writing guess centroids trace to '{os.path.basename(out_trace_cent_guess)}'")
         centroids.writeFitsData(out_trace_cent_guess)
@@ -4315,7 +4533,7 @@ def trace_fibers(
         figure_path="qa",
         label="residuals_int_columns"
     )
-    
+
     # profile models vs data
     fig, ax = create_subplots(to_display=display_plots, figsize=(15,7))
     fig.suptitle(f"Profile fitting residuals for {camera = }")
@@ -4323,7 +4541,6 @@ def trace_fibers(
     fig.supxlabel("Y (pixel)")
 
     colors = plt.cm.coolwarm(numpy.linspace(0, 1, len(columns)))
-    #colors = plt.cm.Spectral(numpy.linspace(0, 1, len(columns)))
     idx = numpy.argsort(columns)
     for i in idx:
         icolumn = columns[i]
@@ -4382,9 +4599,9 @@ def trace_Voigt_fibers(
     out_trace_cent : str
         path to output centroid trace
     out_trace_fwhm_G : str
-        path to output FWHM gaussian trace 
+        path to output FWHM gaussian trace
     out_trace_fwhm_L : str
-        path to output FWHM lorentz trace 
+        path to output FWHM lorentz trace
     out_trace_cent_guess : str, optional
         path to output centroid guess trace, by default None
     correct_ref : bool, optional
@@ -4432,7 +4649,7 @@ def trace_Voigt_fibers(
         fiber FWHM gaussian
     fwhm_L : TraceMask
         fiber FWHM lorentzian
-    
+
     Raises
     ------
     ValueError
@@ -4456,7 +4673,7 @@ def trace_Voigt_fibers(
         ncolumns_cent = ncolumns_full = ncolumns
     else:
         raise ValueError(f"invalid number of columns: {ncolumns}")
-    
+
     # load continuum image  from file
     log.info(f"using flat image {os.path.basename(in_image)} for tracing")
     img = loadImage(in_image)
@@ -4539,7 +4756,7 @@ def trace_Voigt_fibers(
     for i, icolumn in iterator:
         # extract column profile
         img_slice = img.getSlice(icolumn, axis="y")
-        
+
         # get fiber positions along previous column
         if icolumn == LVM_REFERENCE_COLUMN:
             # trace reference column first or skip if already traced
@@ -4549,7 +4766,7 @@ def trace_Voigt_fibers(
                 continue
         else:
             cent_guess, _, mask_guess = centroids.getSlice(columns[i-1], axis="y")
-        
+
         # update masked fibers
         mask_guess |= numpy.isnan(cent_guess)
 
@@ -4573,7 +4790,7 @@ def trace_Voigt_fibers(
     # linearly interpolate coefficients at masked fibers
     log.info(f"interpolating coefficients at {bad_fibers.sum()} masked fibers")
     centroids.interpolate_coeffs()
-    
+
     # select columns to fit for amplitudes, centroids and FWHMs per fiber block
     step = img._dim[1] // ncolumns_full
     columns = numpy.concatenate((numpy.arange(LVM_REFERENCE_COLUMN, 0, -step), numpy.arange(LVM_REFERENCE_COLUMN+step, img._dim[1], step)))
@@ -4602,7 +4819,7 @@ def trace_Voigt_fibers(
             # apply flux threshold
             cen_idx = cen_block.round().astype("int16")
             msk_block |= (img_slice._data[cen_idx] < counts_threshold)
-            
+
             # mask bad fibers
             cen_block = cen_block[~msk_block]
             # initialize parameters with the full block size
@@ -4623,11 +4840,11 @@ def trace_Voigt_fibers(
         par_joint = numpy.asarray([numpy.split(par_block, 4) for par_block in par_blocks])
         par_joint = par_joint.transpose(1, 0, 2).reshape(4, -1)
         # define joint gaussian model
-        mod_joint = Voigts(par=par_joint.ravel()) 
+        mod_joint = Voigts(par=par_joint.ravel())
 
         # store joint model
         mod_columns.append(mod_joint)
-    
+
         # get parameters of joint model
         amp_slice = par_joint[0]
         cent_slice = par_joint[1]
@@ -4675,7 +4892,7 @@ def trace_Voigt_fibers(
                 dummy_cent_mask[iblock] = cent_mask_split[j]
                 dummy_fwhm_G_mask[iblock] = fwhm_G_mask_split[j]
                 dummy_fwhm_L_mask[iblock] = fwhm_L_mask_split[j]
-            
+
             # update traces
             trace_amp.setSlice(icolumn, axis="y", data=numpy.concatenate(dummy_amp), mask=numpy.concatenate(dummy_amp_mask))
             trace_cent.setSlice(icolumn, axis="y", data=numpy.concatenate(dummy_cent), mask=numpy.concatenate(dummy_cent_mask))
@@ -4691,12 +4908,12 @@ def trace_Voigt_fibers(
             trace_cent.setSlice(icolumn, axis="y", data=cent_slice, mask=cent_mask)
             trace_fwhm_G.setSlice(icolumn, axis="y", data=fwhm_G_slice, mask=fwhm_G_mask)
             trace_fwhm_L.setSlice(icolumn, axis="y", data=fwhm_L_slice, mask=fwhm_L_mask)
-        
+
         # compute residuals
         integral_mod = numpy.trapz(mod_joint(img_slice._pixels), img_slice._pixels) or numpy.nan
         integral_dat = numpy.trapz(img_slice._data, img_slice._pixels)
         residuals.append((integral_dat - integral_mod) / integral_dat * 100)
-    
+
         # compute fitted model stats
         chisq_red = bn.nansum((mod_joint(img_slice._pixels) - img_slice._data)[~img_slice._mask]**2 / img_slice._error[~img_slice._mask]**2) / (img._dim[0] - 1 - 3)
         log.info(f"joint model {chisq_red = :.2f}")
@@ -4710,7 +4927,7 @@ def trace_Voigt_fibers(
         log.info(f"joint model centroids: {min_cent = :.2f}, {max_cent = :.2f}, {median_cent = :.2f}")
         log.info(f"joint model FWHM_Gs: {min_fwhm_G = :.2f}, {max_fwhm_G = :.2f}, {median_fwhm_G = :.2f}")
         log.info(f"joint model FWHM_Ls: {min_fwhm_L = :.2f}, {max_fwhm_L = :.2f}, {median_fwhm_L = :.2f}")
-    
+
     # smooth all trace by a polynomial
     if fit_poly:
         log.info(f"fitting peak trace with {deg_amp}-deg polynomial")
@@ -4753,7 +4970,7 @@ def trace_Voigt_fibers(
             trace_cent.interpolate_data(axis="Y")
             trace_fwhm_G.interpolate_data(axis="Y")
             trace_fwhm_L.interpolate_data(axis="Y")
-    
+
     # write output traces
     log.info(f"writing amplitude trace to '{os.path.basename(out_trace_amp)}'")
     trace_amp.writeFitsData(out_trace_amp)
@@ -4785,7 +5002,7 @@ def trace_Voigt_fibers(
         figure_path="qa",
         label="residuals_int_columns"
     )
-    
+
     # profile models vs data
     fig, ax = create_subplots(to_display=display_plots, figsize=(15,7))
     fig.suptitle(f"Profile fitting residuals for {camera = }")
@@ -4883,8 +5100,8 @@ def image_gauss(image_path, amp_path, cent_path, fwhm_G_path, out_model, out_rat
 
     ncolumns = centroid._data.shape[1]
     y_pixels = numpy.arange(img._data.shape[0])
-    
-    gauss_list = [] 
+
+    gauss_list = []
 
     for column in range(ncolumns):
         c = centroid._data[:, column]
@@ -4893,7 +5110,7 @@ def image_gauss(image_path, amp_path, cent_path, fwhm_G_path, out_model, out_rat
         param = numpy.concatenate([a, c, f_g/2.354])
         gauss = fp.Gaussians(param)
 
-        # evaluar Modelo 
+        # evaluar Modelo
         ev = gauss(y_pixels)
         gauss_list.append(ev)
 
@@ -4948,7 +5165,7 @@ def image_fitting_voigt(img_path, amp_path, cent_path, fwhm_G_path, fwhm_L_path,
         model_ratio.loadFitsData(out_ratio)
 
         return model_ratio, model_image
-        
+
     median_box = (1, 10)
     coadd = 20
 
@@ -4984,9 +5201,9 @@ def image_fitting_voigt(img_path, amp_path, cent_path, fwhm_G_path, fwhm_L_path,
     ncolumns = centroid._data.shape[1]
     y_pixels = numpy.arange(img._data.shape[0])
 
-    voigt_list = []    
+    voigt_list = []
 
-    for column in range(ncolumns): 
+    for column in range(ncolumns):
         c = centroid._data[:, column]
         a = amp._data[:, column]
         f_g = fwhm_G._data[:, column]
@@ -4997,9 +5214,9 @@ def image_fitting_voigt(img_path, amp_path, cent_path, fwhm_G_path, fwhm_L_path,
         # Evaluar Modelo
         ev = voigts(y_pixels)
         voigt_list.append(ev)
-    
+
     voigt_array = numpy.array(voigt_list).T
-    
+
     model_image = copy(img)
     model_image._data = voigt_array # instancia de image
 

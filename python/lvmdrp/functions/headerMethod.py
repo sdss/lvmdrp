@@ -1,4 +1,3 @@
-import sys
 
 import numpy
 
@@ -119,7 +118,7 @@ def expandHdrKeys_drp(
     hdr.loadFitsHeader(file, extension=int(extension), removeEmpty=int(removeEmpty))
     keys = hdr.getHdrKeys()
     for k in keys:
-        if not k in exclude_list:
+        if k not in exclude_list:
             if keywords == "" or k in key_list:
                 hdr.extendHierarch(k, prefix, verbose=int(verbose))
     hdr.writeFitsHeader()
@@ -219,9 +218,9 @@ def addHdrKey_drp(file, key, value, comment="", extension="0"):
         if v % 1 == 0:
             try:
                 v = int(value)
-            except:
+            except Exception:
                 pass
-    except:
+    except Exception:
         v = value
     hdr.setHdrValue(key, v, comment)
     hdr.writeFitsHeader(extension=int(extension))
@@ -287,7 +286,7 @@ def mergeHdr_drp(files_in, file_out, exclude="", extension="0", removeEmpty="0")
     for k in keys:
         try:
             combined_header.setHdrValue(k, hdr.getValue(k))
-        except:
+        except Exception:
             pass
     combined_header.writeFitsHeader(file_out, extension=int(extension))
 

@@ -4,28 +4,26 @@
                     Space Telescope Science Institute
 
 
-Synopsis:  
+Synopsis:
     Thse are a series of subroutines/utilites that are intended to
     be of general use for astronomy applications
 
-Description:  
+Description:
 
 Notes:
     Standards - do not include anything here that is specific to one
     project or file format that is not very generic.  These routines
     should be as bulletproof as possible
-                                       
+
 History:
 
 090208    ksl    Coding begun
-120129    ksl    Added routines having to do with images 
+120129    ksl    Added routines having to do with images
 
 """
 
 
 import math
-import os
-import sys
 
 
 # from pyraf import iraf
@@ -95,13 +93,13 @@ def radec2hms(ra="225.2", dec="-17.35", ra_format="", dec_format=""):
 
     """
 
-    if isinstance(ra, float) == False:
+    if isinstance(ra, float) is False:
         try:
             ra = eval(ra)
         except TypeError:
             ra = float(ra)
 
-    if isinstance(dec, float) == False:
+    if isinstance(dec, float) is False:
         try:
             dec = eval(dec)
         except TypeError:

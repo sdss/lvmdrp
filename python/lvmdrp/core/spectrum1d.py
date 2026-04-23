@@ -1,21 +1,99 @@
 from copy import deepcopy
+import warnings
 
-import matplotlib.pyplot as plt
 import numpy
 import bottleneck as bn
 from astropy.io import fits as pyfits
+from astropy.stats import biweight_location
 from numpy import polynomial
 from scipy.linalg import norm
-from scipy import signal, interpolate, ndimage, sparse, linalg
-from scipy.ndimage import zoom
+from scipy import signal, interpolate, integrate, ndimage, sparse
+from scipy.ndimage import zoom, median_filter
 from typing import List, Tuple
 
 from lvmdrp.utils import gaussian
 from lvmdrp.core import fit_profile
+from lvmdrp.core import plot
 from lvmdrp.core.header import Header
 
+def adaptive_smooth(data, start_width, end_width):
+    """
+    Smooth an array with a filter that adapts in size from start_width to end_width.
+    Parameters:
+    - data (numpy.array): The input array to be smoothed.
+    - start_width (int): The width of the smoothing kernel at the beginning of the array.
+    - end_width (int): The width of the smoothing kernel at the end of the array.
+    Returns:
+    - numpy.array: The smoothed array.
+    """
+    # Create an array of kernel sizes changing linearly from start_width to end_width
+    n_points = len(data)
+    kernel_sizes = numpy.linspace(start_width, end_width, n_points).astype(int)
+    # Output array initialization
+    smoothed_data = numpy.zeros_like(data)
+    # Apply varying filter
+    for i in range(n_points):
+        # Handle boundary effects by determining effective kernel size
+        half_width = kernel_sizes[i] // 2
+        start_index = max(0, i - half_width)
+        end_index = min(n_points, i + half_width + 1)
+        # Apply uniform filter to the local segment of the data
+        smoothed_data[i] = bn.median(data[start_index:end_index])
+    return smoothed_data
 
-def _spec_from_lines(lines: numpy.ndarray, sigma: float, wavelength: numpy.ndarray, heights: numpy.ndarray = None, names: numpy.ndarray = None):
+def find_continuum(spec_s,niter=15,thresh=0.8,median_box_max=100,median_box_min=1):
+    """
+    find the continuum from a spectrum by smoothing and masking the values above
+    the smoothed version in an iterative way.
+    Parameters:
+    - data (numpy.array): The input array from which we would like to find the continuum.
+    - niter  (int): Maximum number of iterations
+    - thresh (float): Threshold to compare the smoothed an unsmoother version
+    - median_box_max (float): Maximum size of the smoothing box
+    - median_box_min (float): Minumum size of the smoothing box
+    Returns:
+    - numpy.array: continuum spectrum.
+    """
+    median_box=median_box_max
+    spec_s_org = spec_s.copy()
+    mask = (spec_s>(-1)*numpy.abs(numpy.nanmin(spec_s)))
+    #m_spec_s = adaptive_smooth(spec_s, median_box, int(median_box_max*0.5))
+    m_spec_s = median_filter(spec_s, median_box)
+    pixels = numpy.arange(0,spec_s.shape[0])
+    i_len_in = len(spec_s_org[mask])
+    for i in range(niter):
+        mask = mask & (numpy.divide(m_spec_s, spec_s, where=spec_s != 0, out=numpy.zeros_like(spec_s)) > thresh)
+        i_len = len(spec_s_org[mask])
+        if (i_len==i_len_in):
+            break
+        else:
+            i_len_in=i_len
+        spec_s = numpy.interp(pixels, pixels[mask], spec_s[mask])
+        m_spec_s = adaptive_smooth(spec_s, median_box, median_box_max)
+#        m_spec_s = median_filter(median_box, spec_s)
+        median_box = int(median_box*0.5)
+        if (median_box<median_box_min):
+            median_box=median_box_min
+    spec_s = numpy.interp(pixels, pixels[mask], spec_s_org[mask])
+    spec_s_out = spec_s
+#    s_spec_s = adaptive_smooth(spec_s, median_box_min, int(median_box_max*0.5))
+#    w1 = 1/(1+pixels)
+#    w2 = pixels
+#    wN = w1+w2
+#    w1 = w1/wN
+#    w2 = w2/wN
+#    print(w1,w2)
+#    spec_s_out = w1*spec_s + w2*s_spec_s
+    return spec_s_out, mask
+
+
+def _spec_from_lines(
+    lines: numpy.ndarray,
+    sigma: float,
+    wavelength: numpy.ndarray,
+    heights: numpy.ndarray = None,
+    names: numpy.ndarray = None,
+):
     rss = numpy.zeros((len(lines), wavelength.size))
     for i, line in enumerate(lines):
         rss[i] = gaussian(wavelength, mean=line, stddev=sigma)
@@ -56,12 +134,12 @@ def _cross_match(
     shift_range: List[int],
     peak_num: int = None,
 ) -> Tuple[float, int, float]:
-    """Find the best cross correlation between two spectra.
+    """Find the best integer-offset cross correlation between two spectra.
 
     This function finds the best cross correlation between two spectra by
     stretching and shifting the first spectrum and computing the cross
     correlation with the second spectrum. The best cross correlation is
-    defined as the one with the highest correlation value and the correct
+    defined as the integer offset with the highest correlation value and the correct
     number of peaks.
 
     Parameters
@@ -144,6 +222,375 @@ def _cross_match(
             best_stretch_factor = factor
 
     return max_correlation, best_shift, best_stretch_factor
+
+
+def _normalize_peaks(data, ref, min_peak_dist):
+    data_ = numpy.asarray(data).copy()
+    dat_peaks, dat_peak_pars = signal.find_peaks(data_, distance=min_peak_dist)
+
+    ref_ = numpy.asarray(ref).copy()
+    ref_peaks, ref_peak_pars = signal.find_peaks(ref_, distance=min_peak_dist, rel_height=0.5, width=(2,4), prominence=1.5)
+
+    if dat_peaks.size == 0 or ref_peaks.size == 0:
+        return data_, ref_, None, None, None, None
+
+    # dat_norm = interpolate.interp1d(dat_peaks, data_[dat_peaks], kind="linear", bounds_error=False, fill_value=0.0)(numpy.arange(data_.shape[0]))
+    # ref_norm = interpolate.interp1d(ref_peaks, ref_[ref_peaks], kind="linear", bounds_error=False, fill_value=0.0)(numpy.arange(data_.shape[0]))
+    dat_norm = numpy.interp(numpy.arange(data_.shape[0]), dat_peaks, data_[dat_peaks])
+    ref_norm = numpy.interp(numpy.arange(data_.shape[0]), ref_peaks, ref_[ref_peaks])
+
+
+    ref_ = ref_ / ref_norm
+    data_ = data_ / dat_norm
+    # ref_ = ref_ / ref_norm * dat_norm / numpy.median(data_)
+    # data_ = data_ / numpy.median(data_)
+
+    # import matplotlib.pyplot as plt
+    # plt.figure()
+    # plt.plot(dat_norm, "-b")
+    # plt.vlines(dat_peaks, 0, 1, lw=1, color="tab:blue")
+    # # plt.plot(ref_norm, "-r")
+    # # plt.vlines(ref_peaks, 0, 1, lw=1, color="tab:red")
+
+    return data_, ref_, dat_peaks, dat_peak_pars, ref_peaks, ref_peak_pars
+
+
+def _choose_cc_peak(cc, shifts, min_shift, max_shift):
+    mask = (shifts >= min_shift) & (max_shift >= shifts)
+
+    ccp, _ = signal.find_peaks(cc[mask])
+
+    # import matplotlib.pyplot as plt
+    # plt.figure(figsize=(15,5))
+    # plt.plot(shifts[mask], cc[mask], "-o")
+    # plt.vlines(shifts[mask][ccp], 0, 1)
+
+    sum_cc = []
+    for p in ccp:
+        sum_cc.append(max((cc[mask][p-1], cc[mask][p+1])) + cc[mask][p])
+        # plt.vlines(shifts[mask][p-2], 0, 1, ls="--", color="k")
+        # plt.vlines(shifts[mask][p+3], 0, 1, ls="--", color="k")
+        # mask = (shifts >= p-7) & (shifts <= p+7)
+        # guess = [numpy.trapz(cc[mask], shifts[mask]), p, 1.0, 0.0]
+        # bound_lower = [0.0, p+min_shift, 2, -numpy.inf]
+        # bound_upper = [numpy.inf, p+max_shift, 5, numpy.inf]
+        # best_gauss = fit_profile.Gaussian_const(guess)
+        # best_gauss.fit(
+        #     shifts[mask],
+        #     cc[mask],
+        #     sigma=1.0,
+        #     p0=guess,
+        #     bounds=(bound_lower, bound_upper)
+        # )
+        # area, best_shift_sp, sigma, bg = best_gauss.getPar()
+        # sum_cc.append(area)
+
+
+    # print(ccp, sum_cc)
+    return ccp[numpy.argmax(sum_cc)]
+
+
+def _align_fiber_blocks(ref_spec, obs_spec, median_box=21, clip_factor=0.7, axs=None):
+    """Cross-correlate median-filtered versions of fiber profile data and model to get coarse alignment"""
+    # sigma-clip spectra to half median to remove fiber features
+    obs_avg = biweight_location(obs_spec, ignore_nan=True)
+    ref_avg = biweight_location(ref_spec, ignore_nan=True)
+    obs_spec = numpy.clip(obs_spec, 0, clip_factor*obs_avg)
+    ref_spec = numpy.clip(ref_spec, 0, clip_factor*ref_avg)
+
+    obs_median = signal.medfilt(obs_spec, median_box)
+    ref_median = signal.medfilt(ref_spec, median_box)
+
+    obs_median /= numpy.median(obs_median)
+    ref_median /= numpy.median(ref_median)
+
+    cc = signal.correlate(obs_median, ref_median, mode="same")
+
+    shifts = signal.correlation_lags(len(obs_spec), len(ref_spec), mode="same")
+    best_shift = shifts[numpy.argmax(cc)]
+
+    if axs is not None and len(axs) >= 2:
+        pixels = numpy.arange(obs_spec.size)
+        axs[0].step(pixels, obs_median, where="mid", color="k", lw=2, label="obs. profile")
+        axs[0].step(pixels, ref_median, where="mid", color="tab:blue", lw=1, label="ref. profile")
+        axs[0].set_xlabel("Y (pix)")
+        axs[0].set_ylabel("Fiber blocks")
+        axs[0].legend(loc=2, frameon=False, ncols=2)
+        axs[0].set_ylim(-0.1, 1.2)
+        axs[1].step(shifts, cc, where="mid")
+        axs[1].set_xlabel("Shifts (pix)")
+        axs[1].set_ylabel("Cross-correlation")
+
+    return best_shift
+
+
+def _cross_match_float(
+    ref_spec: numpy.ndarray,
+    obs_spec: numpy.ndarray,
+    stretch_factors: numpy.ndarray,
+    shift_range: List[int],
+    min_peak_dist: float = 5.0,
+    gauss_window: List[int] = [-5, 5],
+    gauss_sigmas: List[float] = [0.0, 5.0],
+    normalize_spectra : bool = True,
+    ax: None|plot.plt.Axes = None
+) -> Tuple[float, float, float]:
+    """Find the best fractional-pixel cross correlation between two spectra.
+
+    This function finds the best cross correlation between two spectra by
+    stretching and shifting the first spectrum and computing the cross
+    correlation with the second spectrum. The best cross correlation is
+    defined as the fractional-pixel offset with the highest correlation value.
+    The spectra are "peak-normalized" before correlating, making all peaks
+    about 1 unit in height.
+
+    This is used for measuring fiber shifts during the night
+
+    Parameters
+    ----------
+    ref_spec : ndarray
+        The reference spectrum.
+    obs_spec : ndarray
+        The observed spectrum.
+    stretch_factors : ndarray
+        The stretch factors to use.
+    shift_range : tuple
+        The range of shifts to use.
+    min_peak_dist : float, optional
+        Minimum distance between two consecutive peaks to be considered signal, by default 5.0
+    gauss_window : list[int], optional
+        Range of pixels to consider in Gaussian fitting relative to peak, by default [-5, 5]
+    gauss_sigmas : list[float], optional
+        Gaussian sigma boundaries, by default [0.0, 5.0]
+    normalize_spectra : bool, optional
+        Normalize both spectrum to have peaks ~1, by default True
+    ax : None|plt.Axes, optional
+        The matplotlib axes where to draw the CC and the
+
+    Returns
+    -------
+    max_correlation : float
+        The maximum correlation value.
+    best_shift : float
+        The fractional pixel shift that maximizes the correlation
+    best_stretch_factor : float
+        The best stretch factor.
+    """
+    min_shift, max_shift = shift_range
+    max_correlation = -numpy.inf
+    best_shift = 0
+    best_stretch_factor = 1
+
+    # normalize the peaks to roughly magnitude 1, so that individual very bright
+    # fibers do not dominate the signal
+    if normalize_spectra:
+        ref_spec_ = _normalize_peaks(ref_spec, min_peak_dist=min_peak_dist)
+        obs_spec_ = _normalize_peaks(obs_spec, min_peak_dist=min_peak_dist)
+    else:
+        ref_spec_ = ref_spec.copy()
+        obs_spec_ = obs_spec.copy()
+
+    for factor in stretch_factors:
+        # Stretch the first signal
+        stretched_signal1 = zoom(ref_spec_, factor, mode="constant", prefilter=True)
+
+        # Make the lengths equal
+        len_diff = len(obs_spec_) - len(stretched_signal1)
+        if len_diff > 0:
+            # Zero pad the stretched signal at the end if it's shorter
+            stretched_signal1 = numpy.pad(stretched_signal1, (0, len_diff))
+        elif len_diff < 0:
+            # Or crop the stretched signal at the end if it's longer
+            stretched_signal1 = stretched_signal1[:len_diff]
+
+        # Compute the cross correlation
+        cross_corr = signal.correlate(obs_spec_, stretched_signal1, mode="same")
+
+        # Normalize the cross correlation
+        cross_corr = cross_corr.astype(numpy.float32)
+        cross_corr /= norm(stretched_signal1) * norm(obs_spec_)
+        cross_corr = numpy.nan_to_num(cross_corr)
+
+        # Get the correlation shifts
+        shifts = signal.correlation_lags(
+            len(obs_spec_), len(stretched_signal1), mode="same"
+        )
+
+        # Find the max correlation and the corresponding shift for this stretch factor
+        mask = (shifts >= min_shift) & (shifts <= max_shift)
+        idx_max_corr = numpy.argmax(cross_corr[mask])
+        max_corr = cross_corr[mask][idx_max_corr]
+        shift = shifts[mask][idx_max_corr]
+
+        if ax is not None:
+            mask_cc = (shifts >= shift+2*gauss_window[0]) & (shifts <= shift+2*gauss_window[1])
+            ax.step(shifts[mask_cc], cross_corr[mask_cc], color="0.7", lw=1, where="mid", alpha=0.3)
+
+        condition = max_corr > max_correlation
+
+        if condition:
+            best_shifts, best_cross_corr = shifts, cross_corr
+            max_correlation = max_corr
+            best_shift = shift
+            best_stretch_factor = factor
+
+    # Fit Gaussian around maximum cross-correlation peak
+    mask = (best_shifts >= best_shift+gauss_window[0]) & (best_shifts <= best_shift+gauss_window[1])
+    guess = [numpy.trapz(best_cross_corr[mask], best_shifts[mask]), best_shift, 1.0, 0.0]
+    bound_lower = [0.0, best_shift+min_shift, gauss_sigmas[0], -numpy.inf]
+    bound_upper = [numpy.inf, best_shift+max_shift, gauss_sigmas[1], numpy.inf]
+    best_gauss = fit_profile.Gaussian_const(guess)
+    best_gauss.fit(
+        best_shifts[mask],
+        best_cross_corr[mask],
+        sigma=1.0,
+        p0=guess,
+        bounds=(bound_lower, bound_upper)
+    )
+    area, best_shift_sp, sigma, bg = best_gauss.getPar()
+
+    # display best match
+    if ax is not None:
+        mask = (best_shifts >= best_shift+gauss_window[0]) & (best_shifts <= best_shift+gauss_window[1])
+        mask_cc = (best_shifts >= best_shift+2*gauss_window[0]) & (best_shifts <= best_shift+2*gauss_window[1])
+        ax.step(best_shifts[mask_cc], best_cross_corr[mask_cc], color="0.2", lw=2, where="mid")
+        ax.step(best_shifts[mask], best_gauss(best_shifts[mask]), color="tab:red", lw=2, where="mid")
+        ax.axvline(best_shift, color="tab:blue", lw=1, ls="--")
+        ax.axvline(best_shift_sp, color="tab:red", lw=1)
+        ax.text(best_shift, (best_cross_corr[mask_cc]).min(), f"shift = {best_shift}", va="bottom", ha="left", color="tab:blue")
+        ax.text(best_shift_sp, (best_cross_corr[mask_cc]).min(), f"subpix. shift = {best_shift_sp:.3f}", va="top", ha="right", color="tab:red")
+
+    return max_correlation, best_shift_sp, best_stretch_factor
+
+
+def _fiber_cc_match(
+    ref_spec: numpy.ndarray,
+    obs_spec: numpy.ndarray,
+    guess_shift : int,
+    shift_range: List[int],
+    min_peak_dist: float = 5.0,
+    gauss_window: List[int] = [-10, 10],
+    gauss_sigmas: List[float] = [0.0, 5.0],
+    normalize_spectra : bool = True,
+    ax: None|plot.plt.Axes = None
+) -> Tuple[float, float, float]:
+    """Find the best fractional-pixel cross correlation between two fiber profiles.
+
+    This function finds the best cross correlation between two fiber profiles
+    by shifting the first spectrum and computing the cross correlation with the
+    second spectrum. The best cross correlation is defined as the
+    fractional-pixel offset with the highest correlation value. The spectra are
+    "peak-normalized" before correlating, making all peaks about 1 unit in
+    height.
+
+    This is used for measuring fiber shifts during the night
+
+    Parameters
+    ----------
+    ref_spec : ndarray
+        The reference spectrum.
+    obs_spec : ndarray
+        The observed spectrum.
+    guess_shift : int
+        Guess for the best CC shift
+    shift_range : tuple
+        The range of shifts to use.
+    min_peak_dist : float, optional
+        Minimum distance between two consecutive peaks to be considered signal, by default 5.0
+    gauss_window : list[int], optional
+        Range of pixels to consider in Gaussian fitting relative to peak, by default [-5, 5]
+    gauss_sigmas : list[float], optional
+        Gaussian sigma boundaries, by default [0.0, 5.0]
+    normalize_spectra : bool, optional
+        Normalize both spectrum to have peaks ~1, by default True
+    ax : None|plt.Axes, optional
+        The matplotlib axes where to draw the CC and the
+
+    Returns
+    -------
+    max_correlation : float
+        The maximum correlation value.
+    best_shift : float
+        The fractional pixel shift that maximizes the correlation
+    best_stretch_factor : float
+        The best stretch factor.
+    """
+
+    min_shift, max_shift = shift_range
+    max_correlation = -numpy.inf
+    best_shift = 0
+    best_stretch_factor = 1
+
+    # normalize the peaks to roughly magnitude 1, so that individual very bright
+    # fibers do not dominate the signal
+    if normalize_spectra:
+        obs_spec_, ref_spec_, obs_peak, obs_peak_pars, ref_peaks, ref_peak_pars = _normalize_peaks(obs_spec, ref_spec, min_peak_dist=min_peak_dist)
+    else:
+        ref_spec_ = ref_spec.copy()
+        obs_spec_ = obs_spec.copy()
+
+    # Get the correlation shifts
+    shifts = signal.correlation_lags(
+        len(obs_spec_), len(ref_spec_), mode="same"
+    )
+    cross_corr = signal.correlate(obs_spec_, ref_spec_, mode="same")
+
+    # import matplotlib.pyplot as plt
+    # plt.figure()
+    # pixels = numpy.arange(obs_spec_.size)
+    # plt.step(pixels, obs_spec_, where="mid")
+    # plt.step(pixels, ref_spec_, where="mid")
+    # plt.figure()
+    # plt.step(shifts, cross_corr, where="mid")
+
+    # Normalize the cross correlation
+    cross_corr = cross_corr.astype(numpy.float32)
+    cross_corr /= norm(ref_spec_) * norm(obs_spec_)
+    cross_corr = numpy.nan_to_num(cross_corr)
+
+    # Find the max correlation and the corresponding shift for this stretch factor
+    mask = (shifts >= min_shift+guess_shift) & (shifts <= max_shift+guess_shift)
+    idx_max_corr = numpy.argmax(cross_corr[mask])
+    max_corr = cross_corr[mask][idx_max_corr]
+    shift = shifts[mask][idx_max_corr]
+
+    if ax is not None:
+        ax.step(shifts[mask], cross_corr[mask], color="0.7", lw=1, where="mid", alpha=0.3)
+
+    condition = max_corr > max_correlation
+
+    if condition:
+        best_shifts, best_cross_corr = shifts, cross_corr
+        max_correlation = max_corr
+        best_shift = shift
+
+    # Fit Gaussian around maximum cross-correlation peak
+    mask = (shifts >= min_shift+best_shift) & (shifts <= max_shift+best_shift)
+    guess = [numpy.trapz(best_cross_corr[mask], best_shifts[mask]), best_shift, 1.0, 0.0]
+    bound_lower = [0.0, best_shift+min_shift, gauss_sigmas[0], -numpy.inf]
+    bound_upper = [numpy.inf, best_shift+max_shift, gauss_sigmas[1], numpy.inf]
+    best_gauss = fit_profile.Gaussian_const(guess)
+    best_gauss.fit(
+        best_shifts[mask],
+        best_cross_corr[mask],
+        sigma=1.0,
+        p0=guess,
+        bounds=(bound_lower, bound_upper)
+    )
+    area, best_shift_sp, sigma, bg = best_gauss.getPar()
+
+    # display best match
+    if ax is not None:
+        mask = (best_shifts >= best_shift+gauss_window[0]) & (best_shifts <= best_shift+gauss_window[1])
+        ax.step(best_shifts[mask], best_cross_corr[mask], color="0.2", lw=2, where="mid")
+        ax.step(best_shifts[mask], best_gauss(best_shifts[mask]), color="tab:red", lw=2, where="mid")
+        ax.axvline(best_shift, color="tab:blue", lw=1, ls="--")
+        ax.axvline(best_shift_sp, color="tab:red", lw=1)
+        ax.text(best_shift, (best_cross_corr[mask]).min(), f"shift = {best_shift}", va="bottom", ha="left", color="tab:blue")
+        ax.text(best_shift_sp, (best_cross_corr[mask]).min(), f"subpix. shift = {best_shift_sp:.3f}", va="top", ha="right", color="tab:red")
+
+    return max_correlation, best_shift_sp, best_stretch_factor
+
 
 
 def _apply_shift_and_stretch(
@@ -244,8 +691,8 @@ def wave_little_interpol(wavelist):
         # In overlap region patch in a linear scale with slightly different step.
         dw = overlap_end - overlap_start
         step = 0.5 * (
-            numpy.mean(numpy.diff(wavelist[i]))
-            + numpy.mean(numpy.diff(wavelist[i + 1]))
+            bn.mean(numpy.diff(wavelist[i]))
+            + bn.mean(numpy.diff(wavelist[i + 1]))
         )
         n_steps = int(dw / step + 0.5)
 
@@ -267,28 +714,163 @@ def wave_little_interpol(wavelist):
     return numpy.hstack(waveout)
 
 
+def convolution_matrix(kernel, normalize=True):
+    """Helper function to construct a kernel matrix for a convolution
+
+    Parameters
+    ----------
+    kernel : numpy.ndarray[float]
+        Matrix containing kernels for each pixel, row-wise
+    normalize : bool, optional
+        Normalizes over rows if the matrix, by default True
+
+    Returns
+    -------
+    new_kernel : scipy.sparse.csr_array
+        Compresed sparse kernel
+    """
+    if len(kernel.shape) == 2:
+        nrows = kernel.shape[0]
+    elif len(kernel.shape) == 1:
+        nrows = kernel.size
+        kernel = numpy.repeat([kernel], nrows, axis=0)
+
+    kernelLength = kernel.shape[1]
+
+    rowIdxFirst = numpy.floor(kernelLength / 2)
+    rowIdxLast  = rowIdxFirst + nrows
+
+    vI = []
+    vJ = []
+    vV = []
+    for jj in range(nrows):
+        kernel_row = kernel[jj] / numpy.sum(kernel[jj])
+        for ii in range(kernelLength):
+            if (ii + jj >= rowIdxFirst) and (ii + jj < rowIdxLast):
+                # Valid otuput matrix row index
+                vI.append(int(ii + jj - rowIdxFirst))
+                vJ.append(int(jj))
+                vV.append(kernel_row[ii])
+
+    # vI, vJ = numpy.where(kernel>1e-5)
+    # vV = kernel[vI, vJ]
+    new_kernel = sparse.csr_array((vV, (vJ, vI)))
+    if normalize:
+        new_kernel = new_kernel.multiply(1 / numpy.sum(new_kernel, axis=1))
+    return new_kernel
+
+
+class FiberProfileCache(object):
+    def __init__(self, fiber_radius=1.4, oversampling_factor=100, npixels=8):
+        self.sigma_min = 0.5
+        self.sigma_max = 2.5
+        assert(fiber_radius>0)
+        self.fiber_radius = fiber_radius
+        assert (oversampling_factor>0)
+        self.oversampling_factor = oversampling_factor
+        self.nprofiles = 20001
+        assert (npixels>0)
+        self.npixels = npixels
+        self.x = numpy.linspace(numpy.zeros(self.nprofiles)-npixels, numpy.zeros(self.nprofiles)+npixels, 2*npixels+1, endpoint=True)
+        self.profile_cache = self._gen_mexhat_basis(self.x, numpy.zeros(self.nprofiles), \
+                                                    numpy.linspace(self.sigma_min, self.sigma_max, self.nprofiles, endpoint=True), \
+                                                    self.fiber_radius, self.oversampling_factor)
+        self.profile_cumsum = numpy.cumsum(self.profile_cache, axis=0) / oversampling_factor
+
+    def __call__(self, centroids, sigmas):
+        lines = numpy.clip((numpy.round(self.nprofiles/(self.sigma_max - self.sigma_min)*(sigmas-self.sigma_min))).astype(int),
+                            a_min=0, a_max=self.nprofiles-1)
+        cumsums = self.profile_cumsum[:,lines]
+        # calculate the shift relative to the given fractional centroid
+        cen_fracs = centroids - numpy.trunc(centroids) + 0.5 # account for pixel boundaries [0...1]
+
+        centers = self.x_os[:,lines]+cen_fracs
+        bins = self.x[:,lines]
+        bin_starts =  numpy.clip(((bins - centers[0,:]) * self.oversampling_factor).astype(int), a_min=0, a_max=None)
+        bin_ends = numpy.clip(bin_starts + self.oversampling_factor, a_min=None, a_max=len(cumsums[:,0])-1)
+        cols = numpy.arange(bin_starts.shape[1])[None, :]  # shape (1, M), will broadcast to (N, M)
+        return cumsums[bin_ends, cols] - cumsums[bin_starts, cols]
+
+    def _gen_mexhat_basis(self, x, centroids, sigmas, fiber_radius, oversampling_factor):
+        dx = x[1, 0] - x[0, 0]
+        self.x_os = fit_profile.oversample(x, oversampling_factor)
+        self.dx_os = dx / oversampling_factor
+
+        x_kernel = numpy.arange(0, 2*fiber_radius + self.dx_os, self.dx_os)
+        kernel = fit_profile.fiber_profile(centroids=fiber_radius, radii=fiber_radius, x=x_kernel)
+        psfs = fit_profile.gaussians((numpy.ones_like(centroids), centroids, sigmas), self.x_os.T, alpha=2, collapse=False)[0].T
+
+        profiles = signal.fftconvolve(psfs, kernel.T, mode="same", axes=0)
+        profiles /= integrate.trapezoid(profiles, self.x_os, axis=0)[None, :]
+
+        return profiles
+
+    def _pixel_integrate(self, pixels, cumsum):
+        bins = self.x[:,0]
+        # bin_starts = numpy.searchsorted(xx, bins[:-1], side='left')
+        bin_starts = ((bins - pixels[0]) * self.oversampling_factor).astype(int)
+        # numpy.clip(bin_starts, min_value = 0)
+        bin_starts[0] = 0 if bin_starts[0] < 0 else bin_starts[0]
+        bin_ends   = bin_starts + self.oversampling_factor
+        # numpy.clip(bin_ends, max_value = len(cumsum)-1)
+        bin_ends[-1] = len(cumsum)-1 if bin_ends[-1] >= len(cumsum) else bin_ends[-1]
+        return cumsum[bin_ends] - cumsum[bin_starts]
+
 class Spectrum1D(Header):
+
+    fiberProfileCache = None
+
+    @classmethod
+    def select_poly_class(cls, poly_kind=None):
+        """Returns the polynomial class to use for the given kind of polynomial
+
+        Parameters
+        ----------
+        poly_kind : string, optional with default None
+
+        Returns
+        -------
+        poly_cls : numpy.polynomial.Polynomial
+        """
+        if poly_kind == "poly" or poly_kind is None or poly_kind == "None":
+            poly_cls = numpy.polynomial.Polynomial
+        elif poly_kind == "chebyshev":
+            poly_cls = numpy.polynomial.Chebyshev
+        elif poly_kind == "legendre":
+            poly_cls = numpy.polynomial.Legendre
+        else:
+            raise ValueError(f"Invalid polynomial kind: '{poly_kind}', valid options are: 'poly', 'legendre', 'chebyshev'")
+        return poly_cls
+
     def __init__(
-        self, wave=None, data=None, error=None, mask=None, inst_fwhm=None, sky=None, sky_error=None, header=None
+        self, wave=None, data=None, error=None, mask=None,
+        lsf=None, wave_trace=None, lsf_trace=None,
+        sky=None, sky_error=None, header=None
     ):
-        self._wave = wave
         self._data = data
         if data is not None:
             self._dim = self._data.shape[0]
             self._pixels = numpy.arange(self._dim)
         self._error = error
         self._mask = mask
-        self._inst_fwhm = inst_fwhm
         self._sky = sky
         self._sky_error = sky_error
         self._header = header
 
+        self.set_wave_and_lsf_traces(wave=wave, wave_trace=wave_trace, lsf_trace=lsf_trace, lsf=lsf)
+
     def __sub__(self, other):
         if isinstance(other, Spectrum1D):
+            # verify wavelength and LSF arrays are the same
+            if not numpy.array_equal(self._wave, other._wave):
+                raise ValueError("wavelength arrays are not the same")
+            if not numpy.array_equal(self._wave_trace, other._wave_trace):
+                raise ValueError("wavelength trace arrays are not the same")
+
             data = numpy.zeros_like(self._data)
             select_zero = self._data == 0
             data = self._data - other._data
-            
+
             if self._mask is not None and other._mask is not None:
                 mask = numpy.logical_or(self._mask, other._mask)
                 select_zero = numpy.logical_and(select_zero, mask)
@@ -301,7 +883,7 @@ class Spectrum1D(Header):
                 data[select_zero] = 0
             else:
                 mask = None
-            
+
             if self._error is not None and other._error is not None:
                 error = numpy.sqrt(self._error**2 + other._error**2)
             elif self._error is not None:
@@ -310,7 +892,7 @@ class Spectrum1D(Header):
                 error = other._error
             else:
                 error = None
-            
+
             if self._sky is not None and other._sky is not None:
                 sky = self._sky - other._sky
             elif self._sky is not None:
@@ -319,7 +901,7 @@ class Spectrum1D(Header):
                 sky = other._sky
             else:
                 sky = None
-            
+
             if self._sky_error is not None and other._sky_error is not None:
                 sky_error = numpy.sqrt(self._sky_error**2 + other._sky_error**2)
             elif self._sky_error is not None:
@@ -338,11 +920,13 @@ class Spectrum1D(Header):
                 if sky.dtype == numpy.float64 or sky.dtype == numpy.dtype(">f8"):
                     sky = sky.astype(numpy.float32)
             if sky_error is not None:
-                if sky_error.dtype == numpy.float64 or sky_error.dtype == numpy.dtype(">f8"):
+                if sky_error.dtype == numpy.float64 or sky_error.dtype == numpy.dtype(
+                    ">f8"
+                ):
                     sky_error = sky_error.astype(numpy.float32)
 
             spec = Spectrum1D(wave=self._wave, data=data, error=error, mask=mask, sky=sky, sky_error=sky_error)
-            
+
             return spec
 
         elif isinstance(other, numpy.ndarray):
@@ -351,7 +935,7 @@ class Spectrum1D(Header):
             mask = self._mask
             sky = self._sky
             sky_error = self._sky_error
-            
+
             if data.dtype == numpy.float64 or data.dtype == numpy.dtype(">f8"):
                 data = data.astype(numpy.float32)
             if error is not None:
@@ -361,11 +945,13 @@ class Spectrum1D(Header):
                 if sky.dtype == numpy.float64 or sky.dtype == numpy.dtype(">f8"):
                     sky = sky.astype(numpy.float32)
             if sky_error is not None:
-                if sky_error.dtype == numpy.float64 or sky_error.dtype == numpy.dtype(">f8"):
+                if sky_error.dtype == numpy.float64 or sky_error.dtype == numpy.dtype(
+                    ">f8"
+                ):
                     sky_error = sky_error.astype(numpy.float32)
-            
+
             spec = Spectrum1D(wave=self._wave, data=data, error=error, mask=mask, sky=sky, sky_error=sky_error)
-            
+
             return spec
         else:
             # try to do addtion for other types, e.g. float, int, etc.
@@ -379,17 +965,22 @@ class Spectrum1D(Header):
                 if data.dtype == numpy.float64 or data.dtype == numpy.dtype(">f8"):
                     data = data.astype(numpy.float32)
                 if error is not None:
-                    if error.dtype == numpy.float64 or error.dtype == numpy.dtype(">f8"):
+                    if error.dtype == numpy.float64 or error.dtype == numpy.dtype(
+                        ">f8"
+                    ):
                         error = error.astype(numpy.float32)
                 if sky is not None:
                     if sky.dtype == numpy.float64 or sky.dtype == numpy.dtype(">f8"):
                         sky = sky.astype(numpy.float32)
                 if sky_error is not None:
-                    if sky_error.dtype == numpy.float64 or sky_error.dtype == numpy.dtype(">f8"):
+                    if (
+                        sky_error.dtype == numpy.float64
+                        or sky_error.dtype == numpy.dtype(">f8")
+                    ):
                         sky_error = sky_error.astype(numpy.float32)
 
                 spec = Spectrum1D(wave=self._wave, data=data, error=error, mask=mask, sky=sky, sky_error=sky_error)
-                
+
                 return spec
             except Exception:
                 # raise exception if the type are not matching in general
@@ -400,11 +991,17 @@ class Spectrum1D(Header):
 
     def __add__(self, other):
         if isinstance(other, Spectrum1D):
+            # verify wavelength and LSF arrays are the same
+            if not numpy.array_equal(self._wave, other._wave):
+                raise ValueError("wavelength arrays are not the same")
+            if not numpy.array_equal(self._wave_trace, other._wave_trace):
+                raise ValueError("wavelength trace arrays are not the same")
+
             other._data.astype(numpy.float32)
             data = numpy.zeros_like(self._data)
             select_zero = self._data == 0
             data = self._data + other._data
-            
+
             if self._mask is not None and other._mask is not None:
                 mask = numpy.logical_or(self._mask, other._mask)
                 select_zero = numpy.logical_and(select_zero, mask)
@@ -417,7 +1014,7 @@ class Spectrum1D(Header):
                 data[select_zero] = 0
             else:
                 mask = None
-            
+
             if self._error is not None and other._error is not None:
                 error = numpy.sqrt(self._error**2 + other._error**2)
             elif self._error is not None:
@@ -426,7 +1023,7 @@ class Spectrum1D(Header):
                 error = other._error
             else:
                 error = None
-            
+
             if self._sky is not None and other._sky is not None:
                 sky = self._sky + other._sky
             elif self._sky is not None:
@@ -435,7 +1032,7 @@ class Spectrum1D(Header):
                 sky = other._sky
             else:
                 sky = None
-            
+
             if self._sky_error is not None and other._sky_error is not None:
                 sky_error = numpy.sqrt(self._sky_error**2 + other._sky_error**2)
             elif self._sky_error is not None:
@@ -444,7 +1041,7 @@ class Spectrum1D(Header):
                 sky_error = other._sky_error
             else:
                 sky_error = None
-            
+
             if data.dtype == numpy.float64 or data.dtype == numpy.dtype(">f8"):
                 data = data.astype(numpy.float32)
             if error is not None:
@@ -454,11 +1051,13 @@ class Spectrum1D(Header):
                 if sky.dtype == numpy.float64 or sky.dtype == numpy.dtype(">f8"):
                     sky = sky.astype(numpy.float32)
             if sky_error is not None:
-                if sky_error.dtype == numpy.float64 or sky_error.dtype == numpy.dtype(">f8"):
+                if sky_error.dtype == numpy.float64 or sky_error.dtype == numpy.dtype(
+                    ">f8"
+                ):
                     sky_error = sky_error.astype(numpy.float32)
 
             spec = Spectrum1D(wave=self._wave, data=data, error=error, mask=mask, sky=sky, sky_error=sky_error)
-            
+
             return spec
 
         elif isinstance(other, numpy.ndarray):
@@ -468,8 +1067,8 @@ class Spectrum1D(Header):
                 error = self._error + other
             else:
                 error = None
-        
-            if self._mask is not None:    
+
+            if self._mask is not None:
                 mask = self._mask
             else:
                 mask = None
@@ -478,7 +1077,7 @@ class Spectrum1D(Header):
                 sky = self._sky + other
             else:
                 sky = None
-            
+
             if self._sky_error is not None:
                 sky_error = self._sky_error + other
             else:
@@ -493,11 +1092,13 @@ class Spectrum1D(Header):
                 if sky.dtype == numpy.float64 or sky.dtype == numpy.dtype(">f8"):
                     sky = sky.astype(numpy.float32)
             if sky_error is not None:
-                if sky_error.dtype == numpy.float64 or sky_error.dtype == numpy.dtype(">f8"):
+                if sky_error.dtype == numpy.float64 or sky_error.dtype == numpy.dtype(
+                    ">f8"
+                ):
                     sky_error = sky_error.astype(numpy.float32)
 
             spec = Spectrum1D(wave=self._wave, data=data, error=error, mask=mask, sky=sky, sky_error=sky_error)
-            
+
             return spec
         else:
             # try to do addtion for other types, e.g. float, int, etc.
@@ -518,7 +1119,7 @@ class Spectrum1D(Header):
                     sky = self._sky + other
                 else:
                     sky = None
-                
+
                 if self._sky_error is not None:
                     sky_error = self._sky_error + other
                 else:
@@ -527,17 +1128,22 @@ class Spectrum1D(Header):
                 if data.dtype == numpy.float64 or data.dtype == numpy.dtype(">f8"):
                     data = data.astype(numpy.float32)
                 if error is not None:
-                    if error.dtype == numpy.float64 or error.dtype == numpy.dtype(">f8"):
+                    if error.dtype == numpy.float64 or error.dtype == numpy.dtype(
+                        ">f8"
+                    ):
                         error = error.astype(numpy.float32)
                 if sky is not None:
                     if sky.dtype == numpy.float64 or sky.dtype == numpy.dtype(">f8"):
                         sky = sky.astype(numpy.float32)
                 if sky_error is not None:
-                    if sky_error.dtype == numpy.float64 or sky_error.dtype == numpy.dtype(">f8"):
+                    if (
+                        sky_error.dtype == numpy.float64
+                        or sky_error.dtype == numpy.dtype(">f8")
+                    ):
                         sky_error = sky_error.astype(numpy.float32)
 
                 spec = Spectrum1D(wave=self._wave, data=data, error=error, mask=mask, sky=sky, sky_error=sky_error)
-                
+
                 return spec
             except Exception:
                 # raise exception if the type are not matching in general
@@ -548,9 +1154,17 @@ class Spectrum1D(Header):
 
     def __truediv__(self, other):
         if isinstance(other, Spectrum1D):
+            # verify wavelength and LSF arrays are the same
+            if not numpy.isclose(self._wave, other._wave).all():
+                raise ValueError("wavelength arrays are not the same")
+            if (self._wave_trace is not None and other._wave_trace is not None) and not self._wave_trace == other._wave_trace:
+                raise ValueError("wavelength trace arrays are not the same")
+
             other._data = other._data.astype(numpy.float32)
             select = other._data != 0.0
-            data = numpy.divide(self._data, other._data, out=numpy.zeros_like(self._data), where=select)
+            data = numpy.divide(
+                self._data, other._data, out=numpy.zeros_like(self._data), where=select
+            )
 
             if self._mask is not None and other._mask is not None:
                 mask = numpy.logical_or(self._mask, other._mask)
@@ -563,40 +1177,88 @@ class Spectrum1D(Header):
                 mask[~select] = True
             else:
                 mask = None
-            
+
             if self._error is not None and other._error is not None:
                 error = numpy.zeros_like(self._error)
-                error_a = numpy.divide(self._error, other._data, out=error, where=select) ** 2
-                error_b = numpy.divide(self._data * other._error, other._data ** 2, out=error, where=select) ** 2
+                error_a = (
+                    numpy.divide(self._error, other._data, out=error, where=select) ** 2
+                )
+                error_b = (
+                    numpy.divide(
+                        self._data * other._error,
+                        other._data**2,
+                        out=error,
+                        where=select,
+                    )
+                    ** 2
+                )
                 error = numpy.sqrt(error_a + error_b)
             elif self._error is not None:
-                error = numpy.divide(self._error, other._data, out=numpy.zeros_like(self._error), where=select)
+                error = numpy.divide(
+                    self._error,
+                    other._data,
+                    out=numpy.zeros_like(self._error),
+                    where=select,
+                )
             elif other._error is not None:
-                error = numpy.divide(self._data * other._error, other._data ** 2, out=numpy.zeros_like(self._error), where=select)
+                error = numpy.divide(
+                    self._data * other._error,
+                    other._data**2,
+                    out=numpy.zeros_like(self._error),
+                    where=select,
+                )
             else:
                 error = None
 
             if self._sky is not None and other._sky is not None:
-                sky = numpy.divide(self._sky, other._sky, out=numpy.zeros_like(self._sky), where=other._sky != 0.0)
+                sky = numpy.divide(
+                    self._sky,
+                    other._sky,
+                    out=numpy.zeros_like(self._sky),
+                    where=other._sky != 0.0,
+                )
             elif self._sky is not None:
                 sky = self._sky
             elif other._sky is not None:
                 sky = other._sky
             else:
                 sky = None
-            
+
             if self._sky_error is not None and other._sky_error is not None:
                 sky_error = numpy.zeros_like(self._sky_error)
-                sky_error_a = numpy.divide(self._sky_error, other._data, out=sky_error, where=select) ** 2
-                sky_error_b = numpy.divide(self._data * other._sky_error, other._data ** 2, out=sky_error, where=select) ** 2
+                sky_error_a = (
+                    numpy.divide(
+                        self._sky_error, other._data, out=sky_error, where=select
+                    )
+                    ** 2
+                )
+                sky_error_b = (
+                    numpy.divide(
+                        self._data * other._sky_error,
+                        other._data**2,
+                        out=sky_error,
+                        where=select,
+                    )
+                    ** 2
+                )
                 sky_error = numpy.sqrt(sky_error_a + sky_error_b)
             elif self._sky_error is not None:
-                sky_error = numpy.divide(self._sky_error, other._data, out=numpy.zeros_like(self._sky_error), where=select)
+                sky_error = numpy.divide(
+                    self._sky_error,
+                    other._data,
+                    out=numpy.zeros_like(self._sky_error),
+                    where=select,
+                )
             elif other._sky_error is not None:
-                sky_error = numpy.divide(self._data * other._sky_error, other._data ** 2, out=numpy.zeros_like(self._sky_error), where=select)
+                sky_error = numpy.divide(
+                    self._data * other._sky_error,
+                    other._data**2,
+                    out=numpy.zeros_like(self._sky_error),
+                    where=select,
+                )
             else:
                 sky_error = None
-            
+
             if data.dtype == numpy.float64 or data.dtype == numpy.dtype(">f8"):
                 data = data.astype(numpy.float32)
             if error is not None:
@@ -606,22 +1268,26 @@ class Spectrum1D(Header):
                 if sky.dtype == numpy.float64 or sky.dtype == numpy.dtype(">f8"):
                     sky = sky.astype(numpy.float32)
             if sky_error is not None:
-                if sky_error.dtype == numpy.float64 or sky_error.dtype == numpy.dtype(">f8"):
+                if sky_error.dtype == numpy.float64 or sky_error.dtype == numpy.dtype(
+                    ">f8"
+                ):
                     sky_error = sky_error.astype(numpy.float32)
 
-            spec = Spectrum1D(wave=self._wave, data=data, error=error, mask=mask, sky=sky, sky_error=sky_error)
-            
+            spec = Spectrum1D(wave=self._wave, data=data, error=error, mask=mask, wave_trace=self._wave_trace, lsf_trace=self._lsf_trace, sky=sky, sky_error=sky_error)
+
             return spec
 
         elif isinstance(other, numpy.ndarray):
             select = other != 0.0
             data = numpy.divide(self._data, other, out=numpy.zeros_like(self._data), where=select)
-            
+
             if self._error is not None:
-                error = numpy.divide(self._error, other, out=numpy.zeros_like(self._error), where=select)
+                error = numpy.divide(
+                    self._error, other, out=numpy.zeros_like(self._error), where=select
+                )
             else:
                 error = None
-            
+
             if self._mask is not None:
                 mask = self._mask
                 mask[~select] = True
@@ -629,15 +1295,22 @@ class Spectrum1D(Header):
                 mask = None
 
             if self._sky is not None:
-                sky = numpy.divide(self._sky, other, out=numpy.zeros_like(self._sky), where=select)
+                sky = numpy.divide(
+                    self._sky, other, out=numpy.zeros_like(self._sky), where=select
+                )
             else:
                 sky = None
-            
+
             if self._sky_error is not None:
-                sky_error = numpy.divide(self._sky_error, other, out=numpy.zeros_like(self._sky_error), where=select)
+                sky_error = numpy.divide(
+                    self._sky_error,
+                    other,
+                    out=numpy.zeros_like(self._sky_error),
+                    where=select,
+                )
             else:
                 sky_error = None
-            
+
             if data.dtype == numpy.float64 or data.dtype == numpy.dtype(">f8"):
                 data = data.astype(numpy.float32)
             if error is not None:
@@ -647,51 +1320,72 @@ class Spectrum1D(Header):
                 if sky.dtype == numpy.float64 or sky.dtype == numpy.dtype(">f8"):
                     sky = sky.astype(numpy.float32)
             if sky_error is not None:
-                if sky_error.dtype == numpy.float64 or sky_error.dtype == numpy.dtype(">f8"):
+                if sky_error.dtype == numpy.float64 or sky_error.dtype == numpy.dtype(
+                    ">f8"
+                ):
                     sky_error = sky_error.astype(numpy.float32)
 
             spec = Spectrum1D(wave=self._wave, data=data, error=error, mask=mask, sky=sky, sky_error=sky_error)
-            
+
             return spec
         else:
             # try to do addtion for other types, e.g. float, int, etc.
             try:
                 select = other != 0.0
-                data = numpy.divide(self._data, other, out=numpy.zeros_like(self._data), where=select)
+                data = numpy.divide(
+                    self._data, other, out=numpy.zeros_like(self._data), where=select
+                )
 
                 if self._error is not None:
-                    error = numpy.divide(self._error, other, out=numpy.zeros_like(self._error), where=select)
+                    error = numpy.divide(
+                        self._error,
+                        other,
+                        out=numpy.zeros_like(self._error),
+                        where=select,
+                    )
                 else:
                     error = None
 
                 if self._mask is not None:
                     mask = self._mask
                     mask[~select] = True
-                
+
                 if self._sky is not None:
-                    sky = numpy.divide(self._sky, other, out=numpy.zeros_like(self._sky), where=select)
+                    sky = numpy.divide(
+                        self._sky, other, out=numpy.zeros_like(self._sky), where=select
+                    )
                 else:
                     sky = None
 
                 if self._sky_error is not None:
-                    sky_error = numpy.divide(self._sky_error, other, out=numpy.zeros_like(self._sky_error), where=select)
+                    sky_error = numpy.divide(
+                        self._sky_error,
+                        other,
+                        out=numpy.zeros_like(self._sky_error),
+                        where=select,
+                    )
                 else:
                     sky_error = None
 
                 if data.dtype == numpy.float64 or data.dtype == numpy.dtype(">f8"):
                     data = data.astype(numpy.float32)
                 if error is not None:
-                    if error.dtype == numpy.float64 or error.dtype == numpy.dtype(">f8"):
+                    if error.dtype == numpy.float64 or error.dtype == numpy.dtype(
+                        ">f8"
+                    ):
                         error = error.astype(numpy.float32)
                 if sky is not None:
                     if sky.dtype == numpy.float64 or sky.dtype == numpy.dtype(">f8"):
                         sky = sky.astype(numpy.float32)
                 if sky_error is not None:
-                    if sky_error.dtype == numpy.float64 or sky_error.dtype == numpy.dtype(">f8"):
+                    if (
+                        sky_error.dtype == numpy.float64
+                        or sky_error.dtype == numpy.dtype(">f8")
+                    ):
                         sky_error = sky_error.astype(numpy.float32)
 
                 spec = Spectrum1D(wave=self._wave, data=data, error=error, mask=mask, sky=sky, sky_error=sky_error)
-                
+
                 return spec
             except Exception:
                 # raise exception if the type are not matching in general
@@ -702,9 +1396,17 @@ class Spectrum1D(Header):
 
     def __rtruediv__(self, other):
         if isinstance(other, Spectrum1D):
+            # verify wavelength and LSF arrays are the same
+            if not numpy.array_equal(self._wave, other._wave):
+                raise ValueError("wavelength arrays are not the same")
+            if not numpy.array_equal(self._wave_trace, other._wave_trace):
+                raise ValueError("wavelength trace arrays are not the same")
+
             other._data = other._data.astype(numpy.float32)
             select = self._data != 0.0
-            data = numpy.divide(other._data, self._data, out=numpy.zeros_like(self._data), where=select)
+            data = numpy.divide(
+                other._data, self._data, out=numpy.zeros_like(self._data), where=select
+            )
 
             if self._mask is not None and other._mask is not None:
                 mask = numpy.logical_or(self._mask, other._mask)
@@ -720,18 +1422,43 @@ class Spectrum1D(Header):
 
             if self._error is not None and other._error is not None:
                 error = numpy.zeros_like(self._error)
-                error_a = numpy.divide(other._error, self._data, out=error, where=select) ** 2
-                error_b = numpy.divide(other._data * self._error, self._data ** 2, out=error, where=select) ** 2
+                error_a = (
+                    numpy.divide(other._error, self._data, out=error, where=select) ** 2
+                )
+                error_b = (
+                    numpy.divide(
+                        other._data * self._error,
+                        self._data**2,
+                        out=error,
+                        where=select,
+                    )
+                    ** 2
+                )
                 error = numpy.sqrt(error_a + error_b)
             elif self._error is not None:
-                error = numpy.divide(other._error, self._data, out=numpy.zeros_like(self._error), where=select)
+                error = numpy.divide(
+                    other._error,
+                    self._data,
+                    out=numpy.zeros_like(self._error),
+                    where=select,
+                )
             elif other._error is not None:
-                error = numpy.divide(other._data * self._error, self._data ** 2, out=numpy.zeros_like(self._error), where=select)
+                error = numpy.divide(
+                    other._data * self._error,
+                    self._data**2,
+                    out=numpy.zeros_like(self._error),
+                    where=select,
+                )
             else:
                 error = None
-            
+
             if other._sky is not None:
-                sky = numpy.divide(other._sky, self._sky, out=numpy.zeros_like(self._sky), where=self._sky != 0.0)
+                sky = numpy.divide(
+                    other._sky,
+                    self._sky,
+                    out=numpy.zeros_like(self._sky),
+                    where=self._sky != 0.0,
+                )
             elif self._sky is not None:
                 sky = self._sky
             elif other._sky is not None:
@@ -741,13 +1468,36 @@ class Spectrum1D(Header):
 
             if self._sky_error is not None and other._sky_error is not None:
                 sky_error = numpy.zeros_like(self._sky_error)
-                sky_error_a = numpy.divide(other._sky_error, self._data, out=sky_error, where=select) ** 2
-                sky_error_b = numpy.divide(other._data * self._sky_error, self._data ** 2, out=sky_error, where=select) ** 2
+                sky_error_a = (
+                    numpy.divide(
+                        other._sky_error, self._data, out=sky_error, where=select
+                    )
+                    ** 2
+                )
+                sky_error_b = (
+                    numpy.divide(
+                        other._data * self._sky_error,
+                        self._data**2,
+                        out=sky_error,
+                        where=select,
+                    )
+                    ** 2
+                )
                 sky_error = numpy.sqrt(sky_error_a + sky_error_b)
             elif self._sky_error is not None:
-                sky_error = numpy.divide(other._sky_error, self._data, out=numpy.zeros_like(self._sky_error), where=select)
+                sky_error = numpy.divide(
+                    other._sky_error,
+                    self._data,
+                    out=numpy.zeros_like(self._sky_error),
+                    where=select,
+                )
             elif other._sky_error is not None:
-                sky_error = numpy.divide(other._data * self._sky_error, self._data ** 2, out=numpy.zeros_like(self._sky_error), where=select)
+                sky_error = numpy.divide(
+                    other._data * self._sky_error,
+                    self._data**2,
+                    out=numpy.zeros_like(self._sky_error),
+                    where=select,
+                )
             else:
                 sky_error = None
 
@@ -760,19 +1510,26 @@ class Spectrum1D(Header):
                 if sky.dtype == numpy.float64 or sky.dtype == numpy.dtype(">f8"):
                     sky = sky.astype(numpy.float32)
             if sky_error is not None:
-                if sky_error.dtype == numpy.float64 or sky_error.dtype == numpy.dtype(">f8"):
+                if sky_error.dtype == numpy.float64 or sky_error.dtype == numpy.dtype(
+                    ">f8"
+                ):
                     sky_error = sky_error.astype(numpy.float32)
 
             spec = Spectrum1D(wave=self._wave, data=data, error=error, mask=mask, sky=sky, sky_error=sky_error)
-            
+
             return spec
 
         elif isinstance(other, numpy.ndarray):
             select = self._data != 0.0
             data = numpy.divide(other, self._data, out=numpy.zeros_like(self._data), where=select)
-            
+
             if self._error is not None:
-                error = numpy.divide(other * self._error, self._data ** 2, out=numpy.zeros_like(self._error), where=select)
+                error = numpy.divide(
+                    other * self._error,
+                    self._data**2,
+                    out=numpy.zeros_like(self._error),
+                    where=select,
+                )
             else:
                 error = None
 
@@ -781,14 +1538,24 @@ class Spectrum1D(Header):
                 mask[~select] = True
             else:
                 mask = None
-            
+
             if self._sky is not None:
-                sky = numpy.divide(other, self._sky, out=numpy.zeros_like(self._sky), where=self._sky != 0.0)
+                sky = numpy.divide(
+                    other,
+                    self._sky,
+                    out=numpy.zeros_like(self._sky),
+                    where=self._sky != 0.0,
+                )
             else:
                 sky = None
-            
+
             if self._sky_error is not None:
-                sky_error = numpy.divide(other * self._sky_error, self._data ** 2, out=numpy.zeros_like(self._sky_error), where=select)
+                sky_error = numpy.divide(
+                    other * self._sky_error,
+                    self._data**2,
+                    out=numpy.zeros_like(self._sky_error),
+                    where=select,
+                )
             else:
                 sky_error = None
 
@@ -801,34 +1568,60 @@ class Spectrum1D(Header):
                 if sky.dtype == numpy.float64 or sky.dtype == numpy.dtype(">f8"):
                     sky = sky.astype(numpy.float32)
             if sky_error is not None:
-                if sky_error.dtype == numpy.float64 or sky_error.dtype == numpy.dtype(">f8"):
+                if sky_error.dtype == numpy.float64 or sky_error.dtype == numpy.dtype(
+                    ">f8"
+                ):
                     sky_error = sky_error.astype(numpy.float32)
 
-            spec = Spectrum1D(wave=self._wave, data=data, error=error, mask=mask, sky=sky, sky_error=sky_error)
+            spec = Spectrum1D(
+                wave=self._wave,
+                data=data,
+                error=error,
+                mask=mask,
+                sky=sky,
+                sky_error=sky_error,
+            )
 
             return spec
         else:
             select = self._data != 0.0
-            data = numpy.divide(other, self._data, out=numpy.zeros_like(self._data), where=select)
+            data = numpy.divide(
+                other, self._data, out=numpy.zeros_like(self._data), where=select
+            )
 
             if self._error is not None:
-                error = numpy.divide(other * self._error, self._data ** 2, out=numpy.zeros_like(self._error), where=select)
+                error = numpy.divide(
+                    other * self._error,
+                    self._data**2,
+                    out=numpy.zeros_like(self._error),
+                    where=select,
+                )
             else:
                 error = None
-            
+
             if self._mask is not None:
                 mask = self._mask
                 mask[~select] = True
             else:
                 mask = None
-            
+
             if self._sky is not None:
-                sky = numpy.divide(other, self._sky, out=numpy.zeros_like(self._sky), where=self._sky != 0.0)
+                sky = numpy.divide(
+                    other,
+                    self._sky,
+                    out=numpy.zeros_like(self._sky),
+                    where=self._sky != 0.0,
+                )
             else:
                 sky = None
-            
+
             if self._sky_error is not None:
-                sky_error = numpy.divide(other * self._sky_error, self._data ** 2, out=numpy.zeros_like(self._sky_error), where=select)
+                sky_error = numpy.divide(
+                    other * self._sky_error,
+                    self._data**2,
+                    out=numpy.zeros_like(self._sky_error),
+                    where=select,
+                )
             else:
                 sky_error = None
 
@@ -841,15 +1634,23 @@ class Spectrum1D(Header):
                 if sky.dtype == numpy.float64 or sky.dtype == numpy.dtype(">f8"):
                     sky = sky.astype(numpy.float32)
             if sky_error is not None:
-                if sky_error.dtype == numpy.float64 or sky_error.dtype == numpy.dtype(">f8"):
+                if sky_error.dtype == numpy.float64 or sky_error.dtype == numpy.dtype(
+                    ">f8"
+                ):
                     sky_error = sky_error.astype(numpy.float32)
-            
+
             spec = Spectrum1D(wave=self._wave, data=data, error=error, mask=mask, sky=sky, sky_error=sky_error)
-            
+
             return spec
 
     def __mul__(self, other):
         if isinstance(other, Spectrum1D):
+            # verify wavelength and LSF arrays are the same
+            if not numpy.array_equal(self._wave, other._wave):
+                raise ValueError("wavelength arrays are not the same")
+            if not numpy.array_equal(self._wave_trace, other._wave_trace):
+                raise ValueError("wavelength trace arrays are not the same")
+
             data = self._data * other._data
 
             if self._mask is not None and other._mask is not None:
@@ -864,14 +1665,14 @@ class Spectrum1D(Header):
             if self._error is not None and other._error is not None:
                 error_a = self._error * other._data
                 error_b = self._data * other._error
-                error = numpy.sqrt(error_a ** 2 + error_b ** 2)
+                error = numpy.sqrt(error_a**2 + error_b**2)
             elif self._error is not None:
                 error = self._error
             elif other._error is not None:
                 error = other._error
             else:
                 error = None
-            
+
             if self._sky is not None:
                 sky = self._sky * other._data
             elif self._sky is not None:
@@ -884,7 +1685,7 @@ class Spectrum1D(Header):
             if self._sky_error is not None and other._sky_error is not None:
                 sky_error_a = self._sky_error * other._data
                 sky_error_b = self._data * other._sky_error
-                sky_error = numpy.sqrt(sky_error_a ** 2 + sky_error_b ** 2)
+                sky_error = numpy.sqrt(sky_error_a**2 + sky_error_b**2)
             elif self._sky_error is not None:
                 sky_error = self._sky_error
             elif other._sky_error is not None:
@@ -901,11 +1702,13 @@ class Spectrum1D(Header):
                 if sky.dtype == numpy.float64 or sky.dtype == numpy.dtype(">f8"):
                     sky = sky.astype(numpy.float32)
             if sky_error is not None:
-                if sky_error.dtype == numpy.float64 or sky_error.dtype == numpy.dtype(">f8"):
+                if sky_error.dtype == numpy.float64 or sky_error.dtype == numpy.dtype(
+                    ">f8"
+                ):
                     sky_error = sky_error.astype(numpy.float32)
 
             spec = Spectrum1D(wave=self._wave, data=data, error=error, mask=mask, sky=sky, sky_error=sky_error)
-            
+
             return spec
 
         elif isinstance(other, numpy.ndarray):
@@ -915,17 +1718,17 @@ class Spectrum1D(Header):
                 mask = self._mask
             else:
                 mask = None
-            
+
             if self._error is not None:
                 error = self._error * other
             else:
                 error = None
-            
+
             if self._sky is not None:
                 sky = self._sky * other
             else:
                 sky = None
-            
+
             if self._sky_error is not None:
                 sky_error = self._sky_error * other
             else:
@@ -940,11 +1743,13 @@ class Spectrum1D(Header):
                 if sky.dtype == numpy.float64 or sky.dtype == numpy.dtype(">f8"):
                     sky = sky.astype(numpy.float32)
             if sky_error is not None:
-                if sky_error.dtype == numpy.float64 or sky_error.dtype == numpy.dtype(">f8"):
+                if sky_error.dtype == numpy.float64 or sky_error.dtype == numpy.dtype(
+                    ">f8"
+                ):
                     sky_error = sky_error.astype(numpy.float32)
 
             spec = Spectrum1D(wave=self._wave, data=data, error=error, mask=mask, sky=sky, sky_error=sky_error)
-            
+
             return spec
         else:
             # try to do addtion for other types, e.g. float, int, etc.
@@ -960,7 +1765,7 @@ class Spectrum1D(Header):
                 error = self._error * other
             else:
                 error = None
-            
+
             if self._sky is not None:
                 sky = self._sky * other
             else:
@@ -980,28 +1785,30 @@ class Spectrum1D(Header):
                 if sky.dtype == numpy.float64 or sky.dtype == numpy.dtype(">f8"):
                     sky = sky.astype(numpy.float32)
             if sky_error is not None:
-                if sky_error.dtype == numpy.float64 or sky_error.dtype == numpy.dtype(">f8"):
+                if sky_error.dtype == numpy.float64 or sky_error.dtype == numpy.dtype(
+                    ">f8"
+                ):
                     sky_error = sky_error.astype(numpy.float32)
 
             spec = Spectrum1D(wave=self._wave, data=data, error=error, mask=mask, sky=sky, sky_error=sky_error)
-            
+
             return spec
 
     def __pow__(self, other):
         data = self._data ** other
-        
+
         if self._error is not None:
             error = 1.0 / float(other) * self._data ** (other - 1) * self._error
         else:
             error = None
-        
+
         if self._mask is not None:
             mask = self._mask
         else:
             mask = None
 
         if self._sky is not None:
-            sky = self._sky ** other
+            sky = self._sky**other
         else:
             sky = None
 
@@ -1019,31 +1826,33 @@ class Spectrum1D(Header):
             if sky.dtype == numpy.float64 or sky.dtype == numpy.dtype(">f8"):
                 sky = sky.astype(numpy.float32)
         if sky_error is not None:
-            if sky_error.dtype == numpy.float64 or sky_error.dtype == numpy.dtype(">f8"):
+            if sky_error.dtype == numpy.float64 or sky_error.dtype == numpy.dtype(
+                ">f8"
+            ):
                 sky_error = sky_error.astype(numpy.float32)
-        
+
         spec = Spectrum1D(wave=self._wave, data=data, error=error, mask=mask, sky=sky, sky_error=sky_error)
-        
+
         return spec
 
     def __rpow__(self, other):
-        data = other ** self._data
+        data = other**self._data
 
         if self._error is not None:
             error = numpy.log(other) * data * self._error
         else:
             error = None
-        
+
         if self._mask is not None:
             mask = self._mask
         else:
             mask = None
 
         if self._sky is not None:
-            sky = other ** self._sky
+            sky = other**self._sky
         else:
             sky = None
-        
+
         if self._sky_error is not None:
             sky_error = numpy.log(other) * data * self._sky_error
         else:
@@ -1058,9 +1867,11 @@ class Spectrum1D(Header):
             if sky.dtype == numpy.float64 or sky.dtype == numpy.dtype(">f8"):
                 sky = sky.astype(numpy.float32)
         if sky_error is not None:
-            if sky_error.dtype == numpy.float64 or sky_error.dtype == numpy.dtype(">f8"):
+            if sky_error.dtype == numpy.float64 or sky_error.dtype == numpy.dtype(
+                ">f8"
+            ):
                 sky_error = sky_error.astype(numpy.float32)
-        
+
         spec = Spectrum1D(wave=self._wave, data=data, error=error, mask=mask, sky=sky, sky_error=sky_error)
 
         return spec
@@ -1082,6 +1893,121 @@ class Spectrum1D(Header):
 
     def __ge__(self, other):
         return self._data >= other
+
+    def add_header_comment(self, comstr):
+        '''
+        Append a COMMENT card at the end of the FITS header.
+        '''
+        if self._header is None:
+            return
+        self._header.append(('COMMENT', comstr), bottom=True)
+
+    def eval_wave_and_lsf_traces(self, wave, wave_trace, lsf_trace):
+        """Evaluates the wavelength and LSF traces at the given wavelength array.
+
+        Given a wavelength array, this method evaluates the wavelength and LSF
+        traces at the given wavelength array. The wavelength trace is evaluated
+        using the polynomial coefficients and the LSF trace is evaluated using
+        the LSF coefficients. The wavelength and LSF traces are evaluated using
+        the same polynomial class as the one used to fit the traces.
+
+        If the wavelength array is not the same as the one fitted by the
+        polynomial class, the wavelength and the LSF traces are interpolated to
+        the new wavelength array.
+
+        Parameters
+        ----------
+        wave : numpy.ndarray (float)
+            New wavelength scale
+        wave_trace : astropy.table.row.Row
+            Wavelength trace parameters
+        lsf_trace : astropy.table.row.Row
+            LSF trace parameters
+
+        Returns
+        -------
+        wave : numpy.ndarray (float)
+            New wavelength scale
+        lsf : numpy.ndarray (float)
+            New LSF array
+
+        Raises
+        ------
+        ValueError
+            If the new wavelength array is outside the old wavelength array
+        ValueError
+            If the new LSF array is outside the old LSF array
+        ValueError
+            If the new wavelength array does not match the input wavelength array
+        """
+        # eval wavelength and LSF polynomial traces
+        if wave_trace is not None:
+            wave_coeffs = wave_trace["COEFF"]
+            old_wave_pixels = numpy.arange(wave_trace["XMIN"], wave_trace["XMAX"] + 1)
+            wave_poly_cls = self.select_poly_class(poly_kind=wave_trace["FUNC"])
+            wave_poly = wave_poly_cls(wave_coeffs)
+            old_wave = wave_poly(old_wave_pixels)
+        else:
+            old_wave = wave
+
+        if lsf_trace is not None:
+            lsf_coeffs = lsf_trace["COEFF"]
+            old_lsf_pixels = numpy.arange(lsf_trace["XMIN"], lsf_trace["XMAX"] + 1)
+            lsf_poly_cls = self.select_poly_class(poly_kind=lsf_trace["FUNC"])
+            lsf_poly = lsf_poly_cls(lsf_coeffs)
+            old_lsf = lsf_poly(old_lsf_pixels)
+        else:
+            old_lsf = None
+
+        # check if interpolation is needed
+        if old_wave.size == wave.size and numpy.allclose(old_wave, wave, rtol=1e-2):
+            return old_wave, old_lsf
+        else:
+            new_wave_pixels = numpy.interp(wave, old_wave, old_wave_pixels)
+            # verify that new pixels are within the old pixel range
+            if numpy.any(new_wave_pixels < old_wave_pixels[0]) or numpy.any(new_wave_pixels > old_wave_pixels[-1]):
+                raise ValueError("New wavelength pixels are outside the old wavelength pixel range")
+            new_wave = wave_poly(new_wave_pixels)
+            # verify that the new wavelength is equivalent to the input wavelength
+            if not numpy.allclose(new_wave, wave, rtol=1e-2):
+                raise ValueError("New wavelength pixels do not match the input wavelength")
+
+            # if no LSF trace is provided, return the new wavelength array
+            if old_lsf is None:
+                new_lsf = None
+                return new_wave, new_lsf
+
+            new_lsf_pixels = numpy.interp(wave, old_wave, old_lsf_pixels)
+            # verify that new pixels are within the old pixel range
+            if numpy.any(new_lsf_pixels < old_lsf_pixels[0]) or numpy.any(new_lsf_pixels > old_lsf_pixels[-1]):
+                raise ValueError("New LSF pixels are outside the old LSF pixel range")
+            new_lsf = lsf_poly(new_lsf_pixels)
+
+            return new_wave, new_lsf
+
+    def set_wave_and_lsf_traces(self, wave, wave_trace, lsf_trace, lsf=None):
+        """Sets the wavelength and LSF traces.
+
+        Parameters
+        ----------
+        wave : numpy.ndarray (float)
+            Wavelength array
+        wave_trace : astropy.table.row.Row
+            Wavelength trace parameters
+        lsf_trace : astropy.table.row.Row
+            LSF trace parameters
+        lsf : numpy.ndarray (float), optional
+            LSF array
+        """
+
+        self._wave_trace = wave_trace
+        self._lsf_trace = lsf_trace
+        self._wave, self._lsf = self.eval_wave_and_lsf_traces(
+            wave=wave, wave_trace=self._wave_trace, lsf_trace=self._lsf_trace
+        )
+        # set LSF only if no trace information is provided
+        if self._lsf is None:
+            self._lsf = lsf
 
     def loadFitsData(
         self,
@@ -1140,13 +2066,15 @@ class Spectrum1D(Header):
                     elif hdu[i].header["EXTNAME"].split()[0] == "WAVE":
                         self._wave = hdu[i].data
                     elif hdu[i].header["EXTNAME"].split()[0] == "INSTFWHM":
-                        self._inst_fwhm = hdu[i].data
+                        self._lsf = hdu[i].data
                     elif hdu[i].header["EXTNAME"].split()[0] == "SKY":
                         self._sky = hdu[i].data
                     elif hdu[i].header["EXTNAME"].split()[0] == "SKY_ERROR":
                         self._sky_error = hdu[i].data
             if self._wave is None:
-                self._wave = (self._pixels * self._header["CDELT1"] + self._header["CRVAL1"])
+                self._wave = (
+                    self._pixels * self._header["CDELT1"] + self._header["CRVAL1"]
+                )
         else:
             if extension_data is not None:
                 self._data = hdu[extension_data].data
@@ -1158,7 +2086,7 @@ class Spectrum1D(Header):
             if extension_wave is not None:
                 self._wave = hdu[extension_wave].data
             if extension_fwhm is not None:
-                self._inst_fwhm = hdu[i].data
+                self._lsf = hdu[i].data
             if extension_sky is not None:
                 self._sky = hdu[i].data
             if extension_skyerror:
@@ -1205,14 +2133,22 @@ class Spectrum1D(Header):
             self._error = self._error.astype("float32")
         if self._wave is not None:
             self._wave = self._wave.astype("float32")
-        if self._inst_fwhm is not None:
-            self._inst_fwhm = self._inst_fwhm.astype("float32")
+        if self._lsf is not None:
+            self._lsf = self._lsf.astype("float32")
         if self._sky is not None:
             self._sky = self._sky.astype("float32")
         if self._sky_error is not None:
             self._sky_error = self._sky_error.astype("float32")
 
-        hdus = [None, None, None, None, None, None, None]  # create empty list for hdu storage
+        hdus = [
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        ]  # create empty list for hdu storage
 
         # create primary hdus and image hdus
         # data hdu
@@ -1229,8 +2165,8 @@ class Spectrum1D(Header):
             hdus[0] = pyfits.PrimaryHDU(self._data, header=self._header)
             if self._wave is not None:
                 hdus[1] = pyfits.ImageHDU(self._wave, name="WAVE")
-            if self._inst_fwhm is not None:
-                hdus[2] = pyfits.ImageHDU(self._inst_fwhm, name="INSTFWHM")
+            if self._lsf is not None:
+                hdus[2] = pyfits.ImageHDU(self._lsf, name="INSTFWHM")
             if self._error is not None:
                 hdus[3] = pyfits.ImageHDU(self._error, name="ERROR")
             if self._mask is not None:
@@ -1253,9 +2189,9 @@ class Spectrum1D(Header):
 
             # instrumental FWHM hdu
             if extension_fwhm == 0:
-                hdu = pyfits.PrimaryHDU(self._inst_fwhm)
+                hdu = pyfits.PrimaryHDU(self._lsf)
             elif extension_fwhm > 0 and extension_fwhm is not None:
-                hdus[extension_fwhm] = pyfits.ImageHDU(self._inst_fwhm, name="INSTFWHM")
+                hdus[extension_fwhm] = pyfits.ImageHDU(self._lsf, name="INSTFWHM")
 
             # mask hdu
             if extension_mask == 0:
@@ -1281,7 +2217,9 @@ class Spectrum1D(Header):
             if extension_skyerror == 0:
                 hdu = pyfits.PrimaryHDU(self._sky_error)
             elif extension_skyerror > 0 and extension_skyerror is not None:
-                hdus[extension_skyerror] = pyfits.ImageHDU(self._sky_error, name="SKY_ERROR")
+                hdus[extension_skyerror] = pyfits.ImageHDU(
+                    self._sky_error, name="SKY_ERROR"
+                )
 
             # header hdu
             if extension_hdr == 0:
@@ -1373,7 +2311,7 @@ class Spectrum1D(Header):
             Pixel position of the maximum data value
 
         """
-        max = numpy.nanmax(self._data)  # get max
+        max = bn.nanmax(self._data)  # get max
         select = self._data == max  # select max value
         max_wave = self._wave[select][0]  # get corresponding wavelength
         max_pos = self._pixels[select][0]  # get corresponding position
@@ -1395,7 +2333,7 @@ class Spectrum1D(Header):
             Pixel position of the minimum data value
 
         """
-        min = numpy.nanmin(self._data)  # get min
+        min = bn.nanmin(self._data)  # get min
         select = self._data == min  # select min value
         min_wave = self._wave[select][0]  # get corresponding waveength
         min_pos = self._pixels[select][0]  # get corresponding position
@@ -1445,7 +2383,7 @@ class Spectrum1D(Header):
                 self._sky_error = numpy.flipud(self._sky_error)
 
         # case where input spectrum has more than half the pixels masked
-        if numpy.nansum(self._data) == 0.0 or (
+        if bn.nansum(self._data) == 0.0 or (
             self._mask is not None and numpy.sum(self._mask) > self._dim / 2
         ):
             # all pixels masked
@@ -1453,10 +2391,10 @@ class Spectrum1D(Header):
             # all data points to zero
             new_data = numpy.zeros(len(ref_wave), numpy.float32)
             # all LSF pixels zero (if present)
-            if self._inst_fwhm is not None:
-                new_inst_fwhm = numpy.zeros(len(ref_wave), numpy.float32)
+            if self._lsf is not None:
+                new_lsf = numpy.zeros(len(ref_wave), numpy.float32)
             else:
-                new_inst_fwhm = None
+                new_lsf = None
             # all error pixels replaced with replace_error
             if self._error is None or err_sim == 0:
                 new_error = None
@@ -1479,7 +2417,7 @@ class Spectrum1D(Header):
                 wave=ref_wave,
                 error=new_error,
                 mask=new_mask,
-                inst_fwhm=new_inst_fwhm,
+                lsf=new_lsf,
                 sky=new_sky,
                 sky_error=new_sky_error,
                 header=self._header,
@@ -1495,38 +2433,39 @@ class Spectrum1D(Header):
                 select_goodpix = numpy.ones(self._dim, dtype=bool)
 
             # interpolate LSF ---------------------------------------------------------------------------------------------------------------------------------
-            if self._inst_fwhm is not None:
+            if self._lsf_trace is None and self._lsf is not None:
                 intp = interpolate.interp1d(
                     self._wave[select_goodpix],
-                    self._inst_fwhm[select_goodpix],
+                    self._lsf[select_goodpix],
                     bounds_error=False,
                     assume_sorted=True,
                     fill_value=(0.0, 0.0),
                 )
-                clean_inst_fwhm = intp(self._wave)
+                clean_lsf = intp(self._wave)
 
-                select_interp = clean_inst_fwhm != 0
+                # select pixels that were interpolated (excluding extrapolated ones)
+                select_interp = clean_lsf != 0
                 # wave_interp = self._wave[select_interp]
                 # perform the interpolation on the data
                 if method == "spline":
                     intp = interpolate.UnivariateSpline(
                         self._wave[select_interp],
-                        clean_inst_fwhm[select_interp],
+                        clean_lsf[select_interp],
                         s=0,
                         ext="zeros",
                     )
-                    new_inst_fwhm = intp(ref_wave)
+                    new_lsf = intp(ref_wave)
                 elif method == "linear":
                     intp = interpolate.interp1d(
                         self._wave[select_interp],
-                        clean_inst_fwhm[select_interp],
+                        clean_lsf[select_interp],
                         bounds_error=False,
                         assume_sorted=True,
                         fill_value=(0.0, 0.0),
                     )
-                    new_inst_fwhm = intp(ref_wave)
+                    new_lsf = intp(ref_wave)
             else:
-                new_inst_fwhm = None
+                new_lsf = None
 
             # interpolate data --------------------------------------------------------------------------------------------------------------------------------
             # replace bad pixels within the spectrum with linear interpolated values
@@ -1578,7 +2517,8 @@ class Spectrum1D(Header):
                 for i in range(err_sim):
                     error[select_goodpix] = numpy.random.normal(
                         # NOTE: patching negative errors
-                        clean_data[select_goodpix], numpy.abs(self._error[select_goodpix])
+                        clean_data[select_goodpix],
+                        numpy.abs(self._error[select_goodpix]),
                     ).astype(numpy.float32)
 
                     if method == "spline":
@@ -1634,7 +2574,7 @@ class Spectrum1D(Header):
                 # replace error values in masked pixels
                 if new_error is not None:
                     new_error[new_mask] = replace_error
-            
+
             # interpolate sky ---------------------------------------------------------------------------------------------------------------------------------
             if self._sky is not None:
                 intp = interpolate.interp1d(
@@ -1687,7 +2627,8 @@ class Spectrum1D(Header):
                 for i in range(err_sim):
                     sky_error[select_goodpix] = numpy.random.normal(
                         # NOTE: patching negative sky_errors
-                        clean_data[select_goodpix], numpy.abs(self._sky_error[select_goodpix])
+                        clean_data[select_goodpix],
+                        numpy.abs(self._sky_error[select_goodpix]),
                     ).astype(numpy.float32)
 
                     if method == "spline":
@@ -1720,44 +2661,57 @@ class Spectrum1D(Header):
             new_mask = numpy.where(select_out, extrapolate._mask, new_mask)
             if new_error is not None:
                 new_error = numpy.where(select_out, extrapolate._error, new_error)
-            if new_inst_fwhm is not None:
-                new_inst_fwhm = numpy.where(
-                    select_out, extrapolate._inst_fwhm, new_inst_fwhm
+            if new_lsf is not None:
+                new_lsf = numpy.where(
+                    select_out, extrapolate._lsf, new_lsf
                 )
             if new_sky is not None:
                 new_sky = numpy.where(select_out, extrapolate._sky, new_sky)
             if new_sky_error is not None:
-                new_sky_error = numpy.where(select_out, extrapolate._sky_error, new_error)
+                new_sky_error = numpy.where(
+                    select_out, extrapolate._sky_error, new_error
+                )
 
         spec_out = Spectrum1D(
-            wave=ref_wave,
             data=new_data,
             error=new_error,
             mask=new_mask,
+            wave=ref_wave,
+            wave_trace=self._wave_trace,
+            lsf=new_lsf,
+            lsf_trace=self._lsf_trace,
             sky=new_sky,
-            sky_error=new_sky_error,
-            inst_fwhm=new_inst_fwhm,
+            sky_error=new_sky_error
         )
         return spec_out
 
-    def resampleSpec_flux_conserving(self, ref_wave, method="spline",
+    def resampleSpec_flux_conserving(
+        self,
+        ref_wave,
+        method="spline",
         err_sim=500,
         replace_error=1e10,
-        extrapolate=None):
-
+        extrapolate=None,
+    ):
         old_dlambda = numpy.interp(ref_wave, self._wave[:-1], numpy.diff(self._wave))
 
         # plt.plot(self._wave, self._data, lw=1, color="k")
         # plt.plot(self._wave, )
 
         new_dlambda = numpy.diff(ref_wave, append=ref_wave[-1])
-        new_spec = self.resampleSpec(ref_wave, method=method, err_sim=err_sim, replace_error=replace_error, extrapolate=extrapolate)
+        new_spec = self.resampleSpec(
+            ref_wave,
+            method=method,
+            err_sim=err_sim,
+            replace_error=replace_error,
+            extrapolate=extrapolate,
+        )
         # print(self._data)
         # print(new_spec._data)
         new_spec._data *= old_dlambda / new_dlambda
         if self._error is not None:
             new_spec._error *= old_dlambda / new_dlambda
-        
+
         # print(old_dlambda, new_dlambda, old_dlambda / new_dlambda)
         # print(new_spec._data)
         # plt.plot(ref_wave, new_spec._data, lw=1, color="r")
@@ -1765,81 +2719,143 @@ class Spectrum1D(Header):
 
         return new_spec
 
-    def matchFWHM(self, target_fwhm, inplace=False):
-        if self._inst_fwhm is not None:
-            if self._mask is not None:
-                good_pix = numpy.logical_not(self._mask)
-                data = self._data[good_pix]
-                wave = self._wave[good_pix]
-                fwhm = self._inst_fwhm[good_pix]
-                if self._error is not None:
-                    error = self._error[good_pix]
-                else:
-                    error = None
-                if self._sky is not None:
-                    sky = self._sky
-                else:
-                    sky = None
-                if self._sky_error is not None:
-                    sky_error = self._sky_error
-                else:
-                    sky_error = None
-            else:
-                data = self._data
-                wave = self._wave
-                fwhm = self._inst_fwhm
-                error = self._error
-                sky = self._sky
-                sky_error = self._sky_error
+    def apply_pixelmask(self, mask=None, inplace=False):
+        if mask is None:
+            mask = self._mask
+        if mask is None:
+            return self
 
-            if inplace:
-                new_spec = self
-            else:
-                new_spec = deepcopy(self)
+        if inplace:
+            new_spec = self
+        else:
+            new_spec = deepcopy(self)
 
-            gauss_sig = numpy.zeros_like(fwhm)
-            select = target_fwhm > fwhm
-            gauss_sig[select] = numpy.sqrt(target_fwhm**2 - fwhm[select] ** 2) / 2.354
-            fact = numpy.sqrt(2.0 * numpy.pi)
-            kernel = numpy.exp(
-                -0.5
-                * (
-                    (wave[:, numpy.newaxis] - wave[numpy.newaxis, :])
-                    / gauss_sig[numpy.newaxis, :]
-                )
-                ** 2
-            ) / (fact * gauss_sig[numpy.newaxis, :])
-            multiplied = data[:, numpy.newaxis] * kernel
-            new_data = numpy.sum(multiplied, axis=0) / numpy.sum(kernel, 0)
-            if new_spec._mask is not None:
-                new_spec._data[good_pix] = new_data
-                new_spec._inst_fwhm[:] = target_fwhm
-            if error is not None:
-                new_error = numpy.sqrt(
-                    numpy.sum((error[:, numpy.newaxis] * kernel) ** 2, axis=0)
-                ) / numpy.sum(kernel, 0)
-                if new_spec._mask is not None:
-                    new_spec._error[good_pix] = new_error
-                else:
-                    new_spec._error = new_error
-            if sky is not None:
-                new_sky = numpy.sum(sky[:, numpy.newaxis] * kernel, axis=0) / numpy.sum(
-                    kernel, 0
-                )
-                if new_spec._mask is not None:
-                    new_spec._sky[good_pix] = new_sky
-                else:
-                    new_spec._sky = new_sky
-            if sky_error is not None:
-                new_sky_error = numpy.sqrt(
-                    numpy.sum((sky_error[:, numpy.newaxis] * kernel) ** 2, axis=0)
-                ) / numpy.sum(kernel, 0)
-                if new_spec._mask is not None:
-                    new_spec._sky_error[good_pix] = new_sky_error
-                else:
-                    new_spec._sky_error = new_sky_error
+        new_spec._data[mask] = numpy.nan
+        if new_spec._error is not None:
+            new_spec._error[mask] = numpy.nan
+        if new_spec._sky is not None:
+            new_spec._sky[mask] = numpy.nan
+        if new_spec._sky_error is not None:
+            new_spec._sky_error[mask] = numpy.nan
 
-            return new_spec
+        return new_spec
+
+    def interpolate_masked(self, mask=None, inplace=False):
+        mask = mask if mask is not None else self._mask
+        if mask is None or mask.all():
+            return self
+
+        if inplace:
+            new_spec = self
+        else:
+            new_spec = deepcopy(self)
+
+        good_pix = ~mask
+        new_spec._data = numpy.interp(new_spec._wave, new_spec._wave[good_pix], new_spec._data[good_pix], left=new_spec._data[good_pix][0], right=new_spec._data[good_pix][-1])
+        if new_spec._error is not None:
+            new_spec._error = numpy.interp(new_spec._wave, new_spec._wave[good_pix], new_spec._error[good_pix], left=new_spec._error[good_pix][0], right=new_spec._error[good_pix][-1])
+        if new_spec._sky is not None:
+            new_spec._sky = numpy.interp(new_spec._wave, new_spec._wave[good_pix], new_spec._sky[good_pix], left=new_spec._sky[good_pix][0], right=new_spec._sky[good_pix][-1])
+        if new_spec._sky_error is not None:
+            new_spec._sky_error = numpy.interp(new_spec._wave, new_spec._wave[good_pix], new_spec._sky_error[good_pix], left=new_spec._sky_error[good_pix][0], right=new_spec._sky_error[good_pix][-1])
+
+        return new_spec
+
+    def flatten_lsf(self, target_fwhm, min_fwhm=0.5*2.354, interpolate_bad=True, inplace=False):
+        """Degrades spectral resolution to match a constant resolution in FWHM
+
+        Parameters
+        ----------
+        target_fwhm : float
+            Spectral resolution in FWHM to degrade to
+        min_fwhm : float, optional
+            Minimum resolution to allow in case any target_fwhm <= fwhm, by default 0.5
+        interpolate_bad : bool, optional
+            Interpolate bad pixels before convolution, by default True
+        inplace : bool, optional
+            Degrade resolution in place
+
+        Returns
+        -------
+        new_spec : lvmdrp.core.spectrum1d.Spectrum1D
+            New spectrum with constant LSF
+        """
+        if self._lsf is None:
+            return self
+
+        # make a copy of spectrum if not inplace
+        if inplace:
+            new_spec = self
+        else:
+            new_spec = deepcopy(self)
+
+        # interpolate masked pixels
+        if interpolate_bad:
+            new_spec = new_spec.interpolate_masked(inplace=inplace)
+
+        data = new_spec._data
+        wave = new_spec._wave
+        fwhm = new_spec._lsf
+        if new_spec._error is not None:
+            error = new_spec._error
+        else:
+            error = None
+        if new_spec._sky is not None:
+            sky = new_spec._sky
+        else:
+            sky = None
+        if new_spec._sky_error is not None:
+            sky_error = new_spec._sky_error
+        else:
+            sky_error = None
+
+        # define Gaussian sigmas
+        dfwhm = target_fwhm - fwhm
+        if numpy.any(dfwhm <= 0):
+            # correcting given resolution to match minimum value allowed
+            target_fwhm += min_fwhm - min(dfwhm)
+        sigmas = numpy.sqrt(target_fwhm**2 - fwhm**2) / 2.354 / numpy.gradient(wave)
+
+        # setup kernel
+        pixels = numpy.ceil(3 * max(sigmas))
+        pixels = numpy.arange(-pixels, pixels)
+        kernel = numpy.asarray([numpy.exp(-0.5 * (pixels / sigmas[iw]) ** 2) for iw in range(wave.size)])
+        kernel = convolution_matrix(kernel)
+        new_data = kernel @ data
+
+        # import matplotlib.pyplot as plt
+        # from astropy.visualization import simple_norm
+        # plt.figure(figsize=(10,10), layout="constrained")
+        # plt.imshow(kernel.toarray(), cmap="coolwarm", norm=simple_norm(kernel.toarray(), stretch="log"))
+        # plt.show()
+
+        # gauss_sig = numpy.zeros_like(fwhm)
+        # select = target_fwhm > fwhm
+        # gauss_sig[select] = numpy.sqrt(target_fwhm**2 - fwhm[select] ** 2) / 2.354
+        # fact = numpy.sqrt(2.0 * numpy.pi)
+        # kernel = numpy.exp(
+        #     -0.5
+        #     * (
+        #         (wave[:, numpy.newaxis] - wave[numpy.newaxis, :])
+        #         / gauss_sig[numpy.newaxis, :]
+        #     )
+        #     ** 2
+        # ) / (fact * gauss_sig[numpy.newaxis, :])
+        # multiplied = data[:, numpy.newaxis] * kernel
+        # new_data = bn.nansum(multiplied, axis=0) / bn.nansum(kernel, 0)
+
+        new_spec._data = new_data
+        new_spec._lsf[:] = target_fwhm
+        if error is not None:
+            new_spec._error = numpy.sqrt((kernel @ error) ** 2)
+        if sky is not None:
+            new_spec._sky = kernel @ sky
+        if sky_error is not None:
+            new_spec._sky_error = numpy.sqrt((kernel @ sky_error) ** 2)
+
+        new_spec = new_spec.apply_pixelmask(inplace=inplace)
+
+        return new_spec
 
     def binSpec(self, new_wave):
         new_disp = new_wave[1:] - new_wave[:-1]
@@ -1848,24 +2864,24 @@ class Spectrum1D(Header):
         mask_out = numpy.zeros(len(new_wave), dtype="bool")
         sky_out = numpy.zeros(len(new_wave), dtype=numpy.float32)
         sky_error_out = numpy.zeros(len(new_wave), dtype=numpy.float32)
-        
+
         if self._mask is not None:
             mask_in = numpy.logical_and(self._mask)
         else:
             mask_in = numpy.ones(len(self._wave), dtype="bool")
         # masked_data = self._wave[mask_in]
         masked_wave = self._wave[mask_in]
-        
+
         if self._error is not None:
             error_out = numpy.zeros(len(new_wave), dtype=numpy.float32)
             masked_error = self._error[mask_in]
         else:
             error_out = None
-        
+
         if self._sky_error is not None:
             sky_error_out = numpy.zeros(len(new_wave), dtype=numpy.float32)
             masked_sky_error = self._sky_error[mask_in]
-        
+
         bound_min = new_wave - new_disp / 2.0
         bound_max = new_wave + new_disp / 2.0
 
@@ -1884,21 +2900,22 @@ class Spectrum1D(Header):
                     )
                 if self._sky is not None:
                     sky_out[i] = numpy.sum(
-                    numpy.abs(masked_wave[select] - new_wave[i])
-                    * self._sky[mask_in][select]
-                ) / numpy.sum(numpy.abs(masked_wave[select] - new_wave[i]))
+                        numpy.abs(masked_wave[select] - new_wave[i])
+                        * self._sky[mask_in][select]
+                    ) / numpy.sum(numpy.abs(masked_wave[select] - new_wave[i]))
                 if self._sky_error is not None:
                     sky_error_out[i] = numpy.sqrt(
-                        numpy.sum(masked_sky_error[select] ** 2) / numpy.sum(select) ** 2
+                        numpy.sum(masked_sky_error[select] ** 2)
+                        / numpy.sum(select) ** 2
                     )
             else:
                 mask_out[i] = True
         data_out = numpy.interp(new_wave, masked_wave, self._data[mask_in])
         if self._sky is not None:
-            sky_out = numpy.interp(new_wave, masked_wave, self._sky[mask_in])    
-        
+            sky_out = numpy.interp(new_wave, masked_wave, self._sky[mask_in])
+
         spec = Spectrum1D(data=data_out, wave=new_wave, error=error_out, mask=mask_out, sky=sky_out, sky_error=sky_error_out)
-        
+
         return spec
 
     def smoothSpec(self, size, method="gauss", mode="nearest"):
@@ -1924,9 +2941,9 @@ class Spectrum1D(Header):
             self._data = ndimage.filters.median_filter(self._data, size, mode=mode)
         elif method == "BSpline":
             smooth = interpolate.splrep(
-                self._wave,
-                self._data,
-                w=1.0 / numpy.sqrt(numpy.fabs(self._data)),
+                self._wave[~self._mask],
+                self._data[~self._mask],
+                w=1.0 / numpy.sqrt(numpy.fabs(self._data[~self._mask])),
                 s=size,
             )
             self._data = interpolate.splev(self._wave, smooth, der=0)
@@ -1976,11 +2993,11 @@ class Spectrum1D(Header):
         else:
             error = None
 
-        if self._inst_fwhm is not None:
-            inst_fwhm = numpy.sqrt(self._inst_fwhm**2 + diff_fwhm**2)
+        if self._lsf is not None:
+            lsf = numpy.sqrt(self._lsf**2 + diff_fwhm**2)
         else:
-            inst_fwhm = diff_fwhm
-        
+            lsf = diff_fwhm
+
         if self._sky is not None:
             sky = numpy.zeros_like(self._sky)
             sky[:] = self._sky
@@ -1999,9 +3016,9 @@ class Spectrum1D(Header):
             data=data,
             error=error,
             mask=self._mask,
-            inst_fwhm=inst_fwhm,
+            lsf=lsf,
             sky=sky,
-            sky_error=sky_error
+            sky_error=sky_error,
         )
         return spec
 
@@ -2026,7 +3043,7 @@ class Spectrum1D(Header):
                 poly = polynomial.Legendre.fit(
                     self._wave[mask], self._data[mask], deg=deg
                 )
-            out_par = poly.coef
+            out_par = poly.convert().coef
 
             if ref_base is None:
                 self._data = poly(self._wave)
@@ -2157,131 +3174,84 @@ class Spectrum1D(Header):
 
         return pixels, wave, data
 
-    def measurePeaks(
-        self, init_pos, method="gauss", init_sigma=1.0, threshold=0, max_diff=0
-    ):
-        """
-        Find the subpixel centre for the local maxima in a Spectrum.
+
+    def measure_fibers_profile(self, centroids_guess, fwhms_guess=2.5, counts_range=[0,numpy.inf], centroids_range=[-5,5], fwhms_range=[1.0,3.5],
+                               npixels=2, ftol=1e-3, xtol=1e-3, solver="dogbox"):
+        """Finds the subpixel centers for local maxima in a spectrum by fitting a Gaussian to each peak.
 
         Parameters
-        --------------
-        init_pos : numpy.ndarray
-            Initial guess for the peak centres
+        ----------
+        centroids_guess : numpy.ndarray
+            Initial guess for the peak centers (pixel positions).
+        fwhms_guess : float, optional
+            Initial guess for the Gaussian width (sigma) used for modeling each peak (default: 2.5).
+        bounds : tuple of numpy.ndarray or float, optional
+            Lower and upper bounds for the fit parameters (amplitude, center, sigma) for each peak.
+            Should be a tuple (lower, upper), where each is an array of length 3*N or a scalar (default: (-inf, inf)).
+        npixels : int, optional
+            Number of pixels around the peak to use in the fitting, by default +/-2
+        ftol : float, optional
+            Relative tolerance for the fit optimization (default: 1e-3).
+        xtol : float, optional
+            Absolute tolerance for the fit optimization (default: 1e-3).
+        solver : str, optional
+            Optimization algorithm to use (default: "dogbox").
 
-        method : string, optional with default='gauss'
-            Select the method to measure the peaks, either 'gauss' or 'hyperbolic'.
-            The first one fits a Gaussian to the 3 brightest pixels around each peak,
-            the second one uses a hyperbolic approximation to the 3 brightest pixels around each peak.
+        Returns
+        -------
+        centroids : numpy.ndarray
+            Array of subpixel peak positions (float).
+        mask : numpy.ndarray
+            Boolean array indicating which peaks have uncertain or invalid measurements.
 
-        init_sigma: float, optional with default=1.0
-            Initial guess of the Gaussian width used for the modelling.
-            Only used with the method 'gauss'
-
-        threshold: float, optional with default = 0
-            It defines the contrast between the minmum of maximum values for the
-            3 brightest pixel around a peak for which an estimated centre is assumed to be valid.
-
-        max_diff: float, optional with default = 0
-            If greater than zero, all peak centres which are different from the initial guess position by
-            this value are assumed to be invalid.
-
-        Returns (positions, mask)
-        -----------
-        positions :  numpy.ndarray (float)
-            Array of subpixel peaks positions
-        mask : numpy.ndarray (bool)
-            Array of pixels with uncertain measurements
+        Notes
+        -----
+        For each initial peak position, a Gaussian is fit to the 3 brightest pixels around the peak.
+        Peaks for which the fit fails or returns NaN are masked as invalid.
         """
-        # compute the minimum and maximum value for the 3 pixels around all peaks
-        # selection of fibers within the boundaries of the detector
-        select = numpy.logical_and(
-            init_pos - 1 >= [0], init_pos + 1 <= self._data.shape[0] - 1
-        )
-        mask = numpy.zeros(len(init_pos), dtype="bool")
-        # minimum counts of three pixels around each peak
-        min = numpy.amin(
-            [
-                numpy.take(self._data, init_pos[select] + 1),
-                numpy.take(self._data, init_pos[select]),
-                numpy.take(self._data, init_pos[select] - 1),
-            ],
-            axis=0,
-        )
-        # minimum counts of three pixels around each peak
-        max = numpy.amax(
-            [
-                numpy.take(self._data, init_pos[select] + 1),
-                numpy.take(self._data, init_pos[select]),
-                numpy.take(self._data, init_pos[select] - 1),
-            ],
-            axis=0,
-        )
-        # print(init_pos, max)
-        # mask all peaks where the contrast between maximum and minimum is below a threshold
-        mask[select] = (max) < threshold
-        # masking fibers outside the detector
-        mask[numpy.logical_not(select)] = True
+        fact = numpy.sqrt(2 * numpy.pi)
+        sigmas_guess = fwhms_guess / 2.354
 
-        if method == "hyperbolic":
-            # compute the subpixel peak position using the hyperbolic
-            d = (
-                numpy.take(self._data, init_pos + 1)
-                - 2 * numpy.take(self._data, init_pos)
-                + numpy.take(self._data, init_pos - 1)
+        counts = numpy.full(len(centroids_guess), numpy.nan, dtype="float32")
+        centroids = numpy.full(len(centroids_guess), numpy.nan, dtype="float32")
+        sigmas = numpy.full(len(centroids_guess), numpy.nan, dtype="float32")
+        mask = numpy.isnan(centroids_guess)
+
+        bounds = self._parse_gaussians_boundaries(
+            ngaussians=centroids.size, centroids=centroids_guess, counts_range=counts_range, centroids_range=centroids_range, fwhms_range=fwhms_range, to_sigmas=True)
+
+        counts_lower, centroids_lower, sigmas_lower = numpy.split(bounds[0], 3)
+        counts_upper, centroids_upper, sigmas_upper = numpy.split(bounds[1], 3)
+        for j in range(len(centroids_guess)):
+            if mask[j]:
+                continue
+
+            pixels_selection = numpy.logical_and(
+                self._wave > centroids_guess[j] - npixels,
+                self._wave < centroids_guess[j] + npixels,
             )
-            positions = (
-                init_pos
-                + 1
-                - (
-                    (
-                        numpy.take(self._data, init_pos + 1)
-                        - numpy.take(self._data, init_pos)
-                    )
-                    / d
-                    + 0.5
-                )
-            )
+            counts_guess = numpy.interp(centroids_guess[j], self._wave, self._data) * fact * sigmas_guess
 
-        elif method == "gauss":
-            # compute the subpixel peak position by fitting a gaussian to all peaks (3 pixel to get a unique solution
-            positions = numpy.zeros(
-                len(init_pos), dtype="float32"
-            )  # create empty array
-            for j in range(len(init_pos)):
-                # only pixels with enough contrast are fitted
-                if not mask[j]:
-                    gauss = fit_profile.Gaussian(
-                        [
-                            self._data[init_pos[j]] * numpy.sqrt(2 * numpy.pi),
-                            init_pos[j],
-                            init_sigma,
-                        ]
-                    )  # set initial parameters for Gaussian profile
+            guess_par = [counts_guess, centroids_guess[j], sigmas_guess]
+            gauss = fit_profile.Gaussian(guess_par)
+            gauss.fit(
+                self._wave[pixels_selection],
+                self._data[pixels_selection],
+                sigma=self._error[pixels_selection],
+                p0=guess_par,
+                bounds=([counts_lower[j], centroids_lower[j], sigmas_lower[j]], [counts_upper[j], centroids_upper[j], sigmas_upper[j]]),
+                ftol=ftol, xtol=xtol,
+                solver=solver)
 
-                    gauss.fit(
-                        self._pixels[init_pos[j] - 1 : init_pos[j] + 2],
-                        self._data[init_pos[j] - 1 : init_pos[j] + 2],
-                        warning=False,
-                    )  # perform fitting
-                    positions[j] = gauss.getPar()[1]
+            params = gauss.getPar()
+            counts[j] = params[0]
+            centroids[j] = params[1]
+            sigmas[j] = params[2]
 
-        mask = numpy.logical_or(
-            mask, numpy.isnan(positions)
-        )  # masked all corrupt subpixel peak positions
+        mask = mask | numpy.isnan(counts) | numpy.isnan(centroids)# | numpy.isnan(sigmas)
+        centroids[mask] = numpy.nan
 
-        if max_diff != 0:
-            # mask all pixels that are away from the initial guess of peak positions by a certain difference
-            mask = numpy.logical_or(
-                numpy.logical_or(
-                    positions > init_pos + max_diff, positions < init_pos - max_diff
-                ),
-                mask,
-            )
-
-        if numpy.sum(mask) > 0:
-            # replace the estimated position of all masekd peak position by the corresponding initial guess peak positions
-            positions[mask] = init_pos[mask].astype("float32")
-        return positions, mask
+        return counts, centroids, sigmas*2.354, mask
 
     def measureFWHMPeaks(
         self, pos, nblocks, init_fwhm=2.4, threshold_flux=None, plot=-1
@@ -2328,7 +3298,7 @@ class Spectrum1D(Header):
             pos_block = pos[
                 brackets[i] : brackets[i + 1]
             ]  # cut out the corresponding peak positions
-            median_dist = numpy.nanmedian(
+            median_dist = bn.nanmedian(
                 pos_block[1:] - pos_block[:-1]
             )  # compute median distance between peaks
             flux = (
@@ -2339,10 +3309,10 @@ class Spectrum1D(Header):
             )  # initial guess for the flux
 
             # compute lower and upper bounds of the positions for each block
-            lo = int(numpy.nanmin(pos_block) - median_dist)
+            lo = int(bn.nanmin(pos_block) - median_dist)
             if lo <= 0:
                 lo = 0
-            hi = int(numpy.nanmax(pos_block) + median_dist)
+            hi = int(bn.nanmax(pos_block) + median_dist)
             if hi >= self._wave[-1]:
                 hi = self._wave[-1]
 
@@ -2412,7 +3382,7 @@ class Spectrum1D(Header):
             pos_block = pos[blocks[i]]  # cut out the corresponding peak positions
             pos_mask = good[blocks[i]]
             if numpy.sum(pos_mask) > 0:
-                median_dist = numpy.median(
+                median_dist = bn.median(
                     pos_block[pos_mask][1:] - pos_block[pos_mask][:-1]
                 )  # compute median distance between peaks
                 flux = (
@@ -2460,7 +3430,7 @@ class Spectrum1D(Header):
                     gaussians_offset.plot(self._wave[lo:hi], self._data[lo:hi])
 
                 offsets[i] = fit_par[-1]  # get offset position
-                med_pos[i] = numpy.mean(self._wave[lo:hi])
+                med_pos[i] = bn.mean(self._wave[lo:hi])
             else:
                 offsets[i] = 0.0
                 med_pos[i] = 0.0
@@ -2488,7 +3458,7 @@ class Spectrum1D(Header):
             pos_mask = good[blocks[i]]
             pos_fwhm = fwhm[blocks[i]]
             if numpy.sum(pos_mask) > 0:
-                median_dist = numpy.median(
+                median_dist = bn.median(
                     pos_block[pos_mask][1:] - pos_block[pos_mask][:-1]
                 )  # compute median distance between peaks
 
@@ -2524,34 +3494,196 @@ class Spectrum1D(Header):
                     max_flux[o] = numpy.sum(result[0])
                 find_max = numpy.argsort(max_flux)[-1]
                 offsets[i] = offset[find_max]  # get offset position
-                med_pos[i] = numpy.mean(self._wave[lo:hi])
+                med_pos[i] = bn.mean(self._wave[lo:hi])
             else:
                 offsets[i] = 0.0
                 med_pos[i] = 0.0
         return offsets, med_pos
 
-    def fitMultiGauss(self, centres, init_fwhm):
+    def _guess_gaussians_integral(self, centroids, fwhms, nsigma=6, return_pixels_selection=False):
+        fact = numpy.sqrt(2 * numpy.pi)
+        integrals = numpy.zeros(len(centroids), dtype=numpy.float32)
+        sigmas = fwhms / 2.354
+
         select = numpy.zeros(self._dim, dtype="bool")
-        flux_in = numpy.zeros(len(centres), dtype=numpy.float32)
-        sig_in = numpy.ones_like(flux_in) * init_fwhm / 2.354
-        cent = numpy.zeros(len(centres), dtype=numpy.float32)
-        if self._error is not None:
-            error = self._error
-        else:
-            error = numpy.ones_like(self._dim, dtype=numpy.float32)
-        for i in range(len(centres)):
-            select_line = numpy.logical_and(
-                self._wave > centres[i] - 2 * init_fwhm,
-                self._wave < centres[i] + 2 * init_fwhm,
+        for i in range(len(centroids)):
+            select_ = numpy.logical_and(
+                self._wave > centroids[i] - nsigma * sigmas[i],
+                self._wave < centroids[i] + nsigma * sigmas[i],
             )
-            flux_in[i] = numpy.sum(self._data[select_line])
-            select = numpy.logical_or(select, select_line)
-            cent[i] = centres[i]
-        par = numpy.concatenate([flux_in, cent, sig_in])
-        gauss_multi = fit_profile.Gaussians(par)
-        gauss_multi.fit(self._wave[select], self._data[select], sigma=error[select])
-        return gauss_multi, gauss_multi.getPar()
-    
+            integrals[i] = numpy.interp(centroids[i], self._wave, self._data) * fact * sigmas[i]
+            select = numpy.logical_or(select, select_)
+        if return_pixels_selection:
+            return integrals, select
+        return integrals
+
+    def _parse_gaussians_params(self, counts=None, centroids=None, sigmas=None, fwhms=None, to_sigmas=False, to_fwhms=False):
+        if fwhms is not None and sigmas is not None:
+            raise ValueError(f"Invalid values for `fwhms` or `sigmas`: {sigmas = }, {fwhms = }. Only one or none has to be given")
+
+        params = []
+        if counts is not None:
+            params.append(counts)
+        if centroids is not None:
+            params.append(centroids)
+        if sigmas is not None:
+            params.append(sigmas * (2.354 if to_fwhms else 1.0))
+        if fwhms is not None:
+            params.append(fwhms / (2.354 if to_sigmas else 1.0))
+
+        return numpy.concatenate(params)
+
+    def _parse_gaussians_boundaries(self, ngaussians, counts=None, centroids=None, fwhms=None, counts_range=None, centroids_range=None, fwhms_range=None, to_sigmas=False):
+
+        bounds_lower, bounds_upper = [], []
+        _ = numpy.ones(ngaussians)
+        def _set_boundaries(x, x_range, to_sigmas=False, clip=None):
+            if x is not None and x_range is None:
+                raise ValueError(f"Invalid value for `x_range`: {x_range = }. Expected `x_range` when `x` is given")
+
+            if x is not None and x_range is not None:
+                lower = x + x_range[0]
+                upper = x + x_range[1]
+            elif x_range is not None:
+                lower = _ * x_range[0]
+                upper = _ * x_range[1]
+            else:
+                lower = numpy.array([])
+                upper = numpy.array([])
+
+            if clip is not None and isinstance(clip, (tuple,list)) and len(clip) == 2:
+                if clip[0] is not None:
+                    lower = numpy.clip(lower, a_min=clip[0], a_max=None)
+                if clip[1] is not None:
+                    upper = numpy.clip(upper, a_min=None, a_max=clip[1])
+
+            if to_sigmas:
+                lower /= 2.354
+                upper /= 2.354
+
+            bounds_lower.append(lower)
+            bounds_upper.append(upper)
+
+        _set_boundaries(counts, counts_range, clip=(0.0,None))
+        _set_boundaries(centroids, centroids_range, clip=(self._wave.min(),self._wave.max()))
+        _set_boundaries(fwhms, fwhms_range, clip=(0.0,None), to_sigmas=to_sigmas)
+
+        if len(bounds_lower) == 0 or len(bounds_upper) == 0:
+            return [-numpy.inf, +numpy.inf]
+
+        return [numpy.concatenate(bounds_lower), numpy.concatenate(bounds_upper)]
+
+    def fitMultiGauss(self, pixels_selection, counts_guess, centroids_guess, fwhms_guess, counts_range=[0.0,numpy.inf], centroids_range=[-5,+5], fwhms_range=[1.0,3.5],
+                      ftol=1e-3, xtol=1e-3, solver="trf", loss="linear"):
+        error = numpy.ones(self._dim, dtype=numpy.float32) if self._error is None else self._error
+
+        guess = self._parse_gaussians_params(counts=counts_guess, centroids=centroids_guess, fwhms=fwhms_guess, to_sigmas=True)
+        bounds = self._parse_gaussians_boundaries(
+            ngaussians=counts_guess.size, centroids=centroids_guess,
+            counts_range=counts_range, centroids_range=centroids_range, fwhms_range=fwhms_range, to_sigmas=True)
+
+        gauss_multi = fit_profile.Gaussians(guess)
+        gauss_multi.fit(
+            self._wave[pixels_selection], self._data[pixels_selection], sigma=error[pixels_selection],
+            bounds=bounds, ftol=ftol, xtol=xtol, solver=solver, loss=loss)
+
+        counts, centroids, sigmas = numpy.split(gauss_multi.getPar(), 3)
+        params = self._parse_gaussians_params(counts, centroids, sigmas=sigmas, to_fwhms=True)
+
+        return gauss_multi, params
+
+    def fitMultiGauss_fixed_counts(self, pixels_selection, counts, centroids, fwhms_guess, fwhms_range=[1.0,3.5], ftol=1e-3, xtol=1e-3, solver="trf", loss="linear"):
+        error = numpy.ones(self._dim, dtype=numpy.float32) if self._error is None else self._error
+
+        guess = self._parse_gaussians_params(fwhms=fwhms_guess, to_sigmas=True)
+        fixed = self._parse_gaussians_params(counts=counts, centroids=centroids)
+        bounds = self._parse_gaussians_boundaries(ngaussians=counts.size, fwhms_range=fwhms_range, to_sigmas=True)
+
+        gauss_multi = fit_profile.Gaussians_width(guess, args=fixed)
+        gauss_multi.fit(
+            self._wave[pixels_selection], self._data[pixels_selection], sigma=error[pixels_selection],
+            bounds=bounds, ftol=ftol, xtol=xtol, solver=solver, loss=loss)
+
+        sigmas = gauss_multi.getPar()
+        params = self._parse_gaussians_params(counts, centroids, sigmas, to_fwhms=True)
+        return gauss_multi, params
+
+    def fitMultiGauss_centroids(self, pixels_selection, counts, centroids_guess, fwhms, centroids_range=[-5,+5], ftol=1e-3, xtol=1e-3, solver="trf", loss="linear"):
+        error = numpy.ones(self._dim, dtype=numpy.float32) if self._error is None else self._error
+
+        guess = self._parse_gaussians_params(centroids=centroids_guess)
+        fixed = self._parse_gaussians_params(counts=counts, fwhms=fwhms, to_sigmas=True)
+        bounds = self._parse_gaussians_boundaries(ngaussians=counts.size, centroids=centroids_guess, centroids_range=centroids_range, to_sigmas=True)
+
+        gauss_multi = fit_profile.Gaussians_centroids(guess, args=fixed)
+        gauss_multi.fit(
+            self._wave[pixels_selection], self._data[pixels_selection], sigma=error[pixels_selection],
+            bounds=bounds, ftol=ftol, xtol=xtol, solver=solver, loss=loss)
+
+        centroids = gauss_multi.getPar()
+        params = self._parse_gaussians_params(counts, centroids, fwhms, to_fwhms=False)
+        return gauss_multi, params
+
+    def fitMultiGauss_fixed_width(self, pixels_selection, counts_guess, centroids, fwhms, counts_range=[0.0,numpy.inf], ftol=1e-3, xtol=1e-3, solver="trf", loss="linear"):
+        error = numpy.ones(self._dim, dtype=numpy.float32) if self._error is None else self._error
+
+        guess = self._parse_gaussians_params(counts=counts_guess)
+        fixed = self._parse_gaussians_params(centroids=centroids, fwhms=fwhms, to_sigmas=True)
+        bounds = self._parse_gaussians_boundaries(ngaussians=counts_guess.size, counts_range=counts_range)
+
+        gauss_multi = fit_profile.Gaussians_counts(guess, args=fixed)
+        gauss_multi.fit(
+            self._wave[pixels_selection], self._data[pixels_selection], sigma=error[pixels_selection],
+            bounds=bounds, ftol=ftol, xtol=xtol, solver=solver, loss=loss)
+
+        counts = gauss_multi.getPar()
+        params = self._parse_gaussians_params(counts, centroids, fwhms, to_fwhms=False)
+        return gauss_multi, params
+
+    def fitMultiGauss_alphas(self, pixels_selection, counts, centroids, fwhms, alphas, alphas_range=[-1.0,+1.0], ftol=1e-3, xtol=1e-3, solver="trf", loss="linear"):
+        error = numpy.ones(self._dim, dtype=numpy.float32) if self._error is None else self._error
+
+        guess = alphas
+        _ = numpy.ones_like(alphas)
+        fixed = self._parse_gaussians_params(counts=counts, centroids=centroids, fwhms=fwhms, to_sigmas=True)
+        bounds = [_ * alphas_range[0], _ * alphas_range[1]]
+
+        gauss_multi = fit_profile.SkewedGaussians(guess, args=fixed)
+        gauss_multi.fit(
+            self._wave[pixels_selection], self._data[pixels_selection], sigma=error[pixels_selection],
+            bounds=bounds, ftol=ftol, xtol=xtol, solver=solver, loss=loss)
+
+        alphas = gauss_multi.getPar()
+        params = numpy.concatenate([counts, centroids, fwhms, alphas])
+        return gauss_multi, params
+
+    def fit_gaussians(self, pars_guess, pars_fixed, bounds, fitting_params, profile="mexhat", npixels=4, oversampling_factor=10, axs=None):
+        profile_class = fit_profile.PROFILES.get(profile)
+        if profile_class is None:
+            raise ValueError(f"Invalid value for `profile`: {profile}. Expected one of: {fit_profile.PROFILES}")
+
+        error = numpy.ones(self._dim, dtype=numpy.float32) if self._error is None else self._error
+
+        centroids = pars_guess.get("centroids", pars_fixed.get("centroids"))
+        lower = numpy.nanmin(centroids) - npixels
+        upper = numpy.nanmax(centroids) + npixels
+        pixels_selection = (lower <= self._wave) & (self._wave <= upper)
+
+        model = profile_class(pars=pars_guess, fixed=pars_fixed, bounds=bounds, oversampling_factor=oversampling_factor)
+        kwargs = fitting_params.copy()
+        args = kwargs.pop("args", ())
+        model.fit(self._wave[pixels_selection], self._data[pixels_selection], error[pixels_selection], *args, **kwargs)
+
+        params = model._pars
+        errors = model._errs
+
+        if axs is not None:
+            axs = model.plot(
+                x=self._wave[pixels_selection], y=self._data[pixels_selection],
+                sigma=self._error[pixels_selection], mask=self._mask[pixels_selection], axs=axs)
+
+        return model, params, errors
+
     def fitMultiVoigt(self, centres, init_fwhm_G, init_fwhm_L):
         select = numpy.zeros(self._dim, dtype = "bool")
         flux_in = numpy.zeros(len(centres), dtype = numpy.float32)
@@ -2559,10 +3691,10 @@ class Spectrum1D(Header):
         sig_in_L = numpy.ones_like(flux_in) * init_fwhm_L / 2.354
         cent = numpy.zeros(len(centres), dtype = numpy.float32)
         if self._error is not None:
-            error = self._error 
+            error = self._error
         else:
             error = numpy.ones_like(self._dim, dtype = numpy.float32)
-        for i in range(len(centres)): 
+        for i in range(len(centres)):
             init_fwhm = max(init_fwhm_G, init_fwhm_L)
             select_line = numpy.logical_and(
                 self._wave > centres[i] - 2 * init_fwhm,
@@ -2572,7 +3704,7 @@ class Spectrum1D(Header):
             select = numpy.logical_or(select, select_line)
             cent[i] = centres[i]
         par = numpy.concatenate([flux_in, cent, sig_in_G, sig_in_L])
-        voigt_multi = fit_profile.Voigts(par)
+        voigt_multi = fit_profile.Voigts_x(par)
         voigt_multi.fit(self._wave[select], self._data[select], sigma=error[select], maxfev = 1000000)
         return voigt_multi, voigt_multi.getPar()
 
@@ -2605,73 +3737,182 @@ class Spectrum1D(Header):
 
     def fitSepGauss(
         self,
-        centres,
+        cent_guess,
         aperture,
-        init_back=0.0,
+        fwhm_guess=3,
+        bg_guess=0.0,
+        flux_range=[0.0, numpy.inf],
+        cent_range=[-2.0, 2.0],
+        fwhm_range=[0, 7],
+        bg_range=[0, numpy.inf],
+        badpix_threshold=4,
         ftol=1e-8,
         xtol=1e-8,
         axs=None,
-        warning=False,
+        fit_bg=True
     ):
-        ncomp = len(centres)
+        # copy main arrays to avoid side effects
+        data = self._data.copy()
+        error = self._error.copy() if self._error is not None else numpy.ones(self._dim, dtype=numpy.float32)
+        mask = self._mask.copy() if self._mask is not None else numpy.zeros(self._dim, dtype=bool)
 
-        out = numpy.zeros(3 * ncomp, dtype=numpy.float32)
-        back = [deepcopy(init_back) for _ in centres]
+        # update mask to account for unmasked invalid pixels
+        # mask |= (~numpy.isfinite(data) | ~numpy.isfinite(error))
 
-        error = self._error if self._error is not None else numpy.ones(self._dim, dtype=numpy.float32)
-        mask = self._mask if self._mask is not None else numpy.zeros(self._dim, dtype=bool)
+        # reset bad pixels in data and error
+        error[mask] = numpy.inf
+        data[mask] = 0.0
 
-        for i, centre in enumerate(centres):
-            select = self._get_select(centre, aperture, mask)
-            if numpy.sum(select) > 0:
-                max = numpy.max(self._data[select])
-                cent = numpy.median(self._wave[select][self._data[select] == max])
-                select = self._get_select(cent, aperture, mask)
+        flux = numpy.ones(len(cent_guess)) * numpy.nan
+        cent = numpy.ones(len(cent_guess)) * numpy.nan
+        fwhm = numpy.ones(len(cent_guess)) * numpy.nan
+        bg = numpy.ones(len(cent_guess)) * numpy.nan
 
-                gauss = self._fit_gaussian(select, back[i], error, ftol, xtol, warning)
+        fact = numpy.sqrt(2 * numpy.pi)
+        hw = aperture // 2
+        for i, centre in enumerate(cent_guess):
+            if numpy.isnan(centre) or (centre - hw < self._wave[0] or centre + hw > self._wave[-1]):
+                continue
 
-                out_fit = gauss.getPar()
-                out[i] = out_fit[0]
-                out[ncomp + i] = out_fit[1]
-                out[2 * ncomp + i] = out_fit[2]
+            select = (self._wave >= centre - hw) & (self._wave <= centre + hw)
+            # print(i, centre, self._wave.min(), self._wave.max(), select.sum())
+            if mask[select].sum() >= badpix_threshold:
+                warnings.warn(f"skipping line @ {centre:.2f} with {mask[select].sum()} >= {badpix_threshold = } bad pixels")
+                self.add_header_comment(f"skipping line @ {centre:.2f} with {mask[select].sum()} >= {badpix_threshold = } bad pixels")
+                continue
 
-                if axs is not None:
-                    axs[i] = gauss.plot(self._wave[select], self._data[select], ax=axs[i])
-                    axs[i].axvline(centres[i], ls="--", lw=1, color="tab:red")
+            flux_guess = numpy.interp(centre, self._wave[select], data[select]) * fact * fwhm_guess / 2.354
+            if fit_bg:
+                guess = [flux_guess, centre, fwhm_guess / 2.354, bg_guess]
+                bound_lower = [flux_range[0], centre+cent_range[0], fwhm_range[0]/2.354, bg_range[0]]
+                bound_upper = [flux_range[1], centre+cent_range[1], fwhm_range[1]/2.354, bg_range[1]]
+                gauss = fit_profile.Gaussian_const(guess)
             else:
-                out[i:ncomp + i + 1] = 0.0
+                guess = [flux_guess, centre, fwhm_guess / 2.354]
+                gauss = fit_profile.Gaussian(guess)
+                bound_lower = [flux_range[0], centre+cent_range[0], fwhm_range[0]/2.354]
+                bound_upper = [flux_range[1], centre+cent_range[1], fwhm_range[1]/2.354]
 
-        return out
+            gauss.fit(
+                self._wave[select],
+                data[select],
+                sigma=error[select],
+                p0=guess,
+                bounds=(bound_lower, bound_upper),
+                ftol=ftol,
+                xtol=xtol
+            )
 
-    def _get_select(self, centre, aperture, mask):
-        return numpy.logical_and(
-            numpy.logical_and(
-                self._wave >= centre - aperture / 2.0,
-                self._wave <= centre + aperture / 2.0,
-            ),
-            numpy.logical_not(mask),
-        )
+            if fit_bg:
+                flux[i], cent[i], fwhm[i], bg[i] = gauss.getPar()
+            else:
+                flux[i], cent[i], fwhm[i] = gauss.getPar()
+            fwhm[i] *= 2.354
 
-    def _fit_gaussian(self, select, back, error, ftol, xtol, warning):
-        if back == 0.0:
-            par = [0.0, 0.0, 0.0]
-            gauss = fit_profile.Gaussian(par)
+            if axs is not None:
+                select_2 = (self._wave>=cent[i]-3.5*fwhm[i]/2.354) & (self._wave<=cent[i]+3.5*fwhm[i]/2.354)
+                x = self._wave[select_2]
+                axs[i].plot(self._wave, (select)*numpy.nan+bn.nanmin(data), "ok")
+                axs_ = gauss.plot(self._wave[select], self._data[select], mask=self._mask[select], axs={"mod": axs[i]})
+                axs[i] = axs_["mod"]
+                axs[i].axhline(bg[i], ls="--", color="tab:blue", lw=1)
+                if len(x) != 0:
+                    axs[i].axvspan(x[0], x[-1], alpha=0.1, fc="0.5", label="reg. of masking")
+                axs[i].axvline(cent_guess[i], ls="--", lw=1, color="tab:red", label="cent. guess")
+                axs[i].axvline(cent[i], ls="--", lw=1, color="tab:blue", label="cent. model")
+                axs[i].set_title(f"{axs[i].get_title()} @ {cent[i]:.1f} {'Angstroms' if self._pixels[0]!=self._wave[0] else 'pixels'}")
+                axs[i].text(0.05, 0.9, f"flux = {flux[i]:.2f}", va="bottom", ha="left", transform=axs[i].transAxes, fontsize=11)
+                axs[i].text(0.05, 0.8, f"cent = {cent[i]:.2f}", va="bottom", ha="left", transform=axs[i].transAxes, fontsize=11)
+                axs[i].text(0.05, 0.7, f"fwhm = {fwhm[i]:.2f}", va="bottom", ha="left", transform=axs[i].transAxes, fontsize=11)
+                axs[i].text(0.05, 0.6, f"bg   = {bg[i]:.2f}", va="bottom", ha="left", transform=axs[i].transAxes, fontsize=11)
+                axs[i].legend(loc="upper right", frameon=False, fontsize=11)
+
+            # mask line if >= 2 pixels are masked within 3.5sigma
+            model_badpix = data[select] == 0
+            if not numpy.isnan([cent[i], fwhm[i]]).any():
+                select_2 = (self._wave>=cent[i]-3.5*fwhm[i]/2.354) & (self._wave<=cent[i]+3.5*fwhm[i]/2.354)
+                model_badpix = mask[select_2]
+                if model_badpix.sum() >= 2:
+                    warnings.warn(f"masking line @ {centre:.2f} with >= 2 masked pixels within a 3.5 sigma window")
+                    self.add_header_comment(f"masking line @ {centre:.2f} with >= 2 masked pixels within a 3.5 sigma window")
+                    flux[i] = cent[i] = fwhm[i] = bg[i] = numpy.nan
+
+        return flux, cent, fwhm, bg
+
+    def extract_flux(self, centroids, sigmas, fiber_radius=1.4, npixels=15, replace_error=numpy.inf, return_basis=False):
+        '''
+            fiber_radius is the image of the fiber core in pixels
+            sigmas is the gaussian kernel sigma
+
+        '''
+        # def _gen_mexhat_basis(x, centroids, sigmas, fiber_radius, oversampling_factor):
+        #     dx = x[1, 0] - x[0, 0]
+        #     x_os = fit_profile.oversample(x, oversampling_factor)
+        #     dx_os = dx / oversampling_factor
+
+        #     x_kernel = numpy.arange(0, 2*fiber_radius + dx_os, dx_os)
+        #     kernel = fit_profile.fiber_profile(centroids=fiber_radius, radii=fiber_radius, x=x_kernel)
+        #     psfs = fit_profile.gaussians((numpy.ones_like(centroids), centroids, sigmas), x_os.T, alpha=2, collapse=False)[0].T
+
+        #     profiles = signal.fftconvolve(psfs, kernel.T, mode="same", axes=0)
+        #     profiles /= integrate.trapezoid(profiles, x_os, axis=0)[None, :]
+
+        #     # reshape model into oversampled bins: (x, oversampling_factor)
+        #     profiles_binned = profiles.reshape((x.shape[0], oversampling_factor, x.shape[1]))
+        #     profiles = integrate.trapezoid(profiles_binned, dx=dx_os, axis=1)
+        #     return profiles
+
+        nfibers = centroids.size
+        # round up fiber locations
+        mask_threshold = 3
+        pixels = numpy.round(centroids[:, None] + numpy.arange(-mask_threshold / 2.0, mask_threshold / 2.0, 1.0)[None, :]).astype("int")
+        # defining bad pixels for each fiber if needed
+        if self._mask is not None:
+            # select: fibers in the boundary of the chip
+            mask = numpy.zeros(nfibers, dtype="bool")
+            select = bn.nansum(pixels >= self._mask.shape[0], 1)
+            nselect = numpy.logical_not(select)
+            mask[select] = True
+
+            # masking fibers if all pixels are bad within mask_threshold
+            mask[nselect] = bn.nansum(self._mask[pixels[nselect, :]], 1) == mask_threshold
         else:
-            par = [0.0, 0.0, 0.0, 0.0]
-            gauss = fit_profile.Gaussian_const(par)
+            mask = None
 
-        gauss.fit(
-            self._wave[select],
-            self._data[select],
-            sigma=error[select],
-            ftol=ftol,
-            xtol=xtol,
-            warning=warning,
-        )
+        # evaluate basis
+        xx = numpy.repeat(numpy.arange(nfibers, dtype="int"), 2*npixels+1)
+        # pixel ranges of fiber images
+        pos_t = numpy.trunc(centroids)
+        yyv = numpy.linspace(pos_t-npixels, pos_t+npixels, 2*npixels+1, endpoint=True)
 
-        return gauss
+        if Spectrum1D.fiberProfileCache is None:
+            print("Creating FiberProfileCache ...")
+            Spectrum1D.fiberProfileCache = FiberProfileCache(fiber_radius, 100, npixels)
+        v = Spectrum1D.fiberProfileCache(centroids, sigmas)
+        # v2 = _gen_mexhat_basis(yyv, centroids, sigmas, fiber_radius=fiber_radius, oversampling_factor=100)
+        yyv = yyv.T.ravel()
+        v = v.T.ravel()# / self._error[yyv.astype("int")]
 
-    def obtainGaussFluxPeaks(self, pos, sigma, indices, replace_error=1e10, plot=False):
+        B = sparse.csc_matrix((v, (yyv, xx)), shape=(len(self._data), nfibers))
+        B = B.multiply(1/self._error[:, None])
+
+        # invert the projection matrix and solve
+        ypixels = numpy.arange(self._data.size)
+        guess_flux = numpy.interp(centroids, ypixels, self._data) * fit_profile.fact * sigmas
+        out = sparse.linalg.lsmr(B, self._data / self._error, atol=1e-3, btol=1e-3, x0=guess_flux)
+        flux = out[0]
+
+        error = numpy.sqrt(1 / ((B.multiply(B)).sum(axis=0))).A
+        error = error[0,:]
+        if mask is not None and bn.nansum(mask) > 0:
+            error[mask] = replace_error
+
+        if return_basis:
+            return flux, error, mask, B, out
+
+        return flux, error, mask
+
+    def obtainGaussFluxPeaks(self, pos, sigma, replace_error=1e10, plot=False):
         """returns Gaussian peaks parameters, flux error and mask
 
         this runs fiber fitting assuming that we only need to know the sigma of the Gaussian,
@@ -2683,8 +3924,6 @@ class Spectrum1D(Header):
             peaks positions
         sigma : array_like
             Gaussian widths
-        indices : array_like
-            peaks indices
         replace_error : float, optional
             replace error in bad pixels with this value, by default 1e10
         plot : bool, optional
@@ -2700,7 +3939,7 @@ class Spectrum1D(Header):
             propagated pixel mask
         """
 
-        fibers = len(pos)
+        nfibers = len(pos)
         aperture = 3
         # round up fiber locations
         pixels = numpy.round(
@@ -2708,53 +3947,63 @@ class Spectrum1D(Header):
         ).astype("int")
         # defining bad pixels for each fiber if needed
         if self._mask is not None:
-            bad_pix = numpy.zeros(fibers, dtype="bool")
+            # select: fibers in the boundary of the chip
+            bad_pix = numpy.zeros(nfibers, dtype="bool")
             select = bn.nansum(pixels >= self._mask.shape[0], 1)
             nselect = numpy.logical_not(select)
             bad_pix[select] = True
+
+            # masking fibers if all pixels are bad within aperture
             bad_pix[nselect] = bn.nansum(self._mask[pixels[nselect, :]], 1) == aperture
         else:
             bad_pix = None
         if self._error is None:
             self._error = numpy.ones_like(self._data)
 
+        # construct sparse projection matrix
         fact = numpy.sqrt(2.0 * numpy.pi)
-        A = (
-            1.0
-            * numpy.exp(
-                -0.5 * ((self._wave[:, None] - pos[None, :]) / sigma[None, :]) ** 2
-            )
-            / (fact * sigma[None, :])
-        )
-        # making positive definite
-        select = A > 0.0001
-        A = A / self._error[:, None]
+        kernel_width = 7 # should exceed 4 sigma
+        # vI = []
+        # vJ = []
+        # vV = []
+        # for xx in range(nfibers):
+        #     for yy in range(int(pos[xx]-kernel_width),int(pos[xx]+kernel_width)+1):
+        #         v = numpy.exp(-0.5 * ((yy-pos[xx]) / sigma[xx]) ** 2) / (fact * sigma[xx])
+        #         if v>=0.0000:   # make non-zero and positive definite
+        #             vI.append(xx)
+        #             vJ.append(yy)
+        #             vV.append(v / self._error[yy])
+        # B = sparse.csc_matrix((vV, (vJ, vI)), shape=(len(self._data), nfibers))
 
-        # plt.figure(figsize=(10, 10))
-        # plt.imshow(A, origin="lower")
-        # plt.show()
+        # nfibers x kernel_size
+        xx = numpy.repeat(numpy.array(range(nfibers)), 2*kernel_width+1)
+        # pixel ranges of fiber images
+        pos_t = numpy.trunc(pos)
+        yyv = numpy.linspace(pos_t-kernel_width, pos_t+kernel_width, 2*kernel_width+1, endpoint=True)
+        # nfibers x kernel_size pixel values
+        v = numpy.exp(-0.5 * ((yyv-pos) / sigma) ** 2) / (fact * sigma)
+        yyv = yyv.T.ravel()
+        v = v.T.ravel() / self._error[yyv.astype(numpy.int32)]
+        B = sparse.csc_matrix((v, (yyv, xx)), shape=(len(self._data), nfibers))
 
-        B = sparse.csr_matrix(
-            (A[select], (indices[0][select], indices[1][select])),
-            shape=(self._dim, fibers),
-        )
-        # print(B)
-        out = sparse.linalg.lsmr(
-            B, self._data / self._error, atol=1e-4, btol=1e-4
-        )
-        # out = linalg.lstsq(A, self._data / self._error, lapack_driver='gelsy', check_finite=False)
-        # print(out)
+        # invert the projection matrix and solve
+        ypixels = numpy.arange(self._data.size)
+        guess_flux = numpy.interp(pos, ypixels, self._data) * fact * sigma
+        out = sparse.linalg.lsmr(B, self._data / self._error, atol=1e-3, btol=1e-3, x0=guess_flux)
+        flux = out[0]
 
-        error = numpy.sqrt(1 / bn.nansum((A**2), 0))
+        error = numpy.sqrt(1 / ((B.multiply(B)).sum(axis=0))).A
+        error = error[0,:]
         if bad_pix is not None and bn.nansum(bad_pix) > 0:
             error[bad_pix] = replace_error
+
+        # pyfits.writeto('B.fits', B.toarray(), overwrite=True)
         # if plot:
-        #     plt.figure(figsize=(15, 10))
         #     plt.plot(self._data, "ok")
         #     plt.plot(numpy.dot(A * self._error[:, None], out[0]), "-r")
         #     # plt.plot(numpy.dot(A, out[0]), '-r')
         #     plt.show()
-        return out[0], error, bad_pix, B, A
+        return flux, error, bad_pix
 
     def collapseSpec(self, method="mean", start=None, end=None, transmission_func=None):
         if start is not None:
@@ -2768,11 +4017,11 @@ class Spectrum1D(Header):
         select = numpy.logical_and(select_start, select_end)
         if self._mask is not None:
             select = numpy.logical_and(select, numpy.logical_not(self._mask))
-        
+
         if method != "mean" and method != "median" and method != "sum":
             raise ValueError("method must be either 'mean', 'median' or 'sum'")
         elif method == "mean":
-            flux = numpy.mean(self._data[select])
+            flux = bn.mean(self._data[select])
             if self._error is not None:
                 error = numpy.sqrt(
                     numpy.sum(self._error[select] ** 2) / numpy.sum(select) ** 2
@@ -2780,7 +4029,7 @@ class Spectrum1D(Header):
             else:
                 error = None
             if self._sky is not None:
-                sky = numpy.mean(self._sky[select])
+                sky = bn.mean(self._sky[select])
             else:
                 sky = None
             if self._sky_error is not None:
@@ -2822,8 +4071,8 @@ class Spectrum1D(Header):
             else:
                 errors[i, :] = s_new._error
 
-            if s._inst_fwhm is not None:
-                fwhms[i, :] = s_new._inst_fwhm
+            if s._lsf is not None:
+                fwhms[i, :] = s_new._lsf
             if s._mask is not None:
                 masks[i, :] = s_new._mask
             if s._sky is not None:
@@ -2846,12 +4095,12 @@ class Spectrum1D(Header):
         # There are no masked quantities yet, so make sure they are filled here.
         weights = 1.0 / errors**2
         norm = bn.nansum(weights, axis=0)
-        weights = weights / norm[None,:]
+        weights = weights / norm[None, :]
         fluxes = bn.nansum(fluxes * weights, axis=0)
         fwhms = bn.nansum(fwhms * weights, axis=0)
         errors = numpy.sqrt(1.0 / bn.nansum(weights * norm, axis=0))
         skies = bn.nansum(skies * weights, axis=0)
-        sky_errors = numpy.sqrt(bn.nansum(sky_errors ** 2 * weights ** 2), axis=0)
+        sky_errors = numpy.sqrt(bn.nansum(sky_errors**2 * weights**2), axis=0)
 
         masks = numpy.logical_and(masks[0], masks[1])
         masks = numpy.logical_or(masks, numpy.isnan(fluxes))
@@ -2860,4 +4109,24 @@ class Spectrum1D(Header):
         masks = numpy.logical_or(masks, numpy.isnan(skies))
         masks = numpy.logical_or(masks, numpy.isnan(sky_errors))
 
-        return Spectrum1D(wave=wave, data=fluxes, error=errors, inst_fwhm=fwhms, mask=masks, sky=skies, sky_error=sky_errors)
+        return Spectrum1D(wave=wave, data=fluxes, error=errors, lsf=fwhms, mask=masks, sky=skies, sky_error=sky_errors)
+
+    def fit_lines(self, cwaves, dwave=8, axs=None):
+
+        cwaves_ = numpy.atleast_1d(cwaves)
+
+        if self._lsf is None:
+            fwhm_guess = 2.5
+        else:
+            fwhm_guess = numpy.nanmean(numpy.interp(cwaves_, self._wave, self._lsf))
+
+        if axs is not None:
+            axs = numpy.atleast_1d(axs)
+        flux, sky_wave, fwhm, bg = self.fitSepGauss(cwaves_, dwave,
+                                                    fwhm_guess, 0.0,
+                                                    [0, numpy.inf],
+                                                    [-2.5, 2.5],
+                                                    [max(fwhm_guess - 1.5, 0), fwhm_guess + 1.5],
+                                                    [0.0, numpy.inf],
+                                                    axs=axs)
+        return flux, sky_wave, fwhm, bg

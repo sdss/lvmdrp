@@ -6,6 +6,7 @@ import pathlib
 from sdsstools import get_config, get_logger, get_package_version
 from tree import Tree
 from sdss_access.path import Path
+import subprocess
 
 
 NAME = 'lvmdrp'
@@ -23,15 +24,36 @@ except FileNotFoundError:
     config = {}
 
 
+existing_lvmconf_path = {kw: os.getenv(kw) for kw in ['LVM_MASTER_DIR', 'LVM_SANDBOX', 'LVMCORE_DIR', 'SAS_BASE_DIR']}
+
 # setup the sdss tree environment and paths
 def setup_paths(release: str = 'sdsswork', replant: bool = False):
     tree = Tree(release)
     if replant:
         tree.replant_tree(release)
     return Path(release='sdsswork')
-
-
 path = setup_paths()
+
+# ensure keeping the user-defined paths
+for kw in ['LVM_MASTER_DIR', 'LVM_SANDBOX', 'LVMCORE_DIR', 'SAS_BASE_DIR']:
+    if existing_lvmconf_path[kw] is not None:
+        os.environ[kw] = existing_lvmconf_path[kw]
 
 
 __version__ = os.getenv("LVMDRP_VERSION") or get_package_version(path=__file__, package_name=NAME)
+
+
+# NOTE: taken from https://stackoverflow.com/questions/14989858/get-the-current-git-hash-in-a-python-script
+def get_git_revision_hash(trim_to=8) -> str:
+    cwd = os.getcwd()
+    os.chdir(pathlib.Path(__file__).parent)
+    try:
+        commit_hash = subprocess.check_output(['git', 'rev-parse', 'HEAD']).decode('ascii').strip()
+    except subprocess.CalledProcessError as e:
+        log.warning(f"error {e.returncode} while getting commit hash: {e.output}, setting hash to None")
+        return
+    os.chdir(cwd)
+    return commit_hash[:trim_to]
+
+
+DRP_COMMIT = get_git_revision_hash()

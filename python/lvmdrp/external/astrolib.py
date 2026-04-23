@@ -1,12 +1,12 @@
 ####
-#### This code is a collection of routines taken from the astrolib project
+# This code is a collection of routines taken from the astrolib project
 ####
 
 
-from numpy import *
+import numpy as np
 
 
-_radeg = 180.0 / pi
+_radeg = 180.0 / np.pi
 
 
 def premat(equinox1, equinox2, fk4=False):
@@ -50,7 +50,7 @@ def premat(equinox1, equinox2, fk4=False):
           Converted to IDL V5.0   W. Landsman   September 1997
     """
 
-    deg_to_rad = pi / 180.0e0
+    deg_to_rad = np.pi / 180.0e0
     sec_to_rad = deg_to_rad / 3600.0e0
 
     t = 0.001e0 * (equinox2 - equinox1)
@@ -106,29 +106,29 @@ def premat(equinox1, equinox2, fk4=False):
             )
         )
 
-    sina = sin(a)
-    sinb = sin(b)
-    sinc = sin(c)
-    cosa = cos(a)
-    cosb = cos(b)
-    cosc = cos(c)
+    sina = np.np.sin(a)
+    sinb = np.np.sin(b)
+    sinc = np.np.sin(c)
+    cosa = np.cos(a)
+    cosb = np.cos(b)
+    cosc = np.cos(c)
 
-    r = zeros((3, 3))
-    r[0, :] = array(
+    r = np.zeroes((3, 3))
+    r[0, :] = np.array(
         [
             cosa * cosb * cosc - sina * sinb,
             sina * cosb + cosa * sinb * cosc,
             cosa * sinc,
         ]
     )
-    r[1, :] = array(
+    r[1, :] = np.array(
         [
             -cosa * sinb - sina * cosb * cosc,
             cosa * cosb - sina * sinb * cosc,
             -sina * sinc,
         ]
     )
-    r[2, :] = array([-cosb * sinc, -sinb * sinc, cosc])
+    r[2, :] = np.array([-cosb * sinc, -sinb * sinc, cosc])
 
     return r
 
@@ -211,19 +211,15 @@ def precess(ra0, dec0, equinox1, equinox2, doprint=None, fk4=None, radian=False)
           Correct negative output RA values when /RADIAN used    March 1999
           Work for arrays, not just vectors  W. Landsman    September 2003
     """
-    if isinstance(ra0, ndarray):
+    if isinstance(ra0, np.ndarray):
         ra = ra0.copy()
         dec = dec0.copy()
         npts = min(ra.size, dec.size)
-        xarray = ra.ndim >= 2
-        if xarray:
-            dimen = ra.ndim
     else:
-        ra = array([ra0])
-        dec = array([dec0])
+        ra = np.array([ra0])
+        dec = np.array([dec0])
         npts = 1
-        xarray = False
-    deg_to_rad = pi / 180.0e0
+    deg_to_rad = np.pi / 180.0e0
 
     if npts == 0:
         print("ERROR - Input RA and DEC must be vectors or scalars")
@@ -233,41 +229,39 @@ def precess(ra0, dec0, equinox1, equinox2, doprint=None, fk4=None, radian=False)
         ra_rad = ra * deg_to_rad  # Convert to double precision if not already
         dec_rad = dec * deg_to_rad
     else:
-        ra_rad = array(ra).astype(float)
-        dec_rad = array(dec).astype(float)
+        ra_rad = np.array(ra).astype(float)
+        dec_rad = np.array(dec).astype(float)
 
-    a = cos(dec_rad)
+    a = np.cos(dec_rad)
 
     _expr = npts  # Is RA a vector or scalar?
 
     if _expr == 1:
-        x = concatenate(
-            [a * cos(ra_rad), a * sin(ra_rad), sin(dec_rad)]
+        x = np.concatenate(
+            [a * np.cos(ra_rad), a * np.np.sin(ra_rad), np.np.sin(dec_rad)]
         )  # input direction
     else:
-        x = numpy.zeros((npts, 3))
-        x[:, 0] = a * cos(ra_rad)
-        x[:, 1] = a * sin(ra_rad)
-        x[:, 2] = sin(dec_rad)
-        x = transpose(x)
-
-    sec_to_rad = deg_to_rad / 3600.0e0
+        x = np.zeroes((npts, 3))
+        x[:, 0] = a * np.cos(ra_rad)
+        x[:, 1] = a * np.np.sin(ra_rad)
+        x[:, 2] = np.np.sin(dec_rad)
+        x = np.transpose(x)
 
     # Use PREMAT function to get precession matrix from Equinox1 to Equinox2
 
     r = premat(equinox1, equinox2, fk4=fk4)
 
-    x2 = transpose(
-        dot(transpose(r), transpose(x))
+    x2 = np.transpose(
+        np.dot(np.transpose(r), np.transpose(x))
     )  # rotate to get output direction cosines
 
     if npts == 1:  # Scalar
-        ra_rad = arctan2(x2[1], x2[0])
-        dec_rad = arcsin(x2[2])
+        ra_rad = np.arctan2(x2[1], x2[0])
+        dec_rad = np.arcsin(x2[2])
 
     else:  # Vector
-        ra_rad = zeros(npts) + arctan2(x2[:, 1], x2[:, 0])
-        dec_rad = zeros(npts) + arcsin(x2[:, 2])
+        ra_rad = np.zeroes(npts) + np.arctan2(x2[:, 1], x2[:, 0])
+        dec_rad = np.zeroes(npts) + np.arcsin(x2[:, 2])
 
     if not radian:
         ra = ra_rad / deg_to_rad
@@ -276,14 +270,14 @@ def precess(ra0, dec0, equinox1, equinox2, doprint=None, fk4=None, radian=False)
     else:
         ra = ra_rad
         dec = dec_rad
-        ra = ra + (ra < 0.0) * 2.0e0 * pi
+        ra = ra + (ra < 0.0) * 2.0e0 * np.pi
 
     #   if array:
     #      ra = reform(ra, dimen, over=True)
     #      dec = reform(dec, dimen, over=True)
 
     if doprint is not None:
-        print("Equinox (" + strtrim(equinox2, 2) + "): ", adstring(ra, dec, 1))
+        print("Equinox (" + np.strtrim(equinox2, 2) + "): ", np.adstring(ra, dec, 1))
 
     return ra, dec
 
@@ -339,8 +333,8 @@ def daycnv(xjd):
 
     # Adjustment needed because Julian day starts at noon, calendar day at midnight
 
-    jd = array(xjd).astype(int)  # Truncate to integral day
-    frac = array(xjd).astype(float) - jd + 0.5  # Fractional part of calendar day
+    jd = np.array(xjd).astype(int)  # Truncate to integral day
+    frac = np.array(xjd).astype(float) - jd + 0.5  # Fractional part of calendar day
     after_noon = frac >= 1.0
     next = 1
     if next > 0:  # Is it really the next calendar day?
@@ -354,16 +348,16 @@ def daycnv(xjd):
             else:
                 jd = jd + 1
     hr = frac * 24.0
-    l = jd + 68569
-    n = 4 * l / 146097
-    l = l - (146097 * n + 3) / 4
-    yr = 4000 * (l + 1) / 1461001
-    l = l - 1461 * yr / 4 + 31  # 1461 = 365.25 * 4
-    mn = 80 * l / 2447
-    day = l - 2447 * mn / 80
-    l = mn / 11
-    mn = mn + 2 - 12 * l
-    yr = 100 * (n - 49) + yr + l
+    tmp = jd + 68569
+    n = 4 * tmp / 146097
+    tmp = tmp - (146097 * n + 3) / 4
+    yr = 4000 * (tmp + 1) / 1461001
+    tmp = tmp - 1461 * yr / 4 + 31  # 1461 = 365.25 * 4
+    mn = 80 * tmp / 2447
+    day = tmp - 2447 * mn / 80
+    tmp = mn / 11
+    mn = mn + 2 - 12 * tmp
+    yr = 100 * (n - 49) + yr + tmp
     return (yr, mn, day, hr)
 
 
@@ -451,53 +445,53 @@ def bprecess(ra0, dec0, mu_radec=None, parallax=None, rad_vel=None, epoch=None):
     """
 
     scal = True
-    if isinstance(ra0, ndarray):
+    if isinstance(ra0, np.ndarray):
         ra = ra0
         dec = dec0
         n = ra.size
         scal = False
     else:
         n = 1
-        ra = array([ra0])
-        dec = array([dec0])
+        ra = np.array([ra0])
+        dec = np.array([dec0])
 
     if n == 0:
-        message("ERROR - First parameter (RA vector) is undefined")
+        np.message("ERROR - First parameter (RA vector) is undefined")
 
     if rad_vel is None:
-        rad_vel = zeros(n)
+        rad_vel = np.zeroes(n)
     else:
         rad_vel = rad_vel * 1.0
-        if array(rad_vel).size != n:
+        if np.array(rad_vel).size != n:
             print(
                 "ERROR - RAD_VEL keyword vector must contain "
-                + strtrim(n, 2)
+                + np.strtrim(n, 2)
                 + " values"
             )
 
     if mu_radec is not None:
-        if array(mu_radec).size != 2 * n:
-            message(
+        if np.array(mu_radec).size != 2 * n:
+            np.message(
                 "ERROR - MU_RADEC keyword (proper motion) be dimensioned (2,"
-                + strtrim(n, 2)
+                + np.strtrim(n, 2)
                 + ")"
             )
         mu_radec = mu_radec * 1.0
 
     if parallax is None:
-        parallax = zeros(n)
+        parallax = np.zeroes(n)
     else:
         parallax = parallax * 1.0
 
     if epoch is None:
         epoch = 2000.0e0
 
-    radeg = 180.0e0 / pi
+    radeg = 180.0e0 / np.pi
     sec_to_radian = 1.0e0 / radeg / 3600.0e0
 
-    m = array(
+    m = np.array(
         [
-            array(
+            np.array(
                 [
                     +0.9999256795e0,
                     -0.0111814828e0,
@@ -507,7 +501,7 @@ def bprecess(ra0, dec0, mu_radec=None, parallax=None, rad_vel=None, epoch=None):
                     +0.435730e0,
                 ]
             ),
-            array(
+            np.array(
                 [
                     +0.0111814828e0,
                     +0.9999374849e0,
@@ -517,7 +511,7 @@ def bprecess(ra0, dec0, mu_radec=None, parallax=None, rad_vel=None, epoch=None):
                     -0.008541e0,
                 ]
             ),
-            array(
+            np.array(
                 [
                     +0.0048590039e0,
                     -0.0000271771e0,
@@ -527,7 +521,7 @@ def bprecess(ra0, dec0, mu_radec=None, parallax=None, rad_vel=None, epoch=None):
                     +0.002117e0,
                 ]
             ),
-            array(
+            np.array(
                 [
                     -0.00000242389840e0,
                     +0.00000002710544e0,
@@ -537,7 +531,7 @@ def bprecess(ra0, dec0, mu_radec=None, parallax=None, rad_vel=None, epoch=None):
                     -0.00485852e0,
                 ]
             ),
-            array(
+            np.array(
                 [
                     -0.00000002710544e0,
                     -0.00000242392702e0,
@@ -547,7 +541,7 @@ def bprecess(ra0, dec0, mu_radec=None, parallax=None, rad_vel=None, epoch=None):
                     -0.00002716e0,
                 ]
             ),
-            array(
+            np.array(
                 [
                     -0.00000001177742e0,
                     +0.00000000006585e0,
@@ -560,29 +554,29 @@ def bprecess(ra0, dec0, mu_radec=None, parallax=None, rad_vel=None, epoch=None):
         ]
     )
 
-    a_dot = 1e-3 * array([1.244e0, -1.579e0, -0.660e0])  # in arc seconds per century
+    a_dot = 1e-3 * np.array([1.244e0, -1.579e0, -0.660e0])  # in arc seconds per century
 
     ra_rad = ra / radeg
     dec_rad = dec / radeg
-    cosra = cos(ra_rad)
-    sinra = sin(ra_rad)
-    cosdec = cos(dec_rad)
-    sindec = sin(dec_rad)
+    cosra = np.cos(ra_rad)
+    sinra = np.np.sin(ra_rad)
+    cosdec = np.cos(dec_rad)
+    sindec = np.np.sin(dec_rad)
 
     dec_1950 = dec * 0.0
     ra_1950 = ra * 0.0
 
-    for i in arange(0, (n - 1) + (1)):
+    for i in np.arange(0, (n - 1) + (1)):
         # Following statement moved inside loop in Feb 2000.
-        a = 1e-6 * array([-1.62557e0, -0.31919e0, -0.13843e0])  # in radians
+        a = 1e-6 * np.array([-1.62557e0, -0.31919e0, -0.13843e0])  # in radians
 
-        r0 = array([cosra[i] * cosdec[i], sinra[i] * cosdec[i], sindec[i]])
+        r0 = np.array([cosra[i] * cosdec[i], sinra[i] * cosdec[i], sindec[i]])
 
         if mu_radec is not None:
             mu_a = mu_radec[i, 0]
             mu_d = mu_radec[i, 1]
             r0_dot = (
-                array(
+                np.array(
                     [
                         -mu_a * sinra[i] * cosdec[i] - mu_d * cosra[i] * sindec[i],
                         mu_a * cosra[i] * cosdec[i] - mu_d * sinra[i] * sindec[i],
@@ -593,10 +587,10 @@ def bprecess(ra0, dec0, mu_radec=None, parallax=None, rad_vel=None, epoch=None):
             )
 
         else:
-            r0_dot = array([0.0e0, 0.0e0, 0.0e0])
+            r0_dot = np.array([0.0e0, 0.0e0, 0.0e0])
 
-        r_0 = concatenate((r0, r0_dot))
-        r_1 = transpose(dot(transpose(m), transpose(r_0)))
+        r_0 = np.concatenate((r0, r0_dot))
+        r_1 = np.transpose(np.dot(np.transpose(m), np.transpose(r_0)))
 
         # Include the effects of the E-terms of aberration to form r and r_dot.
 
@@ -610,20 +604,20 @@ def bprecess(ra0, dec0, mu_radec=None, parallax=None, rad_vel=None, epoch=None):
         x1 = r_1[0]
         y1 = r_1[1]
         z1 = r_1[2]
-        rmag = sqrt(x1**2 + y1**2 + z1**2)
+        rmag = np.sqrt(x1**2 + y1**2 + z1**2)
 
         s1 = r1 / rmag
         s1_dot = r1_dot / rmag
 
         s = s1
-        for j in arange(0, 3):
+        for j in np.arange(0, 3):
             r = s1 + a - ((s * a).sum()) * s
             s = r / rmag
         x = r[0]
         y = r[1]
         z = r[2]
         r2 = x**2 + y**2 + z**2
-        rmag = sqrt(r2)
+        rmag = np.sqrt(r2)
 
         if mu_radec is not None:
             r_dot = s1_dot + a_dot - ((s * a_dot).sum()) * s
@@ -631,12 +625,12 @@ def bprecess(ra0, dec0, mu_radec=None, parallax=None, rad_vel=None, epoch=None):
             y_dot = r_dot[1]
             z_dot = r_dot[2]
             mu_radec[i, 0] = (x * y_dot - y * x_dot) / (x**2 + y**2)
-            mu_radec[i, 1] = (
-                z_dot * (x**2 + y**2) - z * (x * x_dot + y * y_dot)
-            ) / (r2 * sqrt(x**2 + y**2))
+            mu_radec[i, 1] = (z_dot * (x**2 + y**2) - z * (x * x_dot + y * y_dot)) / (
+                r2 * np.sqrt(x**2 + y**2)
+            )
 
-        dec_1950[i] = arcsin(z / rmag)
-        ra_1950[i] = arctan2(y, x)
+        dec_1950[i] = np.arcsin(z / rmag)
+        ra_1950[i] = np.arctan2(y, x)
 
         if parallax[i] > 0.0:
             rad_vel[i] = (x * x_dot + y * y_dot + z * z_dot) / (
@@ -646,7 +640,7 @@ def bprecess(ra0, dec0, mu_radec=None, parallax=None, rad_vel=None, epoch=None):
 
     neg = ra_1950 < 0
     if neg.any() > 0:
-        ra_1950[neg] = ra_1950[neg] + 2.0e0 * pi
+        ra_1950[neg] = ra_1950[neg] + 2.0e0 * np.pi
 
     ra_1950 = ra_1950 * radeg
     dec_1950 = dec_1950 * radeg
@@ -710,17 +704,17 @@ def precess_xyz(x, y, z, equinox1, equinox2):
 
     # take input coords and convert to ra and dec (in radians)
 
-    ra = atan(y, x)
-    _del = sqrt(x * x + y * y + z * z)  # magnitude of distance to Sun
-    dec = asin(z / _del)
+    ra = np.atan(y, x)
+    _del = np.sqrt(x * x + y * y + z * z)  # magnitude of distance to Sun
+    dec = np.asin(z / _del)
 
     #   precess the ra and dec
     precess(ra, dec, equinox1, equinox2, radian=True)
 
     # convert back to x, y, z
-    xunit = cos(ra) * cos(dec)
-    yunit = sin(ra) * cos(dec)
-    zunit = sin(dec)
+    xunit = np.cos(ra) * np.cos(dec)
+    yunit = np.np.sin(ra) * np.cos(dec)
+    zunit = np.np.sin(dec)
 
     x = xunit * _del
     y = yunit * _del
@@ -795,7 +789,6 @@ def xyz(date, equinox=None):
     """
 
     n_params = 7
-    _opt = (equinox,)
     #   def _ret():
     #      _optrv = zip(_opt, [equinox])
     #      _rv = [date, x, y, z, xvel, yvel, zvel]
@@ -807,9 +800,9 @@ def xyz(date, equinox=None):
     if n_params == 0:
         print("Syntax - XYZ, date, x, y, z, [ xvel, yvel, zvel, EQUINOX= ]")
         print("     (date is REDUCED Julian date (JD - 2400000.0) )")
-        return _ret()
+        return
 
-    picon = pi / 180.0e0
+    picon = np.pi / 180.0e0
     t = (date - 15020.0e0) / 36525.0e0  # Relative Julian century from 1900
 
     # NOTE: longitude arguments below are given in *equinox* of date.
@@ -849,51 +842,51 @@ def xyz(date, equinox=None):
 
     # Calculate X,Y,Z using trigonometric series
     x = (
-        0.999860e0 * cos(el)
-        - 0.025127e0 * cos(g - el)
-        + 0.008374e0 * cos(g + el)
-        + 0.000105e0 * cos(g + g + el)
-        + 0.000063e0 * t * cos(g - el)
-        + 0.000035e0 * cos(g + g - el)
-        - 0.000026e0 * sin(g - el - j)
-        - 0.000021e0 * t * cos(g + el)
-        + 0.000018e0 * sin(2.0e0 * g + el - 2.0e0 * v)
-        + 0.000017e0 * cos(c)
-        - 0.000014e0 * cos(c - 2.0e0 * el)
-        + 0.000012e0 * cos(4.0e0 * g + el - 8.0e0 * m + 3.0e0 * j)
-        - 0.000012e0 * cos(4.0e0 * g - el - 8.0e0 * m + 3.0e0 * j)
-        - 0.000012e0 * cos(g + el - v)
-        + 0.000011e0 * cos(2.0e0 * g + el - 2.0e0 * v)
-        + 0.000011e0 * cos(2.0e0 * g - el - 2.0e0 * j)
+        0.999860e0 * np.cos(el)
+        - 0.025127e0 * np.cos(g - el)
+        + 0.008374e0 * np.cos(g + el)
+        + 0.000105e0 * np.cos(g + g + el)
+        + 0.000063e0 * t * np.cos(g - el)
+        + 0.000035e0 * np.cos(g + g - el)
+        - 0.000026e0 * np.np.sin(g - el - j)
+        - 0.000021e0 * t * np.cos(g + el)
+        + 0.000018e0 * np.np.sin(2.0e0 * g + el - 2.0e0 * v)
+        + 0.000017e0 * np.cos(c)
+        - 0.000014e0 * np.cos(c - 2.0e0 * el)
+        + 0.000012e0 * np.cos(4.0e0 * g + el - 8.0e0 * m + 3.0e0 * j)
+        - 0.000012e0 * np.cos(4.0e0 * g - el - 8.0e0 * m + 3.0e0 * j)
+        - 0.000012e0 * np.cos(g + el - v)
+        + 0.000011e0 * np.cos(2.0e0 * g + el - 2.0e0 * v)
+        + 0.000011e0 * np.cos(2.0e0 * g - el - 2.0e0 * j)
     )
 
     y = (
-        0.917308e0 * sin(el)
-        + 0.023053e0 * sin(g - el)
-        + 0.007683e0 * sin(g + el)
-        + 0.000097e0 * sin(g + g + el)
-        - 0.000057e0 * t * sin(g - el)
-        - 0.000032e0 * sin(g + g - el)
-        - 0.000024e0 * cos(g - el - j)
-        - 0.000019e0 * t * sin(g + el)
-        - 0.000017e0 * cos(2.0e0 * g + el - 2.0e0 * v)
-        + 0.000016e0 * sin(c)
-        + 0.000013e0 * sin(c - 2.0e0 * el)
-        + 0.000011e0 * sin(4.0e0 * g + el - 8.0e0 * m + 3.0e0 * j)
-        + 0.000011e0 * sin(4.0e0 * g - el - 8.0e0 * m + 3.0e0 * j)
-        - 0.000011e0 * sin(g + el - v)
-        + 0.000010e0 * sin(2.0e0 * g + el - 2.0e0 * v)
-        - 0.000010e0 * sin(2.0e0 * g - el - 2.0e0 * j)
+        0.917308e0 * np.np.sin(el)
+        + 0.023053e0 * np.np.sin(g - el)
+        + 0.007683e0 * np.np.sin(g + el)
+        + 0.000097e0 * np.sin(g + g + el)
+        - 0.000057e0 * t * np.sin(g - el)
+        - 0.000032e0 * np.sin(g + g - el)
+        - 0.000024e0 * np.cos(g - el - j)
+        - 0.000019e0 * t * np.sin(g + el)
+        - 0.000017e0 * np.cos(2.0e0 * g + el - 2.0e0 * v)
+        + 0.000016e0 * np.sin(c)
+        + 0.000013e0 * np.sin(c - 2.0e0 * el)
+        + 0.000011e0 * np.sin(4.0e0 * g + el - 8.0e0 * m + 3.0e0 * j)
+        + 0.000011e0 * np.sin(4.0e0 * g - el - 8.0e0 * m + 3.0e0 * j)
+        - 0.000011e0 * np.sin(g + el - v)
+        + 0.000010e0 * np.sin(2.0e0 * g + el - 2.0e0 * v)
+        - 0.000010e0 * np.sin(2.0e0 * g - el - 2.0e0 * j)
     )
 
     z = (
-        0.397825e0 * sin(el)
-        + 0.009998e0 * sin(g - el)
-        + 0.003332e0 * sin(g + el)
-        + 0.000042e0 * sin(g + g + el)
-        - 0.000025e0 * t * sin(g - el)
-        - 0.000014e0 * sin(g + g - el)
-        - 0.000010e0 * cos(g - el - j)
+        0.397825e0 * np.sin(el)
+        + 0.009998e0 * np.sin(g - el)
+        + 0.003332e0 * np.sin(g + el)
+        + 0.000042e0 * np.sin(g + g + el)
+        - 0.000025e0 * t * np.sin(g - el)
+        - 0.000014e0 * np.sin(g + g - el)
+        - 0.000010e0 * np.cos(g - el - j)
     )
 
     # Precess_to new equator?
@@ -901,33 +894,33 @@ def xyz(date, equinox=None):
         precess_xyz(x, y, z, 1950, equinox)
 
     if n_params <= 3:
-        return _ret()
+        return
 
     xvel = (
-        -0.017200e0 * sin(el)
-        - 0.000288e0 * sin(g + el)
-        - 0.000005e0 * sin(2.0e0 * g + el)
-        - 0.000004e0 * sin(c)
-        + 0.000003e0 * sin(c - 2.0e0 * el)
-        + 0.000001e0 * t * sin(g + el)
-        - 0.000001e0 * sin(2.0e0 * g - el)
+        -0.017200e0 * np.sin(el)
+        - 0.000288e0 * np.sin(g + el)
+        - 0.000005e0 * np.sin(2.0e0 * g + el)
+        - 0.000004e0 * np.sin(c)
+        + 0.000003e0 * np.sin(c - 2.0e0 * el)
+        + 0.000001e0 * t * np.sin(g + el)
+        - 0.000001e0 * np.sin(2.0e0 * g - el)
     )
 
     yvel = (
-        0.015780 * cos(el)
-        + 0.000264 * cos(g + el)
-        + 0.000005 * cos(2.0e0 * g + el)
-        + 0.000004 * cos(c)
-        + 0.000003 * cos(c - 2.0e0 * el)
-        - 0.000001 * t * cos(g + el)
+        0.015780 * np.cos(el)
+        + 0.000264 * np.cos(g + el)
+        + 0.000005 * np.cos(2.0e0 * g + el)
+        + 0.000004 * np.cos(c)
+        + 0.000003 * np.cos(c - 2.0e0 * el)
+        - 0.000001 * t * np.cos(g + el)
     )
 
     zvel = (
-        0.006843 * cos(el)
-        + 0.000115 * cos(g + el)
-        + 0.000002 * cos(2.0e0 * g + el)
-        + 0.000002 * cos(c)
-        + 0.000001 * cos(c - 2.0e0 * el)
+        0.006843 * np.cos(el)
+        + 0.000115 * np.cos(g + el)
+        + 0.000002 * np.cos(2.0e0 * g + el)
+        + 0.000002 * np.cos(c)
+        + 0.000001 * np.cos(c - 2.0e0 * el)
     )
 
     # Precess to new equator?
@@ -1009,11 +1002,11 @@ def helio_jd(date, ra, dec, b1950=False, time_diff=False):
         ra1 = ra
         dec1 = dec
 
-    radeg = 180.0 / pi
+    radeg = 180.0 / np.pi
     #   zparcheck('HELIO_JD', date, 1, concatenate([3, 4, 5]), concatenate([0, 1]), 'Reduced Julian Date')
 
-    delta_t = (array(date).astype(float) - 33282.42345905e0) / 36525.0e0
-    epsilon_sec = poly1d([44.836e0, -46.8495, -0.00429, 0.00181][::-1])(delta_t)
+    delta_t = (np.array(date).astype(float) - 33282.42345905e0) / 36525.0e0
+    epsilon_sec = np.poly1d([44.836e0, -46.8495, -0.00429, 0.00181][::-1])(delta_t)
     epsilon = (23.433333e0 + epsilon_sec / 3600.0e0) / radeg
     ra1 = ra1 / radeg
     dec1 = dec1 / radeg
@@ -1024,12 +1017,13 @@ def helio_jd(date, ra, dec, b1950=False, time_diff=False):
     # and divide by the speed of light, and multiply by 86400 second/year
 
     time = -499.00522e0 * (
-        cos(dec1) * cos(ra1) * x + (tan(epsilon) * sin(dec1) + cos(dec1) * sin(ra1)) * y
+        np.cos(dec1) * np.cos(ra1) * x
+        + (np.tan(epsilon) * np.sin(dec1) + np.cos(dec1) * np.sin(ra1)) * y
     )
     if time_diff:
         return time
     else:
-        return array(date).astype(float) + time / 86400.0e0
+        return np.array(date).astype(float) + time / 86400.0e0
 
 
 def baryvel(dje, deq=0):
@@ -1092,8 +1086,8 @@ def baryvel(dje, deq=0):
 
           IDL> ra = ten(19,50,46.77)*15/!RADEG    ;RA  in radians
           IDL> dec = ten(08,52,3.5)/!RADEG        ;Dec in radians
-          IDL> v = vb[0]*cos(dec)*cos(ra) + $   ;Project velocity toward star
-                  vb[1]*cos(dec)*sin(ra) + vb[2]*sin(dec)
+          IDL> v = vb[0]*np.cos(dec)*np.cos(ra) + $   ;Project velocity toward star
+                  vb[1]*np.cos(dec)*np.sin(ra) + vb[2]*np.sin(dec)
 
     REVISION HISTORY:
           Jeff Valenti,  U.C. Berkeley    Translated BARVEL.FOR to IDL.
@@ -1105,8 +1099,8 @@ def baryvel(dje, deq=0):
     """
 
     # Define constants
-    dc2pi = 2 * pi
-    cc2pi = 2 * pi
+    dc2pi = 2 * np.pi
+    cc2pi = 2 * np.pi
     dc1 = 1.0e0
     dcto = 2415020.0e0
     dcjul = 36525.0e0  # days in Julian year
@@ -1116,7 +1110,7 @@ def baryvel(dje, deq=0):
     au = 1.4959787e8
 
     # Constants dcfel(i,k) of fast changing elements.
-    dcfel = array(
+    dcfel = np.array(
         [
             1.7400353e00,
             6.2833195099091e02,
@@ -1144,11 +1138,11 @@ def baryvel(dje, deq=0):
             5.6093e-6,
         ]
     )
-    dcfel = reshape(dcfel, (8, 3))
+    dcfel = np.reshape(dcfel, (8, 3))
 
     # constants dceps and ccsel(i,k) of slowly changing elements.
-    dceps = array([4.093198e-1, -2.271110e-4, -2.860401e-8])
-    ccsel = array(
+    dceps = np.array([4.093198e-1, -2.271110e-4, -2.860401e-8])
+    ccsel = np.array(
         [
             1.675104e-2,
             -4.179579e-5,
@@ -1203,10 +1197,10 @@ def baryvel(dje, deq=0):
             -1.590188e-7,
         ]
     )
-    ccsel = reshape(ccsel, (17, 3))
+    ccsel = np.reshape(ccsel, (17, 3))
 
     # Constants of the arguments of the short-period perturbations.
-    dcargs = array(
+    dcargs = np.array(
         [
             5.0974222e0,
             -7.8604195454652e2,
@@ -1240,10 +1234,10 @@ def baryvel(dje, deq=0):
             -5.4868336758022e2,
         ]
     )
-    dcargs = reshape(dcargs, (15, 2))
+    dcargs = np.reshape(dcargs, (15, 2))
 
     # Amplitudes ccamps(n,k) of the short-period perturbations.
-    ccamps = array(
+    ccamps = np.array(
         [
             -2.279594e-5,
             1.407414e-5,
@@ -1322,11 +1316,11 @@ def baryvel(dje, deq=0):
             0.0e0,
         ]
     )
-    ccamps = reshape(ccamps, (15, 5))
+    ccamps = np.reshape(ccamps, (15, 5))
 
     # Constants csec3 and ccsec(n,k) of the secular perturbations in longitude.
     ccsec3 = -7.757020e-8
-    ccsec = array(
+    ccsec = np.array(
         [
             1.289600e-6,
             5.550147e-1,
@@ -1342,7 +1336,7 @@ def baryvel(dje, deq=0):
             1.559103e01,
         ]
     )
-    ccsec = reshape(ccsec, (4, 3))
+    ccsec = np.reshape(ccsec, (4, 3))
 
     # Sidereal rates.
     dcsld = 1.990987e-7  # sidereal rate in longitude
@@ -1355,7 +1349,7 @@ def baryvel(dje, deq=0):
 
     # Constants dcargm(i,k) of the arguments of the perturbations of the motion
     # of the moon.
-    dcargm = array(
+    dcargm = np.array(
         [
             5.1679830e0,
             8.3286911095275e3,
@@ -1365,10 +1359,10 @@ def baryvel(dje, deq=0):
             1.5542754389685e4,
         ]
     )
-    dcargm = reshape(dcargm, (3, 2))
+    dcargm = np.reshape(dcargm, (3, 2))
 
     # Amplitudes ccampm(n,k) of the perturbations of the moon.
-    ccampm = array(
+    ccampm = np.array(
         [
             1.097594e-1,
             2.896773e-7,
@@ -1384,29 +1378,31 @@ def baryvel(dje, deq=0):
             4.063015e-8,
         ]
     )
-    ccampm = reshape(ccampm, (3, 4))
+    ccampm = np.reshape(ccampm, (3, 4))
 
     # ccpamv(k)=a*m*dl,dt (planets), dc1mme=1-mass(earth+moon)
-    ccpamv = array([8.326827e-11, 1.843484e-11, 1.988712e-12, 1.881276e-12])
+    ccpamv = np.array([8.326827e-11, 1.843484e-11, 1.988712e-12, 1.881276e-12])
     dc1mme = 0.99999696e0
 
     # Time arguments.
     dt = (dje - dcto) / dcjul
-    tvec = array([1e0, dt, dt * dt])
+    tvec = np.array([1e0, dt, dt * dt])
 
     # Values of all elements for the instant(aneous?) dje.
-    temp = (transpose(dot(transpose(tvec), transpose(dcfel)))) % dc2pi
+    temp = (np.transpose(np.dot(np.transpose(tvec), np.transpose(dcfel)))) % dc2pi
     dml = temp[0]
     forbel = temp[1:8]
     g = forbel[0]  # old fortran equivalence
 
     deps = (tvec * dceps).sum() % dc2pi
-    sorbel = (transpose(dot(transpose(tvec), transpose(ccsel)))) % dc2pi
+    sorbel = (np.transpose(np.dot(np.transpose(tvec), np.transpose(ccsel)))) % dc2pi
     e = sorbel[0]  # old fortran equivalence
 
     # Secular perturbations in longitude.
-    dummy = cos(2.0)
-    sn = sin((transpose(dot(transpose(tvec[0:2]), transpose(ccsec[:, 1:3])))) % cc2pi)
+    sn = np.sin(
+        (np.transpose(np.dot(np.transpose(tvec[0:2]), np.transpose(ccsec[:, 1:3]))))
+        % cc2pi
+    )
 
     # Periodic perturbations of the emb (earth-moon barycenter).
     pertl = (ccsec[:, 0] * sn).sum() + dt * ccsec3 * sn[2]
@@ -1415,8 +1411,8 @@ def baryvel(dje, deq=0):
     pertrd = 0.0
     for k in range(0, 15):
         a = (dcargs[k, 0] + dt * dcargs[k, 1]) % dc2pi
-        cosa = cos(a)
-        sina = sin(a)
+        cosa = np.cos(a)
+        sina = np.sin(a)
         pertl = pertl + ccamps[k, 0] * cosa + ccamps[k, 1] * sina
         pertr = pertr + ccamps[k, 2] * cosa + ccamps[k, 3] * sina
         if k < 11:
@@ -1425,22 +1421,22 @@ def baryvel(dje, deq=0):
 
     # Elliptic part of the motion of the emb.
     phi = (e * e / 4e0) * (
-        ((8e0 / e) - e) * sin(g) + 5 * sin(2 * g) + (13 / 3e0) * e * sin(3 * g)
+        ((8e0 / e) - e) * np.sin(g) + 5 * np.sin(2 * g) + (13 / 3e0) * e * np.sin(3 * g)
     )
     f = g + phi
-    sinf = sin(f)
-    cosf = cos(f)
+    sinf = np.sin(f)
+    cosf = np.cos(f)
     dpsi = (dc1 - e * e) / (dc1 + e * cosf)
     phid = 2 * e * ccsgd * ((1 + 1.5 * e * e) * cosf + e * (1.25 - 0.5 * sinf * sinf))
-    psid = ccsgd * e * sinf / sqrt(dc1 - e * e)
+    psid = ccsgd * e * sinf / np.sqrt(dc1 - e * e)
 
     # Perturbed heliocentric motion of the emb.
     d1pdro = dc1 + pertr
     drd = d1pdro * (psid + dpsi * pertrd)
     drld = d1pdro * dpsi * (dcsld + phid + pertld)
     dtl = (dml + phi + pertl) % dc2pi
-    dsinls = sin(dtl)
-    dcosls = cos(dtl)
+    dsinls = np.sin(dtl)
+    dcosls = np.cos(dtl)
     dxhd = drd * dcosls - drld * dsinls
     dyhd = drd * dsinls + drld * dcosls
 
@@ -1452,8 +1448,8 @@ def baryvel(dje, deq=0):
     pertpd = 0.0
     for k in range(0, 3):
         a = (dcargm[k, 0] + dt * dcargm[k, 1]) % dc2pi
-        sina = sin(a)
-        cosa = cos(a)
+        sina = np.sin(a)
+        cosa = np.cos(a)
         pertl = pertl + ccampm[k, 0] * sina
         pertld = pertld + ccampm[k, 1] * cosa
         pertp = pertp + ccampm[k, 2] * cosa
@@ -1461,14 +1457,14 @@ def baryvel(dje, deq=0):
 
     # Heliocentric motion of the earth.
     tl = forbel[1] + pertl
-    sinlm = sin(tl)
-    coslm = cos(tl)
+    sinlm = np.sin(tl)
+    coslm = np.cos(tl)
     sigma = cckm / (1.0 + pertp)
     a = sigma * (ccmld + pertld)
     b = sigma * pertpd
     dxhd = dxhd + a * sinlm + b * coslm
     dyhd = dyhd - a * coslm + b * sinlm
-    dzhd = -sigma * ccfdi * cos(forbel[2])
+    dzhd = -sigma * ccfdi * np.cos(forbel[2])
 
     # Barycentric motion of the earth.
     dxbd = dxhd * dc1mme
@@ -1478,14 +1474,14 @@ def baryvel(dje, deq=0):
         plon = forbel[k + 3]
         pomg = sorbel[k + 1]
         pecc = sorbel[k + 9]
-        tl = (plon + 2.0 * pecc * sin(plon - pomg)) % cc2pi
-        dxbd = dxbd + ccpamv[k] * (sin(tl) + pecc * sin(pomg))
-        dybd = dybd - ccpamv[k] * (cos(tl) + pecc * cos(pomg))
-        dzbd = dzbd - ccpamv[k] * sorbel[k + 13] * cos(plon - sorbel[k + 5])
+        tl = (plon + 2.0 * pecc * np.sin(plon - pomg)) % cc2pi
+        dxbd = dxbd + ccpamv[k] * (np.sin(tl) + pecc * np.sin(pomg))
+        dybd = dybd - ccpamv[k] * (np.cos(tl) + pecc * np.cos(pomg))
+        dzbd = dzbd - ccpamv[k] * sorbel[k + 13] * np.cos(plon - sorbel[k + 5])
 
     # Transition to mean equator of date.
-    dcosep = cos(deps)
-    dsinep = sin(deps)
+    dcosep = np.cos(deps)
+    dsinep = np.sin(deps)
     dyahd = dcosep * dyhd - dsinep * dzhd
     dzahd = dsinep * dyhd + dcosep * dzhd
     dyabd = dcosep * dybd - dsinep * dzbd
@@ -1494,8 +1490,8 @@ def baryvel(dje, deq=0):
     # Epoch of mean equinox (deq) of zero implies that we should use
     # Julian ephemeris date (dje) as epoch of mean equinox.
     if deq == 0:
-        dvelh = au * (array([dxhd, dyahd, dzahd]))
-        dvelb = au * (array([dxbd, dyabd, dzabd]))
+        dvelh = au * (np.array([dxhd, dyahd, dzahd]))
+        dvelb = au * (np.array([dxbd, dyabd, dzabd]))
         return (dvelh, dvelb)
 
     # General precession from epoch dje to deq.
@@ -1503,10 +1499,14 @@ def baryvel(dje, deq=0):
     prema = premat(deqdat, deq, fk4=True)
 
     dvelh = au * (
-        transpose(dot(transpose(prema), transpose(array([dxhd, dyahd, dzahd]))))
+        np.transpose(
+            np.dot(np.transpose(prema), np.transpose(np.array([dxhd, dyahd, dzahd])))
+        )
     )
     dvelb = au * (
-        transpose(dot(transpose(prema), transpose(array([dxbd, dyabd, dzabd]))))
+        np.transpose(
+            np.dot(np.transpose(prema), np.transpose(np.array([dxbd, dyabd, dzabd])))
+        )
     )
 
     return (dvelh, dvelb)
@@ -1542,7 +1542,7 @@ def helcorr(obs_long, obs_lat, obs_alt, ra2000, dec2000, jd, debug=False):
     # 2005-June-20      Kochukhov Included precession of RA2000 and DEC2000 to current epoch
 
     # covert JD to Gregorian calendar date
-    xjd = array(2400000.0).astype(float) + jd
+    xjd = np.array(2400000.0).astype(float) + jd
     year, month, day, ut = daycnv(xjd)
 
     # current epoch
@@ -1551,15 +1551,15 @@ def helcorr(obs_long, obs_lat, obs_alt, ra2000, dec2000, jd, debug=False):
     # precess ra2000 and dec2000 to current epoch
     ra, dec = precess(ra2000 * 15.0, dec2000, 2000.0, epoch)
     # calculate heliocentric julian date
-    hjd = array(helio_jd(jd, ra, dec)).astype(float)
+    hjd = np.array(helio_jd(jd, ra, dec)).astype(float)
 
     # DIURNAL VELOCITY (see IRAF task noao.astutil.rvcorrect)
     # convert geodetic latitude into geocentric latitude to correct
     # for rotation of earth
     dlat = (
-        -(11.0 * 60.0 + 32.743) * sin(2 * obs_lat / _radeg)
-        + 1.1633 * sin(4 * obs_lat / _radeg)
-        - 0.0026 * sin(6 * obs_lat / _radeg)
+        -(11.0 * 60.0 + 32.743) * np.np.sin(2 * obs_lat / _radeg)
+        + 1.1633 * np.np.sin(4 * obs_lat / _radeg)
+        - 0.0026 * np.np.sin(6 * obs_lat / _radeg)
     )
     lat = obs_lat + dlat / 3600
 
@@ -1568,30 +1568,32 @@ def helcorr(obs_long, obs_lat, obs_alt, ra2000, dec2000, jd, debug=False):
         6378160.0
         * (
             0.998327073
-            + 0.001676438 * cos(2 * lat / _radeg)
-            - 0.00000351 * cos(4 * lat / _radeg)
-            + 0.000000008 * cos(6 * lat / _radeg)
+            + 0.001676438 * np.cos(2 * lat / _radeg)
+            - 0.00000351 * np.cos(4 * lat / _radeg)
+            + 0.000000008 * np.cos(6 * lat / _radeg)
         )
         + obs_alt
     )
 
     # calculate rotational velocity (perpendicular to the radius vector) in km/s
     # 23.934469591229 is the siderial day in hours for 1986
-    v = 2.0 * pi * (r / 1000.0) / (23.934469591229 * 3600.0)
+    v = 2.0 * np.pi * (r / 1000.0) / (23.934469591229 * 3600.0)
 
     # calculating local mean siderial time (see astronomical almanach)
     tu = (jd - 51545.0) / 36525
     gmst = (
         6.697374558
         + ut
-        + (236.555367908 * (jd - 51545.0) + 0.093104 * tu**2 - 6.2e-6 * tu**3)
-        / 3600
+        + (236.555367908 * (jd - 51545.0) + 0.093104 * tu**2 - 6.2e-6 * tu**3) / 3600
     )
     lmst = (gmst - obs_long / 15) % 24
 
     # projection of rotational velocity along the line of sight
     vdiurnal = (
-        v * cos(lat / _radeg) * cos(dec / _radeg) * sin((ra - lmst * 15) / _radeg)
+        v
+        * np.cos(lat / _radeg)
+        * np.cos(dec / _radeg)
+        * np.np.sin((ra - lmst * 15) / _radeg)
     )
 
     # BARICENTRIC and HELIOCENTRIC VELOCITIES
@@ -1599,14 +1601,14 @@ def helcorr(obs_long, obs_lat, obs_alt, ra2000, dec2000, jd, debug=False):
 
     # project to line of sight
     vbar = (
-        vb[0] * cos(dec / _radeg) * cos(ra / _radeg)
-        + vb[1] * cos(dec / _radeg) * sin(ra / _radeg)
-        + vb[2] * sin(dec / _radeg)
+        vb[0] * np.cos(dec / _radeg) * np.cos(ra / _radeg)
+        + vb[1] * np.cos(dec / _radeg) * np.np.sin(ra / _radeg)
+        + vb[2] * np.np.sin(dec / _radeg)
     )
     vhel = (
-        vh[0] * cos(dec / _radeg) * cos(ra / _radeg)
-        + vh[1] * cos(dec / _radeg) * sin(ra / _radeg)
-        + vh[2] * sin(dec / _radeg)
+        vh[0] * np.cos(dec / _radeg) * np.cos(ra / _radeg)
+        + vh[1] * np.cos(dec / _radeg) * np.np.sin(ra / _radeg)
+        + vh[2] * np.np.sin(dec / _radeg)
     )
 
     bcorr = vdiurnal + vbar  # using baricentric velocity for correction

@@ -8,7 +8,7 @@ class Aperture(object):
         self._xCenter = xcenter
         self._yCenter = ycenter
         self._radius = radius
-        if grid_fixed == True:
+        if grid_fixed is True:
             subres = int(numpy.sqrt(kmax))
             self._sampeling = numpy.indices((subres, subres)).reshape(
                 2, subres * subres

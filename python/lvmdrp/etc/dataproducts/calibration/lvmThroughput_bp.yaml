@@ -33,7 +33,7 @@ hdu1:
       name: IVAR
       type: float64
       unit: null
-      description: associated inverse variance (1/sigma^2) of the above
+      description: associated inverse variance of the above
     MASK:
       name: MASK
       type: int32
