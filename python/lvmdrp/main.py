@@ -1782,7 +1782,8 @@ def science_reduction(expnum: int,
 def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
             with_cals: bool = False, no_sci: bool = False,
             fluxcal_method: str = 'MOD',
-            skip_2d: bool = False, skip_1d: bool = False, skip_post_1d: bool = False, skip_drpall: bool = False,
+            skip_2d: bool = False, skip_1d: bool = False, skip_wavecal: bool = False,
+            skip_fluxcal: bool = False, skip_skysub: bool = False, skip_drpall: bool = False,
             use_nightly_cals: bool = False, use_untagged_cals: bool = False,
             clean_ancillary: bool = False, debug_mode: bool = False, force_run: bool = False):
     """ Run the quick DRP
@@ -1809,8 +1810,12 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
         Skip preprocessing and detrending, by default False
     skip_1d : bool, optional
         Skip astrometry, straylight subtraction and extraction, by default False
-    skip_post_1d : bool, optional
-        Skip wavelength calibration, flatfielding, sky processing and flux calibration
+    skip_wavecal : bool, optional
+        Skip wavelength calibration, flatfielding, sky processing and flux calibration, by default False
+    skip_fluxcal : bool, optional
+        Skip flux calibration and channel combine, by default False
+    skip_skysub : bool, optional
+        Skip sky subtraction, by default False
     skip_drpall : bool, optional
         Skip create/update drpall summary file
     use_nightly_cals : bool, optional
@@ -1844,7 +1849,9 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
                     fluxcal_method=fluxcal_method,
                     skip_2d=skip_2d,
                     skip_1d=skip_1d,
-                    skip_post_1d=skip_post_1d,
+                    skip_wavecal=skip_wavecal,
+                    skip_fluxcal=skip_fluxcal,
+                    skip_skysub=skip_skysub,
                     skip_drpall=skip_drpall,
                     clean_ancillary=clean_ancillary,
                     use_nightly_cals=use_nightly_cals,
@@ -1948,7 +1955,9 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
                                         fluxcal_method=fluxcal_method,
                                         skip_2d=skip_2d,
                                         skip_1d=skip_1d,
-                                        skip_post_1d=skip_post_1d,
+                                        skip_wavecal=skip_wavecal,
+                                        skip_fluxcal=skip_fluxcal,
+                                        skip_skysub=skip_skysub,
                                         skip_drpall=skip_drpall,
                                         clean_ancillary=clean_ancillary,
                                         use_longterm_cals=not use_nightly_cals,
