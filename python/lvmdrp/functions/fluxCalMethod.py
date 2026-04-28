@@ -1106,7 +1106,7 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
 
         # load Gaia BP-RP spectrum from cache, or download from webapp, and fit the continuum to Gaia spec
         try:
-            gw, gf = fluxcal.retrive_gaia_star(gaia_ids[i], GAIA_CACHE_DIR=GAIA_CACHE_DIR)
+            gw, gf = fluxcal.get_gaia_xp_spectrum(gaia_ids[i], cache_dir=GAIA_CACHE_DIR)
             stdflux = np.interp(std_wave_all, gw, gf)  # interpolate to our wavelength grid
 
             # Try to get stellar parameters from the local table first
@@ -1706,7 +1706,7 @@ def standard_sensitivity(stds, rss, GAIA_CACHE_DIR, ext, res, plot=False, width=
 
         # load Gaia BP-RP spectrum from cache, or download from webapp
         try:
-            gw, gf = fluxcal.retrive_gaia_star(gaia_id, GAIA_CACHE_DIR=GAIA_CACHE_DIR)
+            gw, gf = fluxcal.get_gaia_xp_spectrum(gaia_id, cache_dir=GAIA_CACHE_DIR)
             stdflux = np.interp(w, gw, gf)  # interpolate to our wavelength grid
         except fluxcal.GaiaStarNotFound as e:
             log.warning(e)
@@ -1833,8 +1833,8 @@ def science_sensitivity(rss, res_sci, ext, GAIA_CACHE_DIR, NSCI_MAX=15, r_spaxel
         m2 = get_z_continuum_mask(obswave)
 
     # get GAIA data, potentially cached
-    r, calibrated_spectra, sampling = fluxcal.get_XP_spectra(expnum, ra, dec, plot=False, lim_mag=13.5,
-                                                             n_spec=NSCI_MAX, GAIA_CACHE_DIR=GAIA_CACHE_DIR)
+    r = fluxcal.get_gaia_ids(expnum, ra, dec, lim_mag=13.5, n_ids=NSCI_MAX, cache_dir=GAIA_CACHE_DIR)
+    sampling, calibrated_spectra = fluxcal.get_gaia_xp_spectra(expnum, source_ids=r["source_id"], cache_dir=GAIA_CACHE_DIR)
     gwave = sampling*10 # to A
     for i in range(len(calibrated_spectra)):
         # W/micron/m^2 -> in erg/s/cm^2/A

@@ -2085,7 +2085,8 @@ def cache_gaia_spectra(mjds: Union[int, str, list], min_acquired=999, dry_run: b
             log.info(f"going to download 15 field stars spectra with G<13.5 around {ra = }, {dec = } for {expnum = }")
             if not dry_run:
                 try:
-                    fluxcal.get_XP_spectra(expnum, ra, dec, plot=False, lim_mag=13.5, n_spec=15, GAIA_CACHE_DIR=gaia_cache_dir)
+                    gaia_table = fluxcal.get_gaia_ids(expnum, ra, dec, lim_mag=13.5, n_ids=15, cache_dir=gaia_cache_dir)
+                    fluxcal.get_gaia_xp_spectra(expnum, source_ids=gaia_table["source_id"], cache_dir=gaia_cache_dir)
                 except Exception as e:
                     log.error(f"failed caching of Gaia spectra for {expnum = }: {e}")
                     failed_expnums.append(expnum)
