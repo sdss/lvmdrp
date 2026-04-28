@@ -118,6 +118,11 @@ def get_gaia_xp_spectrum(source_id, cache_dir="./gaia_cache", ignore_cache=False
         log.info(f"loading Gaia XP spetrum for ID = {source_id} files labelled {output_name}")
         wave_xp = Table.read(wavelength_path, format="csv")
         spectrum_xp = Table.read(spectrum_path, format="csv")
+
+        # make numpy arrays from whatever weird objects the Gaia stuff creates
+        wave_xp = np.fromstring(wave_xp["pos"][0][1:-1], sep=",")
+        # W/s/micron -> in erg/s/cm^2/A
+        spectrum_xp = np.fromstring(spectrum_xp["flux"][0][1:-1], sep=",")
     else:
         # define origin DB
         tap_service = vo.dal.TAPService("https://gaia.aip.de/tap")
@@ -142,11 +147,12 @@ def get_gaia_xp_spectrum(source_id, cache_dir="./gaia_cache", ignore_cache=False
         log.info(f"caching Gaia XP spectrum for ID = {source_id} with label {output_name}")
         with open(os.devnull, 'w') as f, redirect_stdout(f):
             spectrum_xp, _ = gaiaxpy.calibrate(coeffs, sampling=wave_xp, truncation=False, save_file=True,
-                                            output_path=cache_dir, output_file=output_name, output_format="csv")
+                                               output_path=cache_dir, output_file=output_name, output_format="csv")
+        spectrum_xp = spectrum_xp.loc[0, "flux"]
 
     wave_xp *= 10
     # W/s/micron -> in erg/s/cm^2/A
-    spectrum_xp = spectrum_xp.loc[0, "flux"] * 1e7 * 1e-1 * 1e-4
+    spectrum_xp *= 1e7 * 1e-1 * 1e-4
     return wave_xp, spectrum_xp
 
 

@@ -197,7 +197,7 @@ def apply_fluxcal(in_rss: str, out_fframe: str, method: str = 'MOD', display_plo
             method = 'SCI'
         # fall back to science field if less than 8 standard stars
         elif (~np.isnan(sens_arr).all(axis=0)).sum() < 8:
-            log.warning(f"{np.isnan(sens_arr).all(axis=0).sum()} good standard fibers")
+            log.warning(f"{(~np.isnan(sens_arr).all(axis=0)).sum()} good standard fibers")
             log.warning("less than 8 good standard fibers, falling back to science field calibration")
             rss.add_header_comment("less than 8 good standard fibers, falling back to science field calibration")
             method = "SCI"
