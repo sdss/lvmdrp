@@ -2036,7 +2036,7 @@ def create_drpall(drp_version: str = None, overwrite: bool = False) -> None:
     log.info(f"finished converting HDF5 to FITS format in {drpall}")
 
 
-def cache_gaia_spectra(mjds: Union[int, str, list], min_acquired=999, dry_run: bool = False) -> None:
+def cache_gaia_spectra(mjds: Union[int, str, list], min_acquired=999, ignore_cache: bool = False, dry_run: bool = False) -> None:
     """Caches Gaia XP spectra for science field calibration
 
     Parameters
@@ -2050,7 +2050,6 @@ def cache_gaia_spectra(mjds: Union[int, str, list], min_acquired=999, dry_run: b
     """
     log.info("start of Gaia XP spectra caching for science field flux calibration")
     gaia_cache_dir = os.path.join(os.getenv("LVM_MASTER_DIR"), "gaia_cache")
-    os.makedirs(gaia_cache_dir, exist_ok=True)
     # parse MJDs
     mjds = parse_mjds(mjds)
     if isinstance(mjds, int):
@@ -2082,18 +2081,16 @@ def cache_gaia_spectra(mjds: Union[int, str, list], min_acquired=999, dry_run: b
                 dec = header.get("POSCIDE", header.get("TESCIDE"))
 
             # cache corresponding gaia spectra
-            log.info(f"going to download 15 field stars spectra with G<13.5 around {ra = }, {dec = } for {expnum = }")
             if not dry_run:
                 try:
-                    gaia_table = fluxcal.get_gaia_ids(expnum, ra, dec, lim_mag=13.5, n_ids=15, cache_dir=gaia_cache_dir)
-                    fluxcal.get_gaia_xp_spectra(expnum, source_ids=gaia_table["source_id"], cache_dir=gaia_cache_dir)
+                    fluxcal.get_tile_xp_spectra(expnum, ra, dec, lim_mag=13.5, n_spectra=15, cache_only=True, cache_dir=gaia_cache_dir, ignore_cache=ignore_cache)
                 except Exception as e:
                     log.error(f"failed caching of Gaia spectra for {expnum = }: {e}")
                     failed_expnums.append(expnum)
                     continue
 
     # summarize run
-    log.info(f"cached metadata for {len(frames) - len(failed_expnums)} exposures, with {len(failed_expnums)} fails, {failed_expnums = }")
+    log.info(f"cached Gaia XP metadata for {len(frames) - len(failed_expnums)} exposures, with {len(failed_expnums)} fails, {failed_expnums = }")
 
 
 def reduce_calib_frame(row: dict):
