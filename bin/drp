@@ -14,7 +14,7 @@ from cloup.constraints import mutually_exclusive, RequireExactly, IsSet, If
 
 from lvmdrp.core.constants import CALIBRATION_MAPPINGS, CALIBRATION_TYPES, LVM_REFERENCE_COLUMN
 from lvmdrp import __version__ as drpver
-from lvmdrp.main import run_drp, reduce_file, check_daily_mjd, parse_mjds, read_expfile, create_drpall, cache_gaia_spectra
+from lvmdrp.main import run_drp, reduce_file, check_daily_mjd, parse_mjds, read_expfile, create_drpall, cache_std_xp_spectra, cache_sci_xp_spectra
 from lvmdrp.functions.skyMethod import configureSkyModel_drp
 from lvmdrp.utils.metadata import get_frames_metadata, get_master_metadata
 from lvmdrp.utils.cluster import run_cluster, run_cluster_cals
@@ -671,16 +671,26 @@ def summary(drp_version, overwrite):
     create_drpall(drp_version=drp_version, overwrite=overwrite)
 
 
+@cli.command(short_help='Caches Gaia XP spectra for flux calibration based on standard stars')
+@click.option('-m', '--mjd', type=int, help='an MJD to reduce')
+@click.option('-l', '--mjd-list', type=int, multiple=True, help='a list of specific MJDs to reduce')
+@click.option('-r', '--mjd-range', type=str, help='a range of MJDs to reduce')
+@click.option('--dry-run', is_flag=True, default=False)
+@click.option("--ignore-cache", is_flag=True, default=False)
+def cache_std_xp(mjd, mjd_list, mjd_range, ignore_cache, dry_run):
+    """Caches Gaia XP spectra for flux calibration based on standard stars"""
+    cache_std_xp_spectra(mjds=mjd or mjd_list or mjd_range, ignore_cache=ignore_cache, dry_run=dry_run)
+
 @cli.command(short_help='Caches Gaia XP spectra for science field calibration')
 @click.option('-m', '--mjd', type=int, help='an MJD to reduce')
 @click.option('-l', '--mjd-list', type=int, multiple=True, help='a list of specific MJDs to reduce')
 @click.option('-r', '--mjd-range', type=str, help='a range of MJDs to reduce')
 @click.option("--min-acquired", type=int, default=999, help='minimum number of standard stars acquired to skip caching')
+@click.option("--ignore-cache", is_flag=True, default=False)
 @click.option('--dry-run', is_flag=True, default=False)
-def cache_gaia_xp(mjd, mjd_list, mjd_range, min_acquired, dry_run):
+def cache_sci_xp(mjd, mjd_list, mjd_range, min_acquired, ignore_cache, dry_run):
     """"Caches Gaia XP spectra for science field calbration"""
-    mjds = mjd or mjd_list or mjd_range
-    cache_gaia_spectra(mjds=mjds, dry_run=dry_run, min_acquired=min_acquired)
+    cache_sci_xp_spectra(mjds=mjd or mjd_list or mjd_range, min_acquired=min_acquired, ignore_cache=ignore_cache, dry_run=dry_run)
 
 
 if __name__ == "__main__":

@@ -253,6 +253,28 @@ def get_std_xp_spectrum(source_id, convert_to_cgs=True, cache_dir="./gaia_cache"
     return wave_xp, spectra_xp[0]
 
 
+def get_std_xp_spectra(source_ids, cache_only=False, convert_to_cgs=True, cache_dir="./gaia_cache", ignore_cache=False):
+    gaia = GaiaXPSpectra(cache_dir=cache_dir)
+
+    # identify new sources if any present in cache or ignore cache and download all
+    new_ids = source_ids if ignore_cache else gaia._not_in_cache(source_ids)
+    if len(new_ids) != 0:
+        log.info(f"downloading {len(new_ids)} new XP spectra coefficients")
+        coeffs = gaia.fetch_gaia_xp_coeffs(new_ids)
+        gaia.cache_xp_spectra(coeffs)
+
+    # return if only requested caching
+    if cache_only:
+        log.info(f"cached {len(new_ids)}, returning after running with {cache_only = }")
+        return
+
+    # load XP spectra, only the old ones
+    log.info(f"loading {len(source_ids)} Gaia XP spectra with {convert_to_cgs = }")
+    wave_xp, spectra_xp = gaia.load_xp_spectra(source_ids, convert_to_cgs=convert_to_cgs)
+
+    return wave_xp, spectra_xp
+
+
 def get_std_stellar_params(source_ids):
     # Read Calibration GAIA stars table and create index on source_id for quick
     # record retrieval

@@ -2036,7 +2036,45 @@ def create_drpall(drp_version: str = None, overwrite: bool = False) -> None:
     log.info(f"finished converting HDF5 to FITS format in {drpall}")
 
 
-def cache_gaia_spectra(mjds: Union[int, str, list], min_acquired=999, ignore_cache: bool = False, dry_run: bool = False) -> None:
+def cache_std_xp_spectra(mjds: Union[int, str, list], ignore_cache: bool = False, dry_run: bool = False) -> None:
+    log.info("start of Gaia XP spectra caching for science field flux calibration")
+    gaia_cache_dir = os.path.join(os.getenv("LVM_MASTER_DIR"), "gaia_cache")
+    # parse MJDs
+    mjds = parse_mjds(mjds)
+    if isinstance(mjds, int):
+        mjds = [mjds]
+    log.info(f"selecting MJDs: {','.join(map(str, mjds))}")
+
+    for mjd in mjds:
+        # load metadata and filter good quality science frames
+        frames = get_frames_metadata(mjd=mjd)
+        frames.query("imagetyp == 'object' and qaqual == 'GOOD'", inplace=True)
+        frames = frames.drop_duplicates(subset=["expnum"], keep="first")
+
+        failed_expnums = []
+        for exposure in frames.to_dict("records"):
+            log.info(f"going to cache XP spectra for expnum = {exposure['expnum']}")
+            raw_path = path.full("lvm_raw", camspec=exposure["camera"], **exposure)
+            # check for presence of standard stars metadata
+            with fits.open(raw_path) as f:
+                header = f[0].header
+                expnum = exposure["expnum"]
+                source_ids = list(filter(lambda s: s is not None, header["STD*ID"].values()))
+
+            # cache corresponding gaia spectra
+            if not dry_run:
+                try:
+                    fluxcal.get_std_xp_spectra(source_ids, cache_only=True, cache_dir=gaia_cache_dir, ignore_cache=ignore_cache)
+                except Exception as e:
+                    log.error(f"failed caching of Gaia spectra for {expnum = }: {e}")
+                    failed_expnums.append(expnum)
+                    continue
+
+    # summarize run
+    log.info(f"cached Gaia XP metadata for {len(frames) - len(failed_expnums)} exposures, with {len(failed_expnums)} fails, {failed_expnums = }")
+
+
+def cache_sci_xp_spectra(mjds: Union[int, str, list], min_acquired=999, ignore_cache: bool = False, dry_run: bool = False) -> None:
     """Caches Gaia XP spectra for science field calibration
 
     Parameters
@@ -2064,6 +2102,7 @@ def cache_gaia_spectra(mjds: Union[int, str, list], min_acquired=999, ignore_cac
 
         failed_expnums = []
         for exposure in frames.to_dict("records"):
+            log.info(f"going to cache XP spectra for expnum = {exposure['expnum']}")
             raw_path = path.full("lvm_raw", camspec=exposure["camera"], **exposure)
             # check for presence of standard stars metadata
             with fits.open(raw_path) as f:
