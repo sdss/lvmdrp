@@ -29,7 +29,6 @@ from astropy import units as u
 from astropy.stats import biweight_location, biweight_scale
 from astropy.table import Table
 from astropy.io import fits
-from astroquery.gaia import Gaia
 
 from lmfit import minimize, Parameters
 
@@ -894,16 +893,12 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
     GAIA_CACHE_DIR = "./" if GAIA_CACHE_DIR is None else GAIA_CACHE_DIR
     log.info(f"Using Gaia CACHE DIR '{GAIA_CACHE_DIR}'")
 
-    # Read Calibration GAIA stars table and create index on source_id for quick
-    # record retrieval
-    # https://sdss-wiki.atlassian.net/wiki/spaces/LVM/pages/14460157/Calibration+Stars
-    gaia_stars = Table.read(models_dir + '/lvm-many_Gaia_stars_5-9_ftype_v4-all.fits', format='fits')
-    gaia_stars.add_index('source_id')
-
     # Prepare the spectra
     (w, nns, gaia_ids, fibers, std_spectra_all_bands, normalized_spectra_unconv_all_bands,
      normalized_spectra_all_bands, std_errors_all_bands, lsf_all_bands,
      std_spectra_orig_all_bands, zenith_angles, std_info) = prepare_spec(in_rss, width=width)
+
+    stellar_params = fluxcal.get_std_stellar_params(source_ids=gaia_ids)
 
     # Stitch wavelength arrays in brz together
     wave_b = np.round(w[0],1)
@@ -938,9 +933,6 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
     model_to_gaia_median = []
     best_fit_models = []
     gaia_flux_interpolated = []
-    gaia_Teff = []
-    gaia_logg = []
-    gaia_z = []
     pwv_values, pwv_errors = [], []
     stack_stellar_model, stack_telluric_trans = [], []
 
@@ -1108,31 +1100,12 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
         try:
             gw, gf = fluxcal.get_std_xp_spectrum(gaia_ids[i], cache_dir=GAIA_CACHE_DIR)
             stdflux = np.interp(std_wave_all, gw, gf)  # interpolate to our wavelength grid
-
-            # Try to get stellar parameters from the local table first
-            try:
-                # Used indexed column source_id, See where table was read
-                gaia_rec = gaia_stars.loc[gaia_ids[i]]
-                teff, logg, z = gaia_rec['teff_gspspec'], gaia_rec['logg_gspspec'], gaia_rec['mh_gspspec']
-            except KeyError:
-                # If entry not found in local table, then call external Gaia service
-                job = Gaia.launch_job(f"SELECT teff_gspspec, logg_gspspec, mh_gspspec FROM gaiadr3.astrophysical_parameters WHERE source_id = {gaia_ids[i]} ")
-                r = job.get_results()
-                teff, logg, z = r['teff_gspspec'][0], r['logg_gspspec'][0], r['mh_gspspec'][0]
         except (fluxcal.GaiaStarNotFound, requests.exceptions.HTTPError) as e:
             stdflux = np.full_like(std_wave_all, np.nan)
-            teff, logg, z = np.nan, np.nan, np.nan
             model_to_gaia_median.append(np.nan)
             log.warning(f"Gaia star {gaia_ids[i]} not found: {e}")
         finally:
             gaia_flux_interpolated.append(stdflux)
-            gaia_Teff.append(teff)
-            gaia_logg.append(logg)
-            gaia_z.append(z)
-
-        # Skip star with no Gaia parameters
-        if np.isnan(teff):
-            continue
 
         # Keep Eugenia's implementation for a reference after a minor bug fix
         # (missing GAIA LSF conversion to pixels).
@@ -1169,9 +1142,9 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
         fiber_params = {'i': i, 'fiber_id': fibers[i]}
         gaia_params = {
             'gaia_id': gaia_ids[i],
-            'gaia_Teff': gaia_Teff[i],
-            'gaia_logg': gaia_logg[i],
-            'gaia_z': gaia_z[i]
+            'gaia_Teff': stellar_params.loc[gaia_ids[i], 'teff_gspspec'],
+            'gaia_logg': stellar_params.loc[gaia_ids[i], 'logg_gspspec'],
+            'gaia_z': stellar_params.loc[gaia_ids[i], 'mh_gspspec']
         }
         model_params = {
             'model_name': model_names[best_id],

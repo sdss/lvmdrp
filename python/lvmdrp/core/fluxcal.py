@@ -9,6 +9,7 @@
 import os
 import numpy as np
 import pathlib
+import requests
 from contextlib import redirect_stdout
 from scipy import signal
 from scipy.integrate import simpson
@@ -142,6 +143,7 @@ class GaiaXPSpectra(object):
         # calibrate gaia XP coefficients into spectra
         with open(os.devnull, 'w') as f, redirect_stdout(f):
             spectra_xp = []
+            print(coeffs)
             coeffs_list = np.split(coeffs, coeffs.shape[0])
             for coeff in coeffs_list:
                 spectrum_xp, wave_xp = gaiaxpy.calibrate(coeff, sampling=self._wave_sampling,
@@ -249,6 +251,39 @@ def get_std_xp_spectrum(source_id, convert_to_cgs=True, cache_dir="./gaia_cache"
     wave_xp, spectra_xp = gaia.load_xp_spectra(source_id, convert_to_cgs=convert_to_cgs)
 
     return wave_xp, spectra_xp[0]
+
+
+def get_std_stellar_params(source_ids):
+    # Read Calibration GAIA stars table and create index on source_id for quick
+    # record retrieval
+    # https://sdss-wiki.atlassian.net/wiki/spaces/LVM/pages/14460157/Calibration+Stars
+    params_path = pathlib.Path(MASTERS_DIR) / "stellar_models" / "lvm-many_Gaia_stars_5-9_ftype_v4-all.fits"
+
+    SOURCE_IDS = ", ".join(map(str, source_ids))
+    COLUMN_NAMES = ["source_id", "teff_gspspec", "logg_gspspec", "mh_gspspec"]
+    DUMMY_TABLE = pd.DataFrame(index=source_ids, columns=COLUMN_NAMES[1:])
+
+    gaia_stars = Table.read(params_path, format='fits').to_pandas()
+    gaia_stars = gaia_stars.filter(items=COLUMN_NAMES)
+    gaia_stars.set_index('source_id', drop=True, inplace=True)
+
+    # Try to get stellar parameters from the local table first
+    try:
+        # Used indexed column source_id, See where table was read
+        stellar_params = gaia_stars.loc[source_ids]
+        log.info(f"found all {len(source_ids)} standard stars physical parameters in {params_path}")
+    except KeyError as e:
+        log.warning(e.args[0])
+        # If entry not found in local table, then call external Gaia service
+        try:
+            job = Gaia.launch_job(f"SELECT source_id, teff_gspspec, logg_gspspec, mh_gspspec FROM gaiadr3.astrophysical_parameters WHERE source_id IN ({SOURCE_IDS})")
+            stellar_params = job.get_results().to_pandas().set_index("source_id")
+            stellar_params = stellar_params.loc[source_ids]
+            log.info(f"fetched {len(source_ids)} standard stars stellar parameters")
+        except (GaiaStarNotFound, requests.exceptions.HTTPError) as e:
+            log.warning(f"{e}, returning dummy parameters")
+            stellar_params = DUMMY_TABLE.copy()
+    return stellar_params
 
 
 def mean_absolute_deviation(vals):
