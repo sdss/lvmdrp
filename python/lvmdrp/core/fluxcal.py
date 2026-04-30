@@ -8,17 +8,16 @@
 
 import os
 import numpy as np
+import pathlib
+from contextlib import redirect_stdout
 from scipy import signal
 from scipy.integrate import simpson
 from scipy import interpolate
-import requests
 import pandas as pd
 import bottleneck as bn
-import os.path as path
-import pathlib
 from tqdm import tqdm
 
-
+import pyvo as vo
 import gaiaxpy
 from astroquery.gaia import Gaia
 
@@ -37,11 +36,16 @@ from lvmdrp.core.rss import RSS
 
 from scipy.sparse import csr_matrix
 
+import warnings
+
+# pandas mute warnings about .swapaxes method
+warnings.filterwarnings("ignore", message='.*DataFrame.swapaxes.*')
 
 def get_mean_sens_curves(sens_dir):
     return {'b':pd.read_csv(f'{sens_dir}/mean-sens-b.csv', names=['wavelength', 'sens']),
             'r':pd.read_csv(f'{sens_dir}/mean-sens-r.csv', names=['wavelength', 'sens']),
             'z':pd.read_csv(f'{sens_dir}/mean-sens-z.csv', names=['wavelength', 'sens'])}
+
 
 def retrieve_header_stars(rss):
     """
@@ -73,96 +77,426 @@ def retrieve_header_stars(rss):
     return stddata
 
 
-class GaiaStarNotFound(Exception):
+class GaiaXPSpectra(object):
+    """Manage Gaia XP spectrophotometry retrieval, caching, and loading.
+
+    This class fetches Gaia DR3 XP coefficient data, converts coefficients into
+    sampled spectra, caches results locally, and loads cached spectra on demand.
     """
-    Signal that the star has no BP-RP spectrum
+
+    def __init__(self, cache_dir="./gaia_cache"):
+        """Initialize the GaiaXPSpectra cache manager.
+
+        Parameters
+        ----------
+        cache_dir : str, optional
+            Directory where Gaia XP spectrum cache files are stored.
+        """
+        self.cache_dir = pathlib.Path(cache_dir)
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+
+        self._wave_sampling = np.arange(336, 1021, 2)
+
+    def _get_xp_spectrum_paths(self, source_id):
+        """Return the expected cache file paths for a Gaia source.
+
+        Parameters
+        ----------
+        source_id : int or str
+            Gaia source identifier.
+
+        Returns
+        -------
+        tuple[pathlib.Path, pathlib.Path]
+            Paths for the wavelength sampling and spectrum CSV files.
+        """
+        output_name = f"gaia_spec_{source_id}"
+        wave_path = self.cache_dir / f"{output_name}_sampling.csv"
+        spec_path = self.cache_dir / f"{output_name}.csv"
+        return wave_path, spec_path
+
+    def _xp_spectrum_exists(self, source_id):
+        """Return whether a cached XP spectrum exists for the source.
+
+        Parameters
+        ----------
+        source_id : int or str
+            Gaia source identifier.
+
+        Returns
+        -------
+        bool
+            True if both sampling and spectrum cache files exist.
+        """
+        wave_path, spec_path = self._get_xp_spectrum_paths(source_id)
+        return wave_path.exists() and spec_path.exists()
+
+    def _not_in_cache(self, source_ids):
+        """Filter source IDs that are not already cached.
+
+        Parameters
+        ----------
+        source_ids : iterable
+            Gaia source identifiers to check.
+
+        Returns
+        -------
+        list
+            IDs that are missing from the local cache.
+        """
+        new_ids = list(filter(lambda source_id: not self._xp_spectrum_exists(source_id), source_ids))
+        return new_ids
+
+    def _convert_to_csg(self, wave_xp, spectra_xp):
+        """Convert Gaia XP spectrum units to wavelength in Angstrom and flux in CGS.
+
+        Parameters
+        ----------
+        wave_xp : ndarray
+            Wavelength sampling array in microns.
+        spectra_xp : ndarray
+            Flux array in W/s/micron.
+
+        Returns
+        -------
+        tuple[ndarray, ndarray]
+            Converted wavelength and flux arrays.
+        """
+        # micron -> A
+        wave_xp *= 10
+        # W/s/micron -> erg/s/cm^2/A
+        spectra_xp *= 1e7 * 1e-1 * 1e-4
+        return wave_xp, spectra_xp
+
+    def fetch_xp_coeffs(self, source_ids):
+        """Fetch Gaia XP coefficients from the Gaia TAP service.
+
+        Parameters
+        ----------
+        source_ids : int, str, or sequence
+            Gaia DR3 source identifier or identifiers.
+
+        Returns
+        -------
+        pandas.DataFrame
+            Coefficients for the requested XP spectra.
+        """
+
+        # define origin DB
+        tap_service = vo.dal.TAPService("https://gaia.aip.de/tap")
+
+        # define query for XP coefficients
+        if isinstance(source_ids, (int, str)):
+            source_ids = [source_ids]
+        id_string = ", ".join(map(str, source_ids))
+        GAIA_XP_QUERY = f"""
+            SELECT * FROM gaiadr3.xp_continuous_mean_spectrum
+            WHERE source_id IN ({id_string})
+        """
+
+        # summit query
+        job = tap_service.run_sync(GAIA_XP_QUERY)
+
+        # parse pandas dataframe and strip masked arrays
+        coeffs = job.to_table().to_pandas()
+        for col in coeffs.columns:
+            if coeffs[col].dtype == 'object':
+                coeffs[col] = coeffs[col].apply(lambda x: np.array(x.data) if isinstance(x, np.ma.MaskedArray) else x)
+
+        return coeffs
+
+    def cache_xp_spectra(self, coeffs, convert_to_cgs=True):
+        """Calibrate Gaia XP coefficients to spectra and save them to cache.
+
+        Parameters
+        ----------
+        coeffs : pandas.DataFrame
+            Result of :meth:`fetch_xp_coeffs` containing XP coefficients.
+        convert_to_cgs : bool, optional
+            If True, convert outputs to CGS units.
+
+        Returns
+        -------
+        tuple[ndarray, ndarray]
+            Wavelength sampling and stacked spectrum array for the last source.
+        """
+        # calibrate gaia XP coefficients into spectra
+        with open(os.devnull, 'w') as f, redirect_stdout(f):
+            spectra_xp = []
+            print(coeffs)
+            coeffs_list = np.split(coeffs, coeffs.shape[0])
+            for coeff in coeffs_list:
+                spectrum_xp, wave_xp = gaiaxpy.calibrate(coeff, sampling=self._wave_sampling,
+                                                         truncation=False, save_file=True, output_path=self.cache_dir,
+                                                         output_file=f"gaia_spec_{coeff.iloc[0].source_id}", output_format="csv")
+                spectra_xp.append(spectrum_xp.loc[0, "flux"])
+        spectra_xp = np.row_stack(spectra_xp)
+
+        if convert_to_cgs:
+            return self._convert_to_csg(wave_xp, spectra_xp)
+
+        return wave_xp, spectra_xp
+
+    def load_xp_spectra(self, source_ids, convert_to_cgs=True):
+        """Load cached XP spectra for one or more Gaia source IDs.
+
+        Parameters
+        ----------
+        source_ids : int or sequence
+            Gaia source identifier or identifiers.
+        convert_to_cgs : bool, optional
+            If True, convert loaded spectra to CGS units.
+
+        Returns
+        -------
+        tuple[ndarray, ndarray]
+            Wavelength sampling and one- or two-dimensional flux array.
+        """
+
+        if isinstance(source_ids, (list, tuple, set, np.ndarray)):
+            spectra_xp = []
+            for source_id in source_ids:
+                wave_xp, spectrum = self.load_xp_spectra(source_ids=source_id, convert_to_cgs=False)
+                spectra_xp.append(spectrum)
+            spectra_xp = np.row_stack(spectra_xp)
+
+            if convert_to_cgs:
+                return self._convert_to_csg(wave_xp, spectra_xp)
+
+            return wave_xp, spectra_xp
+
+        if not self._xp_spectrum_exists(source_ids):
+            raise ValueError(f"{source_ids = } not present in cache directory {self.cache_dir}")
+
+        wavelength_path, spectrum_path = self._get_xp_spectrum_paths(source_ids)
+        wave_xp = Table.read(wavelength_path, format="csv")
+        spectrum_xp = Table.read(spectrum_path, format="csv")
+
+        # make numpy arrays from whatever weird objects the Gaia stuff creates
+        wave_xp = np.fromstring(wave_xp["pos"][0][1:-1], sep=",")
+        spectrum_xp = np.atleast_2d(np.fromstring(spectrum_xp["flux"][0][1:-1], sep=","))
+
+        if convert_to_cgs:
+            return self._convert_to_csg(wave_xp, spectrum_xp)
+        return wave_xp, spectrum_xp
+
+    def fetch_sources(self, label, ra, dec, lim_mag=14.0, n_ids=15, ignore_cache=False):
+        """Fetch nearby Gaia sources with XP spectra and cache the query results.
+
+        Parameters
+        ----------
+        label : str
+            Cache label used to write the source ID file.
+        ra : float
+            Tile center right ascension in degrees.
+        dec : float
+            Tile center declination in degrees.
+        lim_mag : float, optional
+            Maximum Gaia G magnitude for selected sources.
+        n_ids : int, optional
+            Number of sources to retrieve.
+        ignore_cache : bool, optional
+            If True, ignore cached source lists and refetch from Gaia.
+
+        Returns
+        -------
+        astropy.table.Table
+            Gaia source table for the selected nearby objects.
+        """
+
+        IFU_INNER_RADIUS = np.sqrt(3.0)/2 * (30.2/2) / 60.0
+        TILE_GAIA_QUERY = f"""
+            SELECT TOP {n_ids} * FROM gaiadr3.gaia_source_lite WHERE
+            DISTANCE({ra}, {dec}, ra, dec) < {IFU_INNER_RADIUS}
+            AND phot_g_mean_mag < {lim_mag} AND has_xp_continuous = 'True' ORDER BY phot_g_mean_mag ASC"""
+
+        cache_path = self.cache_dir / f"{label}_ids.ecsv"
+        if not ignore_cache and cache_path.exists():
+            gaia_table = Table.read(cache_path, format="ascii.ecsv")
+        else:
+            job = Gaia.launch_job(TILE_GAIA_QUERY)
+            gaia_table = job.get_results()
+            gaia_table.write(cache_path, format="ascii.ecsv", serialize_method="data_mask", overwrite=True)
+
+        # clean up columns
+        cols = gaia_table.colnames
+        new_cols = [col.lower() for col in cols]
+        gaia_table.rename_columns(cols, new_cols)
+
+        return gaia_table
+
+    def fetch_xp_spectra(self, source_ids, ignore_cache=False):
+        """Fetch and cache XP spectra for requested Gaia source IDs.
+
+        Parameters
+        ----------
+        source_ids : sequence
+            Gaia source identifiers whose spectra should be retrieved.
+        ignore_cache : bool, optional
+            If True, force download even if cached spectra exist.
+
+        Returns
+        -------
+        list
+            Source IDs that were newly downloaded and cached.
+        """
+
+        # identify new sources if any present in cache or ignore cache and download all
+        new_ids = source_ids if ignore_cache else self._not_in_cache(source_ids)
+        if len(new_ids) != 0:
+            log.info(f"downloading {len(new_ids)} new XP spectra coefficients")
+            coeffs = self.fetch_xp_coeffs(new_ids)
+            self.cache_xp_spectra(coeffs)
+
+        return new_ids
+
+
+def get_xp_spectra_from_tile(expnum, ra, dec, lim_mag=14.0, n_spectra=15, return_table=False, cache_only=False, convert_to_cgs=True, cache_dir="./gaia_cache", ignore_cache=False):
+    """Retrieve Gaia XP spectra for a tile centered at RA/Dec.
+
+    Parameters
+    ----------
+    expnum : str
+        Exposure number or tile label used for cache naming.
+    ra : float
+        Right ascension of the tile center in degrees.
+    dec : float
+        Declination of the tile center in degrees.
+    lim_mag : float, optional
+        Maximum Gaia G magnitude for returned sources.
+    n_spectra : int, optional
+        Number of Gaia sources to retrieve.
+    return_table : bool, optional
+        If True, also return the Gaia source table.
+    cache_only : bool, optional
+        If True, only download and cache spectra without loading them.
+    convert_to_cgs : bool, optional
+        If True, convert loaded spectra to CGS units.
+    cache_dir : str, optional
+        Directory used for Gaia cache files.
+    ignore_cache : bool, optional
+        If True, ignore existing cache and refetch all data.
+
+    Returns
+    -------
+    tuple
+        If return_table is False, returns (wave_xp, spectra_xp).
+        If return_table is True, returns (wave_xp, spectra_xp, gaia_table).
+    """
+    gaia = GaiaXPSpectra(cache_dir=cache_dir)
+
+    log.info(f"fetching {n_spectra} Gaia sources for {expnum = } with G < {lim_mag} mag")
+    gaia_table = gaia.fetch_sources(expnum, ra, dec, lim_mag=lim_mag, n_ids=n_spectra, ignore_cache=ignore_cache)
+
+    # download new XP spectra
+    source_ids = gaia_table["source_id"].filled().data
+    new_ids = gaia.fetch_xp_spectra(source_ids, ignore_cache=ignore_cache)
+    # return if only requested caching
+    if cache_only:
+        log.info(f"cached {len(new_ids)} for {expnum = }, returning after running with {cache_only = }")
+        return
+
+    # load XP spectra, only the old ones
+    log.info(f"loading {len(source_ids)} Gaia XP spectra with {convert_to_cgs = }")
+    wave_xp, spectra_xp = gaia.load_xp_spectra(source_ids, convert_to_cgs=convert_to_cgs)
+
+    if return_table:
+        return wave_xp, spectra_xp, gaia_table
+    return wave_xp, spectra_xp
+
+
+def get_xp_spectra_from_ids(source_ids, cache_only=False, convert_to_cgs=True, cache_dir="./gaia_cache", ignore_cache=False):
+    """Fetch Gaia XP spectra for the specified source IDs.
+
+    Parameters
+    ----------
+    source_ids : int or sequence
+        Gaia source identifier(s) to retrieve.
+    cache_only : bool, optional
+        If True, only cache the spectra and do not load them.
+    convert_to_cgs : bool, optional
+        If True, convert loaded spectra to CGS units.
+    cache_dir : str, optional
+        Directory used for Gaia cache files.
+    ignore_cache : bool, optional
+        If True, re-download spectra even if cached.
+
+    Returns
+    -------
+    tuple[ndarray, ndarray]
+        Wavelength sampling and spectra array unless cache_only is True.
     """
 
-    pass
+    if isinstance(source_ids, int):
+        source_ids = [source_ids]
+
+    gaia = GaiaXPSpectra(cache_dir=cache_dir)
+
+    # download new XP spectra
+    new_ids = gaia.fetch_xp_spectra(source_ids, ignore_cache=ignore_cache)
+
+    # return if only requested caching
+    if cache_only:
+        log.info(f"cached {len(new_ids)}, returning after running with {cache_only = }")
+        return
+
+    # load XP spectra, only the old ones
+    log.info(f"loading {len(source_ids)} Gaia XP spectra with {convert_to_cgs = }")
+    wave_xp, spectra_xp = gaia.load_xp_spectra(source_ids, convert_to_cgs=convert_to_cgs)
+
+    return wave_xp, spectra_xp
 
 
-def retrive_gaia_star(gaiaID, GAIA_CACHE_DIR):
+def get_stellar_params(source_ids):
+    """Retrieve stellar physical parameters for Gaia source IDs.
+
+    This function first attempts to read stellar parameters from a local
+    calibration table in the masters directory. If any requested source IDs are
+    missing from the local table, it queries Gaia DR3 astrophysical parameters
+    and falls back to a dummy parameter table if the external query fails.
+
+    Parameters
+    ----------
+    source_ids : sequence
+        Gaia source identifiers for which to retrieve stellar parameters.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Stellar parameters indexed by source_id, including teff_gspspec,
+        logg_gspspec, and mh_gspspec.
     """
-    Load or download and load from cache the XP spectrum of a gaia star, converted to erg/s/cm^2/A
-    """
-    # create cache dir if it does not exist
-    pathlib.Path(GAIA_CACHE_DIR).mkdir(parents=True, exist_ok=True)
+    # Read Calibration GAIA stars table and create index on source_id for quick
+    # record retrieval
+    # https://sdss-wiki.atlassian.net/wiki/spaces/LVM/pages/14460157/Calibration+Stars
+    params_path = pathlib.Path(MASTERS_DIR) / "stellar_models" / "lvm-many_Gaia_stars_5-9_ftype_v4-all.fits"
 
-    if path.exists(GAIA_CACHE_DIR + "/gaia_spec_" + str(gaiaID) + ".csv") is True:
-        # read the tables from our cache
-        gaiaflux = Table.read(GAIA_CACHE_DIR + "/gaia_spec_" + str(gaiaID) + ".csv", format="csv")
-        gaiawave = Table.read(GAIA_CACHE_DIR + "/gaia_spec_" + str(gaiaID) + "_sampling.csv", format="csv")
-    else:
-        # need to download from Gaia archive
-        CSV_URL = ("https://gea.esac.esa.int/data-server/data?RETRIEVAL_TYPE=XP_CONTINUOUS&ID=Gaia+DR3+"
-            + str(gaiaID)
-            + "&format=CSV&DATA_STRUCTURE=RAW")
-        FILE = GAIA_CACHE_DIR + "/XP_" + str(gaiaID) + "_RAW.csv"
+    SOURCE_IDS = ", ".join(map(str, source_ids))
+    COLUMN_NAMES = ["source_id", "teff_gspspec", "logg_gspspec", "mh_gspspec"]
+    DUMMY_TABLE = pd.DataFrame(index=source_ids, columns=COLUMN_NAMES[1:])
+    DUMMY_TABLE.index.name = "source_id"
 
-        with requests.get(CSV_URL, stream=True) as r:
-            r.raise_for_status()
-            if len(r.content) < 2:
-                raise GaiaStarNotFound(f"Gaia DR3 {gaiaID} has no BP-RP spectrum!")
-            with open(FILE, "w") as f:
-                f.write(r.content.decode("utf-8"))
+    gaia_stars = Table.read(params_path, format='fits').to_pandas()
+    gaia_stars = gaia_stars.filter(items=COLUMN_NAMES)
+    gaia_stars.set_index('source_id', drop=True, inplace=True)
 
-        # convert coefficients to sampled spectrum
-        _, _ = gaiaxpy.calibrate(FILE, output_path=GAIA_CACHE_DIR,\
-                                 output_file="gaia_spec_" + str(gaiaID), output_format="csv")
-        # read the flux and wavelength tables
-        gaiaflux = Table.read(GAIA_CACHE_DIR + "/gaia_spec_" + str(gaiaID) + ".csv", format="csv")
-        gaiawave = Table.read(GAIA_CACHE_DIR + "/gaia_spec_" + str(gaiaID) + "_sampling.csv", format="csv")
-
-    # make numpy arrays from whatever weird objects the Gaia stuff creates
-    wave = np.fromstring(gaiawave["pos"][0][1:-1], sep=",") * 10  # in Angstrom
-    # W/s/micron -> in erg/s/cm^2/A
-    flux = (1e7 * 1e-1 * 1e-4 * np.fromstring(gaiaflux["flux"][0][1:-1], sep=","))
-    return wave, flux
-
-
-def get_XP_spectra(expnum, ra_tile, dec_tile, lim_mag=14.0, n_spec=15, GAIA_CACHE_DIR='./gaia_cache', plot=False):
-    '''
-    mjd, tileid, central ra and dec, query for brightest GAIA stars in the science IFU,
-    cache their IDs, cache their XP spectra, and return a table with all the data
-    '''
-    if GAIA_CACHE_DIR is None or path.exists(GAIA_CACHE_DIR + f'/{expnum}_ids.ecsv') is False:
-        print('querying for ids ...')
-        r_ifu = np.sqrt(3.0)/2 * (30.2/2) / 60.0 # inner radius of hexagon in degrees for margin
-        select_tile = f'DISTANCE({ra_tile}, {dec_tile}, ra, dec) < {r_ifu} '
-        job = Gaia.launch_job(f"SELECT TOP {n_spec} * FROM gaiadr3.gaia_source_lite WHERE "
-                              + select_tile + f"AND phot_g_mean_mag < {lim_mag} AND has_xp_continuous = 'True' ORDER BY phot_g_mean_mag ASC ")
-        r = job.get_results()
-        if GAIA_CACHE_DIR is not None:
-            #print('writing '+GAIA_CACHE_DIR + f'/{expnum}_ids.ecsv')
-            r.write(GAIA_CACHE_DIR + f'/{expnum}_ids.ecsv', overwrite=True)
-    else:
-        #print('reading '+GAIA_CACHE_DIR + f'/{expnum}_ids.ecsv')
-        r = Table.read(GAIA_CACHE_DIR + f'/{expnum}_ids.ecsv')
-    #
-    # get XP spectra and cache the calibrated spectra
-    #
-
-    cols = r.colnames
-    new_cols = [col.lower() for col in cols]
-    r.rename_columns(cols, new_cols)
-
-    sampling=np.arange(336., 1021., 2.)
-    ids = [line['source_id'] for line in r]
-    if GAIA_CACHE_DIR is None or path.exists(GAIA_CACHE_DIR + f'/{expnum}_XP_spec.pickle') is False:
-        calibrated_spectra, _ = gaiaxpy.calibrate(ids, truncation=False, save_file=False)
-        if GAIA_CACHE_DIR is not None:
-            #print('writing '+GAIA_CACHE_DIR + f'/{expnum}_XP_spec.pickle')
-            calibrated_spectra.to_pickle(GAIA_CACHE_DIR + f'/{expnum}_XP_spec.pickle')
-    else:
-        #print('reading '+GAIA_CACHE_DIR + f'/{expnum}_XP_spec.csv')
-        calibrated_spectra = pd.read_pickle(GAIA_CACHE_DIR + f'/{expnum}_XP_spec.pickle')
-
-    # calibrated_spectra
-    if(plot):
-        gaiaxpy.plot_spectra(calibrated_spectra, sampling=sampling, multi=True, show_plot=True, output_path=None, legend=False)
-    # calibrated_spectra *= 100  # W/m^2 -> erg/s/cm^
-    # astropy.Table ['SOURCE_ID, 'ra', 'dec', ...], ]pandas.DataFrame ['source_id', 'flux', 'flux_error'], np.ndarray
-    return r, calibrated_spectra, sampling
+    # Try to get stellar parameters from the local table first
+    try:
+        # Used indexed column source_id, See where table was read
+        stellar_params = gaia_stars.loc[source_ids]
+        log.info(f"found all {len(source_ids)} standard stars physical parameters in {params_path}")
+    except KeyError as e:
+        log.warning(e.args[0])
+        # If entry not found in local table, then call external Gaia service
+        try:
+            job = Gaia.launch_job(f"SELECT source_id, teff_gspspec, logg_gspspec, mh_gspspec FROM gaiadr3.astrophysical_parameters WHERE source_id IN ({SOURCE_IDS})")
+            stellar_params = job.get_results().to_pandas().set_index("source_id")
+            stellar_params = stellar_params.loc[source_ids]
+            log.info(f"fetched {len(source_ids)} standard stars stellar parameters")
+        except Exception as e:
+            log.warning(f"{e}, returning dummy parameters")
+            stellar_params = DUMMY_TABLE.copy()
+    return stellar_params
 
 
 def mean_absolute_deviation(vals):

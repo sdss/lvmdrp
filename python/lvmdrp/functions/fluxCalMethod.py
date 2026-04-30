@@ -10,7 +10,6 @@
 import os
 import time
 import warnings
-import requests
 # from os import listdir
 # from os.path import isfile, join
 import numpy as np
@@ -29,7 +28,6 @@ from astropy import units as u
 from astropy.stats import biweight_location, biweight_scale
 from astropy.table import Table
 from astropy.io import fits
-from astroquery.gaia import Gaia
 
 from lmfit import minimize, Parameters
 
@@ -197,7 +195,7 @@ def apply_fluxcal(in_rss: str, out_fframe: str, method: str = 'MOD', display_plo
             method = 'SCI'
         # fall back to science field if less than 8 standard stars
         elif (~np.isnan(sens_arr).all(axis=0)).sum() < 8:
-            log.warning(f"{np.isnan(sens_arr).all(axis=0).sum()} good standard fibers")
+            log.warning(f"{(~np.isnan(sens_arr).all(axis=0)).sum()} good standard fibers")
             log.warning("less than 8 good standard fibers, falling back to science field calibration")
             rss.add_header_comment("less than 8 good standard fibers, falling back to science field calibration")
             method = "SCI"
@@ -894,16 +892,15 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
     GAIA_CACHE_DIR = "./" if GAIA_CACHE_DIR is None else GAIA_CACHE_DIR
     log.info(f"Using Gaia CACHE DIR '{GAIA_CACHE_DIR}'")
 
-    # Read Calibration GAIA stars table and create index on source_id for quick
-    # record retrieval
-    # https://sdss-wiki.atlassian.net/wiki/spaces/LVM/pages/14460157/Calibration+Stars
-    gaia_stars = Table.read(models_dir + '/lvm-many_Gaia_stars_5-9_ftype_v4-all.fits', format='fits')
-    gaia_stars.add_index('source_id')
-
     # Prepare the spectra
     (w, nns, gaia_ids, fibers, std_spectra_all_bands, normalized_spectra_unconv_all_bands,
      normalized_spectra_all_bands, std_errors_all_bands, lsf_all_bands,
      std_spectra_orig_all_bands, zenith_angles, std_info) = prepare_spec(in_rss, width=width)
+
+    # download or load from cache Gaia stellar parameters
+    stellar_params = fluxcal.get_stellar_params(source_ids=gaia_ids)
+    # load Gaia BP-RP spectrum from cache, or download from webapp
+    wave_xp, spectra_xp = fluxcal.get_xp_spectra_from_ids(source_ids=gaia_ids)
 
     # Stitch wavelength arrays in brz together
     wave_b = np.round(w[0],1)
@@ -938,9 +935,6 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
     model_to_gaia_median = []
     best_fit_models = []
     gaia_flux_interpolated = []
-    gaia_Teff = []
-    gaia_logg = []
-    gaia_z = []
     pwv_values, pwv_errors = [], []
     stack_stellar_model, stack_telluric_trans = [], []
 
@@ -1104,35 +1098,11 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
         # gaia_lsf_rp = np.interp(std_wave_all[mask_wl_rp], gaia_lsf_table_rp['wavelength'], gaia_lsf_table_rp['linewidth'])
         # gaia_lsf = np.concatenate((gaia_lsf_bp, gaia_lsf_rp))
 
-        # load Gaia BP-RP spectrum from cache, or download from webapp, and fit the continuum to Gaia spec
-        try:
-            gw, gf = fluxcal.retrive_gaia_star(gaia_ids[i], GAIA_CACHE_DIR=GAIA_CACHE_DIR)
-            stdflux = np.interp(std_wave_all, gw, gf)  # interpolate to our wavelength grid
-
-            # Try to get stellar parameters from the local table first
-            try:
-                # Used indexed column source_id, See where table was read
-                gaia_rec = gaia_stars.loc[gaia_ids[i]]
-                teff, logg, z = gaia_rec['teff_gspspec'], gaia_rec['logg_gspspec'], gaia_rec['mh_gspspec']
-            except KeyError:
-                # If entry not found in local table, then call external Gaia service
-                job = Gaia.launch_job(f"SELECT teff_gspspec, logg_gspspec, mh_gspspec FROM gaiadr3.astrophysical_parameters WHERE source_id = {gaia_ids[i]} ")
-                r = job.get_results()
-                teff, logg, z = r['teff_gspspec'][0], r['logg_gspspec'][0], r['mh_gspspec'][0]
-        except (fluxcal.GaiaStarNotFound, requests.exceptions.HTTPError) as e:
-            stdflux = np.full_like(std_wave_all, np.nan)
-            teff, logg, z = np.nan, np.nan, np.nan
-            model_to_gaia_median.append(np.nan)
-            log.warning(f"Gaia star {gaia_ids[i]} not found: {e}")
-        finally:
-            gaia_flux_interpolated.append(stdflux)
-            gaia_Teff.append(teff)
-            gaia_logg.append(logg)
-            gaia_z.append(z)
-
-        # Skip star with no Gaia parameters
-        if np.isnan(teff):
-            continue
+        # fit the continuum to Gaia spec
+        gw = wave_xp.copy()
+        gf = spectra_xp.copy()[i]
+        stdflux = np.interp(std_wave_all, gw, gf)  # interpolate to our wavelength grid
+        gaia_flux_interpolated.append(stdflux)
 
         # Keep Eugenia's implementation for a reference after a minor bug fix
         # (missing GAIA LSF conversion to pixels).
@@ -1169,9 +1139,9 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
         fiber_params = {'i': i, 'fiber_id': fibers[i]}
         gaia_params = {
             'gaia_id': gaia_ids[i],
-            'gaia_Teff': gaia_Teff[i],
-            'gaia_logg': gaia_logg[i],
-            'gaia_z': gaia_z[i]
+            'gaia_Teff': stellar_params.loc[gaia_ids[i], 'teff_gspspec'],
+            'gaia_logg': stellar_params.loc[gaia_ids[i], 'logg_gspspec'],
+            'gaia_z': stellar_params.loc[gaia_ids[i], 'mh_gspspec']
         }
         model_params = {
             'model_name': model_names[best_id],
@@ -1694,6 +1664,10 @@ def standard_sensitivity(stds, rss, GAIA_CACHE_DIR, ext, res, plot=False, width=
 
     master_sky = rss.eval_master_sky()
 
+    # load Gaia BP-RP spectrum from cache, or download from webapp
+    _, _, gaia_ids, _, _, _ = zip(*stds)
+    wave_xp, spectra_xp = fluxcal.get_xp_spectra_from_ids(source_ids=gaia_ids)
+
     # iterate over standard stars, derive sensitivity curve for each
     for i, s in enumerate(stds):
         nn, fiber, gaia_id, exptime, secz, _ = s  # unpack standard star tuple
@@ -1703,15 +1677,6 @@ def standard_sensitivity(stds, rss, GAIA_CACHE_DIR, ext, res, plot=False, width=
         fibidx = np.where(select)[0]
 
         log.info(f"standard fiber '{fiber}', index '{fibidx}', star '{gaia_id}', exptime '{exptime:.2f}', secz '{secz:.2f}'")
-
-        # load Gaia BP-RP spectrum from cache, or download from webapp
-        try:
-            gw, gf = fluxcal.retrive_gaia_star(gaia_id, GAIA_CACHE_DIR=GAIA_CACHE_DIR)
-            stdflux = np.interp(w, gw, gf)  # interpolate to our wavelength grid
-        except fluxcal.GaiaStarNotFound as e:
-            log.warning(e)
-            rss.add_header_comment(f"Gaia star {gaia_id} not found")
-            continue
 
         # subtract sky spectrum and divide by exptime
         spec = rss._data[fibidx[0], :]
@@ -1770,6 +1735,7 @@ def standard_sensitivity(stds, rss, GAIA_CACHE_DIR, ext, res, plot=False, width=
         # s_gaia = interpolate.make_smoothing_spline(wgood_gaia, sgood_gaia, lam=win)
 
         # divide to find sensitivity and smooth
+        stdflux = np.interp(w, wave_xp, spectra_xp[i])  # interpolate to our wavelength grid
         sens = stdflux / spec
         wgood, sgood = fluxcal.filter_channel(w, sens, 2)
         s = interpolate.make_smoothing_spline(wgood, sgood, lam=1e4)
@@ -1833,12 +1799,8 @@ def science_sensitivity(rss, res_sci, ext, GAIA_CACHE_DIR, NSCI_MAX=15, r_spaxel
         m2 = get_z_continuum_mask(obswave)
 
     # get GAIA data, potentially cached
-    r, calibrated_spectra, sampling = fluxcal.get_XP_spectra(expnum, ra, dec, plot=False, lim_mag=13.5,
-                                                             n_spec=NSCI_MAX, GAIA_CACHE_DIR=GAIA_CACHE_DIR)
-    gwave = sampling*10 # to A
-    for i in range(len(calibrated_spectra)):
-        # W/micron/m^2 -> in erg/s/cm^2/A
-        calibrated_spectra.iloc[i].flux *= 100
+    gwave, calibrated_spectra, r = fluxcal.get_xp_spectra_from_tile(expnum, ra, dec, lim_mag=13.5, n_spectra=NSCI_MAX,
+                                                               return_table=True, convert_to_cgs=True, cache_dir=GAIA_CACHE_DIR)
 
     # read the mean sensitivity curve
     mean_sens = fluxcal.get_mean_sens_curves(os.getenv("LVMCORE_DIR") + "/sensitivity")
@@ -1871,7 +1833,7 @@ def science_sensitivity(rss, res_sci, ext, GAIA_CACHE_DIR, NSCI_MAX=15, r_spaxel
                 log.info(f"dropping gaia star {data['source_id']} in fiber {fib}, multiple stars")
                 continue
             # if we found a single star in a fiber
-            gflux = calibrated_spectra.iloc[i].flux
+            gflux = calibrated_spectra[i]
 
             fibidx = scifibs['fiberid'][fib] - 1
 
