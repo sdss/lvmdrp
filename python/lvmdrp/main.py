@@ -2060,11 +2060,13 @@ def cache_std_xp_spectra(mjds: Union[int, str, list], ignore_cache: bool = False
                 header = f[0].header
                 expnum = exposure["expnum"]
                 source_ids = list(filter(lambda s: s is not None, header["STD*ID"].values()))
-
+                acquired_stds = list(header["STD*ACQ"].values())
+                total_acquired = sum(acquired_stds)
+                log.info(f"{expnum = } has standard stars metadata and {total_acquired} were acquired")
             # cache corresponding gaia spectra
             if not dry_run:
                 try:
-                    fluxcal.get_std_xp_spectra(source_ids, cache_only=True, cache_dir=gaia_cache_dir, ignore_cache=ignore_cache)
+                    fluxcal.get_xp_spectra_from_ids(source_ids, cache_only=True, cache_dir=gaia_cache_dir, ignore_cache=ignore_cache)
                 except Exception as e:
                     log.error(f"failed caching of Gaia spectra for {expnum = }: {e}")
                     failed_expnums.append(expnum)
@@ -2114,7 +2116,6 @@ def cache_sci_xp_spectra(mjds: Union[int, str, list], min_acquired=999, ignore_c
                     if total_acquired >= min_acquired:
                         log.info(f"{expnum = } has standard stars metadata and {total_acquired} were acquired, skipping")
                         continue
-                    log.info(f"{expnum = } has standard stars metadata and {total_acquired} were acquired")
                 # get exposure parameters
                 ra = header.get("POSCIRA", header.get("TESCIRA"))
                 dec = header.get("POSCIDE", header.get("TESCIDE"))
@@ -2122,7 +2123,7 @@ def cache_sci_xp_spectra(mjds: Union[int, str, list], min_acquired=999, ignore_c
             # cache corresponding gaia spectra
             if not dry_run:
                 try:
-                    fluxcal.get_tile_xp_spectra(expnum, ra, dec, lim_mag=13.5, n_spectra=15, cache_only=True, cache_dir=gaia_cache_dir, ignore_cache=ignore_cache)
+                    fluxcal.get_xp_spectra_from_tile(expnum, ra, dec, lim_mag=13.5, n_spectra=15, cache_only=True, cache_dir=gaia_cache_dir, ignore_cache=ignore_cache)
                 except Exception as e:
                     log.error(f"failed caching of Gaia spectra for {expnum = }: {e}")
                     failed_expnums.append(expnum)

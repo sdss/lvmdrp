@@ -10,7 +10,6 @@
 import os
 import time
 import warnings
-import requests
 # from os import listdir
 # from os.path import isfile, join
 import numpy as np
@@ -898,7 +897,10 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
      normalized_spectra_all_bands, std_errors_all_bands, lsf_all_bands,
      std_spectra_orig_all_bands, zenith_angles, std_info) = prepare_spec(in_rss, width=width)
 
-    stellar_params = fluxcal.get_std_stellar_params(source_ids=gaia_ids)
+    # download or load from cache Gaia stellar parameters
+    stellar_params = fluxcal.get_stellar_params(source_ids=gaia_ids)
+    # load Gaia BP-RP spectrum from cache, or download from webapp
+    wave_xp, spectra_xp = fluxcal.get_xp_spectra_from_ids(source_ids=gaia_ids)
 
     # Stitch wavelength arrays in brz together
     wave_b = np.round(w[0],1)
@@ -1096,16 +1098,11 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
         # gaia_lsf_rp = np.interp(std_wave_all[mask_wl_rp], gaia_lsf_table_rp['wavelength'], gaia_lsf_table_rp['linewidth'])
         # gaia_lsf = np.concatenate((gaia_lsf_bp, gaia_lsf_rp))
 
-        # load Gaia BP-RP spectrum from cache, or download from webapp, and fit the continuum to Gaia spec
-        try:
-            gw, gf = fluxcal.get_std_xp_spectrum(gaia_ids[i], cache_dir=GAIA_CACHE_DIR)
-            stdflux = np.interp(std_wave_all, gw, gf)  # interpolate to our wavelength grid
-        except (fluxcal.GaiaStarNotFound, requests.exceptions.HTTPError) as e:
-            stdflux = np.full_like(std_wave_all, np.nan)
-            model_to_gaia_median.append(np.nan)
-            log.warning(f"Gaia star {gaia_ids[i]} not found: {e}")
-        finally:
-            gaia_flux_interpolated.append(stdflux)
+        # fit the continuum to Gaia spec
+        gw = wave_xp.copy()
+        gf = spectra_xp.copy()[i]
+        stdflux = np.interp(std_wave_all, gw, gf)  # interpolate to our wavelength grid
+        gaia_flux_interpolated.append(stdflux)
 
         # Keep Eugenia's implementation for a reference after a minor bug fix
         # (missing GAIA LSF conversion to pixels).
@@ -1667,6 +1664,10 @@ def standard_sensitivity(stds, rss, GAIA_CACHE_DIR, ext, res, plot=False, width=
 
     master_sky = rss.eval_master_sky()
 
+    # load Gaia BP-RP spectrum from cache, or download from webapp
+    _, _, gaia_ids, _, _, _ = zip(*stds)
+    wave_xp, spectra_xp = fluxcal.get_xp_spectra_from_ids(source_ids=gaia_ids)
+
     # iterate over standard stars, derive sensitivity curve for each
     for i, s in enumerate(stds):
         nn, fiber, gaia_id, exptime, secz, _ = s  # unpack standard star tuple
@@ -1676,15 +1677,6 @@ def standard_sensitivity(stds, rss, GAIA_CACHE_DIR, ext, res, plot=False, width=
         fibidx = np.where(select)[0]
 
         log.info(f"standard fiber '{fiber}', index '{fibidx}', star '{gaia_id}', exptime '{exptime:.2f}', secz '{secz:.2f}'")
-
-        # load Gaia BP-RP spectrum from cache, or download from webapp
-        try:
-            gw, gf = fluxcal.get_std_xp_spectrum(gaia_id, cache_dir=GAIA_CACHE_DIR)
-            stdflux = np.interp(w, gw, gf)  # interpolate to our wavelength grid
-        except fluxcal.GaiaStarNotFound as e:
-            log.warning(e)
-            rss.add_header_comment(f"Gaia star {gaia_id} not found")
-            continue
 
         # subtract sky spectrum and divide by exptime
         spec = rss._data[fibidx[0], :]
@@ -1743,6 +1735,7 @@ def standard_sensitivity(stds, rss, GAIA_CACHE_DIR, ext, res, plot=False, width=
         # s_gaia = interpolate.make_smoothing_spline(wgood_gaia, sgood_gaia, lam=win)
 
         # divide to find sensitivity and smooth
+        stdflux = np.interp(w, wave_xp, spectra_xp[i])  # interpolate to our wavelength grid
         sens = stdflux / spec
         wgood, sgood = fluxcal.filter_channel(w, sens, 2)
         s = interpolate.make_smoothing_spline(wgood, sgood, lam=1e4)
@@ -1806,7 +1799,7 @@ def science_sensitivity(rss, res_sci, ext, GAIA_CACHE_DIR, NSCI_MAX=15, r_spaxel
         m2 = get_z_continuum_mask(obswave)
 
     # get GAIA data, potentially cached
-    gwave, calibrated_spectra, r = fluxcal.get_tile_xp_spectra(expnum, ra, dec, lim_mag=13.5, n_spectra=NSCI_MAX,
+    gwave, calibrated_spectra, r = fluxcal.get_xp_spectra_from_tile(expnum, ra, dec, lim_mag=13.5, n_spectra=NSCI_MAX,
                                                                return_table=True, convert_to_cgs=True, cache_dir=GAIA_CACHE_DIR)
 
     # read the mean sensitivity curve
