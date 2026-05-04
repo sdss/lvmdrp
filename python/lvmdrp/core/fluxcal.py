@@ -323,6 +323,12 @@ class GaiaXPSpectra(object):
         new_cols = [col.lower() for col in cols]
         gaia_table.rename_columns(cols, new_cols)
 
+        # parse into a pandas dataframe and clean up masked columns if present
+        gaia_table = gaia_table.to_pandas()
+        for col in gaia_table.columns:
+            if gaia_table[col].dtype == 'object':
+                gaia_table[col] = gaia_table[col].apply(lambda x: np.array(x.data) if isinstance(x, np.ma.MaskedArray) else x)
+
         return gaia_table
 
     def fetch_xp_spectra(self, source_ids, ignore_cache=False):
@@ -389,7 +395,7 @@ def get_xp_spectra_from_tile(expnum, ra, dec, lim_mag=14.0, n_spectra=15, return
     gaia_table = gaia.fetch_sources(expnum, ra, dec, lim_mag=lim_mag, n_ids=n_spectra, ignore_cache=ignore_cache)
 
     # download new XP spectra
-    source_ids = gaia_table["source_id"].filled().data
+    source_ids = gaia_table["source_id"].values
     new_ids = gaia.fetch_xp_spectra(source_ids, ignore_cache=ignore_cache)
     # return if only requested caching
     if cache_only:
