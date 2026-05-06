@@ -1529,7 +1529,9 @@ def science_reduction(expnum: int,
                       clean_ancillary: bool = False,
                       skip_2d: bool = False,
                       skip_1d: bool = False,
-                      skip_post_1d: bool = False,
+                      skip_wavecal: bool = False,
+                      skip_fluxcal: bool = False,
+                      skip_skysub: bool = False,
                       skip_drpall: bool = False,
                       debug_mode: bool = False,
                       force_run: bool = False) -> None:
@@ -1644,8 +1646,8 @@ def science_reduction(expnum: int,
     # per channel reduction
     cframe_path = path.full("lvm_frame", drpver=drpver, tileid=sci_tileid, mjd=sci_mjd, expnum=sci_expnum, kind='CFrame')
     sframe_path = path.full("lvm_frame", mjd=sci_mjd, drpver=drpver, tileid=sci_tileid, expnum=sci_expnum, kind='SFrame')
-    if skip_post_1d:
-        log.info("skipping post 1D reduction")
+    if skip_wavecal:
+        log.info("skipping wavelength calibration and fiber flat fielding")
     else:
         mwave_groups = group_calib_paths(calibs["wave"])
         mlsf_groups = group_calib_paths(calibs["lsf"])
@@ -1699,6 +1701,9 @@ def science_reduction(expnum: int,
                 resample_wavelength(in_rss=ssci_path,  out_rss=hsci_path, wave_range=SPEC_CHANNELS[channel], wave_disp=0.5, convert_to_density=True)
 
 
+    if skip_fluxcal:
+        log.info("skipping flux calibration")
+    else:
         hsci_all_bands = [path.full('lvm_anc', mjd=sci_mjd, tileid=sci_tileid, drpver=drpver, kind='h',
                                 camera=channel, imagetype=sci_imagetyp, expnum=expnum) for channel in "brz"]
 
@@ -1729,6 +1734,9 @@ def science_reduction(expnum: int,
         with Timer(name='Join Channels '+cframe_path, logger=log.info):
             join_spec_channels(in_fframes=fframe_paths, out_cframe=cframe_path, use_weights=True)
 
+    if skip_skysub:
+        log.info("skipping sky subtraction")
+    else:
         # sky subtraction
         with Timer(name='QSky '+sframe_path, logger=log.info):
             quick_sky_subtraction(in_cframe=cframe_path, out_sframe=sframe_path)
@@ -1774,7 +1782,8 @@ def science_reduction(expnum: int,
 def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
             with_cals: bool = False, no_sci: bool = False,
             fluxcal_method: str = 'MOD',
-            skip_2d: bool = False, skip_1d: bool = False, skip_post_1d: bool = False, skip_drpall: bool = False,
+            skip_2d: bool = False, skip_1d: bool = False, skip_wavecal: bool = False,
+            skip_fluxcal: bool = False, skip_skysub: bool = False, skip_drpall: bool = False,
             use_nightly_cals: bool = False, use_untagged_cals: bool = False,
             clean_ancillary: bool = False, debug_mode: bool = False, force_run: bool = False):
     """ Run the quick DRP
@@ -1801,8 +1810,12 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
         Skip preprocessing and detrending, by default False
     skip_1d : bool, optional
         Skip astrometry, straylight subtraction and extraction, by default False
-    skip_post_1d : bool, optional
-        Skip wavelength calibration, flatfielding, sky processing and flux calibration
+    skip_wavecal : bool, optional
+        Skip wavelength calibration, flatfielding, sky processing and flux calibration, by default False
+    skip_fluxcal : bool, optional
+        Skip flux calibration and channel combine, by default False
+    skip_skysub : bool, optional
+        Skip sky subtraction, by default False
     skip_drpall : bool, optional
         Skip create/update drpall summary file
     use_nightly_cals : bool, optional
@@ -1836,7 +1849,9 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
                     fluxcal_method=fluxcal_method,
                     skip_2d=skip_2d,
                     skip_1d=skip_1d,
-                    skip_post_1d=skip_post_1d,
+                    skip_wavecal=skip_wavecal,
+                    skip_fluxcal=skip_fluxcal,
+                    skip_skysub=skip_skysub,
                     skip_drpall=skip_drpall,
                     clean_ancillary=clean_ancillary,
                     use_nightly_cals=use_nightly_cals,
@@ -1940,7 +1955,9 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
                                         fluxcal_method=fluxcal_method,
                                         skip_2d=skip_2d,
                                         skip_1d=skip_1d,
-                                        skip_post_1d=skip_post_1d,
+                                        skip_wavecal=skip_wavecal,
+                                        skip_fluxcal=skip_fluxcal,
+                                        skip_skysub=skip_skysub,
                                         skip_drpall=skip_drpall,
                                         clean_ancillary=clean_ancillary,
                                         use_longterm_cals=not use_nightly_cals,
@@ -2019,21 +2036,9 @@ def create_drpall(drp_version: str = None, overwrite: bool = False) -> None:
     log.info(f"finished converting HDF5 to FITS format in {drpall}")
 
 
-def cache_gaia_spectra(mjds: Union[int, str, list], min_acquired=999, dry_run: bool = False) -> None:
-    """Caches Gaia XP spectra for science field calibration
-
-    Parameters
-    ----------
-    mjds : int|str|list[int]
-        MJDs for which the caching should be run
-    min_acquired : int, optional
-        minimum number of acquired standard stars to skip caching, defaults to 999 (no skipping)
-    dry_run : bool, optional
-        lists exposures that will be targeted
-    """
+def cache_std_xp_spectra(mjds: Union[int, str, list], ignore_cache: bool = False, dry_run: bool = False) -> None:
     log.info("start of Gaia XP spectra caching for science field flux calibration")
     gaia_cache_dir = os.path.join(os.getenv("LVM_MASTER_DIR"), "gaia_cache")
-    os.makedirs(gaia_cache_dir, exist_ok=True)
     # parse MJDs
     mjds = parse_mjds(mjds)
     if isinstance(mjds, int):
@@ -2048,6 +2053,58 @@ def cache_gaia_spectra(mjds: Union[int, str, list], min_acquired=999, dry_run: b
 
         failed_expnums = []
         for exposure in frames.to_dict("records"):
+            log.info(f"going to cache XP spectra for expnum = {exposure['expnum']}")
+            raw_path = path.full("lvm_raw", camspec=exposure["camera"], **exposure)
+            # check for presence of standard stars metadata
+            with fits.open(raw_path) as f:
+                header = f[0].header
+                expnum = exposure["expnum"]
+                source_ids = list(filter(lambda s: s is not None, header["STD*ID"].values()))
+                acquired_stds = list(header["STD*ACQ"].values())
+                total_acquired = sum(acquired_stds)
+                log.info(f"{expnum = } has standard stars metadata and {total_acquired} were acquired")
+            # cache corresponding gaia spectra
+            if not dry_run:
+                try:
+                    fluxcal.get_xp_spectra_from_ids(source_ids, cache_only=True, cache_dir=gaia_cache_dir, ignore_cache=ignore_cache)
+                except Exception as e:
+                    log.error(f"failed caching of Gaia spectra for {expnum = }: {e}")
+                    failed_expnums.append(expnum)
+                    continue
+
+    # summarize run
+    log.info(f"cached Gaia XP metadata for {len(frames) - len(failed_expnums)} exposures, with {len(failed_expnums)} fails, {failed_expnums = }")
+
+
+def cache_sci_xp_spectra(mjds: Union[int, str, list], min_acquired=999, ignore_cache: bool = False, dry_run: bool = False) -> None:
+    """Caches Gaia XP spectra for science field calibration
+
+    Parameters
+    ----------
+    mjds : int|str|list[int]
+        MJDs for which the caching should be run
+    min_acquired : int, optional
+        minimum number of acquired standard stars to skip caching, defaults to 999 (no skipping)
+    dry_run : bool, optional
+        lists exposures that will be targeted
+    """
+    log.info("start of Gaia XP spectra caching for science field flux calibration")
+    gaia_cache_dir = os.path.join(os.getenv("LVM_MASTER_DIR"), "gaia_cache")
+    # parse MJDs
+    mjds = parse_mjds(mjds)
+    if isinstance(mjds, int):
+        mjds = [mjds]
+    log.info(f"selecting MJDs: {','.join(map(str, mjds))}")
+
+    for mjd in mjds:
+        # load metadata and filter good quality science frames
+        frames = get_frames_metadata(mjd=mjd)
+        frames.query("imagetyp == 'object' and qaqual == 'GOOD'", inplace=True)
+        frames = frames.drop_duplicates(subset=["expnum"], keep="first")
+
+        failed_expnums = []
+        for exposure in frames.to_dict("records"):
+            log.info(f"going to cache XP spectra for expnum = {exposure['expnum']}")
             raw_path = path.full("lvm_raw", camspec=exposure["camera"], **exposure)
             # check for presence of standard stars metadata
             with fits.open(raw_path) as f:
@@ -2059,23 +2116,21 @@ def cache_gaia_spectra(mjds: Union[int, str, list], min_acquired=999, dry_run: b
                     if total_acquired >= min_acquired:
                         log.info(f"{expnum = } has standard stars metadata and {total_acquired} were acquired, skipping")
                         continue
-                    log.info(f"{expnum = } has standard stars metadata and {total_acquired} were acquired")
                 # get exposure parameters
                 ra = header.get("POSCIRA", header.get("TESCIRA"))
                 dec = header.get("POSCIDE", header.get("TESCIDE"))
 
             # cache corresponding gaia spectra
-            log.info(f"going to download 15 field stars spectra with G<13.5 around {ra = }, {dec = } for {expnum = }")
             if not dry_run:
                 try:
-                    fluxcal.get_XP_spectra(expnum, ra, dec, plot=False, lim_mag=13.5, n_spec=15, GAIA_CACHE_DIR=gaia_cache_dir)
+                    fluxcal.get_xp_spectra_from_tile(expnum, ra, dec, lim_mag=13.5, n_spectra=15, cache_only=True, cache_dir=gaia_cache_dir, ignore_cache=ignore_cache)
                 except Exception as e:
                     log.error(f"failed caching of Gaia spectra for {expnum = }: {e}")
                     failed_expnums.append(expnum)
                     continue
 
     # summarize run
-    log.info(f"cached metadata for {len(frames) - len(failed_expnums)} exposures, with {len(failed_expnums)} fails, {failed_expnums = }")
+    log.info(f"cached Gaia XP metadata for {len(frames) - len(failed_expnums)} exposures, with {len(failed_expnums)} fails, {failed_expnums = }")
 
 
 def reduce_calib_frame(row: dict):

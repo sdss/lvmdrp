@@ -122,6 +122,14 @@ or a list of exposure numbers in a file `<expnum_file>`, by running:
 drp run -F <expnum_file>
 ```
 
+You can also skip reduction steps if you carried those steps already by running:
+
+```
+drp run -e <expnum> -2d -1d -wc -fl -sk -da
+```
+
+which would skip the 2D reduction, the 1D reduction, the wavelength calibration and fiber flat-fielding, flux calibration, the sky subtraction and drpall summary generation. See the list of reduction steps below for more details on what each of those steps do.
+
 More options are available, you can see them by running:
 
 ```bash
@@ -132,21 +140,27 @@ Running the DRP requires that you have correctly setup your environment by follo
 
 The `drp run` will reduce your target exposure. Here is a list of reduction steps carried out by the DRP:
 
-- **Preprocessing**: overscan trimming and subtraction and pixel masking
-- **Detrending**: bias and dark subtraction, Poisson error calculation, flatfielding (pixel level, when available), units conversion (e-/s)
-- **Astrometry**: adds astrometry to the primary header and RA and DEC for each fiber to the slitmap extension
-- **Stray light**: modelling and subtraction of the straylight field
-- **Extraction**: fiber fitting spectra extraction, takes into account thermal fiber shifts in the Y direction
-- **Spectrograph combination**: row-stacking of spectrograph fibers
-- **Wavelength calibration**: pixel-to-wavelength mapping and LSF function per fiber
-- **Fiberflat**: flatfielding (fiber level) using twilight fiberflats
-- **Wavelength refinement**: refines the wavelength solution by matching the sky line positions, takes into account fiber thermal shifts in the wavelength direction, only used to subtract sky from standard fibers
-- **Sky fibers interpolation**: sky fibers interpolation along fiber ID by fitting the supersampled sky spectrum, per sky telescope
-- **Wavelength resampling**: wavelength resampling to a common grid (~0.5 Angstrom)
-- **Flux calibration**: calculates sensitivity curves for each standard star exposed and flux-calibrate the science fibers using the average sensitivity
-- **Channel combination**: stitching together spectrographs' channels
-- **Sky subtraction**: final sky subtraction separating sky lines and continuum and combining into master sky in a predefined way
-- **Generate/update summary**: adds a new record to the summary file (see description below)
+- 2D reduction steps (`-2d` flag):
+  - **Preprocessing**: overscan trimming and subtraction and pixel masking
+  - **Detrending**: bias and dark subtraction, Poisson error calculation, flatfielding (pixel level, when available), units conversion (e-/s)
+  - **Astrometry**: adds astrometry to the primary header and RA and DEC for each fiber to the slitmap extension
+  - **Stray light**: modelling and subtraction of the straylight field
+- 1D reduction steps (`-1d` flag):
+  - **Extraction**: fiber fitting spectra extraction, takes into account thermal fiber shifts in the Y direction
+- Wavelength calibration and fiber flat-fielding steps (`-wc` flag):
+  - **Spectrograph combination**: row-stacking of spectrograph fibers
+  - **Wavelength calibration**: pixel-to-wavelength mapping and LSF function per fiber
+  - **Fiberflat**: flatfielding (fiber level) using twilight fiberflats
+  - **Wavelength refinement**: refines the wavelength solution by matching the sky line positions, takes into account fiber thermal shifts in the wavelength direction, only used to subtract sky from standard fibers
+  - **Sky fibers interpolation**: sky fibers interpolation along fiber ID by fitting the supersampled sky spectrum, per sky telescope
+  - **Wavelength resampling**: wavelength resampling to a common grid (~0.5 Angstrom)
+- Flux calibration steps (`-fl` flag):
+  - **Flux calibration**: calculates sensitivity curves for each standard star exposed and flux-calibrate the science fibers using the average sensitivity
+  - **Channel combination**: stitching together spectrographs' channels
+- Sky subtraction steps (`-sk` flag):
+  - **Sky subtraction**: final sky subtraction separating sky lines and continuum and combining into master sky in a predefined way
+- `drpall` summary generation steps (`-da` flag):
+  - **Generate/update summary**: adds a new record to the summary file (see description below)
 
 The main outputs will be stored in the SAS directory:
 
