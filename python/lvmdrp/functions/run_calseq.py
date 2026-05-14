@@ -39,6 +39,7 @@ from datetime import datetime
 from shutil import copy2, copytree
 from astropy.io import fits
 from astropy.table import Table
+from astropy.stats import biweight_location
 from typing import Union, Tuple, List, Dict
 from collections.abc import Callable
 from matplotlib.gridspec import GridSpec
@@ -126,7 +127,7 @@ def _read_ffactors(drpver, channel):
     return pd.DataFrame(metadata)
 
 
-def _measure_ffactors(mjd, drpver, channel, norm_stat=bn.nanmean, label=None, write_table=False):
+def _measure_ffactors(mjd, drpver, channel, sky_lines=SKYLINES_FIBERFLAT, norm_stat=lambda x: biweight_location(x, ignore_nan=True), label=None, write_table=False):
     label = label or norm_stat.__name__
 
     # define general parameters
@@ -136,7 +137,10 @@ def _measure_ffactors(mjd, drpver, channel, norm_stat=bn.nanmean, label=None, wr
 
     # grab all relevant DRP products: before/ after fiber flat fielding
     channel_ = "?" if channel == "all" else channel
-    wframe_paths = sorted(path.expand("lvm_anc", drpver=drpver, tileid="*", mjd=mjd, expnum="????????", imagetype="object", kind="w", camera=channel_))
+    wframe_paths = sorted(
+        path.expand("lvm_anc", drpver=drpver, tileid="*", mjd=mjd, expnum="????????", imagetype="object", kind="w", camera=channel_),
+        key=lambda s: int(os.path.basename(s).split(".")[0].split("-")[-1]))
+
     # grab master fiber flat fields
     mflat_paths = get_calib_paths(mjd=mjd, flavors={"fiberflat_twilight"}, from_sandbox=True)["fiberflat_twilight"]
 
@@ -146,12 +150,13 @@ def _measure_ffactors(mjd, drpver, channel, norm_stat=bn.nanmean, label=None, wr
         rss = RSS.from_file(wframe_path)
 
         channel_current = rss._header["CCD"][0]
-        sky_cwave = SKYLINES_FIBERFLAT[channel_current]
+        expnum = rss._header["EXPOSURE"]
+        sky_cwave = sky_lines[channel_current]
         cont_cwave = CONTINUUM_FIBERFLAT[channel_current]
         mflat = RSS.from_file(mflat_paths[channel_current])
 
         fig = plt.figure(figsize=(14,3*2))
-        fig.suptitle(f"Fiber flatfield correction for {channel = } around sky line @ {sky_cwave:.2f} Angstroms", fontsize="xx-large")
+        fig.suptitle(f"Fiber flatfield correction for {expnum = } {channel = } around sky line @ {sky_cwave:.2f} Angstroms", fontsize="xx-large")
         gs_gra = GridSpec(2, 5, hspace=0.01, wspace=0.01, left=0.07, right=0.99, figure=fig)
         gs_cor = GridSpec(2, 5, hspace=0.5, wspace=0.01, left=0.07, right=0.99, figure=fig)
         axs = [fig.add_subplot(gs_gra[0, j]) for j in range(5)]
@@ -160,7 +165,7 @@ def _measure_ffactors(mjd, drpver, channel, norm_stat=bn.nanmean, label=None, wr
             sky_cwave=sky_cwave,
             cont_cwave=cont_cwave,
             dwave=dwave,
-            quantiles=quantiles, guess_coeffs=[1,0,0,0], fixed_coeffs=[0,1,2,3], groupby=groupby,
+            quantiles=quantiles, guess_coeffs=[1,0,0,0], fixed_coeffs=[1,2,3], groupby=groupby,
             axs=axs, labels=True)
 
         log.info("applying flatfield correction")
