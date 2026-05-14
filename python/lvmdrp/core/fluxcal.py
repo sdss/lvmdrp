@@ -223,7 +223,6 @@ class GaiaXPSpectra(object):
         # calibrate gaia XP coefficients into spectra
         with open(os.devnull, 'w') as f, redirect_stdout(f):
             spectra_xp = []
-            print(coeffs)
             coeffs_list = np.split(coeffs, coeffs.shape[0])
             for coeff in coeffs_list:
                 spectrum_xp, wave_xp = gaiaxpy.calibrate(coeff, sampling=self._wave_sampling,
@@ -435,6 +434,9 @@ def get_xp_spectra_from_ids(source_ids, cache_only=False, convert_to_cgs=True, c
 
     if isinstance(source_ids, int):
         source_ids = [source_ids]
+
+    if len(source_ids) == 0:
+        return [], []
 
     gaia = GaiaXPSpectra(cache_dir=cache_dir)
 
