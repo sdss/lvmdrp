@@ -3745,6 +3745,8 @@ class Spectrum1D(Header):
         cent_range=[-2.0, 2.0],
         fwhm_range=[0, 7],
         bg_range=[0, numpy.inf],
+        fiber_radius=0.01,
+        oversampling_factor=100,
         badpix_threshold=4,
         ftol=1e-8,
         xtol=1e-8,
@@ -3786,7 +3788,7 @@ class Spectrum1D(Header):
                 guess = [flux_guess, centre, fwhm_guess / 2.354, bg_guess]
                 bound_lower = [flux_range[0], centre+cent_range[0], fwhm_range[0]/2.354, bg_range[0]]
                 bound_upper = [flux_range[1], centre+cent_range[1], fwhm_range[1]/2.354, bg_range[1]]
-                gauss = fit_profile.Gaussian_const(guess)
+                gauss = fit_profile.Gaussian_const(guess, oversampling_factor=oversampling_factor, fiber_radius=fiber_radius)
             else:
                 guess = [flux_guess, centre, fwhm_guess / 2.354]
                 gauss = fit_profile.Gaussian(guess)
@@ -3813,7 +3815,7 @@ class Spectrum1D(Header):
                 select_2 = (self._wave>=cent[i]-3.5*fwhm[i]/2.354) & (self._wave<=cent[i]+3.5*fwhm[i]/2.354)
                 x = self._wave[select_2]
                 axs[i].plot(self._wave, (select)*numpy.nan+bn.nanmin(data), "ok")
-                axs_ = gauss.plot(self._wave[select], self._data[select], mask=self._mask[select], axs={"mod": axs[i]})
+                axs_ = gauss.plot(self._wave[select], self._data[select], self._error[select], mask=self._mask[select], axs={"mod": axs[i]})
                 axs[i] = axs_["mod"]
                 axs[i].axhline(bg[i], ls="--", color="tab:blue", lw=1)
                 if len(x) != 0:
@@ -4111,7 +4113,7 @@ class Spectrum1D(Header):
 
         return Spectrum1D(wave=wave, data=fluxes, error=errors, lsf=fwhms, mask=masks, sky=skies, sky_error=sky_errors)
 
-    def fit_lines(self, cwaves, dwave=8, axs=None):
+    def fit_lines(self, cwaves, dwave=8, fiber_radius=0.01, oversampling_factor=100, axs=None):
 
         cwaves_ = numpy.atleast_1d(cwaves)
 
@@ -4128,5 +4130,7 @@ class Spectrum1D(Header):
                                                     [-2.5, 2.5],
                                                     [max(fwhm_guess - 1.5, 0), fwhm_guess + 1.5],
                                                     [0.0, numpy.inf],
+                                                    fiber_radius=fiber_radius,
+                                                    oversampling_factor=oversampling_factor,
                                                     axs=axs)
         return flux, sky_wave, fwhm, bg

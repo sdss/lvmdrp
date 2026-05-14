@@ -3363,7 +3363,7 @@ class RSS(FiberRows):
                 continue
 
             try:
-                flux, _, _, _ = spec.fit_lines(cwaves_, dwave=dwave, axs=axs[iax] if axs is not None else axs)
+                flux, _, _, _ = spec.fit_lines(cwaves_, dwave=dwave, fiber_radius=1.0, axs=axs[iax] if axs is not None else axs)
             except ValueError as e:
                 warnings.warn(f"while fitting fiber {ifiber}: {e}")
                 continue
