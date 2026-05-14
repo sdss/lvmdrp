@@ -1614,9 +1614,24 @@ class Gaussian(fit_profile1D):
 
 class Gaussian_const(fit_profile1D):
     def _profile(self, x):
-        x_os = oversample(x, oversampling_factor=100)
-        model = numpy.exp(-0.5 * ((x_os - self._par[1]) / self._par[2]) ** 2) / (fact * self._par[2])
-        model = pixelate(x_os, models=self._par[0] * model[None, :] + self._par[3], oversampling_factor=100)[0]
+
+        counts = numpy.atleast_1d(self._par[0])
+        centroids = numpy.atleast_1d(self._par[1])
+        sigmas = numpy.atleast_1d(self._par[2])
+
+        x_os = oversample(x, oversampling_factor=self._oversampling_factor)
+        dx_os = x_os[1] - x_os[0]
+
+        x_kernel = numpy.arange(0, 2*self._fiber_radius + dx_os, dx_os)
+        kernel = fiber_profile(centroids=self._fiber_radius, radii=self._fiber_radius, x=x_kernel)
+        psfs = gaussians((counts, centroids, sigmas), x_os, alpha=2.0, collapse=False)
+
+        model_os = fftconvolve(psfs, kernel, mode="same", axes=1)
+        model_os /= integrate.trapezoid(model_os, x_os, axis=1)[:, None]
+        model_os *= counts
+        model_os += self._par[3]
+
+        model = pixelate(x_os, models=model_os, oversampling_factor=self._oversampling_factor)[0]
         return model
 
     def _guess_par(self, x, y):
@@ -1631,8 +1646,11 @@ class Gaussian_const(fit_profile1D):
         self._par[3] = ymin
         self._par[0] *= dx
 
-    def __init__(self, par):
+    def __init__(self, par, oversampling_factor=100, fiber_radius=0.01):
         fit_profile1D.__init__(self, par, self._profile, self._guess_par)
+
+        self._oversampling_factor = oversampling_factor
+        self._fiber_radius = fiber_radius if fiber_radius >= (1 / oversampling_factor) else (1 / oversampling_factor)
 
 
 class Gaussian_poly(fit_profile1D):
