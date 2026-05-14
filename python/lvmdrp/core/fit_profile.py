@@ -51,7 +51,7 @@ def polyval2d(x, y, m):
         z += a * x ** i * y ** j
     return z
 
-def gaussians(pars, x, alpha=2.3, collapse=True):
+def gaussians(pars, x, alpha=2, collapse=True):
     """Gaussian models for multiple components"""
     y = pars[0][:, None] * numpy.exp(-0.5 * numpy.abs((x[None, :] - pars[1][:, None]) / pars[2][:, None]) ** alpha) / (pars[2][:, None] * fact)
     if not collapse:
@@ -135,7 +135,7 @@ def oversample(x, oversampling_factor):
 
 def pixelate(x, models, oversampling_factor):
     models_bins = models.reshape((models.shape[0], models.shape[1]//oversampling_factor, oversampling_factor))
-    models_pixelated = integrate.trapezoid(models_bins, dx=x[1]-x[0], axis=2)
+    models_pixelated = bn.nanmean(models_bins, axis=2)
     return models_pixelated
 
 def update_params(func):
@@ -373,7 +373,10 @@ class Profile1D:
 
     def _fwhms(self, x):
         centroids = self._pars.get("centroids", self._fixed.get("centroids"))
-        half_max = self(centroids) / 2
+        x_centroids = numpy.array(list(set(x.tolist() + centroids.tolist())))
+        x_centroids = numpy.sort(x_centroids)
+        icentroids = numpy.where(x_centroids == centroids)
+        half_max = self(x_centroids)[icentroids] / 2
         if x is None:
             fwhms = numpy.ones_like(centroids) * numpy.nan
             errors = numpy.ones_like(centroids) * numpy.nan
@@ -384,7 +387,7 @@ class Profile1D:
         models = self(x_os, collapse=False)
 
         indices = numpy.asarray([numpy.where(model >= half_max[i])[0][[0,-1]] if numpy.isfinite(model).all() else [0, 0] for i, model in enumerate(models)])
-        fwhms = numpy.diff(x_os[indices], axis=1)
+        fwhms = numpy.atleast_1d(numpy.diff(x_os[indices], axis=1).squeeze())
         errors = numpy.ones_like(fwhms) / self._oversampling_factor
         masks = (fwhms == 0) | (~numpy.isfinite(fwhms))
 
@@ -690,17 +693,17 @@ class MexHatGaussians(Profile1D):
         kernel = fiber_profile(centroids=self._fiber_radius, radii=self._fiber_radius, x=x_kernel)
         psfs = gaussians((counts, centroids, sigmas), x_os, alpha=2.0, collapse=False)
 
-        profiles = fftconvolve(psfs, kernel, mode="same", axes=1)
-        profiles /= integrate.trapezoid(profiles, x_os, axis=1)[:, None]
-        profiles *= counts[:, None]
+        models_os = fftconvolve(psfs, kernel, mode="same", axes=1)
+        models_os /= integrate.trapezoid(models_os, x_os, axis=1)[:, None]
+        models_os *= counts[:, None]
 
         # pixelate models
-        models = self._pixelate(x_os, profiles)
+        models = self._pixelate(x_os, models_os)
 
         if return_all:
             if collapse:
-                return bn.nansum(models, 0), bn.nansum(profiles, 0), x_os
-            return models, profiles, x_os
+                return bn.nansum(models, 0), bn.nansum(models_os, 0), x_os
+            return models, models_os, x_os
         if collapse:
             return bn.nansum(models, 0)
         return models
@@ -714,25 +717,31 @@ class TopHatGaussians(Profile1D):
         "sigmas"
     )
 
-    def __init__(self, pars, fixed, bounds, ignore_nans=True, oversampling_factor=50, fiber_width=1.2):
+    def __init__(self, pars, fixed, bounds, ignore_nans=True, oversampling_factor=50, fiber_radius=1.2):
         super().__init__(pars, fixed, bounds, ignore_nans=ignore_nans, oversampling_factor=oversampling_factor)
 
-        self._fiber_width = fiber_width
+        self._fiber_radius = fiber_radius
 
-    def __call__(self, x):
+    def __call__(self, x, collapse=True, return_all=False):
         counts, centroids, sigmas = self.unpack_params()
 
         x_os = self._oversample_x(x)
 
-        width = int(self._fiber_width * self._oversampling_factor)
+        width = int(2 * self._fiber_radius * self._oversampling_factor)
         gaussians_ = gaussians((counts, centroids, sigmas), x_os, collapse=False)
         tophats = numpy.ones((counts.size, width)) / width
-        gaussians_tophats = fftconvolve(gaussians_, tophats, mode="same", axes=1)
+        models_os = fftconvolve(gaussians_, tophats, mode="same", axes=1)
 
-        model = self._pixelate(x_os, gaussians_tophats)
-        model = bn.nansum(gaussians_tophats, axis=0)
+        # pixelate models
+        models = self._pixelate(x_os, models_os)
 
-        return model
+        if return_all:
+            if collapse:
+                return bn.nansum(models, 0), bn.nansum(models_os, 0), x_os
+            return models, models_os, x_os
+        if collapse:
+            return bn.nansum(models, 0)
+        return models
 
 
 class NormalGaussians(Profile1D):
@@ -748,15 +757,20 @@ class NormalGaussians(Profile1D):
 
         self._alpha = alpha
 
-    def __call__(self, x):
+    def __call__(self, x, collapse=True, return_all=False):
         pars = self.unpack_params()
 
         x_os = self._oversample_x(x)
-        models = gaussians(pars, x_os, alpha=self._alpha, collapse=False)
-        models = self._pixelate(x_os, models)
+        models_os = gaussians(pars, x_os, alpha=self._alpha, collapse=False)
+        models = self._pixelate(x_os, models_os)
 
-        model = bn.nansum(models, axis=0)
-        return model
+        if return_all:
+            if collapse:
+                return bn.nansum(models, 0), bn.nansum(models_os, 0), x_os
+            return models, models_os, x_os
+        if collapse:
+            return bn.nansum(models, 0)
+        return models
 
 
 class SkewedGaussians(Profile1D):
@@ -771,7 +785,7 @@ class SkewedGaussians(Profile1D):
     def __init__(self, pars, fixed, bounds, ignore_nans=True, oversampling_factor=50):
         super().__init__(pars, fixed, bounds, ignore_nans=ignore_nans, oversampling_factor=oversampling_factor)
 
-    def __call__(self, x):
+    def __call__(self, x, collapse=True, return_all=False):
         counts, centroids, sigmas, alphas = self.unpack_params()
         # convert to PDF parameters
         deltas = self._deltas(alphas)
@@ -784,11 +798,16 @@ class SkewedGaussians(Profile1D):
         # calculate normalization
         norms = numpy.trapz(shape, x_os, axis=1)
 
-        models = counts[:, numpy.newaxis] * shape / norms[:, numpy.newaxis]
-        models = self._pixelate(x_os, models)
+        models_os = counts[:, numpy.newaxis] * shape / norms[:, numpy.newaxis]
+        models = self._pixelate(x_os, models_os)
 
-        model = bn.nansum(models, axis=0)
-        return model
+        if return_all:
+            if collapse:
+                return bn.nansum(models, 0), bn.nansum(models_os, 0), x_os
+            return models, models_os, x_os
+        if collapse:
+            return bn.nansum(models, 0)
+        return models
 
     def _deltas(self, alphas):
         return alphas / numpy.sqrt(1 + alphas**2)
@@ -831,17 +850,22 @@ class PolyGaussians(Profile1D):
     def __init__(self, pars, fixed, bounds, ignore_nans=True, oversampling_factor=50):
         super().__init__(pars, fixed, bounds, ignore_nans, oversampling_factor=oversampling_factor)
 
-    def __call__(self, x):
+    def __call__(self, x, collapse=True, return_all=False):
         counts, centroids, sigmas, a, b, c, d = self.unpack_params()
 
         x_os = self._oversample_x(x)
         gauss = gaussians((counts, centroids, sigmas), x_os, collapse=False)
         poly = a[:,None] + b[:,None]*x_os[None,:] + c[:,None]*x_os[None,:]**2 + d[:,None]*x_os[None,:]**3
-        models = gauss + poly
-        models = self._pixelate(x_os, models)
+        models_os = gauss + poly
+        models = self._pixelate(x_os, models_os)
 
-        model = bn.nansum(models, axis=0)
-        return model
+        if return_all:
+            if collapse:
+                return bn.nansum(models, 0), bn.nansum(models_os, 0), x_os
+            return models, models_os, x_os
+        if collapse:
+            return bn.nansum(models, 0)
+        return models
 
     def _polynomial(self, x):
         counts, centroids, sigmas, a, b, c, d = self.unpack_params()
@@ -861,18 +885,23 @@ class Moffats(Profile1D):
     def __init__(self, pars, fixed, bounds, ignore_nans=True, oversampling_factor=50):
         super().__init__(pars, fixed, bounds, ignore_nans, oversampling_factor=oversampling_factor)
 
-    def __call__(self, x):
+    def __call__(self, x, collapse=True, return_all=False):
         counts, centroids, sigmas, betas = self.unpack_params()
 
         x_os = self._oversample_x(x)
         moffats_ = numpy.asarray([Moffat1D(1.0, centroid, sigma, beta)(x_os) for centroid, sigma, beta in zip(centroids, sigmas, betas)])
         norms = integrate.trapezoid(moffats_, x_os, axis=1)
 
-        models = counts[:, None] * moffats_ / norms[:, None]
-        models = self._pixelate(x_os, models)
+        models_os = counts[:, None] * moffats_ / norms[:, None]
+        models = self._pixelate(x_os, models_os)
 
-        model = bn.nansum(models, axis=0)
-        return model
+        if return_all:
+            if collapse:
+                return bn.nansum(models, 0), bn.nansum(models_os, 0), x_os
+            return models, models_os, x_os
+        if collapse:
+            return bn.nansum(models, 0)
+        return models
 
 class Lorentzs(Profile1D):
 
@@ -885,16 +914,21 @@ class Lorentzs(Profile1D):
     def __init__(self, pars, fixed, bounds, ignore_nans=True, oversampling_factor=50):
         super().__init__(pars, fixed, bounds, ignore_nans=ignore_nans, oversampling_factor=oversampling_factor)
 
-    def __call__(self, x):
+    def __call__(self, x, collapse=True, return_all=False):
         counts, centroids, sigmas = self.unpack_params()
         fwhms = sigmas * 2.354
 
         x_os = self._oversample_x(x)
-        models = [count * Lorentz1D(2/(numpy.pi*fwhm), centroid, fwhm)(x_os) for count, centroid, fwhm in zip(counts, centroids, fwhms)]
-        models = self._pixelate(x_os, models)
+        models_os = [count * Lorentz1D(2/(numpy.pi*fwhm), centroid, fwhm)(x_os) for count, centroid, fwhm in zip(counts, centroids, fwhms)]
+        models = self._pixelate(x_os, models_os)
 
-        model = bn.nansum(models, axis=0)
-        return model
+        if return_all:
+            if collapse:
+                return bn.nansum(models, 0), bn.nansum(models_os, 0), x_os
+            return models, models_os, x_os
+        if collapse:
+            return bn.nansum(models, 0)
+        return models
 
 class Voigts(Profile1D):
 
@@ -908,17 +942,22 @@ class Voigts(Profile1D):
     def __init__(self, pars, fixed, bounds, ignore_nans=True, oversampling_factor=50):
         super().__init__(pars, fixed, bounds, ignore_nans, oversampling_factor=oversampling_factor)
 
-    def __call__(self, x):
+    def __call__(self, x, collapse=True, return_all=False):
         counts, centroids, sigmas_l, sigmas_g = self.unpack_params()
         fwhms_l = sigmas_l * 2.354
         fwhms_g = sigmas_g * 2.354
 
         x_os = self._oversample_x(x)
-        models = [count * Voigt1D(centroid, 2/(numpy.pi*fwhm_l), fwhm_l, fwhm_g, method="Scipy")(x) for count, centroid, fwhm_l, fwhm_g in zip(counts, centroids, fwhms_l, fwhms_g)]
-        models = self._pixelate(x_os, models)
+        models_os = [count * Voigt1D(centroid, 2/(numpy.pi*fwhm_l), fwhm_l, fwhm_g, method="Scipy")(x) for count, centroid, fwhm_l, fwhm_g in zip(counts, centroids, fwhms_l, fwhms_g)]
+        models = self._pixelate(x_os, models_os)
 
-        model = bn.nansum(models, axis=0)
-        return model
+        if return_all:
+            if collapse:
+                return bn.nansum(models, 0), bn.nansum(models_os, 0), x_os
+            return models, models_os, x_os
+        if collapse:
+            return bn.nansum(models, 0)
+        return models
 
 
 PROFILES = {
