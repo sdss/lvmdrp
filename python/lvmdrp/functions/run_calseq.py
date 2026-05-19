@@ -130,7 +130,7 @@ def _read_ffactors(drpver, channel):
 def _measure_ffactors(mjd, drpver, channel, sky_lines=SKYLINES_FIBERFLAT, dwave=20.0,
                       fiber_radius=0.01, oversampling_factor=100, quantiles=(5.0, 97.0),
                       groupby="spec", coadd_method="fit", norm_stat=lambda x: biweight_location(x, ignore_nan=True),
-                      fit_gradient=False, label=None, write_table=False, table_dir=None, display_plots=False):
+                      fit_gradient=False, label=None, write_table=False, table_dir=None, overwrite=False, display_plots=False):
     # define label if not given
     label = label or "".join(filter(str.isalnum, norm_stat.__name__))
 
@@ -139,6 +139,8 @@ def _measure_ffactors(mjd, drpver, channel, sky_lines=SKYLINES_FIBERFLAT, dwave=
     table_dir = table_dir or "./"
     os.makedirs(table_dir, exist_ok=True)
     table_path = os.path.join(table_dir, f"{name}.csv")
+    if not overwrite and os.path.exists(table_path):
+        return pd.read_csv(table_path)
 
     # grab all relevant DRP products: before/ after fiber flat fielding
     channel_ = "?" if channel == "all" else channel
@@ -210,7 +212,7 @@ def _measure_ffactors(mjd, drpver, channel, sky_lines=SKYLINES_FIBERFLAT, dwave=
     metadata = pd.DataFrame(metadata)
     metadata.sort_values("exposure", inplace=True)
     if write_table:
-        metadata.to_csv(table_path)
+        metadata.to_csv(table_path, index=False)
 
     return metadata
 
