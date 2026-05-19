@@ -106,7 +106,7 @@ CALIBRATION_EPOCHS_PATH = os.path.join(os.getenv("LVMCORE_DIR"), "calibrations",
 def _extract_ffactors(header):
     channel = header["CCD"][0]
     columns = [
-        "obstime", "smjd", "tile_id", "exposure", "scira", "scidec",
+        "obstime", "smjd", "tile_id", "exposure", "scira", "scidec", f"{channel} fiberflat grad",
         f"{channel}1 fiberflat corr", f"{channel}2 fiberflat corr", f"{channel}3 fiberflat corr"]
 
     metadata_row = {k.replace(" ", "_"): header.get(k) for k in columns}
@@ -127,13 +127,13 @@ def _read_ffactors(drpver, channel):
     return pd.DataFrame(metadata)
 
 
-def _measure_ffactors(mjd, drpver, channel, sky_lines=SKYLINES_FIBERFLAT, norm_stat=lambda x: biweight_location(x, ignore_nan=True), label=None, write_table=False):
+def _measure_ffactors(mjd, drpver, channel, sky_lines=SKYLINES_FIBERFLAT, dwave=20.0,
+                      fiber_radius=0.01, oversampling_factor=100, quantiles=(5.0, 97.0),
+                      groupby="spec", coadd_method="fit", norm_stat=lambda x: biweight_location(x, ignore_nan=True),
+                      fit_gradient=False,
+                      label=None, write_table=False):
+    # define label if not given
     label = label or norm_stat.__name__
-
-    # define general parameters
-    dwave = 20.0
-    quantiles = (5.0, 97.0)
-    groupby = "spec"
 
     # grab all relevant DRP products: before/ after fiber flat fielding
     channel_ = "?" if channel == "all" else channel
@@ -165,8 +165,16 @@ def _measure_ffactors(mjd, drpver, channel, sky_lines=SKYLINES_FIBERFLAT, norm_s
             sky_cwave=sky_cwave,
             cont_cwave=cont_cwave,
             dwave=dwave,
-            quantiles=quantiles, guess_coeffs=[1,0,0,0], fixed_coeffs=[1,2,3], groupby=groupby,
-            axs=axs, labels=True)
+            fiber_radius=fiber_radius,
+            oversampling_factor=oversampling_factor,
+            coadd_method=coadd_method,
+            quantiles=quantiles,
+            guess_coeffs=[1,0,0,0],
+            fixed_coeffs=[3] if fit_gradient else [1, 2, 3],
+            groupby=groupby, axs=axs, labels=True)
+
+        log.info("evaluating gradient model")
+        gradient_model = IFUGradient.ifu_gradient(coeffs, x=x, y=y, normalize=True)
 
         log.info("applying flatfield correction")
         fiber_groups = mflat._get_fiber_groups(by="spec")
@@ -185,6 +193,7 @@ def _measure_ffactors(mjd, drpver, channel, sky_lines=SKYLINES_FIBERFLAT, norm_s
         ax_cor.set_ylim(0.92, 1.08)
         slit(x=rss._slitmap["fiberid"].data, y=skyline_slit, data=rss._data, ax=ax_cor)
 
+        rss._header[f"HIERARCH {channel.upper()} FIBERFLAT GRAD"] = (np.round(bn.nanmax(gradient_model)/bn.nanmin(gradient_model), 5), "fiberflat field gradient")
         rss._header[f"HIERARCH {channel.upper()}1 FIBERFLAT CORR"] =  (np.round(factor[0], 5), "fiberflat corr. spec. 1")
         rss._header[f"HIERARCH {channel.upper()}2 FIBERFLAT CORR"] =  (np.round(factor[1], 5), "fiberflat corr. spec. 2")
         rss._header[f"HIERARCH {channel.upper()}3 FIBERFLAT CORR"] =  (np.round(factor[2], 5), "fiberflat corr. spec. 3")

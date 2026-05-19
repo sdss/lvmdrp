@@ -3340,7 +3340,7 @@ class RSS(FiberRows):
 
         return wave_offsets, wave_offsets_mod
 
-    def fit_lines_slit(rss, cwaves, dwave=8, return_xy=False, select_fibers=None, axs=None):
+    def fit_lines_slit(rss, cwaves, dwave=8, fiber_radius=0.01, oversampling_factor=100, return_xy=False, select_fibers=None, axs=None):
 
         cwaves_ = numpy.atleast_1d(cwaves)
 
@@ -3363,7 +3363,10 @@ class RSS(FiberRows):
                 continue
 
             try:
-                flux, _, _, _ = spec.fit_lines(cwaves_, dwave=dwave, fiber_radius=1.0, axs=axs[iax] if axs is not None else axs)
+                flux, _, _, _ = spec.fit_lines(cwaves_, dwave=dwave,
+                                               fiber_radius=fiber_radius,
+                                               oversampling_factor=oversampling_factor,
+                                               axs=axs[iax] if axs is not None else axs)
             except ValueError as e:
                 warnings.warn(f"while fitting fiber {ifiber}: {e}")
                 continue
@@ -3376,6 +3379,8 @@ class RSS(FiberRows):
 
     def fit_ifu_gradient(self,
                          cwave, dwave=8,
+                         fiber_radius=0.01,
+                         oversampling_factor=100,
                          guess_coeffs=[1,2,3,0], fixed_coeffs=[3], groupby="spec",
                          coadd_method="average", norm_method=lambda x: biweight_location(x, ignore_nan=True),
                          axs=None):
@@ -3383,9 +3388,13 @@ class RSS(FiberRows):
         if coadd_method == "average":
             z, x, y = self.coadd_flux(cwave=cwave, dwave=dwave, comb_stat=bn.nanmean, return_xy=True, telescope="Sci")
         elif coadd_method == "integrate":
-            z, x, y = self.coadd_flux(cwave=cwave, dwave=dwave, comb_stat=lambda a, axis: numpy.trapz(numpy.nan_to_num(a, nan=0), self._wave, axis=axis), return_xy=True, telescope="Sci")
+            z, x, y = self.coadd_flux(cwave=cwave, dwave=dwave,
+                                      comb_stat=lambda a, axis: numpy.trapz(numpy.nan_to_num(a, nan=0), self._wave, axis=axis),
+                                      return_xy=True, telescope="Sci")
         elif coadd_method == "fit":
-            z, x, y = self.fit_lines_slit(cwaves=cwave, return_xy=True, select_fibers="Sci")
+            z, x, y = self.fit_lines_slit(cwaves=cwave, dwave=dwave,
+                                          fiber_radius=fiber_radius, oversampling_factor=oversampling_factor,
+                                          return_xy=True, select_fibers="Sci")
         else:
             raise ValueError(f"Invalid value for `coadd_method`: {coadd_method}. Expected either 'average', 'integrate' or 'fit'")
 
@@ -3458,8 +3467,8 @@ class RSS(FiberRows):
         return rejects
 
     def measure_skyline_flatfield(self, mflat,
-                                  sky_cwave, cont_cwave, dwave=8, quantiles=(5, 97),
-                                  guess_coeffs=[1,2,3,0], fixed_coeffs=[3], groupby="spec",
+                                  sky_cwave, cont_cwave, dwave=8, fiber_radius=0.01, oversampling_factor=100,
+                                  quantiles=(5, 97), guess_coeffs=[1,2,3,0], fixed_coeffs=[3], groupby="spec",
                                   coadd_method="fit", norm_method=lambda x: biweight_location(x, ignore_nan=True),
                                   axs=None, labels=False):
         expnum = self._header["EXPOSURE"]
@@ -3488,8 +3497,9 @@ class RSS(FiberRows):
         fscience._wave = wave_trace.eval_coeffs()
 
         log.info(f"  fitting gradient and factors around sky line @ {sky_cwave:.2f} Angstroms for '{imagetyp}' exposure {expnum = }")
-        x, y, z, coeffs, factor = fscience.fit_ifu_gradient(cwave=sky_cwave, dwave=dwave, groupby=groupby,
-                                                            guess_coeffs=guess_coeffs, fixed_coeffs=fixed_coeffs,
+        x, y, z, coeffs, factor = fscience.fit_ifu_gradient(cwave=sky_cwave, dwave=dwave,
+                                                            fiber_radius=fiber_radius, oversampling_factor=oversampling_factor,
+                                                            groupby=groupby, guess_coeffs=guess_coeffs, fixed_coeffs=fixed_coeffs,
                                                             coadd_method=coadd_method, norm_method=norm_method)
         gradient_model = IFUGradient.ifu_gradient(coeffs, x=x, y=y, normalize=True)
         log.info(f"  factors          = {numpy.round(factor, 4)}")

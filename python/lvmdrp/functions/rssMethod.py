@@ -1624,6 +1624,7 @@ def correctTraceMask_drp(trace_in, trace_out, logfile, ref_file, poly_smooth="")
 def apply_fiberflat(in_rss: str, out_frame: str, in_flat: str,
                     sky_cwaves: Dict[str, float] = SKYLINES_FIBERFLAT,
                     cont_cwaves: Dict[str, float] = CONTINUUM_FIBERFLAT,
+                    dwave: float = 20.0,
                     groupby: str = "spec", quantiles: Tuple[float, float] = (5.0, 97.0),
                     coadd_method="fit", norm_method=lambda x: biweight_location(x, ignore_nan=True),
                     display_plots: bool = False) -> RSS:
@@ -1657,7 +1658,6 @@ def apply_fiberflat(in_rss: str, out_frame: str, in_flat: str,
     channel = rss._header["CCD"][0]
     sky_cwave = sky_cwaves[channel]
     cont_cwave = cont_cwaves[channel]
-    dwave = 20.0
 
     # load fiberflat
     log.info(f"reading fiberflat from {os.path.basename(in_flat)}")
