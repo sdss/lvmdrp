@@ -130,10 +130,15 @@ def _read_ffactors(drpver, channel):
 def _measure_ffactors(mjd, drpver, channel, sky_lines=SKYLINES_FIBERFLAT, dwave=20.0,
                       fiber_radius=0.01, oversampling_factor=100, quantiles=(5.0, 97.0),
                       groupby="spec", coadd_method="fit", norm_stat=lambda x: biweight_location(x, ignore_nan=True),
-                      fit_gradient=False,
-                      label=None, write_table=False):
+                      fit_gradient=False, label=None, write_table=False, table_dir=None, display_plots=False):
     # define label if not given
-    label = label or norm_stat.__name__
+    label = label or "".join(filter(str.isalnum, norm_stat.__name__))
+
+    # define paths
+    name = f"ffactors-{drpver}-{mjd}-{channel}-{label}"
+    table_dir = table_dir or "./"
+    os.makedirs(table_dir, exist_ok=True)
+    table_path = os.path.join(table_dir, f"{name}.csv")
 
     # grab all relevant DRP products: before/ after fiber flat fielding
     channel_ = "?" if channel == "all" else channel
@@ -192,6 +197,7 @@ def _measure_ffactors(mjd, drpver, channel, sky_lines=SKYLINES_FIBERFLAT, dwave=
         ax_cor.set_ylabel("Normalized counts", fontsize="large")
         ax_cor.set_ylim(0.92, 1.08)
         slit(x=rss._slitmap["fiberid"].data, y=skyline_slit, data=rss._data, ax=ax_cor)
+        save_fig(fig, product_path=f"{table_path.replace('.csv', '')}-{expnum:>08d}.fits", figure_path="qa", to_display=display_plots)
 
         rss._header[f"HIERARCH {channel.upper()} FIBERFLAT GRAD"] = (np.round(bn.nanmax(gradient_model)/bn.nanmin(gradient_model), 5), "fiberflat field gradient")
         rss._header[f"HIERARCH {channel.upper()}1 FIBERFLAT CORR"] =  (np.round(factor[0], 5), "fiberflat corr. spec. 1")
@@ -204,7 +210,7 @@ def _measure_ffactors(mjd, drpver, channel, sky_lines=SKYLINES_FIBERFLAT, dwave=
     metadata = pd.DataFrame(metadata)
     metadata.sort_values("exposure", inplace=True)
     if write_table:
-        metadata.to_csv(f"ffactors-{drpver}-{channel}-{label}.csv")
+        metadata.to_csv(table_path)
 
     return metadata
 
