@@ -148,6 +148,9 @@ def _measure_ffactors(mjd, drpver, channel, sky_lines=SKYLINES_FIBERFLAT, dwave=
         path.expand("lvm_anc", drpver=drpver, tileid="*", mjd=mjd, expnum="????????", imagetype="object", kind="w", camera=channel_),
         key=lambda s: int(os.path.basename(s).split(".")[0].split("-")[-1]))
 
+    if len(wframe_paths) == 0:
+        return
+
     # grab master fiber flat fields
     mflat_paths = get_calib_paths(mjd=mjd, flavors={"fiberflat_twilight"}, from_sandbox=True)["fiberflat_twilight"]
 
