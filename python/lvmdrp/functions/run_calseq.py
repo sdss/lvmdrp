@@ -77,7 +77,7 @@ from lvmdrp.core.fit_profile import gaussians, IFUGradient
 
 from lvmdrp.functions import imageMethod as image_tasks
 from lvmdrp.functions import rssMethod as rss_tasks
-from lvmdrp.functions import sky_qa as sky
+from lvmdrp.core import sky
 from lvmdrp.main import start_logging, get_config_options, read_fibermap, reduce_2d, reduce_1d
 from lvmdrp.functions.run_twilights import lvmFlat, to_native_wave, fit_fiberflat, combine_twilight_sequence, fit_skyline_flatfield
 
@@ -103,14 +103,14 @@ FIBER_SMOOTHING_CONFIG = {
 CALIBRATION_EPOCHS_PATH = os.path.join(os.getenv("LVMCORE_DIR"), "calibrations", "calibration-epochs.yaml")
 
 
-def _extract_ffactors(header):
-    channel = header["CCD"][0]
+def _extract_ffactors(channel, header):
     columns = [
         "obstime", "smjd", "tile_id", "exposure", "scira", "scidec", f"{channel} fiberflat grad",
         f"{channel}1 fiberflat corr", f"{channel}2 fiberflat corr", f"{channel}3 fiberflat corr"]
 
     metadata_row = {k.replace(" ", "_"): header.get(k) for k in columns}
-    metadata_sky = sky.create_overview(header)
+    metadata_sky = sky.sky_pars_header(header)
+    metadata_sky = {k.split()[-1].lower().replace("sci_", ""): v[0] for k, v in metadata_sky.items() if "SKYE_" not in k and "SKYW_" not in k}
     metadata_row.update(metadata_sky)
 
     return metadata_row
@@ -155,6 +155,10 @@ def _measure_ffactors(mjd, drpver, channel, sky_lines=SKYLINES_FIBERFLAT, dwave=
     metadata = []
     for wframe_path in wframe_paths:
         rss = RSS.from_file(wframe_path)
+
+        if "ON" in [rss._header[lamp] for lamp in ARC_LAMPS + CON_LAMPS]:
+            metadata.append(_extract_ffactors(channel, rss._header))
+            continue
 
         channel_current = rss._header["CCD"][0]
         expnum = rss._header["EXPOSURE"]
@@ -207,7 +211,7 @@ def _measure_ffactors(mjd, drpver, channel, sky_lines=SKYLINES_FIBERFLAT, dwave=
         rss._header[f"HIERARCH {channel.upper()}3 FIBERFLAT CORR"] =  (np.round(factor[2], 5), "fiberflat corr. spec. 3")
 
         # extract flat field factors and additional information
-        metadata.append(_extract_ffactors(rss._header))
+        metadata.append(_extract_ffactors(channel, rss._header))
 
     metadata = pd.DataFrame(metadata)
     metadata.sort_values("exposure", inplace=True)
