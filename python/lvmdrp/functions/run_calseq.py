@@ -130,7 +130,11 @@ def _read_ffactors(drpver, channel):
 def _measure_ffactors(mjd, drpver, channel, sky_lines=SKYLINES_FIBERFLAT, dwave=20.0,
                       fiber_radius=0.01, oversampling_factor=100, quantiles=(5.0, 97.0),
                       groupby="spec", coadd_method="fit", norm_stat=lambda x: biweight_location(x, ignore_nan=True),
-                      fit_gradient=False, label=None, write_table=False, table_dir=None, overwrite=False, display_plots=False):
+                      fit_gradient=False, label=None, write_table=False, table_dir=None, overwrite=False,
+                      display_plots=False, dry_run=False):
+    if mjd is None:
+        log.error("no MJD given, nothing to do")
+        return
     # define label if not given
     label = label or "".join(filter(str.isalnum, norm_stat.__name__))
 
@@ -149,6 +153,12 @@ def _measure_ffactors(mjd, drpver, channel, sky_lines=SKYLINES_FIBERFLAT, dwave=
         key=lambda s: int(os.path.basename(s).split(".")[0].split("-")[-1]))
 
     if len(wframe_paths) == 0:
+        log.error(f"zero paths matched given {drpver = }, {mjd = }, channel = {channel_}; nothing to do")
+        return
+
+    log.info(f"going to estimate flat field factors for {len(wframe_paths)} frames, {mjd = }, channel = {channel_}")
+    if dry_run:
+        log.info(f"output table at {table_path}")
         return
 
     # grab master fiber flat fields
@@ -219,6 +229,7 @@ def _measure_ffactors(mjd, drpver, channel, sky_lines=SKYLINES_FIBERFLAT, dwave=
     metadata = pd.DataFrame(metadata)
     metadata.sort_values("exposure", inplace=True)
     if write_table:
+        log.info(f"saving output table at {table_path}")
         metadata.to_csv(table_path, index=False)
 
     return metadata
