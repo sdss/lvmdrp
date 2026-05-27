@@ -123,7 +123,7 @@ def _read_ffactors(drpver, channel):
     for p in tqdm(frame_paths, desc=f"extracting factors for {drpver = } | {channel = }", ascii=True, unit="exposure"):
         hdr = fits.getheader(p)
 
-        metadata.append(_extract_ffactors(hdr))
+        metadata.append(_extract_ffactors(channel, hdr))
     return pd.DataFrame(metadata)
 
 
