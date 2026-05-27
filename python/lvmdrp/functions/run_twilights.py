@@ -677,6 +677,10 @@ def fit_fiberflat(in_rss, out_flat, out_rss, ref_kind=600, guess_coeffs=[1,2,3,0
     flat_g.setHdrValue(f"HIERARCH {channel} FIBERFLAT COADD", coadd_method, "coadding method")
     flat_g.setHdrValue(f"HIERARCH {channel} FIBERFLAT SKYCORR", False, "fiberflat skyline-corrected?")
     flat_g.setHdrValue(f"HIERARCH {channel} FIBERFLAT GROUPBY", groupby, "fiber grouping")
+    for i, factor in enumerate(factors):
+        flat_g.setHdrValue(f"HIERARCH {channel} FIBERFLAT FACTOR{i+1}", factor, f"fiberflat factor #{i+1}")
+    for i, coeff in enumerate(coeffs):
+        flat_g.setHdrValue(f"HIERARCH {channel} FIBERFLAT GCOEFF{i+1}", coeff, f"IFU gradient coeff #{i+1}")
     flat_g.writeFitsData(out_flat)
     log.info(f"writing flatfielded exposure to {out_rss}")
     (rss_g/flat_g).writeFitsData(out_rss)
