@@ -459,10 +459,13 @@ def get_flatfield(rss, ref_kind=lambda x: biweight_location(x, ignore_nan=True),
         nyq = 1 / (rss._wave[1] - rss._wave[0])
         for ifiber in range(flatfield_r._fibers):
             spec = flatfield.getSpec(ifiber)
-            if spec._mask.all():
-                continue
 
             select = np.isfinite(spec._data)
+            # reject fiber that has half of the pixels masked or
+            # less than `padlen` valid pixels
+            if spec._mask.sum() >= spec._mask.size // 2 or select.sum() <= 15:
+                continue
+
             spec._data[select] = butter_lowpass_filter(median_filter(spec._data[select], 51), smoothing, nyq)
             spec._error[select] = np.sqrt(butter_lowpass_filter(median_filter(spec._error[select]**2, 51), smoothing, nyq))
 
