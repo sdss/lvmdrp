@@ -33,6 +33,7 @@ from lvmdrp.core.plot import (plt, create_subplots, save_fig,
                               plot_wavesol_coeffs, plot_wavesol_residuals,
                               plot_wavesol_spec, plot_wavesol_wave,
                               plot_wavesol_lsf,
+                              plot_gradient_fit,
                               slit)
 from lvmdrp.core.rss import RSS, _read_pixwav_map, loadRSS, lvmFrame, lvmFFrame, lvmCFrame
 from lvmdrp.core.spectrum1d import Spectrum1D, _spec_from_lines, _cross_match_float
@@ -1622,9 +1623,14 @@ def correctTraceMask_drp(trace_in, trace_out, logfile, ref_file, poly_smooth="")
 
 
 def apply_fiberflat(in_rss: str, out_frame: str, in_flat: str,
+                    fit_factors: bool = True,
+                    fit_gradient: bool = False,
+                    assume_factors: numpy.ndarray | None = None,
+                    assume_coeffs: numpy.ndarray | None = None,
                     sky_cwaves: Dict[str, float] = SKYLINES_FIBERFLAT,
                     cont_cwaves: Dict[str, float] = CONTINUUM_FIBERFLAT,
                     dwave: float = 20.0,
+                    fiber_radius: float = 0.01, oversampling_factor: int = 100,
                     groupby: str = "spec", quantiles: Tuple[float, float] = (5.0, 97.0),
                     coadd_method="fit", norm_method=lambda x: biweight_location(x, ignore_nan=True),
                     display_plots: bool = False) -> RSS:
@@ -1682,22 +1688,32 @@ def apply_fiberflat(in_rss: str, out_frame: str, in_flat: str,
     gs_gra = gridspec.GridSpec(2, 5, hspace=0.01, wspace=0.01, left=0.07, right=0.99, figure=fig)
     gs_cor = gridspec.GridSpec(2, 5, hspace=0.5, wspace=0.01, left=0.07, right=0.99, figure=fig)
     axs = [fig.add_subplot(gs_gra[0, j]) for j in range(5)]
-    log.info(f"measuring sky line {sky_cwave:.2f}+/-{dwave:.2f} Angstroms in {rss._fibers} fibers")
-    x, y, skyline_slit, coeffs, factor, _ = rss.measure_skyline_flatfield(
-            mflat=mflat, sky_cwave=sky_cwave, cont_cwave=cont_cwave, dwave=dwave,
-            quantiles=quantiles, guess_coeffs=[1,0,0,0], fixed_coeffs=[0,1,2,3], groupby=groupby,
-            coadd_method=coadd_method, norm_method=norm_method,
-            axs=axs, labels=True)
 
-    log.info("applying flatfield correction")
     fiber_groups = mflat._get_fiber_groups(by="spec")
-    flatfield_corr = fp.IFUGradient.ifu_factors(factor, fiber_groups)
+    factor = assume_factors if assume_factors is not None else numpy.ones(len(set(fiber_groups)), dtype="float")
+    coeffs = assume_coeffs if assume_coeffs is not None else numpy.array([1,0,0,0], dtype="float")
+    fixed_coeffs = [0,1,2,3] if not fit_gradient else [3]
+    log.info(f"measuring sky line {sky_cwave:.2f}+/-{dwave:.2f} Angstroms in {rss._fibers} fibers")
+    if fit_factors:
+        x, y, skyline_slit, coeffs, factor, _ = rss.measure_skyline_flatfield(
+                mflat=mflat, sky_cwave=sky_cwave, cont_cwave=cont_cwave, dwave=dwave,
+                fiber_radius=fiber_radius, oversampling_factor=oversampling_factor,
+                quantiles=quantiles, guess_coeffs=coeffs, fixed_coeffs=fixed_coeffs, groupby=groupby,
+                coadd_method=coadd_method, norm_method=norm_method,
+                axs=None, labels=True)
+
+        log.info("applying flatfield correction")
+    else:
+        skyline_slit, x, y = (rss / mflat).fit_lines_slit(
+            cwaves=sky_cwave, dwave=dwave,
+            fiber_radius=fiber_radius, oversampling_factor=oversampling_factor, select_fibers="Sci", return_xy=True)
+
+    flatfield_corr, g, f = fp.IFUGradient.ifu_joint_model(coeffs, factor, x, y, fiber_groups, normalize=True, return_components=True)
+    plot_gradient_fit(rss._slitmap, skyline_slit, g, f, telescope="Sci", axs=axs)
+
     mflat *= flatfield_corr[:, None]
     rss /= mflat
     skyline_slit /= flatfield_corr
-
-    # update pixel mask
-    rss._mask = numpy.isnan(rss._data)|numpy.isnan(rss._error)
 
     ax_cor = fig.add_subplot(gs_cor[-1, :])
     ax_cor.set_title(f"Flatfielded skyline @ {sky_cwave:.2f}+/-{dwave:.2f} Angstroms", loc="left")
@@ -1706,6 +1722,9 @@ def apply_fiberflat(in_rss: str, out_frame: str, in_flat: str,
     ax_cor.set_ylim(0.92, 1.08)
     slit(x=rss._slitmap["fiberid"].data, y=skyline_slit, data=rss._data, ax=ax_cor)
     save_fig(fig, out_frame, to_display=display_plots, figure_path="qa", label="fiberflat_correction")
+
+    # update pixel mask
+    rss._mask = numpy.isnan(rss._data)|numpy.isnan(rss._error)
 
     # create lvmFrame
     log.info(f"writing lvmFrame to {os.path.basename(out_frame)}")
