@@ -1819,7 +1819,7 @@ def create_dome_fiberflats(mjd, expnums_ldls=None, expnums_qrtz=None, cals_mjd=N
 
 def create_twilight_fiberflats(mjd: int, epochs: dict[int, dict] = None, cals_mjd: int = None, use_longterm_cals: bool = True,
                       ref_kind: Union[int, Callable[[np.ndarray, int], np.ndarray]] = bn.nanmedian,
-                      groupby: str = "spec", guess_coeffs: List[int] = [1,0,0,0], fixed_coeffs: List[int] = [0,1,2,3],
+                      groupby: str = "spec", guess_coeffs: List[int] = [1,0,0,0], fixed_coeffs: List[int] = [3],
                       cnorms: Dict[str, float] = SKYLINES_FIBERFLAT, dwave: float = 20.0,
                       smoothing: float = 0.07,
                       interpolate_invalid: bool = True,
@@ -1848,7 +1848,7 @@ def create_twilight_fiberflats(mjd: int, epochs: dict[int, dict] = None, cals_mj
     guess_coeffs : list[int], optional
         Initial guess for polynomial coefficients in gradient fitting. Defaults to [1,0,0,0].
     fixed_coeffs : list[int], optional
-        Indices of coefficients to fix during fitting. Defaults to [1,2,3].
+        Indices of coefficients to fix during fitting. Defaults to [3].
     cnorms : dict, optional
         Dictionary of normalization wavelengths per channel. Defaults to SKYLINES_FIBERFLAT.
     dwave : float, optional
