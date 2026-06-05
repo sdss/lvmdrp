@@ -681,9 +681,9 @@ def fit_fiberflat(in_rss, out_flat, out_rss, ref_kind=600, guess_coeffs=[1,2,3,0
     flat_g.setHdrValue(f"HIERARCH {channel} FIBERFLAT SKYCORR", False, "fiberflat skyline-corrected?")
     flat_g.setHdrValue(f"HIERARCH {channel} FIBERFLAT GROUPBY", groupby, "fiber grouping")
     for i, factor in enumerate(factors):
-        flat_g.setHdrValue(f"HIERARCH {channel} FIBERFLAT FACTOR{i+1}", factor, f"fiberflat factor #{i+1}")
+        flat_g.setHdrValue(f"HIERARCH {channel} FIBERFLAT FACTOR{i+1}", np.round(factor, 5), f"fiberflat factor {groupby}{i+1}")
     for i, coeff in enumerate(coeffs):
-        flat_g.setHdrValue(f"HIERARCH {channel} FIBERFLAT GCOEFF{i+1}", coeff, f"IFU gradient coeff #{i+1}")
+        flat_g.setHdrValue(f"HIERARCH {channel} FIBERFLAT GCOEFF{i+1}", np.round(coeff, 5), f"IFU gradient coeff #{i+1}")
     flat_g.writeFitsData(out_flat)
     log.info(f"writing flatfielded exposure to {out_rss}")
     (rss_g/flat_g).writeFitsData(out_rss)
@@ -813,10 +813,15 @@ def fit_skyline_flatfield(in_sciences, in_mflat, out_mflat, sky_cwave, cont_cwav
     save_fig(fig, out_mflat, to_display=display_plots, figure_path="qa", label="flat_correction")
 
     mflat_corr = mflat * flatfield_corr[:, None]
+    mflat_corr.setHdrValue(f"HIERARCH {channel} FIBERFLAT CWAVE", sky_cwave, "norm. wavelength [Angstrom]")
+    mflat_corr.setHdrValue(f"HIERARCH {channel} FIBERFLAT DWAVE", dwave, "norm. window width [Angstrom]")
+    mflat_corr.setHdrValue(f"HIERARCH {channel} FIBERFLAT COADD", coadd_method, "coadding method")
     mflat_corr.setHdrValue(f"HIERARCH {channel} FIBERFLAT SKYCORR", True, "fiberflat skyline-corrected?")
     mflat_corr.setHdrValue(f"HIERARCH {channel} FIBERFLAT GROUPBY", groupby, "fiber grouping")
     for i, f in enumerate(factor):
-        mflat_corr.setHdrValue(f"HIERARCH {channel} FIBERFLAT FACTOR{i+1}", f, f"{groupby}{i+1} factor")
+        mflat_corr.setHdrValue(f"HIERARCH {channel} FIBERFLAT FACTOR{i+1}", np.round(f, 5), f"fiberflat factor {groupby}{i+1}")
+    for i, c in enumerate(coeffs):
+        mflat_corr.setHdrValue(f"HIERARCH {channel} FIBERFLAT GCOEFF{i+1}", np.round(c, 5), f"IFU gradient coeff #{i+1}")
     log.info(f"writing corrected master fiberflat to {out_mflat}")
     mflat_corr.writeFitsData(out_mflat)
 

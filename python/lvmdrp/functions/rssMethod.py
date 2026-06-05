@@ -1739,10 +1739,16 @@ def apply_fiberflat(in_rss: str, out_frame: str, in_flat: str,
         slitmap=rss._slitmap,
         superflat=mflat._data
     )
-    rss._header[f"HIERARCH {channel.upper()}1 FIBERFLAT CORR"] =  (numpy.round(factor[0], 5), "fiberflat corr. spec. 1")
-    rss._header[f"HIERARCH {channel.upper()}2 FIBERFLAT CORR"] =  (numpy.round(factor[1], 5), "fiberflat corr. spec. 2")
-    rss._header[f"HIERARCH {channel.upper()}3 FIBERFLAT CORR"] =  (numpy.round(factor[2], 5), "fiberflat corr. spec. 3")
-    lvmframe.set_header(orig_header=rss._header, flatname=os.path.basename(in_flat))
+    lvmframe.set_header(orig_header=rss._header.copy(), flatname=os.path.basename(in_flat))
+    lvmframe.setHdrValue(f"HIERARCH {channel} FIBERFLAT CWAVE", sky_cwave, "norm. wavelength [Angstrom]")
+    lvmframe.setHdrValue(f"HIERARCH {channel} FIBERFLAT DWAVE", dwave, "norm. window width [Angstrom]")
+    lvmframe.setHdrValue(f"HIERARCH {channel} FIBERFLAT COADD", coadd_method, "coadding method")
+    lvmframe.setHdrValue(f"HIERARCH {channel} FIBERFLAT SKYCORR", True, "fiberflat skyline-corrected?")
+    lvmframe.setHdrValue(f"HIERARCH {channel} FIBERFLAT GROUPBY", groupby, "fiber grouping")
+    for i, f in enumerate(factor):
+        lvmframe.setHdrValue(f"HIERARCH {channel} FIBERFLAT FACTOR{i+1}", numpy.round(f, 5), f"fiberflat factor {groupby}{i+1}")
+    for i, c in enumerate(coeffs):
+        lvmframe.setHdrValue(f"HIERARCH {channel} FIBERFLAT GCOEFF{i+1}", numpy.round(c, 5), f"IFU gradient coeff #{i+1}")
     lvmframe.writeFitsData(out_frame)
 
     return rss, lvmframe
