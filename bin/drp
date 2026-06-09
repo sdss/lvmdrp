@@ -10,7 +10,7 @@ from typing import List
 
 import click
 import cloup
-from cloup.constraints import mutually_exclusive, RequireExactly, IsSet, If
+from cloup.constraints import mutually_exclusive, RequireExactly
 
 import bottleneck as bn
 from astropy.stats import biweight_location
@@ -450,12 +450,20 @@ def fiberflat_corrections(mjd, science_mjds, science_expnums, force_correction, 
 @click.option('--label', type=str, help='label for the output tables')
 @click.option('--table-dir', type=str, help='directory path where the output tables will be stored')
 @click.option('--overwrite', is_flag=True, default=False, help='overwrite existing output tables')
-@click.option("--dry-run", is_flag=True, default=False, help="Shows useful information about the current setup without actually running experiment")
+@click.option('--use-untagged-cals', is_flag=True, default=False, help='use fiber flat field from the untagged (not sandbox) directory')
+@click.option('--version-cals', type=str, help='fiber flat field version to use if --use-untagged-cals is given')
+@click.option("--dry-run", is_flag=True, default=False, help="shows useful information about the current setup without actually running experiment")
 @cloup.constraint(mutually_exclusive, ['mjd', 'mjd_list', 'mjd_range'])
 @cloup.constraint(RequireExactly(1), ['mjd', 'mjd_list', 'mjd_range'])
 def ffactors_experiment(mjd, mjd_list, mjd_range, drpver, channel, b_skyline, r_skyline, z_skyline, dwave,
                         fiber_radius, oversampling_factor, quantiles, groupby, coadd_method, norm_stat,
-                        fit_gradient, label, table_dir, overwrite, dry_run):
+                        fit_gradient, label, table_dir, overwrite, use_untagged_cals, version_cals, dry_run):
+
+    if use_untagged_cals and version_cals is None:
+        raise click.UsageError(
+            "--version-cals is required when --use-untagged-cals is used"
+        )
+
     STATS = {
         "mean": bn.nanmean,
         "median": bn.nanmedian,
@@ -475,7 +483,9 @@ def ffactors_experiment(mjd, mjd_list, mjd_range, drpver, channel, b_skyline, r_
                           fiber_radius=fiber_radius, oversampling_factor=oversampling_factor,
                           quantiles=quantiles, groupby=groupby, coadd_method=coadd_method,
                           norm_stat=STATS[norm_stat], fit_gradient=fit_gradient, label=label,
-                          write_table=True, table_dir=table_dir, overwrite=overwrite, dry_run=dry_run)
+                          write_table=True, table_dir=table_dir, overwrite=overwrite,
+                          use_untagged_cals=use_untagged_cals, version_cals=version_cals,
+                          dry_run=dry_run)
 
 
 

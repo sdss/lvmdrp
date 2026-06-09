@@ -131,7 +131,12 @@ def _measure_ffactors(mjd, drpver, channel, sky_lines=SKYLINES_FIBERFLAT, dwave=
                       fiber_radius=0.01, oversampling_factor=100, quantiles=(5.0, 97.0),
                       groupby="spec", coadd_method="fit", norm_stat=lambda x: biweight_location(x, ignore_nan=True),
                       fit_gradient=False, label=None, write_table=False, table_dir=None, overwrite=False,
-                      display_plots=False, dry_run=False):
+                      use_untagged_cals=False, version_cals=None, display_plots=False, dry_run=False):
+
+    if use_untagged_cals and version_cals is None:
+        log.error(f"Invalid value for `version_cals`: {version_cals}. Expected a long-term calibration version tag, .e.g, '1.2.2dev'")
+        return
+
     if mjd is None:
         log.error("no MJD given, nothing to do")
         return
@@ -157,12 +162,15 @@ def _measure_ffactors(mjd, drpver, channel, sky_lines=SKYLINES_FIBERFLAT, dwave=
         return
 
     log.info(f"going to estimate flat field factors for {len(wframe_paths)} frames, {mjd = }, channel = {channel_}")
-    if dry_run:
-        log.info(f"output table at {table_path}")
-        return
 
     # grab master fiber flat fields
-    mflat_paths = get_calib_paths(mjd=mjd, flavors={"fiberflat_twilight"}, from_sandbox=True)["fiberflat_twilight"]
+    mflat_paths = get_calib_paths(mjd=mjd, from_sandbox=not use_untagged_cals, version=version_cals)["fiberflat_twilight"]
+    if dry_run:
+        log.info(f"using calibrations:")
+        for channel in mflat_paths:
+            log.info(f"{channel = }: {mflat_paths[channel]}")
+        log.info(f"output table at {table_path}")
+        return
 
     # measure/fit flat-field factors using given normalization statistic
     metadata = []
