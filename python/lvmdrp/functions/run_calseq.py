@@ -49,7 +49,7 @@ from lvmdrp import log, path, __version__ as drpver
 from lvmdrp.utils import metadata as md
 from lvmdrp.utils import hdrfix
 from lvmdrp.utils.convert import tileid_grp
-from lvmdrp.utils.paths import get_calib_paths, group_calib_paths, get_frames_paths
+from lvmdrp.utils.paths import get_calib_paths, group_calib_paths, get_frames_paths, get_master_mjd
 from lvmdrp.utils import pixshifts
 from lvmdrp.core.plot import save_fig, slit
 from lvmdrp.core import dataproducts as dp
@@ -164,11 +164,15 @@ def _measure_ffactors(mjd, drpver, channel, sky_lines=SKYLINES_FIBERFLAT, dwave=
     log.info(f"going to estimate flat field factors for {len(wframe_paths)} frames, {mjd = }, channel = {channel_}")
 
     # grab master fiber flat fields
-    mflat_paths = get_calib_paths(mjd=mjd, from_sandbox=not use_untagged_cals, version=version_cals)["fiberflat_twilight"]
+    if use_untagged_cals:
+        cals_mjd = get_master_mjd(mjd)
+    else:
+        cals_mjd = mjd
+    mflat_paths = get_calib_paths(mjd=cals_mjd, from_sandbox=not use_untagged_cals, version=version_cals)["fiberflat_twilight"]
     if dry_run:
         log.info(f"using calibrations:")
         for channel in mflat_paths:
-            log.info(f"{channel = }: {mflat_paths[channel]}")
+            log.info(f"  {channel = }: {mflat_paths[channel]}")
         log.info(f"output table at {table_path}")
         return
 
