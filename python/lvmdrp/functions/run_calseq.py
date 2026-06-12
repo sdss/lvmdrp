@@ -170,7 +170,7 @@ def _measure_ffactors(mjd, drpver, channel, sky_lines=SKYLINES_FIBERFLAT, dwave=
         cals_mjd = mjd
     mflat_paths = get_calib_paths(mjd=cals_mjd, from_sandbox=not use_untagged_cals, version=version_cals)["fiberflat_twilight"]
     if dry_run:
-        log.info(f"using calibrations:")
+        log.info("using calibrations:")
         for channel in mflat_paths:
             log.info(f"  {channel = }: {mflat_paths[channel]}")
         log.info(f"output table at {table_path}")
@@ -338,7 +338,7 @@ def choose_sequence(frames, calibration, ref_mjd=None, kind="longterm", ring="pr
     ref_mjd : int, optional
         Reference MJD around which a sequence will be chosen, by default None
     kind : str, optional
-        Calibration sequence length, either 'nightly' (short) or 'longterm' (long), by default "longterm"
+        Calibration sequence length, either 'nightly' (short), 'longterm' (long), by default "longterm" or None
     ring : str, optional
         Standard fibers ring to select, either 'primary', 'secondary', 'both'. By default 'primary'
 
@@ -364,8 +364,12 @@ def choose_sequence(frames, calibration, ref_mjd=None, kind="longterm", ring="pr
         raise ValueError(f"Invalid value for `ring`: {ring}. Expected either 'primary', 'secondary' or 'both'")
     if not isinstance(calibration, str) or calibration not in CALIBRATION_TYPES:
         raise ValueError(f"Invalid value for `calibration`: {calibration}. Expected one of {','.join(CALIBRATION_TYPES)}")
-    if not isinstance(kind, str) or kind not in {"nightly", "longterm"}:
+    if kind is not None and (not isinstance(kind, str) or kind not in {"nightly", "longterm"}):
         raise ValueError(f"Invalid value for `kind`: {kind}. Expected either 'longterm' or 'nightly'")
+
+    # skip sequence selection if
+    if kind is None:
+        return frames, frames.expnum.unique()
 
     nstandards = 12 if ring in {"primary", "secondary"} else 24
     EXPECTED_SEQUENCE_LENGTH = {
@@ -1835,6 +1839,8 @@ def create_twilight_fiberflats(mjd: int, epochs: dict[int, dict] = None, cals_mj
                       cnorms: Dict[str, float] = SKYLINES_FIBERFLAT, dwave: float = 20.0,
                       smoothing: float = 0.07,
                       interpolate_invalid: bool = True,
+                      skip_sequence_selection: bool = False,
+                      skip_combination: bool = False,
                       skip_done: bool = False,
                       display_plots: bool = False,
                       dry_run: bool = False) -> None:
@@ -1880,7 +1886,7 @@ def create_twilight_fiberflats(mjd: int, epochs: dict[int, dict] = None, cals_mj
     mjds = epoch["twilight"]
 
     frames = md.get_calibrations_metadata(mjds=mjds, calibration="twilight")
-    frames, expnums = choose_sequence(frames, calibration="twilight", kind="longterm")
+    frames, expnums = choose_sequence(frames, calibration="twilight", kind=None if skip_sequence_selection else "longterm")
     if frames.empty:
         log.error("no twilight frames found, skipping production of twilight fiberflats")
         return
@@ -1958,6 +1964,12 @@ def create_twilight_fiberflats(mjd: int, epochs: dict[int, dict] = None, cals_mj
                           ref_kind=ref_kind, groupby=groupby, guess_coeffs=guess_coeffs, fixed_coeffs=fixed_coeffs,
                           norm_cwave=cnorms[channel], norm_dwave=dwave, smoothing=smoothing, interpolate_invalid=interpolate_invalid,
                           display_plots=display_plots)
+
+
+        # skip creation of master fiberflats
+        if skip_combination:
+            log.info("skipping creation of master fiberflat")
+            return
 
         # combine individual fiberflats into master fiberflat
         mflat_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, kind="mfiberflat_twilight", camera=channel)

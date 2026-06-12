@@ -310,6 +310,8 @@ def detrend(mjd, mjd_list, mjd_range, calibration, dry_run, skip_done):
 @click.option('--from-epochs', is_flag=True, default=False, help="Use fiducial or given epochs file to produce long-term calibrations")
 @click.option('--epochs-file', type=str, default=None, help="Path to a calibrations epoch file")
 @click.option('-cr', '--reject-cr', is_flag=True, default=False, help='flag to run cosmic rays rejection')
+@click.option('--skip-sequence-selection', is_flag=True, default=False, help='skip selection of calibration sequence, select all matching flavor instead')
+@click.option('--skip-combination', is_flag=True, default=False, help='skip combining calibrations into master frame')
 @click.option('-b', '--skip-bias', is_flag=True, default=False, help='skip bias calibrations')
 @click.option('-t', '--skip-trace', is_flag=True, default=False, help='skip fiber traces')
 @click.option('-w', '--skip-wavelength', is_flag=True, default=False, help='skip wavelength calibrations')
@@ -326,6 +328,7 @@ def detrend(mjd, mjd_list, mjd_range, calibration, dry_run, skip_done):
 @cloup.constraint(mutually_exclusive, ['mjd', 'mjd_list', 'mjd_range'])
 @cloup.constraint(RequireExactly(1), ['mjd', 'mjd_list', 'mjd_range'])
 def longterm(mjd, mjd_list, mjd_range, from_epochs, epochs_file, reject_cr,
+             skip_sequence_selection, skip_combination,
              skip_bias, skip_trace, skip_wavelength,
              skip_dome, skip_twilight,
              ldls_threshold, qrtz_threshold,
@@ -355,7 +358,10 @@ def longterm(mjd, mjd_list, mjd_range, from_epochs, epochs_file, reject_cr,
             only_cals=only_cals,
             counts_thresholds={"ldls": ldls_threshold, "quartz": qrtz_threshold},
             cent_guess_ncolumns=cent_ncolumns, trace_full_ncolumns=full_ncolumns,
-            extract_metadata=extract_md, skip_done=skip_done,
+            extract_metadata=extract_md,
+            skip_sequence_selection=skip_sequence_selection,
+            skip_combination=skip_combination,
+            skip_done=skip_done,
             keep_ancillary=not clean_ancillary,
             dry_run=dry_run)
 
