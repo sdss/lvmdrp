@@ -2266,6 +2266,8 @@ def reduce_longterm_sequence(mjd, epochs=None, use_longterm_cals=True,
                              counts_thresholds=COUNTS_THRESHOLDS,
                              cent_guess_ncolumns=140, trace_full_ncolumns=40,
                              extract_metadata=False,
+                             skip_sequence_selection=False,
+                             skip_combination=False,
                              skip_done=True, keep_ancillary=False,
                              link_pixelmasks=True,
                              dry_run=False):
@@ -2294,7 +2296,11 @@ def reduce_longterm_sequence(mjd, epochs=None, use_longterm_cals=True,
         Only produce this calibrations, by default {'bias', 'trace', 'wave', 'dome', 'twilight'}
     extract_metadata : bool, optional
         Extract or use cached metadata if exist, by default False (use cache)
-    skip_done : bool
+    skip_sequence_selection : bool, optional
+        Skip calibration sequence selection, by default False
+    skip_combination : bool, optional
+        Skip combination of calibrations into final master frames, by default False
+    skip_done : bool, optional
         Skip pipeline steps that have already been done
     keep_ancillary : bool
         Keep ancillary files, by default False
@@ -2338,7 +2344,15 @@ def reduce_longterm_sequence(mjd, epochs=None, use_longterm_cals=True,
         create_dome_fiberflats(mjd=mjd, cals_mjd=mjd, use_longterm_cals=use_longterm_cals, kind="longterm", skip_done=skip_done, dry_run=dry_run)
 
     if "twilight" in only_cals:
-        create_twilight_fiberflats(mjd=mjd, epochs=epochs, cals_mjd=mjd, use_longterm_cals=use_longterm_cals, skip_done=skip_done, dry_run=dry_run)
+        create_twilight_fiberflats(
+            mjd=mjd,
+            epochs=epochs,
+            cals_mjd=mjd,
+            use_longterm_cals=use_longterm_cals,
+            skip_sequence_selection=skip_sequence_selection,
+            skip_combination=skip_combination,
+            skip_done=skip_done,
+            dry_run=dry_run)
 
     # if not keep_ancillary:
     #     _clean_ancillary(mjd)
