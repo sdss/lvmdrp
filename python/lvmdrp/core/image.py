@@ -10,12 +10,13 @@ import os
 import numpy
 import itertools as it
 import bottleneck as bn
-import pandas as pd
 from astropy.table import Table
 from astropy.io import fits as pyfits
 from astropy.modeling import fitting, models
 from astropy.stats import biweight_location, biweight_scale, sigma_clip
 from astropy.visualization import simple_norm
+from scipy.sparse import csc_matrix
+from scipy.sparse.linalg import spsolve
 from scipy import ndimage
 from scipy import interpolate
 
@@ -348,6 +349,80 @@ def interpolate_mask(x, y, mask, kind="linear", fill_value=0):
     yy[missing_idx] = f(missing_x)
 
     return yy
+
+
+def _make_bspline_knots(xmin, xmax, n_knots, degree=3):
+    """
+    Generate a clamped uniform knot vector for B-splines.
+
+    Parameters
+    ----------
+    xmin, xmax : float
+        Domain of x (e.g., 0 to nx-1)
+    nknots : int
+        Number of *interior* knots (controls flexibility)
+    degree : int, optional
+        Spline degree, by default 3 (cubic)
+
+    Returns
+    -------
+    knots : ndarray
+        Full knot vector suitable for scipy BSpline
+    """
+
+    # interior knots (uniform)
+    # Uniform interior knots plus clamped boundary knots
+    interior = numpy.linspace(xmin, xmax, n_knots + 2)[1:-1]
+    knots = numpy.concatenate([
+        numpy.zeros(degree),
+        interior,
+        numpy.ones(degree)
+    ])
+    return knots
+
+
+def _bspline_basis(x: numpy.ndarray, n_knots: int, degree: int = 3) -> numpy.ndarray:
+    """
+    Build a B-spline design matrix for 1D coordinate array `x` in [0, 1].
+
+    Parameters
+    ----------
+    x        : 1D coordinate array, values in [0, 1]
+    n_knots  : number of *interior* knots (total basis functions = n_knots + degree - 1)
+    degree   : spline degree (3 = cubic, recommended)
+
+    Returns
+    -------
+    B : (len(x), n_basis) dense design matrix
+    """
+    if x.min() < 0.0:
+        raise ValueError(f"Invalid minimum value in `x`: x_min = {x.min()}. Expected >=0.0")
+    if x.max() > 1.0:
+        raise ValueError(f"Invalid maximum value in `x`: x_max = {x.max()}. Expected <=1.0")
+
+    n_basis = n_knots + degree - 1
+    knots = _make_bspline_knots(0.0, 1.0, n_knots=n_knots, degree=degree)
+    B = numpy.zeros((len(x), n_basis))
+    for j in range(n_basis):
+        c = numpy.zeros(n_basis)
+        c[j] = 1.0
+        spl = interpolate.BSpline(knots, c, degree)
+        B[:, j] = spl(x)
+    return B
+
+
+def _diff_matrix(n: int, order: int = 2) -> numpy.ndarray:
+    """
+    Build an (n - order) x n finite difference matrix of given order.
+    Used to penalise roughness of adjacent spline coefficients.
+    """
+    D = numpy.eye(n)
+    for _ in range(order):
+        D = numpy.diff(D, axis=0)
+    return D
+
+
+
 
 
 class Image(Header):
@@ -1657,241 +1732,6 @@ class Image(Header):
 
         return Spectrum1D(wave=pixels, data=data, error=error, mask=mask)
 
-    def fitPoly(self, axis="y", order=4, plot=-1):
-        """
-        Fits the image with polynomial function along a given axis.
-
-        Parameters
-        --------------
-        axis : string or int
-            Define the axis along which the  polynomial fit is performed either 'X', 'x', or 0 for the
-            x axis or 'Y',' y', or 1 for the y axis.
-
-        order : integer, optional with default: 4
-            Order of the polynomials to be fitted
-
-        Returns
-        -----------
-        new_image :  Image object
-            An Image object containing the polynomial modelled data
-        """
-
-        # create empty arrays to store the results
-        fit_result = numpy.zeros(self._dim, dtype=numpy.float32)
-        fit_par = numpy.zeros((order + 1, self._dim[1]), dtype=numpy.float32)
-
-        # match orientation of the image
-        if axis == "y" or axis == "Y" or axis == 0:
-            pass
-        else:
-            self.swapaxes()
-        # setup the base line for the polynomial fitting
-        slices = self._dim[1]
-        x = numpy.arange(self._dim[0])
-        x = x - bn.nanmean(x)
-        # if self._mask is not None:
-        #    self._mask = numpy.logical_and(self._mask, numpy.logical_not(numpy.isnan(self._data)))
-        valid = ~self._mask.astype("bool")
-        # iterate over the image
-        for i in range(slices):
-            # decide on the bad pixel mask
-            # fit the polynomial and clip pixels that are 3sigma away from the initial fit
-            # redo the polynomial fitting with clipped data
-            if self._mask is not None:
-                if numpy.sum(valid[:, i]) > order + 5:
-                    fit_par[:, i] = numpy.polyfit(
-                        x[valid[:, i]], self._data[valid[:, i], i], order
-                    )  # fit polynom
-                    res = (
-                        numpy.polyval(fit_par[:, i], x[valid[:, i]])
-                        - self._data[valid[:, i], i]
-                    )  # compute residuals
-                    std = numpy.std(res)  # compute RMS deviation
-                    select = numpy.logical_and(
-                        res > -3 * std, res < 3 * std
-                    )  # select good pixels
-                    # print(std, i, numpy.sum(numpy.isnan(self._data[self._mask[:, i], i])))
-                    fit_par[:, i] = numpy.polyfit(
-                        x[valid[:, i]][select],
-                        self._data[valid[:, i], i][select],
-                        order,
-                    )  # fit #refit polynomial with clipped data
-                    if plot == i:
-                        plt.plot(x, self._data[:, i], "-b")
-                        plt.plot(
-                            x[valid[:, i]][select],
-                            self._data[valid[:, i], i][select],
-                            "ok",
-                        )
-                        max = bn.nanmax(self._data[valid[:, i], i][select])
-                    fit_result[:, i] = numpy.polyval(
-                        fit_par[:, i], x
-                    )  # evalute the polynom
-                else:
-                    fit_result[:, i] = numpy.nan
-            else:
-                fit_par[:, i] = numpy.polyfit(x, self._data[:, i], order)  # fit polynom
-                res = (
-                    numpy.polyval(fit_par[:, i], x) - self._data[:, i]
-                )  # compute residuals
-                std = numpy.std(res)  # compute RMS deviation
-                select = numpy.logical_and(
-                    res > -3 * std, res < 3 * std
-                )  # select good pixels
-                fit_par[:, i] = numpy.polyfit(
-                    x[select], self._data[:, i][select], order
-                )  # refit polynomial with clipped data
-                if plot == i:
-                    plt.plot(x[select], self._data[:, i][select], "ok")
-                fit_result[:, i] = numpy.polyval(
-                    fit_par[:, i], x
-                )  # evalute the polynom
-            if plot == i:
-                plt.plot(x, fit_result[:, i], "-r")
-                plt.ylim([0, max])
-                plt.show()
-        # match orientation of the output array
-        if axis == "y" or axis == "Y" or axis == 0:
-            pass
-        else:
-            fit_result = fit_result.T
-            self.swapaxes()
-
-        # create image object and return
-        if self._mask is not None:
-            new_mask = numpy.isnan(fit_result)
-        else:
-            new_mask = None
-
-        new_img = copy(self)
-        new_img.setData(data=fit_result, mask=new_mask)
-        return new_img
-
-    def fitSpline(self, axis="y", degree=3, smoothing=0, use_weights=False, clip=None, interpolate_missing=True, display_plots=False):
-        """Fits a spline to the image along a given axis
-
-        Parameters
-        ----------
-        axis : string or int
-            Define the axis along which the spline fit is performed either 'X', 'x', or 0 for the
-            x axis or 'Y',' y', or 1 for the y axis.
-        degree : int, optional
-            degree of the spline fit, by default 3
-        smoothing : float, optional
-            smoothing factor for the spline fit, by default 0
-        use_weights : bool, optional
-            whether to use the inverse variance as weights for the spline fit or not, by default False
-        clip : tuple, optional
-            minimum and maximum values to clip the spline model, by default None
-        interpolate_missing : bool, optional
-            interpolate coefficients if spline fitting failed
-        display_plot: bool, optional
-            display plots for spline fitting
-
-        Returns
-        -------
-        lvmdrp.core.image.Image
-            An Image object containing the spline modelled data
-        """
-        # match orientation of the image
-        if axis == "y" or axis == "Y" or axis == 0:
-            pass
-        else:
-            self.swapaxes()
-
-        pixels = numpy.arange(self._dim[0])
-        models = numpy.zeros(self._dim)
-        colors = plt.cm.coolwarm(numpy.linspace(0, 1, self._dim[1]))
-        if display_plots:
-            fig, axs = plt.subplots(2, 1, figsize=(15,5), sharex=True, layout="constrained")
-            axs[1].axhline(ls=":", color="0.7")
-            axs[1].set_xlabel("Y axis (pix)")
-            axs[0].set_ylabel("Counts (e-)")
-            axs[1].set_ylabel("(model - data) / data")
-        for i in range(self._dim[1]):
-            good_pix = ~self._mask[:,i] if self._mask is not None else ~numpy.isnan(self._data[:,i])
-
-            # skip column if all pixels are masked
-            if good_pix.sum() == 0:
-                warnings.warn(f"Skipping column {i} due to all pixels being masked", RuntimeWarning)
-                continue
-
-            # define spline fitting parameters
-            masked_pixels = pixels[good_pix]
-            data = self._data[good_pix, i]
-            vars = self._error[good_pix, i] ** 2
-
-            # group pixels into continuous segments
-            groups, indices = [], []
-            for j in range(len(masked_pixels)-1):
-                delta = masked_pixels[j+1] - masked_pixels[j]
-                if delta > 1:
-                    if len(indices) > 0:
-                        indices.append(j)
-                        groups.append(indices)
-                        indices = []
-                    continue
-                elif j == len(masked_pixels)-2:
-                    indices.append(j+1)
-                    groups.append(indices)
-                else:
-                    indices.append(j)
-
-            if len(groups) <= degree+1:
-                warnings.warn(f"Skipping column {i} due to insufficient data for spline fit", RuntimeWarning)
-                continue
-
-            # collapse groups into single pixel
-            new_masked_pixels, new_data, new_vars = [], [], []
-            for group in groups:
-                new_masked_pixels.append(bn.nanmean(masked_pixels[group]))
-                new_data.append(bn.nanmedian(data[group]))
-                new_vars.append(bn.nanmean(vars[group]))
-            masked_pixels = numpy.asarray(new_masked_pixels)
-            data = numpy.asarray(new_data)
-            vars = numpy.asarray(new_vars)
-
-            # fit spline
-            if use_weights:
-                weights = numpy.divide(1, vars, out=numpy.zeros_like(vars), where=vars!=0)
-                spline_pars = interpolate.splrep(masked_pixels, data, w=weights, s=smoothing)
-            else:
-                spline_pars = interpolate.splrep(masked_pixels, data, s=smoothing)
-            models[:, i] = interpolate.splev(pixels, spline_pars)
-
-            if display_plots:
-                if i % 100 == 0:
-                    axs[0].plot(pixels, models[:, i], color=colors[i])
-                    axs[0].plot(masked_pixels, data, "o", ms=7, color=colors[i])
-                axs[1].plot(masked_pixels, interpolate.splev(masked_pixels, spline_pars) / data - 1, "o", ms=7, color=colors[i])
-
-        # clip spline fit if required
-        if clip is not None:
-            models = numpy.clip(models, clip[0], clip[1])
-
-        # interpolate failed columns if requested
-        masked_columns = numpy.count_nonzero((models < 0)|numpy.isnan(models), axis=0) >= 0.1*self._dim[0]
-        if interpolate_missing and masked_columns.any():
-            log.info(f"interpolating spline fit in {masked_columns.sum()} columns")
-            x_pixels = numpy.arange(self._dim[1])
-            f = interpolate.interp1d(x_pixels[~masked_columns], models[:, ~masked_columns], axis=1, bounds_error=False, fill_value="extrapolate")
-            models[:, masked_columns] = f(x_pixels[masked_columns])
-
-            # clip spline fit if required
-            if clip is not None:
-                models = numpy.clip(models, clip[0], clip[1])
-
-        # match orientation of the output array
-        if axis == "y" or axis == "Y" or axis == 0:
-            pass
-        else:
-            models = models.T
-            self.swapaxes()
-
-        new_img = copy(self)
-        new_img.setData(data=models)
-        return new_img
-
     def enhance(self, median_box=None, coadd=None, trust_errors=True, apply_mask=True, replace_errors=numpy.inf):
 
         img = copy(self)
@@ -1920,131 +1760,6 @@ class Image(Header):
         img._error[img._mask|(img._error<=0)|(numpy.isnan(img._error))] = replace_errors
 
         return img
-
-    def _get_bins(self, bins, x_bounds_type=(None,None), y_bounds_type=(None,None), x_nbound=10, y_nbound=11):
-        """Returns bins for given 2D image, considering the errors and the pixel mask
-
-        This function will create arrays for bins along X and Y, possibly
-        adding boundary bins. Given `data`, `error` and `mask` arrays are
-        modified inplace.
-
-        NOTE: the implementation of 'data' boundary types along X axis is still missing
-
-        Parameters
-        ----------
-        bins : tuple[int,int]
-            Number of bins along X and Y
-        x_bounds_type : tuple, optional
-            Boundary types along X, either None, 'data' or a floating point value, by default (None,None)
-        y_bounds_type : tuple, optional
-            Boundary types along Y, either None, 'data' or a floating point value, by default (None,None)
-        x_nbound : int, optional
-            Size of the boundary bins in X, by default 10
-        y_nbound : int, optional
-            Size of the boundary bins in Y, by default 11
-
-        Returns
-        -------
-        {data, error, mask}
-            Updated arrays after constructing bins
-        {x_bins, y_bins}
-            Bins edges along X and Y directions
-
-        Raises
-        ------
-        ValueError
-            If `x_nbound` is not consistent with image shape
-        ValueError
-            If `y_nbound` is not consistent with image shape
-        """
-        data = self._data.copy()
-        error = numpy.sqrt(self._data).copy()
-        mask = self._mask.copy()
-
-        x_nbins, y_nbins = bins
-        # set left and right boundaries if given
-        l_bound, r_bound = x_bounds_type
-        # set top and bottom boundaries if given
-        b_bound, t_bound = y_bounds_type
-
-        if x_nbound < 0 or x_nbound > self._dim[1]:
-            raise ValueError(f"Invalid values for `x_nbound`: {x_nbound}. Consider the data size along X-axis: {data.shape[1]}")
-        if y_nbound < 0 or y_nbound > self._dim[0]:
-            raise ValueError(f"Invalid values for `y_nbound`: {y_nbound}. Consider the data size along Y-axis: {data.shape[0]}")
-
-        x_bins = _edge_centered_bins(x_nbins, self._dim[1])
-        y_bins = _edge_centered_bins(y_nbins, self._dim[0])
-
-        # handle boundary types along X and Y
-        # if given specific values for boundaries, set small error values (assume robust knowledge of these bins)
-        if isinstance(l_bound, (float, int)):
-            data[:, 3:x_nbound] = l_bound
-            error[:, 3:x_nbound] = 0.1
-            mask[:, 3:x_nbound] = False
-        elif l_bound == "data":
-            pass
-        if isinstance(r_bound, (float, int)):
-            data[:, -x_nbound:-3] = r_bound
-            error[:, -x_nbound:-3] = 0.1
-            mask[:, -x_nbound:-3] = False
-        elif r_bound == "data":
-            pass
-        if isinstance(b_bound, (float, int)):
-            data[:y_nbound, :] = b_bound
-            error[:y_nbound, :] = 0.1
-            mask[:y_nbound, :] = False
-        elif b_bound == "data":
-            mask[:y_nbound, :] = False
-        if isinstance(t_bound, (float, int)):
-            data[-y_nbound:, :] = t_bound
-            error[-y_nbound:, :] = 0.1
-            mask[-y_nbound:, :] = False
-        elif t_bound == "data":
-            mask[-y_nbound:, :] = False
-
-        return data, error, mask, x_bins, y_bins
-
-    def histogram(self, bins, nsigma=5.0, stat=bn.nanmedian, x_bounds=(None,None), y_bounds=(None,None), x_nbound=3, y_nbound=3, clip=None, use_mask=True):
-
-        x_pixels = numpy.arange(self._dim[1], dtype="int")
-        y_pixels = numpy.arange(self._dim[0], dtype="int")
-        X, Y = numpy.meshgrid(x_pixels, y_pixels, indexing="xy")
-        xx, yy = X.ravel(), Y.ravel()
-
-        img_data, img_error, img_mask, x_bins, y_bins = self._get_bins(
-            bins=bins, x_bounds_type=x_bounds, x_nbound=x_nbound, y_bounds_type=y_bounds, y_nbound=y_nbound)
-
-        if use_mask:
-            img_data[img_mask] = numpy.nan
-            img_error[img_mask] = numpy.nan
-        data = img_data.ravel()
-        error = img_error.ravel()
-
-        ix = numpy.digitize(xx, x_bins) - 1
-        iy = numpy.digitize(yy, y_bins) - 1
-        df = pd.DataFrame({'ix': ix, 'iy': iy, 'data': data, 'variance': error**2})
-        groups = df.groupby(['ix', 'iy'])
-
-        zscore = groups.data.apply(lambda g: numpy.abs(g.mean() - g) / g.std(), include_groups=False)
-        invalid = zscore > nsigma
-
-        data[invalid] = numpy.nan
-        error[invalid] = numpy.nan
-        img_data = data.reshape(self._dim)
-        img_error = error.reshape(self._dim)
-
-        data_binned = groups.data.agg(stat).unstack().to_numpy()
-        error_binned = numpy.sqrt(groups.variance.agg(stat).unstack().to_numpy())
-        data_binned = data_binned.T
-        error_binned = error_binned.T
-        if clip is not None and isinstance(clip, tuple) and len(clip) == 2:
-            data_binned = numpy.clip(data_binned, *clip)
-
-        x_cent = (x_bins[:-1]+x_bins[1:]) / 2
-        y_cent = (y_bins[:-1]+y_bins[1:]) / 2
-        x, y = numpy.meshgrid(x_cent, y_cent, indexing="xy")
-
-        return (ix,iy), x_bins, y_bins, x, y, data_binned, error_binned, X, Y, data, error
 
     def straylight_binning(self, centroids, x_nbins=20, y_margin=7, nrows=5, nsigma=1.0):
         # initialize image pixel grid
@@ -2201,122 +1916,223 @@ class Image(Header):
         stray_img.setData(data=model_data, error=None, mask=None)
         return stray_img
 
-    def fit_spline2d(self, bins, x_bounds=("data","data"), y_bounds=(0.0,0.0), x_nbound=3, y_nbound=3, nsigma=None, clip=None, use_mask=True, axs=None):
-        """Fits a 2D bivariate spline to the image data, using binned statistics and sigma clipping.
+    def fit_pspline2d(
+            self,
+            selection: numpy.ndarray,
+            n_knots_x: int = 40,
+            n_knots_y: int = 20,
+            lam_x: float = 1e2,
+            lam_y: float = 1e5,
+            degree: int = 3,
+            use_weights: bool = False
+    ) -> numpy.ndarray:
+        """
+        Fit a 2D tensor-product P-spline surface to selected pixels of a CCD frame.
 
-        The image is divided into bins along both axes, and the median value in each bin is computed.
-        Outlier bins are rejected based on a sigma threshold. A 2D spline is then fit to the valid bins,
-        optionally using inverse variance weights. The resulting smooth background model can be used for
-        tasks such as stray light subtraction.
+        The objective minimised is:
+
+            || sqrt(W) · (y - B_kron · alpha) ||^2
+            + lam_x · || D_x alpha ||^2
+            + lam_y · || D_y alpha ||^2
+
+        where B_kron = kron(B_y, B_x) is the 2D tensor-product basis,
+        D_x and D_y are 2nd-order difference matrices along each axis,
+        and alpha is the vector of spline coefficients.
+
+        The main advantage of posing the problem as a separable product surface
+        function relies in that we can impose assymetric penalizations lam_x and
+        lam_y to indepently control smoothness along the spectral and the spatial
+        dimensions. This is ideal for stray light modeling.
+
+        This method is both memory and CPU efficient and does not thus does not
+        require prior binning of the input image.
 
         Parameters
         ----------
-        bins : tuple of int
-            Number of bins along the (X, Y) axes, e.g., (x_bins, y_bins).
-        nsigma : float
-            Sigma threshold for clipping outlier bins. If None, no rejection is performed.
-        axs : dict of matplotlib.axes.Axes, optional
-            Dictionary of axes for diagnostic plotting (default: None).
+        selection : numpy.ndarray
+            Boolean mask of pixels, True where a valid point is to be fitted
+        n_knots_x : int, optional
+            Number of knots along x-dimension, by default 40
+        n_knots_y : int, optional
+            Number of knots along y-dimension, by default 20
+        lam_x : float, optional
+            Penalization factor along x-dimension, by default 1e2
+        lam_y : float, optional
+            Penalization factor along y-dimension, by default 1e5
+        degree : int, optional
+            Degree of the B-Spline, by default 3
+        use_weights : bool, optional
+            If True, compute variance weighted fit, by default False
 
         Returns
         -------
-        stray_img : Image
-            Image object containing the fitted 2D spline model.
-        data_binned : numpy.ndarray
-            2D array of binned median values used for the fit.
-        error_binned : numpy.ndarray
-            2D array of binned errors.
-        valid_bins : numpy.ndarray
-            Boolean mask indicating which bins were used in the fit.
+        numpy.ndarray
+            Fitted 2D surface evaluated in all image pixels
         """
-        x_pixels = numpy.arange(self._dim[1])
-        y_pixels = numpy.arange(self._dim[0])
+        n_rows, n_cols = self._data.shape
 
-        # get 2D histogram
-        xybins, x_bins, y_bins, x, y, data_binned, error_binned, X, Y, data, error = self.histogram(
-            bins=bins, nsigma=nsigma,
-            x_bounds=x_bounds, x_nbound=x_nbound,
-            y_bounds=y_bounds, y_nbound=y_nbound,
-            clip=clip, use_mask=use_mask)
-        y_cent = (y_bins[:-1]+y_bins[1:]) / 2
-        x_cent = (x_bins[:-1]+x_bins[1:]) / 2
-        y_nbins = y_cent.size
+        # Normalised coordinate grids
+        x_all = numpy.linspace(0, 1, n_cols)  # dispersion
+        y_all = numpy.linspace(0, 1, n_rows)  # spatial
 
-        # select valid bins
-        valid_bins = numpy.isfinite(data_binned) & numpy.isfinite(error_binned)
+        # Build 1D bases over the full axis
+        Bx_full = _bspline_basis(x_all, n_knots_x, degree)   # (n_cols, nx_basis)
+        By_full = _bspline_basis(y_all, n_knots_y, degree)   # (n_rows, ny_basis)
+        nx_basis = Bx_full.shape[1]
+        ny_basis = By_full.shape[1]
 
-        # fit 2D smoothing spline
-        model = interpolate.CloughTocher2DInterpolator(
-            list(zip(x[valid_bins].ravel(), y[valid_bins].ravel())),
-            data_binned[valid_bins].ravel())
-        model_data = model(X, Y)
-        if clip is not None and isinstance(clip, tuple) and len(clip) == 2:
-            model_data = numpy.clip(model_data, *clip)
+        # 2D tensor-product basis: row_index varies fast -> kron(By, Bx) gives
+        # a basis whose (i*n_cols+j)-th row corresponds to pixel (i, j)
+        # We only need the rows corresponding to masked pixels.
+        rows_idx, cols_idx = numpy.where(selection)
 
-        # calculate binned residuals & model systematic errors
-        model_binned = model(x, y)
-        model_residuals = (model_binned - data_binned) / error_binned
+        # Evaluate bases at masked pixel positions
+        Bx_m = Bx_full[cols_idx, :]       # (n_masked, nx_basis)
+        By_m = By_full[rows_idx, :]       # (n_masked, ny_basis)
 
-        model_error = interpolate.griddata(
-            points=(x[valid_bins].ravel(), y[valid_bins].ravel()), values=model_residuals[valid_bins].ravel(), xi=(X.ravel(), Y.ravel()),
-            method="nearest", rescale=True).reshape(self._dim)
+        # Row-wise Kronecker: B_kron[k, :] = kron(By_m[k,:], Bx_m[k,:])
+        # Shape: (n_masked, nx_basis * ny_basis)
+        # This transforms the x/y basis matrices into a single joint basis matrix
+        # with # of coefficients = nx_basis * ny_basis
+        B_kron = (By_m[:, :, None] * Bx_m[:, None, :]).reshape(
+            len(rows_idx), ny_basis * nx_basis
+        )
 
-        if axs is not None:
-            unit = self._header["BUNIT"]
-            norm = simple_norm(data=model_data, stretch="asinh")
-            im = axs["img"].imshow(model_data, origin="lower", cmap="Greys_r", norm=norm, interpolation="none")
-            cbar = plt.colorbar(im, cax=axs["col"], orientation="horizontal")
-            cbar.set_label(f"Counts ({unit})", fontsize="small", color="tab:red")
-            axs["img"].set_aspect("auto")
+        # Observed values at masked pixels
+        y_obs = self._data[selection]
 
-            axs["img"].plot(x[valid_bins].ravel(), y[valid_bins].ravel(), "o", mew=0.5, ms=4, mec="tab:blue", mfc="none")
+        # Weights
+        if use_weights and self._error is not None:
+            weights = numpy.where(self._error > 0, 1 / self._error ** 2, 0.0)
+            w_obs = weights[selection]
+        else:
+            w_obs = numpy.ones(len(y_obs))
 
-            # CS = axs["img"].contour(X, Y, model_data, levels=numpy.percentile(model_data, q=(25,50,75)), cmap="Greys", linewidths=1)
-            # axs["img"].clabel(CS, fontsize=9)
+        # Weighted design matrix
+        W_diag = w_obs                      # diagonal of W
+        BtWB = (B_kron * W_diag[:, None]).T @ B_kron
 
-            colors_x = plt.cm.coolwarm(numpy.linspace(0, 1, self._data.shape[0]))
-            colors_y = plt.cm.coolwarm(numpy.linspace(0, 1, self._data.shape[1]))
-            for iy in y_pixels:
-                axs["xma"].plot(x_pixels, model_data[iy], ",", color=colors_x[iy], alpha=0.2)
-            axs["xma"].step(x_pixels, numpy.sqrt(bn.nanmedian(self._error**2, axis=0)), lw=1, color="0.8", where="mid")
-            for ix in x_pixels:
-                axs["yma"].plot(model_data[:, ix], y_pixels, ",", color=colors_y[ix], alpha=0.2)
-            axs["yma"].step(numpy.sqrt(bn.nanmedian(self._error, axis=1)), y_pixels, lw=1, color="0.8", where="mid")
+        # 2nd-order difference penalty matrices
+        # Dx/Dy matrices serve the purpose of smoothing
+        # variations along three consecutive coefficients
+        # at a time. This should prevent overshooting features
+        # in the fitted 2D surface
+        Dx = _diff_matrix(nx_basis, order=2)
+        Dy = _diff_matrix(ny_basis, order=2)
 
-            X_, YC_ = numpy.meshgrid(x_pixels, y_cent, indexing="xy")
-            model_ = model(X_, YC_)
-            if clip is not None and isinstance(clip, tuple) and len(clip) == 2:
-                model_ = numpy.clip(model_, *clip)
-            for i in range(y_nbins):
-                data_ = data[xybins[1]==i].reshape((-1,self._dim[1]))
-                error_ = error[xybins[1]==i].reshape((-1,self._dim[1]))
-                residuals = (model_[i] - data_) / error_
-                mu = numpy.nanmean(residuals, axis=0)
+        # Penalty in Kronecker space:
+        #   P_x = kron(I_y, Dx.T Dx)
+        #   P_y = kron(Dy.T Dy, I_x)
+        Ix = numpy.eye(nx_basis)
+        Iy = numpy.eye(ny_basis)
+        P_x = numpy.kron(Iy, Dx.T @ Dx)
+        P_y = numpy.kron(Dy.T @ Dy, Ix)
 
-                axs["res"][i].set_title(f"Y-bin = [{y_bins[i]:.1f},{y_bins[i+1]:.1f})", fontsize="large", loc="left")
-                axs["res"][i].set_ylabel(f"Counts ({unit})", fontsize="large")
+        # Normal equations: (BtWB + lam_x*P_x + lam_y*P_y) alpha = BtW y
+        A = csc_matrix(BtWB + lam_x * P_x + lam_y * P_y)
+        rhs = (B_kron * W_diag[:, None]).T @ y_obs
 
-                axs["res"][i].errorbar(
-                    x_cent[valid_bins[i]], data_binned[i][valid_bins[i]], yerr=error_binned[i][valid_bins[i]],
-                    fmt=".", color="tab:red", ecolor="tab:red", lw=1, elinewidth=1)
-                ylims = axs["res"][i].get_ylim()
-                axs["res"][i].errorbar(
-                    x_pixels, bn.nanmean(data_, axis=0), yerr=numpy.sqrt(bn.nanmean(error_**2, axis=0)),
-                    fmt=",", color="0.2", ecolor="0.2", elinewidth=0.5, zorder=-1)
-                axs["res"][i].plot(x_pixels, model_[i], "-", color="tab:blue")
+        alpha = spsolve(A, rhs)            # shape: (ny_basis * nx_basis,)
 
-                f = numpy.abs(ylims).max()*0.03
-                axs["res"][i].plot(x_pixels, residuals.T*f, ",", color="0.2")
-                axs["res"][i].step(x_pixels, mu*f, "-", color="tab:blue", lw=1, where="mid")
-                axs["res"][i].axhline(-f, ls=":", lw=1, color="0.2")
-                axs["res"][i].axhline(+f, ls=":", lw=1, color="0.2")
-                axs["res"][i].axhline(ls="--", lw=1, color="0.2")
-                axs["res"][i].set_ylim(-f*2, ylims[1])
+        # Evaluate surface on the full 2D grid
+        # B_full = kron(By_full, Bx_full): (n_rows*n_cols, nx*ny)
+        # Evaluated as outer product to avoid building the huge dense matrix
+        surface = (By_full @ alpha.reshape(ny_basis, nx_basis) @ Bx_full.T)
+        # surface shape: (n_rows, n_cols)
 
-        stray_img = copy(self)
-        stray_img.setData(data=model_data, error=model_error, mask=None)
+        return surface
 
-        return stray_img, data_binned, error_binned, valid_bins
+    def fit_pspline2d_iterative(
+            self,
+            selection: numpy.ndarray,
+            n_knots_x: int = 40,
+            n_knots_y: int = 20,
+            lam_x: float = 1e2,
+            lam_y: float = 1e5,
+            sigma_clip: float = 3.0,
+            n_iter: int = 5,
+            use_weights: bool = False,
+    ) -> tuple[numpy.ndarray, numpy.ndarray]:
+        """
+        Fit a 2D P-spline stray light model with iterative sigma-clipping.
+
+        At each iteration:
+        1. Fit the P-spline to the current active mask.
+        2. Compute residuals in the inter-block pixels.
+        3. Clip pixels with |residual| > sigma_clip * MAD and remove from mask.
+        4. Repeat until convergence or n_iter reached.
+
+        Parameters
+        ----------
+        selection : numpy.ndarray
+            Boolean mask of pixels, True where a valid point is to be fitted
+        n_knots_x : int, optional
+            Number of knots along x-dimension, by default 40
+        n_knots_y : int, optional
+            Number of knots along y-dimension, by default 20
+        lam_x : float, optional
+            Penalization factor along x-dimension, by default 1e2
+        lam_y : float, optional
+            Penalization factor along y-dimension, by default 1e5
+        sigma_clip : float, optional
+            Threshold for iterative sigma clipping, by default 3.0
+        n_iter : int, optional
+            Number of iterations, by default 5
+        use_weights : bool, optional
+            If True, compute variance weighted fit, by default False, by default False
+
+        Returns
+        -------
+        surface : numpy.array[n_rows, n_cols]
+            Stray light model
+        active_selection : numpy.array[n_rows, n_cols]
+            Final selection of pixels after iterative clipping
+
+        Raises
+        ------
+        RuntimeError
+            If the number of active pixels is less than (n_knots_x + 3) * (n_knots_y + 3)
+        """
+        active_selection = selection.copy()
+
+        for iteration in range(n_iter):
+            n_pixels = active_selection.sum()
+            if n_pixels < (n_knots_x + 3) * (n_knots_y + 3):
+                raise RuntimeError(
+                    f"Too few inter-block pixels ({n_pixels}) to constrain the spline. "
+                    "Reduce knot counts or check the trace mask."
+                )
+
+            surface = self.fit_pspline2d(
+                active_selection,
+                n_knots_x=n_knots_x, n_knots_y=n_knots_y,
+                lam_x=lam_x, lam_y=lam_y,
+                use_weights=use_weights,
+            )
+
+            # Residuals in inter-block pixels only
+            residuals = numpy.where(active_selection, self._data - surface, 0.0)
+            res_vals = residuals[active_selection]
+            mad = numpy.median(numpy.abs(res_vals - numpy.median(res_vals)))
+            sigma_est = 1.4826 * mad  # robust sigma estimate
+
+            # Flag outliers
+            outlier = active_selection & (numpy.abs(residuals) > sigma_clip * sigma_est)
+            n_clipped = outlier.sum()
+
+            active_selection &= ~outlier
+
+            print(
+                f"  iter {iteration + 1}/{n_iter}: "
+                f"n_pixels={active_selection.sum()}, clipped={n_clipped}, "
+                f"sigma_est={sigma_est:.4f}"
+            )
+
+            if n_clipped == 0:
+                print(f"  Converged after {iteration + 1} iterations.")
+                break
+
+        return surface, active_selection
 
     def match_reference_column(self, ref_column=LVM_REFERENCE_COLUMN, width=100, ref_centroids=None, stretch_range=[0.7, 1.3], shift_range=[-100, 100], return_all=False):
         """Returns the reference centroids matched against the current image
