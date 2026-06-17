@@ -1,5 +1,6 @@
 from copy import deepcopy as copy
 from multiprocessing import Pool, cpu_count
+from contextlib import contextmanager, redirect_stdout, nullcontext
 import warnings
 
 from functools import partial
@@ -16,9 +17,11 @@ from astropy.modeling import fitting, models
 from astropy.stats import biweight_location, biweight_scale, sigma_clip
 from astropy.visualization import simple_norm
 from scipy.sparse import csc_matrix
+from scipy.sparse import vstack as sp_vstack, eye as sp_eye, kron as sp_kron
 from scipy.sparse.linalg import spsolve
 from scipy import ndimage
 from scipy import interpolate
+import osqp
 
 from lvmdrp import log
 from lvmdrp.core.constants import CON_LAMPS, ARC_LAMPS, LVM_NBLOCKS, LVM_BLOCKSIZE, LVM_REFERENCE_COLUMN
@@ -33,6 +36,17 @@ from lvmdrp.core.spectrum1d import Spectrum1D, _normalize_peaks, _fiber_cc_match
 from lvmdrp.external.fast_median import fast_median_filter_2d
 
 from lvmdrp import __version__ as drpver
+
+
+@contextmanager
+def mute_stdout(verbose=False):
+    """Context manager to suppress stdout."""
+    if verbose:
+        yield nullcontext()
+    else:
+        with open(os.devnull, 'w') as devnull:
+            with redirect_stdout(devnull):
+                yield
 
 
 def _edge_centered_bins(nbins, size):
@@ -381,7 +395,7 @@ def _make_bspline_knots(xmin, xmax, n_knots, degree=3):
     return knots
 
 
-def _bspline_basis(x: numpy.ndarray, n_knots: int, degree: int = 3) -> numpy.ndarray:
+def _bspline_basis(x: numpy.ndarray, n_knots: int, degree: int = 3, return_sparse: bool = False) -> numpy.ndarray:
     """
     Build a B-spline design matrix for 1D coordinate array `x` in [0, 1].
 
@@ -402,13 +416,23 @@ def _bspline_basis(x: numpy.ndarray, n_knots: int, degree: int = 3) -> numpy.nda
 
     n_basis = n_knots + degree - 1
     knots = _make_bspline_knots(0.0, 1.0, n_knots=n_knots, degree=degree)
-    B = numpy.zeros((len(x), n_basis))
-    for j in range(n_basis):
-        c = numpy.zeros(n_basis)
-        c[j] = 1.0
-        spl = interpolate.BSpline(knots, c, degree)
-        B[:, j] = spl(x)
-    return B
+    if return_sparse:
+        # design_matrix requires x strictly inside [knots[degree], knots[-degree-1]];
+        # floating point can push exact 0.0/1.0 endpoints just outside that range.
+        # extrapolate=True avoids spurious "out of bounds" errors for points
+        # that land exactly on (or float-precision-adjacent to) the boundary
+        # knots at 0 and 1 — our grid always stays within [0,1] by construction.
+        B_sparse = interpolate.BSpline.design_matrix(x, knots, degree, extrapolate=True)  # sparse CSR
+        B = B_sparse.tocsr()
+    else:
+        B = numpy.zeros((len(x), n_basis))
+        for j in range(n_basis):
+            c = numpy.zeros(n_basis)
+            c[j] = 1.0
+            spl = interpolate.BSpline(knots, c, degree)
+            B[:, j] = spl(x)
+
+    return B, n_basis
 
 
 def _diff_matrix(n: int, order: int = 2) -> numpy.ndarray:
@@ -422,7 +446,135 @@ def _diff_matrix(n: int, order: int = 2) -> numpy.ndarray:
     return D
 
 
+def _row_nonzeros(B_csr, dpo):
+    """
+    Vectorized extraction of per-row nonzero (col, val) pairs from a CSR
+    matrix where every row has at most `dpo` nonzeros (true for B-spline
+    design matrices). Avoids a Python-level loop over rows.
+    """
+    n = B_csr.shape[0]
+    indptr, indices, data = B_csr.indptr, B_csr.indices, B_csr.data
+    counts = numpy.diff(indptr)
 
+    cols = numpy.zeros((n, dpo), dtype=numpy.int32)
+    vals = numpy.zeros((n, dpo), dtype=numpy.float64)
+
+    within_row_pos = numpy.arange(len(indices)) - numpy.repeat(indptr[:-1], counts)
+    row_of_entry = numpy.repeat(numpy.arange(n), counts)
+
+    valid = within_row_pos < dpo
+    cols[row_of_entry[valid], within_row_pos[valid]] = indices[valid]
+    vals[row_of_entry[valid], within_row_pos[valid]] = data[valid]
+
+    short_rows = numpy.where(counts < dpo)[0]
+    for r in short_rows:
+        k = counts[r]
+        if k > 0:
+            cols[r, k:] = cols[r, 0]
+    return cols, vals
+
+
+def _chunk_to_sparse(Bx, By, dpo, nx, n_coef, rows_chunk_idx, cols_chunk_idx, n_chunk):
+    """Build a sparse (n_chunk, n_coef) row-wise Kronecker block."""
+    Bx_c = Bx[cols_chunk_idx, :].tocsr()
+    By_c = By[rows_chunk_idx, :].tocsr()
+    bx_cols, bx_vals = _row_nonzeros(Bx_c, dpo)
+    by_cols, by_vals = _row_nonzeros(By_c, dpo)
+
+    row_rep = numpy.repeat(numpy.arange(n_chunk), dpo * dpo)
+    flat_cols = (by_cols[:, :, None].astype(numpy.int64) * nx
+                    + bx_cols[:, None, :]).reshape(n_chunk, dpo * dpo)
+    flat_vals = (by_vals[:, :, None] * bx_vals[:, None, :]).reshape(n_chunk, dpo * dpo)
+
+    return csc_matrix(
+        (flat_vals.ravel(), (row_rep, flat_cols.ravel())),
+        shape=(n_chunk, n_coef),
+    )
+
+
+def _get_contraints_qp(n_coef, constrain_positive=False):
+    # ---- Constraint matrix ----
+    # OSQP form:  lb <= C alpha <= ub
+    # We build C by stacking constraint blocks, with corresponding lb, ub.
+
+    C_blocks = []
+    lb_blocks = []
+    ub_blocks = []
+
+    # Positivity constraint: alpha >= 0  (sufficient condition for surface >= 0)
+    # B-splines are a non-negative partition of unity, so if every
+    # coefficient is non-negative the evaluated surface is non-negative
+    # everywhere too. This replaces the O(n_rows*n_cols) per-pixel
+    # constraint with an O(n_coef) identity constraint.
+    if constrain_positive:
+        C_blocks.append(sp_eye(n_coef, format="csc"))
+        lb_blocks.append(numpy.zeros(n_coef))
+        ub_blocks.append(numpy.full(n_coef, numpy.inf))
+
+    # Always add a trivial equality-free block so OSQP gets at least one constraint
+    if not C_blocks:
+        # Unconstrained: just add a dummy  0 <= 0  row  (OSQP needs C non-empty)
+        C_blocks.append(csc_matrix((1, n_coef)))
+        lb_blocks.append(numpy.array([0.0]))
+        ub_blocks.append(numpy.array([0.0]))
+
+    C = sp_vstack(C_blocks, format="csc")
+    lb = numpy.concatenate(lb_blocks)
+    ub = numpy.concatenate(ub_blocks)
+
+    return C, lb, ub
+
+
+def _get_matrices_qp(data, mask, weights, n_knots_x, n_knots_y, degree, chunk_size=500_000):
+
+    n_rows, n_cols = data.shape
+    rows_idx, cols_idx = numpy.where(mask)
+
+    # ---- Normalised coordinate grids ----
+    x_all = numpy.linspace(0, 1, n_cols)
+    y_all = numpy.linspace(0, 1, n_rows)
+
+    # ---- Sparse 1D bases (CSR, only degree+1 nonzeros per row) ----
+    Bx, nx = _bspline_basis(x_all, n_knots_x, degree, return_sparse=True)   # (n_cols, nx)
+    By, ny = _bspline_basis(y_all, n_knots_y, degree, return_sparse=True)   # (n_rows, ny)
+    n_coef = nx * ny
+
+    # ---- Chunked accumulation of B'WB and B'Wy, avoiding ever
+    # materializing B_mask as a full (n_masked, n_coef) matrix ----
+    #
+    # We never need B_mask itself for the Hessian/linear-term — only the
+    # products B'WB and B'Wy. By processing pixels in chunks and forming
+    # a small sparse B_chunk per chunk, peak memory stays O(chunk_size *
+    # dpo^2) regardless of how many millions of inter-block pixels there
+    # are in total. B_mask is still built (needed for the optional upper-
+    # bound constraint), but each chunk's contribution is freed immediately
+    # after use rather than all chunks living simultaneously.
+    n_masked = len(rows_idx)
+    dpo = degree + 1  # max nonzeros per row, per axis
+
+    y_obs_full = data[mask]
+    if weights is not None:
+        w_full = weights[mask]
+    else:
+        w_full = numpy.ones(n_masked)
+
+    BtWB = csc_matrix((n_coef, n_coef))
+    f = numpy.zeros(n_coef)
+
+    for start in range(0, n_masked, chunk_size):
+        end = min(start + chunk_size, n_masked)
+        n_chunk = end - start
+
+        B_chunk = _chunk_to_sparse(Bx, By, dpo, nx, n_coef, rows_idx[start:end], cols_idx[start:end], n_chunk)
+        w_chunk = w_full[start:end]
+
+        BtWB = BtWB + (B_chunk.multiply(w_chunk[:, None])).T @ B_chunk
+
+        f += numpy.asarray((B_chunk.multiply(w_chunk[:, None])).T @ y_obs_full[start:end]).ravel()
+
+    BtWB = csc_matrix(BtWB)
+
+    return BtWB, f, Bx, By, nx, ny, n_coef
 
 
 class Image(Header):
@@ -1761,6 +1913,218 @@ class Image(Header):
 
         return img
 
+    def fit_pspline2d(
+            self,
+            selection: numpy.ndarray,
+            degree: int = 3,
+            n_knots_x: int = 40,
+            n_knots_y: int = 20,
+            lam_x: float = 1e2,
+            lam_y: float = 1e5,
+            constrain_positive: bool = True,
+            use_weights: bool = False,
+            verbose: bool = False) -> numpy.ndarray:
+        """
+        Fit a 2D tensor-product P-spline surface to selected pixels of a CCD frame.
+
+        The objective minimised is:
+
+            || sqrt(W) · (y - B_kron · alpha) ||^2
+            + lam_x · || D_x alpha ||^2
+            + lam_y · || D_y alpha ||^2
+
+        where B_kron = kron(B_y, B_x) is the 2D tensor-product basis,
+        D_x and D_y are 2nd-order difference matrices along each axis,
+        and alpha is the vector of spline coefficients.
+
+        The main advantage of posing the problem as a separable product surface
+        function relies in that we can impose assymetric penalizations lam_x and
+        lam_y to indepently control smoothness along the spectral and the spatial
+        dimensions. This is ideal for stray light modeling.
+
+        This method is both memory and CPU efficient and does not thus does not
+        require prior binning of the input image.
+
+        Parameters
+        ----------
+        selection : numpy.ndarray
+            Boolean selection of pixels to be fitted
+        degree : int, optional
+            Degree of the B-Spline basis, by default 3 (cubic)
+        n_knots_x : int, optional
+            Number of knots along x dimension, by default 40
+        n_knots_y : int, optional
+            Number of knots along y dimension, by default 20
+        lam_x : float, optional
+            Penalizing factor along x dimension, by default 1e2
+        lam_y : float, optional
+            Penalizing factor along y dimension, by default 1e5
+        constrain_positive : bool, optional
+            If True, constrain surface to be positive in all pixels, by default True
+        use_weights : bool, optional
+            If True, uses inverse variance to weight fitted pixels, by default False
+        verbose : bool, optional
+            If True, show OSQP messages during fitting, by default False
+
+        Returns
+        -------
+        numpy.ndarray
+            Fitted surface
+
+        Raises
+        ------
+        RuntimeError
+            If OSQP did not converge
+        """
+
+        # Weights
+        if use_weights and self._error is not None:
+            weights = numpy.where(self._error > 0, 1 / self._error ** 2, 0.0)
+        else:
+            weights = numpy.ones(self._error.shape)
+
+        BtWB, f, Bx, By, nx, ny, n_coef = _get_matrices_qp(
+            data=self._data, mask=selection, weights=weights,
+            n_knots_x=n_knots_x, n_knots_y=n_knots_y, degree=degree)
+
+        # Compute penalties in Kronecker space
+        Dx = csc_matrix(_diff_matrix(nx, order=2))
+        Dy = csc_matrix(_diff_matrix(ny, order=2))
+        Ix = sp_eye(nx, format="csc")
+        Iy = sp_eye(ny, format="csc")
+
+        Px = sp_kron(Iy, Dx.T @ Dx, format="csc")
+        Py = sp_kron(Dy.T @ Dy, Ix, format="csc")
+
+        H = csc_matrix(BtWB + lam_x * Px + lam_y * Py)
+        C, lb, ub = _get_contraints_qp(n_coef=n_coef, constrain_positive=constrain_positive)
+
+        # Assemble all QP ingredients for the P-spline problem.
+        # Returns a dict with keys:
+        #     H, f          : QP objective  (1/2 x'Hx - f'x)
+        #     C, lb, ub     : constraint matrix and bounds  (lb <= Cx <= ub)
+        #                     OSQP uses the form  lb <= Cx <= ub  internally;
+        #                     one-sided inequalities set the other bound to ±inf.
+        #     Bx_full, By_full, nx_basis, ny_basis
+        #                   : kept for surface evaluation after solving
+        qp = dict(
+            H=H, f=f, C=C, lb=lb, ub=ub,
+            Bx=Bx, By=By,
+            nx=nx, ny=ny)
+
+        # OSQP solves:
+        #     min   (1/2) x' P x + q' x
+        #     s.t.  l <= A x <= u
+
+        # which maps directly to our H, f, C, lb, ub.
+        prob = osqp.OSQP()
+        prob.setup(
+            P=qp["H"],   # must be upper-triangular for OSQP
+            q=-qp["f"],  # OSQP minimises q'x; we want -f'x
+            A=qp["C"],
+            l=qp["lb"],
+            u=qp["ub"],
+            # Solver settings
+            warm_starting=True,
+            verbose=verbose,
+            eps_abs=1e-6,
+            eps_rel=1e-6,
+            max_iter=10_000,
+            polish=True,          # final high-accuracy refinement step
+            adaptive_rho=True
+        )
+        with mute_stdout(verbose=verbose):
+            result = prob.solve()
+
+        if result.info.status not in ("solved", "solved_inaccurate"):
+            raise RuntimeError(f"OSQP did not converge: {result.info.status}")
+        if result.info.status == "solved_inaccurate":
+            warnings.warn("OSQP returned 'solved_inaccurate' — consider tightening tolerances.")
+
+        Bx = qp["Bx"]   # (n_cols, nx)
+        By = qp["By"]   # (n_rows, ny)
+        nx, ny = qp["nx"], qp["ny"]
+        A = result.x.reshape(ny, nx)
+        surface = By @ A @ Bx.T   # (n_rows, n_cols)
+        return surface
+
+    def fit_pspline2d_iterative(
+            self,
+            selection: numpy.ndarray,
+            n_knots_x: int = 40,
+            n_knots_y: int = 20,
+            lam_x: float = 1e2,
+            lam_y: float = 1e5,
+            sigma_clip: float = 3.0,
+            n_iter: int = 5,
+            constrain_positive: bool = True,
+            use_weights: bool = False,
+            verbose: bool = False) -> tuple[numpy.ndarray, numpy.ndarray]:
+        """
+        QP-based P-spline fit with iterative sigma-clipping.
+
+        Parameters
+        ----------
+        selection : numpy.ndarray
+            Boolean selection of pixels to be fitted
+        n_knots_x : int, optional
+            Number of knots along x dimension, by default 40
+        n_knots_y : int, optional
+            Number of knots along y dimension, by default 20
+        lam_x : float, optional
+            Penalizing factor along x dimension, by default 1e2
+        lam_y : float, optional
+            Penalizing factor along y dimension, by default 1e5
+        sigma_clip : float, optional
+            Threshold used for sigma clipping, by default 3.0
+        n_iter : int, optional
+            Maximum number of iterations, by default 5
+        constrain_positive : bool, optional
+            If True, constrain surface to be positive in all pixels, by default True
+        use_weights : bool, optional
+            If True, uses inverse variance to weight fitted pixels, by default False
+        verbose : bool, optional
+            If True, show OSQP messages during fitting, by default False
+
+        Returns
+        -------
+        numpy.array
+            Fitted surface
+        numpy.array
+            Pixel selection after sigma clipping
+        """
+        active_selection = selection.copy()
+
+        for iteration in range(n_iter):
+            log.debug(
+                f"  iter {iteration + 1}/{n_iter}: building QP "
+                f"(n_pixels={active_selection.sum()})...")
+
+            surface = self.fit_pspline2d(
+                selection=active_selection,
+                n_knots_x=n_knots_x, n_knots_y=n_knots_y,
+                lam_x=lam_x, lam_y=lam_y,
+                constrain_positive=constrain_positive,
+                use_weights=use_weights,
+                verbose=verbose)
+
+            # Sigma-clip on inter-trace residuals
+            residuals = numpy.where(active_selection, self._data - surface, 0.0)
+            res_vals = residuals[active_selection]
+            mad = bn.nanmedian(numpy.abs(res_vals - bn.nanmedian(res_vals)))
+            sigma_est = 1.4826 * mad
+
+            outliers = active_selection & (numpy.abs(residuals) > sigma_clip * sigma_est)
+            n_clipped = outliers.sum()
+            active_selection &= ~outliers
+
+            log.debug(f"    clipped={n_clipped}, sigma_est={sigma_est:.4f}")
+            if n_clipped == 0:
+                log.debug(f"  Converged after {iteration + 1} iterations.")
+                break
+
+        return surface, active_selection
+
     def straylight_binning(self, centroids, x_nbins=20, y_margin=7, nrows=5, nsigma=1.0):
         # initialize image pixel grid
         x_pixels, y_pixels = numpy.arange(self._dim[1]), numpy.arange(self._dim[0])
@@ -1915,224 +2279,6 @@ class Image(Header):
         stray_img = copy(self)
         stray_img.setData(data=model_data, error=None, mask=None)
         return stray_img
-
-    def fit_pspline2d(
-            self,
-            selection: numpy.ndarray,
-            n_knots_x: int = 40,
-            n_knots_y: int = 20,
-            lam_x: float = 1e2,
-            lam_y: float = 1e5,
-            degree: int = 3,
-            use_weights: bool = False
-    ) -> numpy.ndarray:
-        """
-        Fit a 2D tensor-product P-spline surface to selected pixels of a CCD frame.
-
-        The objective minimised is:
-
-            || sqrt(W) · (y - B_kron · alpha) ||^2
-            + lam_x · || D_x alpha ||^2
-            + lam_y · || D_y alpha ||^2
-
-        where B_kron = kron(B_y, B_x) is the 2D tensor-product basis,
-        D_x and D_y are 2nd-order difference matrices along each axis,
-        and alpha is the vector of spline coefficients.
-
-        The main advantage of posing the problem as a separable product surface
-        function relies in that we can impose assymetric penalizations lam_x and
-        lam_y to indepently control smoothness along the spectral and the spatial
-        dimensions. This is ideal for stray light modeling.
-
-        This method is both memory and CPU efficient and does not thus does not
-        require prior binning of the input image.
-
-        Parameters
-        ----------
-        selection : numpy.ndarray
-            Boolean mask of pixels, True where a valid point is to be fitted
-        n_knots_x : int, optional
-            Number of knots along x-dimension, by default 40
-        n_knots_y : int, optional
-            Number of knots along y-dimension, by default 20
-        lam_x : float, optional
-            Penalization factor along x-dimension, by default 1e2
-        lam_y : float, optional
-            Penalization factor along y-dimension, by default 1e5
-        degree : int, optional
-            Degree of the B-Spline, by default 3
-        use_weights : bool, optional
-            If True, compute variance weighted fit, by default False
-
-        Returns
-        -------
-        numpy.ndarray
-            Fitted 2D surface evaluated in all image pixels
-        """
-        n_rows, n_cols = self._data.shape
-
-        # Normalised coordinate grids
-        x_all = numpy.linspace(0, 1, n_cols)  # dispersion
-        y_all = numpy.linspace(0, 1, n_rows)  # spatial
-
-        # Build 1D bases over the full axis
-        Bx_full = _bspline_basis(x_all, n_knots_x, degree)   # (n_cols, nx_basis)
-        By_full = _bspline_basis(y_all, n_knots_y, degree)   # (n_rows, ny_basis)
-        nx_basis = Bx_full.shape[1]
-        ny_basis = By_full.shape[1]
-
-        # 2D tensor-product basis: row_index varies fast -> kron(By, Bx) gives
-        # a basis whose (i*n_cols+j)-th row corresponds to pixel (i, j)
-        # We only need the rows corresponding to masked pixels.
-        rows_idx, cols_idx = numpy.where(selection)
-
-        # Evaluate bases at masked pixel positions
-        Bx_m = Bx_full[cols_idx, :]       # (n_masked, nx_basis)
-        By_m = By_full[rows_idx, :]       # (n_masked, ny_basis)
-
-        # Row-wise Kronecker: B_kron[k, :] = kron(By_m[k,:], Bx_m[k,:])
-        # Shape: (n_masked, nx_basis * ny_basis)
-        # This transforms the x/y basis matrices into a single joint basis matrix
-        # with # of coefficients = nx_basis * ny_basis
-        B_kron = (By_m[:, :, None] * Bx_m[:, None, :]).reshape(
-            len(rows_idx), ny_basis * nx_basis
-        )
-
-        # Observed values at masked pixels
-        y_obs = self._data[selection]
-
-        # Weights
-        if use_weights and self._error is not None:
-            weights = numpy.where(self._error > 0, 1 / self._error ** 2, 0.0)
-            w_obs = weights[selection]
-        else:
-            w_obs = numpy.ones(len(y_obs))
-
-        # Weighted design matrix
-        W_diag = w_obs                      # diagonal of W
-        BtWB = (B_kron * W_diag[:, None]).T @ B_kron
-
-        # 2nd-order difference penalty matrices
-        # Dx/Dy matrices serve the purpose of smoothing
-        # variations along three consecutive coefficients
-        # at a time. This should prevent overshooting features
-        # in the fitted 2D surface
-        Dx = _diff_matrix(nx_basis, order=2)
-        Dy = _diff_matrix(ny_basis, order=2)
-
-        # Penalty in Kronecker space:
-        #   P_x = kron(I_y, Dx.T Dx)
-        #   P_y = kron(Dy.T Dy, I_x)
-        Ix = numpy.eye(nx_basis)
-        Iy = numpy.eye(ny_basis)
-        P_x = numpy.kron(Iy, Dx.T @ Dx)
-        P_y = numpy.kron(Dy.T @ Dy, Ix)
-
-        # Normal equations: (BtWB + lam_x*P_x + lam_y*P_y) alpha = BtW y
-        A = csc_matrix(BtWB + lam_x * P_x + lam_y * P_y)
-        rhs = (B_kron * W_diag[:, None]).T @ y_obs
-
-        alpha = spsolve(A, rhs)            # shape: (ny_basis * nx_basis,)
-
-        # Evaluate surface on the full 2D grid
-        # B_full = kron(By_full, Bx_full): (n_rows*n_cols, nx*ny)
-        # Evaluated as outer product to avoid building the huge dense matrix
-        surface = (By_full @ alpha.reshape(ny_basis, nx_basis) @ Bx_full.T)
-        # surface shape: (n_rows, n_cols)
-
-        return surface
-
-    def fit_pspline2d_iterative(
-            self,
-            selection: numpy.ndarray,
-            n_knots_x: int = 40,
-            n_knots_y: int = 20,
-            lam_x: float = 1e2,
-            lam_y: float = 1e5,
-            sigma_clip: float = 3.0,
-            n_iter: int = 5,
-            use_weights: bool = False,
-    ) -> tuple[numpy.ndarray, numpy.ndarray]:
-        """
-        Fit a 2D P-spline stray light model with iterative sigma-clipping.
-
-        At each iteration:
-        1. Fit the P-spline to the current active mask.
-        2. Compute residuals in the inter-block pixels.
-        3. Clip pixels with |residual| > sigma_clip * MAD and remove from mask.
-        4. Repeat until convergence or n_iter reached.
-
-        Parameters
-        ----------
-        selection : numpy.ndarray
-            Boolean mask of pixels, True where a valid point is to be fitted
-        n_knots_x : int, optional
-            Number of knots along x-dimension, by default 40
-        n_knots_y : int, optional
-            Number of knots along y-dimension, by default 20
-        lam_x : float, optional
-            Penalization factor along x-dimension, by default 1e2
-        lam_y : float, optional
-            Penalization factor along y-dimension, by default 1e5
-        sigma_clip : float, optional
-            Threshold for iterative sigma clipping, by default 3.0
-        n_iter : int, optional
-            Number of iterations, by default 5
-        use_weights : bool, optional
-            If True, compute variance weighted fit, by default False, by default False
-
-        Returns
-        -------
-        surface : numpy.array[n_rows, n_cols]
-            Stray light model
-        active_selection : numpy.array[n_rows, n_cols]
-            Final selection of pixels after iterative clipping
-
-        Raises
-        ------
-        RuntimeError
-            If the number of active pixels is less than (n_knots_x + 3) * (n_knots_y + 3)
-        """
-        active_selection = selection.copy()
-
-        for iteration in range(n_iter):
-            n_pixels = active_selection.sum()
-            if n_pixels < (n_knots_x + 3) * (n_knots_y + 3):
-                raise RuntimeError(
-                    f"Too few inter-block pixels ({n_pixels}) to constrain the spline. "
-                    "Reduce knot counts or check the trace mask."
-                )
-
-            surface = self.fit_pspline2d(
-                active_selection,
-                n_knots_x=n_knots_x, n_knots_y=n_knots_y,
-                lam_x=lam_x, lam_y=lam_y,
-                use_weights=use_weights,
-            )
-
-            # Residuals in inter-block pixels only
-            residuals = numpy.where(active_selection, self._data - surface, 0.0)
-            res_vals = residuals[active_selection]
-            mad = numpy.median(numpy.abs(res_vals - numpy.median(res_vals)))
-            sigma_est = 1.4826 * mad  # robust sigma estimate
-
-            # Flag outliers
-            outlier = active_selection & (numpy.abs(residuals) > sigma_clip * sigma_est)
-            n_clipped = outlier.sum()
-
-            active_selection &= ~outlier
-
-            print(
-                f"  iter {iteration + 1}/{n_iter}: "
-                f"n_pixels={active_selection.sum()}, clipped={n_clipped}, "
-                f"sigma_est={sigma_est:.4f}"
-            )
-
-            if n_clipped == 0:
-                print(f"  Converged after {iteration + 1} iterations.")
-                break
-
-        return surface, active_selection
 
     def match_reference_column(self, ref_column=LVM_REFERENCE_COLUMN, width=100, ref_centroids=None, stretch_range=[0.7, 1.3], shift_range=[-100, 100], return_all=False):
         """Returns the reference centroids matched against the current image
