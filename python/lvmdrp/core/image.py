@@ -2055,8 +2055,8 @@ class Image(Header):
             n_knots_y: int = 20,
             lam_x: float = 1e2,
             lam_y: float = 1e5,
-            sigma_clip: float = 3.0,
-            n_iter: int = 5,
+            nsigma: float = 3.0,
+            niter: int = 5,
             constrain_positive: bool = True,
             use_weights: bool = False,
             verbose: bool = False) -> tuple[numpy.ndarray, numpy.ndarray]:
@@ -2075,9 +2075,9 @@ class Image(Header):
             Penalizing factor along x dimension, by default 1e2
         lam_y : float, optional
             Penalizing factor along y dimension, by default 1e5
-        sigma_clip : float, optional
+        nsigma : float, optional
             Threshold used for sigma clipping, by default 3.0
-        n_iter : int, optional
+        niter : int, optional
             Maximum number of iterations, by default 5
         constrain_positive : bool, optional
             If True, constrain surface to be positive in all pixels, by default True
@@ -2095,9 +2095,9 @@ class Image(Header):
         """
         active_selection = selection.copy()
 
-        for iteration in range(n_iter):
+        for iteration in range(niter):
             log.debug(
-                f"  iter {iteration + 1}/{n_iter}: building QP "
+                f"  iter {iteration + 1}/{niter}: building QP "
                 f"(n_pixels={active_selection.sum()})...")
 
             surface = self.fit_pspline2d(
@@ -2114,7 +2114,7 @@ class Image(Header):
             mad = bn.nanmedian(numpy.abs(res_vals - bn.nanmedian(res_vals)))
             sigma_est = 1.4826 * mad
 
-            outliers = active_selection & (numpy.abs(residuals) > sigma_clip * sigma_est)
+            outliers = active_selection & (numpy.abs(residuals) > nsigma * sigma_est)
             n_clipped = outliers.sum()
             active_selection &= ~outliers
 
@@ -2125,7 +2125,7 @@ class Image(Header):
 
         return surface, active_selection
 
-    def straylight_binning(self, centroids, x_nbins=20, y_margin=7, nrows=5, nsigma=1.0):
+    def straylight_binning(self, centroids, x_nbins=20, y_margin=7, nrows=5, nsigma=1.0, return_bins=True):
         # initialize image pixel grid
         x_pixels, y_pixels = numpy.arange(self._dim[1]), numpy.arange(self._dim[0])
         X, Y = numpy.meshgrid(x_pixels, y_pixels, indexing="xy")
@@ -2155,8 +2155,7 @@ class Image(Header):
         x_index = numpy.digitize(numpy.arange(self._dim[1]), x_bins) - 1
         x_centers = 0.5 * (x_bins[:-1] + x_bins[1:])
         cols_per_bin = [numpy.where(x_index == i)[0] for i in range(x_nbins)]
-        samples = []
-
+        bins = []
         for k, strip in enumerate(strips):
 
             xs, ys, zs, es = [], [], [], []
@@ -2195,33 +2194,31 @@ class Image(Header):
             es[bad] = numpy.interp(xs[bad], xs[~bad], es[~bad])
 
             if len(xs) > 0:
-                samples.append(dict(strip_id=k, x=xs, y=ys, z=zs, e=es))
+                bins.append(dict(strip_id=k, x=xs, y=ys, z=zs, e=es))
 
-        return samples, strips, X, Y
+        if return_bins:
+            return bins, strips, X, Y
+        return strips, X, Y
 
-    def fit_straylight(self, samples, strips, X, Y, smoothing, clip=None, axs=None):
+    def fit_straylight(
+            self, strips,
+            n_knots_x: int = 40,
+            n_knots_y: int = 20,
+            lam_x: float = 1e2,
+            lam_y: float = 1e5,
+            nsigma: float = 3.0,
+            niter: int = 5,
+            use_weights: bool = False,
+            axs=None):
 
-        x_pixels = X[0]
-        y_pixels = Y[:, 0]
+        select = numpy.logical_or.reduce(strips, axis=0) & ~self._mask
 
-        x_all = numpy.concatenate([s["x"] for s in samples])
-        y_all = numpy.concatenate([s["y"] for s in samples])
-        z_all = numpy.concatenate([s["z"] for s in samples])
-        # e_all = numpy.concatenate([s["e"] for s in samples])
-        y_cent = numpy.mean([s["y"] for s in samples], axis=1)
-        y_nbins = y_cent.size
-
-        select = ~sigma_clip(z_all, sigma=3, maxiters=3).mask
-
-        # model = interpolate.CloughTocher2DInterpolator(numpy.column_stack((x_all, y_all)), z_all)
-        model = interpolate.RBFInterpolator(numpy.column_stack((x_all[select], y_all[select])), z_all[select], smoothing=smoothing)
-        # w = numpy.divide(1, numpy.sqrt(e_all), where=e_all>0, out=numpy.zeros_like(e_all))
-        # model = interpolate.SmoothBivariateSpline(x_all, y_all, z_all, w=w, bbox=[0, 4086, 0, 4080], kx=3, ky=2, s=smoothing)
-
-        # evaluate model
-        # model_data = model(X, Y)
-        model_data = model(numpy.column_stack((X.ravel(), Y.ravel()))).reshape(self._dim)
-        # model_data = model(X, Y, grid=False)
+        model_data, _ = self.fit_pspline2d_iterative(
+            selection=select,
+            n_knots_x=n_knots_x, n_knots_y=n_knots_y,
+            lam_x=lam_x, lam_y=lam_y,
+            nsigma=nsigma,
+            niter=niter, use_weights=use_weights)
 
         # extrapolate empty rows
         good = numpy.isfinite(model_data).all(axis=1)
@@ -2229,9 +2226,6 @@ class Image(Header):
         i, j = idx[0], idx[-1]
         model_data[:i] = model_data[i]
         model_data[j+1:] = model_data[j]
-
-        if clip is not None and isinstance(clip, tuple) and len(clip) == 2:
-            model_data = numpy.clip(model_data, *clip)
 
         if axs is not None:
             unit = self._header["BUNIT"]
@@ -2241,10 +2235,15 @@ class Image(Header):
             cbar.set_label(f"Counts ({unit})", fontsize="small", color="tab:red")
             axs["img"].set_aspect("auto")
 
-            axs["img"].plot(x_all, y_all, "o", mew=0.5, ms=4, mec="tab:blue", mfc="none")
+            y_strips, x_strips = zip(*[numpy.where(s) for s in strips])
+            y_select, x_select = numpy.where(select)
+
+            axs["img"].plot(x_select, y_select, ".", ms=1, mfc="tab:blue", mew=0)
 
             colors_x = plt.cm.coolwarm(numpy.linspace(0, 1, self._data.shape[0]))
             colors_y = plt.cm.coolwarm(numpy.linspace(0, 1, self._data.shape[1]))
+            x_pixels = numpy.arange(model_data.shape[1])
+            y_pixels = numpy.arange(model_data.shape[0])
             for iy in y_pixels:
                 axs["xma"].plot(x_pixels, model_data[iy], ",", color=colors_x[iy], alpha=0.2)
             axs["xma"].step(x_pixels, numpy.sqrt(bn.nanmedian(self._error**2, axis=0)), lw=1, color="0.8", where="mid")
@@ -2252,7 +2251,7 @@ class Image(Header):
                 axs["yma"].plot(model_data[:, ix], y_pixels, ",", color=colors_y[ix], alpha=0.2)
             axs["yma"].step(numpy.sqrt(bn.nanmedian(self._error, axis=1)), y_pixels, lw=1, color="0.8", where="mid")
 
-            for i in range(y_nbins):
+            for i in range(len(strips)):
                 strip = strips[i]
                 data_ = self._data[strip]
                 error_ = self._error[strip]
@@ -2260,17 +2259,15 @@ class Image(Header):
                 residuals = (model_ - data_) / error_
                 mu = numpy.nanmean(residuals, axis=0)
 
-                axs["res"][i].set_title(f"Y-bin = {y_cent[i]:.0f}", fontsize="large", loc="left")
+                axs["res"][i].set_title(f"Y-bin = {y_strips[i].mean():.0f}", fontsize="large", loc="left")
                 axs["res"][i].set_ylabel(f"Counts ({unit})", fontsize="large")
-                axs["res"][i].errorbar(samples[i]["x"], samples[i]["z"], yerr=samples[i]["e"], fmt=",", color="tab:blue", ecolor="tab:blue", lw=1)
+                axs["res"][i].plot(x_strips[i], model_, ",", color="0.2")
                 ylims = axs["res"][i].get_ylim()
-                axs["res"][i].errorbar(X[strip], data_, yerr=error_, fmt=",", color="0.7", ecolor="0.7", lw=1, zorder=-1)
-
-                axs["res"][i].plot(X[strip], model_, ",", color="0.2")
-
                 f = numpy.abs(ylims).max()*0.03
-                axs["res"][i].plot(X[strip].T, residuals.T*f, ",", color="0.2")
-                axs["res"][i].step(X[strip].mean(0), mu*f, "-", color="0.2", lw=1, where="mid")
+
+                axs["res"][i].errorbar(x_strips[i], data_, yerr=error_, fmt=",", color="0.7", ecolor="0.7", lw=1, zorder=-1)
+                axs["res"][i].plot(x_strips[i], residuals*f, ",", color="0.2")
+                axs["res"][i].step(x_strips[i].mean(0), mu*f, "-", color="0.2", lw=1, where="mid")
                 axs["res"][i].axhline(-f, ls=":", lw=1, color="0.4")
                 axs["res"][i].axhline(+f, ls=":", lw=1, color="0.4")
                 axs["res"][i].axhline(ls="--", lw=1, color="0.4")

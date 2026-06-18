@@ -1563,7 +1563,12 @@ def subtract_straylight(
     margin: int = 7,
     x_bins: int = 70,
     nsigma: float = 3.0,
-    clip: Tuple[float,float]|None = (0.0, None),
+    n_knots_x: int = 40,
+    n_knots_y: int = 20,
+    lam_x: float = 1e2,
+    lam_y: float = 1e5,
+    niter: int = 5,
+    use_weights: bool = False,
     median_box: int|None = None,
     display_plots: bool = False,
 ) -> Tuple[Image, Image, Image]:
@@ -1632,11 +1637,21 @@ def subtract_straylight(
     img_median._mask = img_median._mask | numpy.isnan(img_median._data) | numpy.isinf(img_median._data) | (img_median._data == 0)
 
     log.info(f"binning with parameters: {x_bins = }, {margin = }, {select_nrows = }, {nsigma = }")
-    samples, strips, X, Y = img_median.straylight_binning(trace_mask, x_bins, y_margin=margin, nrows=select_nrows, nsigma=nsigma)
+    strips, _, _ = img_median.straylight_binning(trace_mask, x_bins, y_margin=margin, nrows=select_nrows, nsigma=nsigma, return_bins=False)
 
-    log.info(f"fitting straylight model with parameters: {clip = }")
+    log.info(
+        f"fitting straylight with parameters: "
+        f"{n_knots_x = }, {n_knots_y = }, "
+        f"{lam_x = }, {lam_y = }, "
+        f"{nsigma = }, {niter = }"
+        f"{use_weights = }"
+        )
     fig, axs = create_straylight_axes(img_median, len(strips))
-    img_stray = img_median.fit_straylight(samples, strips, X, Y, smoothing=1.0, clip=clip, axs=axs)
+    img_stray = img_median.fit_straylight(
+        strips, n_knots_x=n_knots_x, n_knots_y=n_knots_y,
+        lam_x=lam_x, lam_y=lam_y,
+        nsigma=nsigma, niter=niter,
+        use_weights=use_weights, axs=axs)
 
     # subtract smoothed background signal from original image
     log.info("subtracting the smoothed background signal from the original image")
