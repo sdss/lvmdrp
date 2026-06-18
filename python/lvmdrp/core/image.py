@@ -2151,52 +2151,52 @@ class Image(Header):
         strips = [above_fibers] + strips + [below_fibers]
 
         # bin along X
-        x_bins = _edge_centered_bins(nbins=x_nbins, size=self._dim[1])
-        x_index = numpy.digitize(numpy.arange(self._dim[1]), x_bins) - 1
-        x_centers = 0.5 * (x_bins[:-1] + x_bins[1:])
-        cols_per_bin = [numpy.where(x_index == i)[0] for i in range(x_nbins)]
-        bins = []
-        for k, strip in enumerate(strips):
-
-            xs, ys, zs, es = [], [], [], []
-
-            # iterate over X bins
-            for ibin in range(x_nbins):
-                cols = cols_per_bin[ibin]
-                if cols.size == 0:
-                    continue
-
-                # restrict to strip pixels in these columns
-                sel = strip[:, cols]
-                if not numpy.any(sel):
-                    continue
-
-                values = self._data[:, cols][sel]
-                vars = self._error[:, cols][sel] ** 2
-
-                # reject outlying pixels
-                med = bn.nanmedian(values)
-                mad = 1.4826 * bn.nanmedian(numpy.abs(values - med))
-                valid = numpy.abs(values - med) < nsigma * mad
-
-                xs.append(x_centers[ibin])
-                ys.append(numpy.mean(Y[:, cols][sel][valid]))
-                zs.append(biweight_location(values[valid], ignore_nan=True))
-                es.append(numpy.sqrt(biweight_location(vars[valid], ignore_nan=True)))
-
-            xs = numpy.asarray(xs)
-            ys = numpy.asarray(ys)
-            zs = numpy.asarray(zs)
-            es = numpy.asarray(es)
-            bad = sigma_clip(zs, sigma=nsigma, maxiters=2).mask
-
-            zs[bad] = numpy.interp(xs[bad], xs[~bad], zs[~bad])
-            es[bad] = numpy.interp(xs[bad], xs[~bad], es[~bad])
-
-            if len(xs) > 0:
-                bins.append(dict(strip_id=k, x=xs, y=ys, z=zs, e=es))
-
         if return_bins:
+            x_bins = _edge_centered_bins(nbins=x_nbins, size=self._dim[1])
+            x_index = numpy.digitize(numpy.arange(self._dim[1]), x_bins) - 1
+            x_centers = 0.5 * (x_bins[:-1] + x_bins[1:])
+            cols_per_bin = [numpy.where(x_index == i)[0] for i in range(x_nbins)]
+            bins = []
+            for k, strip in enumerate(strips):
+
+                xs, ys, zs, es = [], [], [], []
+
+                # iterate over X bins
+                for ibin in range(x_nbins):
+                    cols = cols_per_bin[ibin]
+                    if cols.size == 0:
+                        continue
+
+                    # restrict to strip pixels in these columns
+                    sel = strip[:, cols]
+                    if not numpy.any(sel):
+                        continue
+
+                    values = self._data[:, cols][sel]
+                    vars = self._error[:, cols][sel] ** 2
+
+                    # reject outlying pixels
+                    med = bn.nanmedian(values)
+                    mad = 1.4826 * bn.nanmedian(numpy.abs(values - med))
+                    valid = numpy.abs(values - med) < nsigma * mad
+
+                    xs.append(x_centers[ibin])
+                    ys.append(numpy.mean(Y[:, cols][sel][valid]))
+                    zs.append(biweight_location(values[valid], ignore_nan=True))
+                    es.append(numpy.sqrt(biweight_location(vars[valid], ignore_nan=True)))
+
+                xs = numpy.asarray(xs)
+                ys = numpy.asarray(ys)
+                zs = numpy.asarray(zs)
+                es = numpy.asarray(es)
+                bad = sigma_clip(zs, sigma=nsigma, maxiters=2).mask
+
+                zs[bad] = numpy.interp(xs[bad], xs[~bad], zs[~bad])
+                es[bad] = numpy.interp(xs[bad], xs[~bad], es[~bad])
+
+                if len(xs) > 0:
+                    bins.append(dict(strip_id=k, x=xs, y=ys, z=zs, e=es))
+
             return bins, strips, X, Y
         return strips, X, Y
 
