@@ -500,13 +500,14 @@ def ffactors_experiment(mjd, mjd_list, mjd_range, drpver, channel, b_skyline, r_
 @click.option('-l', '--mjd-list', type=IntListType(), help='a list of specific MJDs to reduce')
 @click.option('-r', '--mjd-range', type=str, help='a range of MJDs to reduce')
 @click.option('--epochs-file', type=str, default=None, help="Path to a calibrations epoch file")
+@click.option('--channels', type=str, default="brz", help="Spectrograph channels that will be analysed")
 @click.option('--skip-sequence-selection', is_flag=True, default=False, help='skip selection of calibration sequence, select all matching flavor instead')
 @click.option('--skip-combination', is_flag=True, default=False, help='skip combining calibrations into master frame')
 @click.option('-s', '--skip-done', is_flag=True, default=False, help='flag to skip reduction steps that have already been done')
 @click.option("--dry-run", is_flag=True, default=False, help="Shows useful information about the current setup without actually running reductions")
 @cloup.constraint(mutually_exclusive, ['mjd', 'mjd_list', 'mjd_range'])
 @cloup.constraint(RequireExactly(1), ['mjd', 'mjd_list', 'mjd_range'])
-def fiberflats(mjd, mjd_list, mjd_range, epochs_file, skip_sequence_selection, skip_combination, skip_done, dry_run):
+def fiberflats(mjd, mjd_list, mjd_range, epochs_file, channels, skip_sequence_selection, skip_combination, skip_done, dry_run):
 
     # parse MJDs
     mjds = parse_mjds(mjd=mjd or mjd_list or mjd_range or None)
@@ -527,6 +528,7 @@ def fiberflats(mjd, mjd_list, mjd_range, epochs_file, skip_sequence_selection, s
         create_twilight_fiberflats(
             mjd=mjd,
             cals_mjd=cals_mjd[mjd],
+            channels=channels,
             skip_sequence_selection=skip_sequence_selection,
             skip_combination=skip_combination,
             skip_done=skip_done,

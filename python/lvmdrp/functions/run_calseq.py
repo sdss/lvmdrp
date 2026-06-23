@@ -1833,7 +1833,7 @@ def create_dome_fiberflats(mjd, expnums_ldls=None, expnums_qrtz=None, cals_mjd=N
         lvmflat.writeFitsData(path.full("lvm_frame", mjd=mjd, tileid=11111, drpver=drpver, expnum=expnum_str, kind=f'DFlat-{channel}'))
 
 
-def create_twilight_fiberflats(mjd: int, epochs: dict[int, dict] = None, cals_mjd: int = None, use_longterm_cals: bool = True,
+def create_twilight_fiberflats(mjd: int, epochs: dict[int, dict] = None, cals_mjd: int = None, channels: str = "brz",
                       ref_kind: Union[int, Callable[[np.ndarray, int], np.ndarray]] = bn.nanmedian,
                       groupby: str = "spec", guess_coeffs: List[int] = [1,0,0,0], fixed_coeffs: List[int] = [3],
                       cnorms: Dict[str, float] = SKYLINES_FIBERFLAT, dwave: float = 20.0,
@@ -1882,6 +1882,11 @@ def create_twilight_fiberflats(mjd: int, epochs: dict[int, dict] = None, cals_mj
     dry_run : bool, optional
         Logs useful information abaut the current setup without actually reducing, by default False
     """
+
+    _channels = set(channels)
+    if not _channels.issubset(set("brz")):
+        raise ValueError(f"Invalid value in `channels`: {channels}. Expected a subset of 'brz'")
+
     epoch = get_calibration_epoch(mjd=mjd, **(epochs or {}).get(mjd, {}))
     mjds = epoch["twilight"]
 
@@ -1923,9 +1928,8 @@ def create_twilight_fiberflats(mjd: int, epochs: dict[int, dict] = None, cals_mj
         calibs[flavor] = group_calib_paths(calibs[flavor])
 
     # decompose twilight spectra into sun continuum and twilight components
-    channels = "brz"
     flat_channels = frames.groupby(frames.camera.str.__getitem__(0))
-    for channel in channels:
+    for channel in _channels:
         flat_expnums = flat_channels.get_group(channel).groupby("expnum")
         xtwi_paths, fflat_paths, lvmflat_paths = [], [], []
         for expnum in flat_expnums.groups:
@@ -1968,8 +1972,8 @@ def create_twilight_fiberflats(mjd: int, epochs: dict[int, dict] = None, cals_mj
 
         # skip creation of master fiberflats
         if skip_combination:
-            log.info("skipping creation of master fiberflat")
-            return
+            log.info(f"skipping creation of master fiberflat for {channel = }")
+            continue
 
         # combine individual fiberflats into master fiberflat
         mflat_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, kind="mfiberflat_twilight", camera=channel)
