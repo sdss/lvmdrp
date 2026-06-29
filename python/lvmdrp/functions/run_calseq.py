@@ -1984,25 +1984,37 @@ def create_twilight_fiberflats(mjd: int, epochs: dict[int, dict] = None, cals_mj
             in_waves=calibs["wave"][channel], in_lsfs=calibs["lsf"][channel])
 
 
-def create_fiberflats_corrections(cals_mjd: int, science_mjds: Union[int, List[int]], use_longterm_cals: bool = True, science_expnums: List[int] = None,
+def create_fiberflats_corrections(cals_mjd: int, science_mjds: Union[int, List[int]], science_expnums: List[int] = None,
                                   sky_cwaves: Dict[str, float] = SKYLINES_FIBERFLAT, cont_cwaves: Dict[str, float] = CONTINUUM_FIBERFLAT,
                                   groupby: str = "spec", quantiles: Tuple[float, float] = (5.0, 97.0), sky_fibers_only: bool = False,
-                                  nsigma: float = 2.0, comb_method: str = "median", force_correction: bool = False,
-                                  skip_done: bool = False, display_plots: bool = False, dry_run: bool = False) -> None:
+                                  nsigma: float = 2.0, comb_method: str = "median", fit_gradient: bool = False, force_correction: bool = False,
+                                  undo_correction: bool = False, skip_done: bool = False, display_plots: bool = False, dry_run: bool = False) -> None:
 
     if not all([cals_mjd <= sci_mjd for sci_mjd in science_mjds]):
         log.error(f"some science MJDs are earlier than {cals_mjd = }: {science_mjds = }")
         return
 
     science_mjds = [science_mjds] if isinstance(science_mjds, int) else science_mjds
+    frames = pd.concat([md.get_frames_metadata(mjd=mjd).query("tileid != 11111 and qaqual != 'BAD'") for mjd in science_mjds], ignore_index=True)
     if science_expnums is None:
-        frames = pd.concat([md.get_frames_metadata(mjd=mjd).query("tileid != 11111 and qaqual != 'BAD'") for mjd in science_mjds], ignore_index=True)
         science_expnums = frames.sort_values("expnum").drop_duplicates("expnum").expnum
+    else:
+        frames = frames.query("expnum in @science_expnums")
 
     calibs = get_calib_paths(mjd=cals_mjd, version=drpver, flavors=CALIBRATION_NEEDS["object"], from_sandbox=False)
 
     if dry_run:
         _log_dry_run(frames, calibs=calibs, settings=None, caller=create_fiberflats_corrections.__name__)
+        return
+
+    if undo_correction:
+        for channel in "brz":
+            fit_skyline_flatfield(
+                in_sciences=[],
+                in_mflat=calibs["fiberflat_twilight"][channel],
+                out_mflat=calibs["fiberflat_twilight"][channel],
+                sky_cwave=sky_cwaves[channel], cont_cwave=cont_cwaves[channel],
+                undo_correction=undo_correction)
         return
 
     # 2D and 1D reduction of science exposures
@@ -2020,11 +2032,12 @@ def create_fiberflats_corrections(cals_mjd: int, science_mjds: Union[int, List[i
             in_mflat=calibs["fiberflat_twilight"][channel],
             out_mflat=calibs["fiberflat_twilight"][channel],
             groupby=groupby,
-            guess_coeffs=[1,0,0,0], fixed_coeffs=[0,1,2,3],
+            guess_coeffs=[1,0,0,0], fixed_coeffs=[3] if fit_gradient else [1, 2, 3],
             sky_cwave=sky_cwaves[channel], cont_cwave=cont_cwaves[channel], dwave=20.0,
             quantiles=quantiles, sky_fibers_only=sky_fibers_only,
             nsigma=nsigma, comb_method=comb_method,
             force_correction=force_correction,
+            undo_correction=undo_correction,
             display_plots=display_plots)
 
 

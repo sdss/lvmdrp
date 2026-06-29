@@ -430,10 +430,13 @@ def nightly(mjd, mjd_list, mjd_range, reject_cr,
 @click.option('-l', '--science-mjds', type=IntListType(), required=True, help='a list of specific MJDs to reduce')
 @click.option('-e', '--science-expnums', type=IntListType(), default=None, help='a list of specific exposure numbers to reduce')
 @click.option('--force-correction', is_flag=True, default=False, help='flag to force correction even if has been already done')
+@click.option('--undo-correction', is_flag=True, default=False, help='flag to undo correction if already applied')
 @click.option('-s', '--skip-done', is_flag=True, default=False, help='flag to skip reduction steps that have already been done')
 @click.option("--dry-run", is_flag=True, default=False, help="Shows useful information about the current setup without actually running reductions")
-def fiberflat_corrections(mjd, science_mjds, science_expnums, force_correction, skip_done, dry_run):
-    create_fiberflats_corrections(cals_mjd=mjd, science_mjds=science_mjds, science_expnums=science_expnums, force_correction=force_correction, skip_done=skip_done, dry_run=dry_run)
+def fiberflat_corrections(mjd, science_mjds, science_expnums, force_correction, undo_correction, skip_done, dry_run):
+    create_fiberflats_corrections(cals_mjd=mjd, science_mjds=science_mjds, science_expnums=science_expnums,
+                                  force_correction=force_correction, undo_correction=undo_correction,
+                                  skip_done=skip_done, dry_run=dry_run)
 
 
 

@@ -315,6 +315,8 @@ def combine_twilight_sequence(in_twilights: list[str], in_fflats: List[str], out
     cwave, dwave = mflat._header[f"{channel} FIBERFLAT CWAVE"], mflat._header[f"{channel} FIBERFLAT DWAVE"]
     groupby = mflat._header[f"{channel} FIBERFLAT GROUPBY"]
     coadd_method = mflat._header[f"{channel} FIBERFLAT COADD"]
+    del mflat._header["*FIBERFLAT GCOEFF?"]
+    del mflat._header["*FIBERFLAT FACTOR?"]
 
     # mask invalid pixels
     mflat._mask |= np.isnan(mflat._data) | (mflat._data <= 0) | np.isinf(mflat._data)
@@ -691,32 +693,52 @@ def fit_fiberflat(in_rss, out_flat, out_rss, ref_kind=600, guess_coeffs=[1,2,3,0
     return flat, flat_g, rss_g, coeffs, factors
 
 def fit_skyline_flatfield(in_sciences, in_mflat, out_mflat, sky_cwave, cont_cwave, dwave=8, guess_coeffs=[1,2,3,0], fixed_coeffs=[3], groupby="spec",
-                          quantiles=(5,97), nsigma=1, comb_method="median", sky_fibers_only=False, force_correction=False, display_plots=False):
+                          quantiles=(5,97), nsigma=1, comb_method="median", sky_fibers_only=False, force_correction=False, undo_correction=False,
+                          display_plots=False):
 
     log.info(f"loading master fiberflat at {in_mflat}")
     mflat = RSS.from_file(in_mflat)
     channel = mflat._header["CCD"]
-    coadd_method = mflat._header[f"{channel} FIBERFLAT COADD"]
 
-    # verify groupy
+    is_corrected = mflat._header.get(f"{channel} FIBERFLAT SKYCORR")
+    if is_corrected is None:
+        if not force_correction:
+            warnings.warn("no fiber flat correction information, assuming this is an old version of fiber flats and skipping")
+            return mflat, np.ones(mflat._fibers, dtype="float32")
+
+        warnings.warn("forcing correction on possibly old version of fiber flat")
+        is_corrected = False
+
+    coadd_method = mflat._header.get(f"{channel} FIBERFLAT COADD")
     groupby_hdr = mflat._header.get(f"{channel} FIBERFLAT GROUPBY")
+    # verify groupby parameter and replace it with header value if necessary
     if groupby != groupby_hdr:
-        log.warning(f"requested {groupby = } but header says {groupby_hdr}, assuming header value")
+        warnings.warn(f"requested {groupby = } but header says {groupby_hdr}, assuming header value")
         groupby = groupby_hdr
     fiber_groups = mflat._get_fiber_groups(by=groupby)
+    ngroups = len(set(fiber_groups))
 
-    # skip correction if already done and no force is required
-    # undo correction if done and force is required
-    if mflat._header.get(f"{channel} FIBERFLAT SKYCORR"):
+    if undo_correction and not is_corrected:
+        log.info("no correction applied, nothing to undo")
+        return mflat, np.ones(mflat._fibers, dtype="float32")
+
+    if is_corrected:
+        factors = [mflat._header.get(f"{channel} FIBERFLAT FACTOR{i+1}") for i in range(ngroups)]
+        flatfield_corr = IFUGradient.ifu_factors(factors, fiber_groups)
+        log.info(f"fiber flat already corrected; undoing '{groupby}' correction with: {factors}")
+        mflat /= flatfield_corr[:, None]
+        del mflat._header["*FIBERFLAT GCOEFF?"]
+        del mflat._header["*FIBERFLAT FACTOR?"]
+        mflat.setHdrValue(f"HIERARCH {channel.upper()} FIBERFLAT SKYCORR", False)
+
+        if undo_correction:
+            log.info(f"writing uncorrected master fiberflat to {out_mflat}")
+            mflat.writeFitsData(out_mflat)
+            return mflat, np.ones(mflat._fibers, dtype="float32")
+
         if not force_correction:
-            log.info("fiber flat already corrected using sky lines, skipping")
-            return mflat, np.ones(mflat._fibers, dtype="float")
-        else:
-            factors = list(mflat._header[f"{channel} FIBERFLAT FACTOR?"].values())
-            log.info(f"requested {force_correction = }; undoing '{groupby}' correction with: {factors}")
-            flatfield_corr = IFUGradient.ifu_factors(factors, fiber_groups)
-            mflat /= flatfield_corr[:, None]
-            mflat.setHdrValue("HIERARCH {channel} FIBERFLAT SKYCORR", False)
+            log.info(f"{force_correction = }, nothing to do")
+            return mflat, np.ones(mflat._fibers, dtype="float32")
 
     log.info(f"loading {len(in_sciences)} science exposures")
     sciences = [RSS.from_file(in_science) for in_science in in_sciences]
@@ -813,15 +835,15 @@ def fit_skyline_flatfield(in_sciences, in_mflat, out_mflat, sky_cwave, cont_cwav
     save_fig(fig, out_mflat, to_display=display_plots, figure_path="qa", label="flat_correction")
 
     mflat_corr = mflat * flatfield_corr[:, None]
-    mflat_corr.setHdrValue(f"HIERARCH {channel} FIBERFLAT CWAVE", sky_cwave, "norm. wavelength [Angstrom]")
-    mflat_corr.setHdrValue(f"HIERARCH {channel} FIBERFLAT DWAVE", dwave, "norm. window width [Angstrom]")
-    mflat_corr.setHdrValue(f"HIERARCH {channel} FIBERFLAT COADD", coadd_method, "coadding method")
-    mflat_corr.setHdrValue(f"HIERARCH {channel} FIBERFLAT SKYCORR", True, "fiberflat skyline-corrected?")
-    mflat_corr.setHdrValue(f"HIERARCH {channel} FIBERFLAT GROUPBY", groupby, "fiber grouping")
+    mflat_corr.setHdrValue(f"HIERARCH {channel.upper()} FIBERFLAT CWAVE", sky_cwave, "norm. wavelength [Angstrom]")
+    mflat_corr.setHdrValue(f"HIERARCH {channel.upper()} FIBERFLAT DWAVE", dwave, "norm. window width [Angstrom]")
+    mflat_corr.setHdrValue(f"HIERARCH {channel.upper()} FIBERFLAT COADD", coadd_method, "coadding method")
+    mflat_corr.setHdrValue(f"HIERARCH {channel.upper()} FIBERFLAT SKYCORR", True, "fiberflat skyline-corrected?")
+    mflat_corr.setHdrValue(f"HIERARCH {channel.upper()} FIBERFLAT GROUPBY", groupby, "fiber grouping")
     for i, f in enumerate(factor):
-        mflat_corr.setHdrValue(f"HIERARCH {channel} FIBERFLAT FACTOR{i+1}", np.round(f, 5), f"fiberflat factor {groupby}{i+1}")
+        mflat_corr.setHdrValue(f"HIERARCH {channel.upper()} FIBERFLAT FACTOR{i+1}", np.round(f, 5), f"fiberflat factor {groupby}{i+1}")
     for i, c in enumerate(coeffs):
-        mflat_corr.setHdrValue(f"HIERARCH {channel} FIBERFLAT GCOEFF{i+1}", np.round(c, 5), f"IFU gradient coeff #{i+1}")
+        mflat_corr.setHdrValue(f"HIERARCH {channel.upper()} FIBERFLAT GCOEFF{i+1}", np.round(c, 5), f"IFU gradient coeff #{i+1}")
     log.info(f"writing corrected master fiberflat to {out_mflat}")
     mflat_corr.writeFitsData(out_mflat)
 
