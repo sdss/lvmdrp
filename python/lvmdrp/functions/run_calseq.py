@@ -26,6 +26,7 @@
 #
 
 import os
+import pathlib
 import yaml
 import warnings
 import numpy as np
@@ -100,7 +101,15 @@ FIBER_SMOOTHING_CONFIG = {
     "sigmas": ("polynomial", {"deg": 8, "nsigmas": np.inf, "min_samples_frac": 0.7})}
 
 
-CALIBRATION_EPOCHS_PATH = os.path.join(os.getenv("LVMCORE_DIR"), "calibrations", "calibration-epochs.yaml")
+lvmcore_dir = pathlib.Path(os.getenv("LVMCORE_DIR", "."))
+FFACTOR_EPOCHS_PATH = lvmcore_dir / "calibrations" / "fiberflat-factor-epochs.yaml"
+
+CALIBRATION_EPOCHS_PATH = lvmcore_dir / "calibrations" / "calibration-epochs.yaml"
+
+EPOCHS_FILE_PATH = {
+        "ffactor": FFACTOR_EPOCHS_PATH,
+        "calibration": CALIBRATION_EPOCHS_PATH
+    }
 
 
 def _extract_ffactors(channel, header):
@@ -726,8 +735,108 @@ def _parse_list(items_str):
     return items
 
 
-def load_calibration_epochs(epochs_path=None, filter_by=None, verbose=True):
-    epochs_path = epochs_path or CALIBRATION_EPOCHS_PATH
+def update_fflat_epochs(ffactor_epoch_path=None, calibration_epoch_path=None, max_mjd=62000):
+    """Update the fiber flat factor epoch definitions from calibration epochs.
+
+    Parameters
+    ----------
+    ffactor_epoch_path : pathlib.Path or None, optional
+        Path to the fiber flat factor epochs YAML file. If None, the default
+        path from ``EPOCHS_FILE_PATH["ffactor"]`` is used.
+    calibration_epoch_path : pathlib.Path or None, optional
+        Path to the calibration epochs YAML file. If None, the default path
+        from ``EPOCHS_FILE_PATH["calibration"]`` is used.
+
+    Returns
+    -------
+    None
+        The function writes or updates the YAML file in place.
+
+    Notes
+    -----
+    The function derives the relevant MJD epochs from the earliest science
+    period, the survey-start trigger, and any instrument intervention events.
+    Existing fiber flat factor epochs are preserved when the target file already
+    exists.
+    """
+
+    calibration_epoch_path = calibration_epoch_path or EPOCHS_FILE_PATH["calibration"]
+    ffactor_epoch_path = ffactor_epoch_path or EPOCHS_FILE_PATH["ffactor"]
+
+    calibration_epochs = load_epochs_file(epochs_kind="calibration", verbose=False)
+
+    # locate early science start
+    mjd_early = list(calibration_epochs.keys())[:1]
+    # locate survey start
+    mjd_start = [mjd for mjd, epoch in calibration_epochs.items() if epoch["trigger"] == "Survey start"]
+    # locate instrument intervention epochs
+    intervention_epochs = {mjd: epoch for mjd, epoch in calibration_epochs.items() if epoch["trigger"] == "Instrument intervention"}
+    mjd_interventions = list(intervention_epochs.keys())
+    # combine all relevant MJDs
+    mjds = sorted(set(mjd_early + mjd_start + mjd_interventions + [max_mjd]))
+
+    # define empty ffactor epochs
+    schema = {
+        "name": "epochs",
+        "dtype": "dict[int, dict]",
+        "description": "Dictionary mapping fiber flat factors to exposure numbers used to generate those factors, epochs are divided by 'Instrument intervention' event.",
+        "keyschmas": [
+            {"name": "flavors", "dtype": "dict[int, int|str]", "description": "Dictionary mapping frame flavors, either 'science' or 'twilight' to a list of MJDs to source from."},
+            {"name": "trigger", "dtype": "str | null", "description": "Reason for which these factors were measured, see calibration epochs `trigger`."},
+            {"name": "comment", "dtype": "str | null", "description": "Optional comment providing more context about the factors measurements."}
+        ]
+    }
+    epochs = {}
+    for i, mjd in enumerate(mjds[:-1]):
+        epochs[mjd] = {
+            "flavors": {
+                "science": f"{mjds[i]}-{mjds[i+1]-1}",
+                "twilight": f"{mjds[i]}-{mjds[i+1]-1}"
+            },
+            "trigger": None,
+            "comment": None
+        }
+
+    # create new ffactor epochs file
+    if not ffactor_epoch_path.exists():
+        with open(ffactor_epoch_path, 'w+') as f:
+            f.write(yaml.safe_dump({"schema": schema, "epochs": epochs}, sort_keys=False, indent=2))
+        return
+
+    # update existing ffactor epochs file using information in calibration epochs file
+    ffactor_epochs = load_epochs_file(epochs_kind="ffactor", verbose=False)
+    epochs.update(ffactor_epochs)
+    with open(ffactor_epoch_path, 'w+') as f:
+        f.write(yaml.safe_dump({"schema": schema, "epochs": epochs}, sort_keys=False, indent=2))
+
+
+def load_epochs_file(epochs_kind, epochs_path=None, filter_by_mjds=None, verbose=True):
+    """Load epoch definitions from a YAML file.
+
+    Parameters
+    ----------
+    epochs_kind : str
+        Kind of epoch file to load. Supported values are typically
+        ``"calibration"`` and ``"ffactor"``.
+    epochs_path : str or pathlib.Path, optional
+        Explicit path to the YAML file. If omitted, the default path is chosen
+        from ``EPOCHS_FILE_PATH[epochs_kind]``.
+    filter_by_mjds : int, tuple, list, set, numpy.ndarray, optional
+        One or more MJDs to keep from the loaded epoch mapping.
+    verbose : bool, optional
+        If True, log the loaded and filtered epoch information.
+
+    Returns
+    -------
+    dict or None
+        The epoch mapping loaded from the YAML file, or ``None`` if the file is
+        missing.
+    """
+
+    if filter_by_mjds is not None and not isinstance(filter_by_mjds, (tuple, list, set, np.ndarray)):
+        filter_by_mjds = [filter_by_mjds]
+
+    epochs_path = epochs_path or EPOCHS_FILE_PATH[epochs_kind]
     if not os.path.exists(epochs_path):
         log.error(f"calibration epochs file not found: {epochs_path}")
         return
@@ -740,21 +849,50 @@ def load_calibration_epochs(epochs_path=None, filter_by=None, verbose=True):
         for mjd in epochs:
             log.info(f"  {mjd}: {epochs[mjd]}")
 
-    if filter_by is not None and isinstance(filter_by, (list, tuple)):
-        epochs = {mjd: epochs[mjd] for mjd in filter_by if mjd in epochs}
+    if filter_by_mjds is not None:
+        epochs = {mjd: epochs[mjd] for mjd in filter_by_mjds if mjd in epochs}
         if len(epochs) == 0:
-            log.error(f"epoch(s) {filter_by} not found in calibration epochs file: '{epochs_path}'")
+            log.error(f"epoch(s) {filter_by_mjds} not found in calibration epochs file: '{epochs_path}'")
             return epochs
         if verbose:
-            log.info(f"after filtering by MJD = {filter_by}, {len(epochs)} remaining epoch(s):")
+            log.info(f"after filtering by MJD = {filter_by_mjds}, {len(epochs)} remaining epoch(s):")
             for mjd in epochs:
                 log.info(f"  {mjd}: {epochs[mjd]}")
     return epochs
 
 
-def get_calibration_epoch(mjd, flavors=None, trigger=None, comment=None):
+def get_epoch(mjd, epochs, epochs_kind, error_on_missing_mjd=True):
+    """Retrieve the source MJDs associated with a given epoch.
+
+    Parameters
+    ----------
+    mjd : int
+        Modified Julian Date identifying the epoch of interest.
+    epochs : dict
+        Mapping of MJDs to epoch metadata loaded from an epochs YAML file.
+    epochs_kind : str
+        Kind of epochs being queried. Supported values include ``"calibration"``
+        and ``"ffactor"``.
+    error_on_missing_mjd : bool, optional
+        If True, raise a ``KeyError`` when the requested MJD is absent. If
+        False, an empty mapping is returned for missing entries.
+
+    Returns
+    -------
+    dict
+        Dictionary mapping each flavor to the corresponding source MJD(s).
+    """
+
+    _FLAVORS = {
+        "calibration": CALIBRATION_TYPES,
+        "ffactor": ["science", "twilight"]
+    }
+
+    epoch = epochs[mjd] if error_on_missing_mjd else epochs.get(mjd, {})
+
+    flavors = epoch.get("flavors")
     if flavors is None:
-        return {flavor: _parse_list(mjd) for flavor in CALIBRATION_TYPES}
+        return {flavor: _parse_list(mjd) for flavor in _FLAVORS[epochs_kind]}
 
     calibs_mjds = {flavor: _parse_list(source_mjd) for flavor, source_mjd in flavors.items()}
     return calibs_mjds
@@ -1317,7 +1455,7 @@ def validate_calibration_epochs(mjd=None, calibrations=CALIBRATION_TYPES, epochs
             log.info(f"{nstds} exposed standards{label}: {', '.join(stds)}")
 
 
-    epochs = load_calibration_epochs(epochs_path=epochs_path, verbose=False)
+    epochs = load_epochs_file(epochs_kind="calibration", epochs_path=epochs_path, verbose=False)
     if mjd is not None and mjd not in epochs:
         log.error(f"no calibrations epoch found for {mjd} in file {epochs_path}")
         return
@@ -1331,7 +1469,7 @@ def validate_calibration_epochs(mjd=None, calibrations=CALIBRATION_TYPES, epochs
 
     for mjd in epoch_mjds:
         log.info(f"validating {calibrations = } for epoch = {mjd}")
-        epoch = get_calibration_epoch(mjd, **epochs[mjd])
+        epoch = get_epoch(mjd=mjd, epochs=epochs, epochs_kind="calibration", error_on_missing_mjd=True)
         for calibration in calibrations:
             source_mjds = epoch.get(calibration, [])
             log.info(f"MJDs for {calibration = }: {', '.join(map(str, source_mjds))}")
@@ -1354,7 +1492,7 @@ def validate_calibration_epochs(mjd=None, calibrations=CALIBRATION_TYPES, epochs
 
 
 def check_epochs_completeness(mjd=None, version=drpver, calibrations=CALIBRATION_TYPES, epochs_path=CALIBRATION_EPOCHS_PATH):
-    epochs = load_calibration_epochs(epochs_path=epochs_path, verbose=False)
+    epochs = load_epochs_file(epochs_kind="calibration", epochs_path=epochs_path, verbose=False)
     if mjd is not None and mjd not in epochs:
         log.error(f"no calibrations epoch found for {mjd} in file {epochs_path}")
         return
@@ -1401,7 +1539,7 @@ def create_bias(mjd, epochs=None, use_longterm_cals=True, skip_done=True, dry_ru
     dry_run : bool, optional
         Logs useful information abaut the current setup without actually reducing, by default False
     """
-    epoch = get_calibration_epoch(mjd=mjd, **(epochs or {}).get(mjd, {}))
+    epoch = get_epoch(mjd=mjd, epochs=epochs or {}, epochs_kind="calibration", error_on_missing_mjd=False)
     mjds = epoch["bias"]
 
     frames = md.get_calibrations_metadata(mjds=mjds, calibration="bias")
@@ -1619,7 +1757,7 @@ def create_traces(mjd, epochs=None, cameras=CAMERAS, ring="primary",
         Skip pipeline steps that have already been done, by default True
     """
 
-    epoch = get_calibration_epoch(mjd=mjd, **(epochs or {}).get(mjd, {}))
+    epoch = get_epoch(mjd=mjd, epochs=epochs or {}, epochs_kind="calibration", error_on_missing_mjd=False)
     mjds = epoch["trace"]
 
     frames = md.get_calibrations_metadata(mjds=mjds, calibration="trace")
@@ -1887,7 +2025,7 @@ def create_twilight_fiberflats(mjd: int, epochs: dict[int, dict] = None, cals_mj
     if not _channels.issubset(set("brz")):
         raise ValueError(f"Invalid value in `channels`: {channels}. Expected a subset of 'brz'")
 
-    epoch = get_calibration_epoch(mjd=mjd, **(epochs or {}).get(mjd, {}))
+    epoch = get_epoch(mjd=mjd, epochs=epochs or {}, epochs_kind="calibration", error_on_missing_mjd=False)
     mjds = epoch["twilight"]
 
     frames = md.get_calibrations_metadata(mjds=mjds, calibration="twilight")
@@ -2098,7 +2236,7 @@ def create_wavelengths(mjd, epochs=None, use_longterm_cals=True, kind="longterm"
         _create_wavelengths_60177(use_longterm_cals=use_longterm_cals, skip_done=skip_done, dry_run=dry_run)
         return
 
-    epoch = get_calibration_epoch(mjd=mjd, **(epochs or {}).get(mjd, {}))
+    epoch = get_epoch(mjd=mjd, epochs=epochs or {}, epochs_kind="calibration", error_on_missing_mjd=False)
     mjds = epoch["wave"]
 
     frames = md.get_calibrations_metadata(mjds=mjds, calibration="wave")
@@ -2272,7 +2410,7 @@ def reduce_nightly_sequence(mjd, use_longterm_cals=False, reject_cr=True, only_c
         create_dome_fiberflats(mjd=mjd, use_longterm_cals=use_longterm_cals, kind="nightly", skip_done=skip_done, dry_run=dry_run)
 
     if "twilight" in only_cals:
-        create_twilight_fiberflats(mjd=mjd, use_longterm_cals=use_longterm_cals, skip_done=skip_done, dry_run=dry_run)
+        create_twilight_fiberflats(mjd=mjd, skip_done=skip_done, dry_run=dry_run)
 
     # if not keep_ancillary:
     #     _clean_ancillary(mjd)
@@ -2365,7 +2503,6 @@ def reduce_longterm_sequence(mjd, epochs=None, use_longterm_cals=True,
             mjd=mjd,
             epochs=epochs,
             cals_mjd=mjd,
-            use_longterm_cals=use_longterm_cals,
             skip_sequence_selection=skip_sequence_selection,
             skip_combination=skip_combination,
             skip_done=skip_done,

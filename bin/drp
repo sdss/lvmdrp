@@ -25,7 +25,7 @@ from lvmdrp.utils.cluster import run_cluster, run_cluster_cals
 from lvmdrp.functions.run_calseq import (
     CALIBRATION_EPOCHS_PATH,
     COUNTS_THRESHOLDS,
-    load_calibration_epochs,
+    load_epochs_file,
     validate_calibration_epochs,
     detrend_calibrations,
     reduce_nightly_sequence,
@@ -348,7 +348,7 @@ def longterm(mjd, mjd_list, mjd_range, from_epochs, epochs_file, reject_cr,
         mjds = [mjds]
     # if no MJD, get fiducial calibration epochs
     if from_epochs or mjds is None:
-        epochs = load_calibration_epochs(epochs_path=epochs_file, filter_by=mjds)
+        epochs = load_epochs_file(epochs_kind="calibration", epochs_path=epochs_file, filter_by_mjds=mjds)
         mjds = sorted(list(epochs.keys()))
 
     # run reduction sequence
@@ -521,7 +521,7 @@ def fiberflats(mjd, mjd_list, mjd_range, epochs_file, channels, skip_sequence_se
         mjds = [mjds]
     mjds = [int(mjd) for mjd in mjds]
 
-    epochs = load_calibration_epochs(epochs_path=epochs_file, verbose=False)
+    epochs = load_epochs_file(epochs_kind="calibration", epochs_path=epochs_file, verbose=False)
     mjd_epochs = sorted(list(epochs.keys())) + [99999]
 
     cals_mjd = {mjd: mjd_epochs[i] for mjd in mjds for i in range(len(mjd_epochs) - 1) if mjd >= mjd_epochs[i] and mjd < mjd_epochs[i+1]}
@@ -557,7 +557,7 @@ def create_tag(mjd, mjd_list, mjd_range, from_epochs, epochs_file, version, dry_
         mjds = [mjds]
     # if no MJD, get fiducial calibration epochs
     if from_epochs or mjds is None:
-        epochs = load_calibration_epochs(epochs_path=epochs_file, filter_by=mjds, verbose=False)
+        epochs = load_epochs_file(epochs_kind="calibration", epochs_path=epochs_file, filter_by_mjds=mjds, verbose=False)
         mjds = sorted(list(epochs.keys()))
 
     for mjd in mjds:
@@ -677,7 +677,7 @@ def cluster_calibs(mjd_list, mjd_range, from_epochs, epochs_file, routine, nodes
     mjds = parse_mjds(mjd=mjd_list or mjd_range or None)
     # if no MJD, get fiducial calibration epochs
     if from_epochs or mjds is None:
-        epochs = load_calibration_epochs(epochs_path=epochs_file, filter_by=mjds, verbose=verbose)
+        epochs = load_epochs_file(epochs_kind="calibration", epochs_path=epochs_file, filter_by_mjds=mjds, verbose=verbose)
         mjds = sorted(list(epochs.keys()))
 
     run_cluster_cals(mjds, from_epochs=from_epochs, nodes=nodes, ppn=ppn, walltime=walltime, alloc=alloc, submit=submit,
