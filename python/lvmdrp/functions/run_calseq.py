@@ -213,6 +213,7 @@ def _measure_ffactors(mjd, drpver, channel, sky_lines=SKYLINES_FIBERFLAT, dwave=
             fiber_radius=fiber_radius,
             oversampling_factor=oversampling_factor,
             coadd_method=coadd_method,
+            norm_method=norm_stat,
             quantiles=quantiles,
             guess_coeffs=[1,0,0,0],
             fixed_coeffs=[3] if fit_gradient else [1, 2, 3],

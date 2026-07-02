@@ -312,9 +312,10 @@ def combine_twilight_sequence(in_twilights: list[str], in_fflats: List[str], out
     mflat = RSS()
     mflat.combineRSS(fflats, method=comb_method)
     channel = mflat._header["CCD"]
-    cwave, dwave = mflat._header[f"{channel} FIBERFLAT CWAVE"], mflat._header[f"{channel} FIBERFLAT DWAVE"]
-    groupby = mflat._header[f"{channel} FIBERFLAT GROUPBY"]
-    coadd_method = mflat._header[f"{channel} FIBERFLAT COADD"]
+    # clean all factor-related keywords to avoid confusion when correcting mflat later
+    del mflat._header[f"{channel} FIBERFLAT CWAVE"]
+    del mflat._header[f"{channel} FIBERFLAT DWAVE"]
+    del mflat._header[f"{channel} FIBERFLAT COADD"]
     del mflat._header["*FIBERFLAT GCOEFF?"]
     del mflat._header["*FIBERFLAT FACTOR?"]
 
@@ -347,7 +348,12 @@ def combine_twilight_sequence(in_twilights: list[str], in_fflats: List[str], out
     # create lvmFlat objects
     log.info(f"creating lvmTFlat products for {len(twilights)}:")
     lvmflats = []
-    for i, twilight in enumerate(twilights):
+    for i, (fflat, twilight) in enumerate(zip(fflats, twilights)):
+        # collect parameters for fitting factors in twilights
+        cwave, dwave = fflat._header[f"{channel} FIBERFLAT CWAVE"], fflat._header[f"{channel} FIBERFLAT DWAVE"]
+        groupby = fflat._header[f"{channel} FIBERFLAT GROUPBY"]
+        coadd_method = fflat._header[f"{channel} FIBERFLAT COADD"]
+
         expnum = twilight._header["EXPOSURE"]
         twilight.set_wave_trace(mwave)
         twilight.set_lsf_trace(mlsf)
@@ -366,6 +372,7 @@ def combine_twilight_sequence(in_twilights: list[str], in_fflats: List[str], out
         log.info(f"  resampling exposure {expnum = } to rectified wavelength grid")
         lvmflat_r = lvmflat.rectify_wave(wave_range=SPEC_CHANNELS[channel], wave_disp=0.5)
 
+        # fit factors in twilights
         log.info(f"  removing factors with parameters: {cwave = :.2f}, {dwave = :.2f} Angstrom, {coadd_method = } and fibers {groupby = }")
         x, y, z, coeffs, factors = lvmflat_r.fit_ifu_gradient(
             guess_coeffs=[1,0,0,0], fixed_coeffs=[0,1,2,3],
@@ -693,8 +700,9 @@ def fit_fiberflat(in_rss, out_flat, out_rss, ref_kind=600, guess_coeffs=[1,2,3,0
     return flat, flat_g, rss_g, coeffs, factors
 
 def fit_skyline_flatfield(in_sciences, in_mflat, out_mflat, sky_cwave, cont_cwave, dwave=8, guess_coeffs=[1,2,3,0], fixed_coeffs=[3], groupby="spec",
-                          quantiles=(5,97), nsigma=1, comb_method="median", sky_fibers_only=False, force_correction=False, undo_correction=False,
-                          display_plots=False):
+                          coadd_method="fit", quantiles=(5,97), nsigma=1, comb_method="median",
+                          sky_fibers_only=False, force_correction=False,
+                          undo_correction=False, display_plots=False):
 
     log.info(f"loading master fiberflat at {in_mflat}")
     mflat = RSS.from_file(in_mflat)
@@ -709,12 +717,7 @@ def fit_skyline_flatfield(in_sciences, in_mflat, out_mflat, sky_cwave, cont_cwav
         warnings.warn("forcing correction on possibly old version of fiber flat")
         is_corrected = False
 
-    coadd_method = mflat._header.get(f"{channel} FIBERFLAT COADD")
-    groupby_hdr = mflat._header.get(f"{channel} FIBERFLAT GROUPBY")
-    # verify groupby parameter and replace it with header value if necessary
-    if groupby != groupby_hdr:
-        warnings.warn(f"requested {groupby = } but header says {groupby_hdr}, assuming header value")
-        groupby = groupby_hdr
+    groupby = mflat._header.get(f"{channel} FIBERFLAT GROUPBY", groupby)
     fiber_groups = mflat._get_fiber_groups(by=groupby)
     ngroups = len(set(fiber_groups))
 
@@ -727,6 +730,9 @@ def fit_skyline_flatfield(in_sciences, in_mflat, out_mflat, sky_cwave, cont_cwav
         flatfield_corr = IFUGradient.ifu_factors(factors, fiber_groups)
         log.info(f"fiber flat already corrected; undoing '{groupby}' correction with: {factors}")
         mflat /= flatfield_corr[:, None]
+        del mflat._header[f"{channel} FIBERFLAT CWAVE"]
+        del mflat._header[f"{channel} FIBERFLAT DWAVE"]
+        del mflat._header[f"{channel} FIBERFLAT COADD"]
         del mflat._header["*FIBERFLAT GCOEFF?"]
         del mflat._header["*FIBERFLAT FACTOR?"]
         mflat.setHdrValue(f"HIERARCH {channel.upper()} FIBERFLAT SKYCORR", False)
