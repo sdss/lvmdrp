@@ -735,7 +735,7 @@ def _parse_list(items_str):
     return items
 
 
-def update_fflat_epochs(ffactor_epoch_path=None, calibration_epoch_path=None, max_mjd=62000):
+def update_fflat_epochs(ffactor_epoch_path=None, calibration_epoch_path=None, n_nights=None, max_mjd=62000):
     """Update the fiber flat factor epoch definitions from calibration epochs.
 
     Parameters
@@ -746,6 +746,12 @@ def update_fflat_epochs(ffactor_epoch_path=None, calibration_epoch_path=None, ma
     calibration_epoch_path : pathlib.Path or None, optional
         Path to the calibration epochs YAML file. If None, the default path
         from ``EPOCHS_FILE_PATH["calibration"]`` is used.
+    n_nights : int or None, optional
+        Maximum number of nights that should be included in each fiber-flat
+        factor epoch. If provided, intervals between the selected calibration
+        boundaries are split into chunks of at most this size.
+    max_mjd : int, optional
+        Maximum MJD to include when building the factor epochs.
 
     Returns
     -------
@@ -763,7 +769,11 @@ def update_fflat_epochs(ffactor_epoch_path=None, calibration_epoch_path=None, ma
     calibration_epoch_path = calibration_epoch_path or EPOCHS_FILE_PATH["calibration"]
     ffactor_epoch_path = ffactor_epoch_path or EPOCHS_FILE_PATH["ffactor"]
 
-    calibration_epochs = load_epochs_file(epochs_kind="calibration", verbose=False)
+    if n_nights is not None and (not isinstance(n_nights, (int, np.integer)) or n_nights < 1):
+        raise ValueError(f"`n_nights` must be a positive integer; got {n_nights!r}")
+    n_nights = 999 if n_nights is None else n_nights
+
+    calibration_epochs = load_epochs_file(epochs_kind="calibration", epochs_path=calibration_epoch_path, verbose=False)
 
     # locate early science start
     mjd_early = list(calibration_epochs.keys())[:1]
@@ -788,12 +798,13 @@ def update_fflat_epochs(ffactor_epoch_path=None, calibration_epoch_path=None, ma
     }
     epochs = {}
     for i, mjd in enumerate(mjds[:-1]):
+        mjd_end = min(mjd + n_nights, mjds[i + 1]) - 1
         epochs[mjd] = {
             "flavors": {
-                "science": f"{mjds[i]}-{mjds[i+1]-1}",
-                "twilight": f"{mjds[i]}-{mjds[i+1]-1}"
+                "science": f"{mjd}-{mjd_end}",
+                "twilight": f"{mjd}-{mjd_end}"
             },
-            "trigger": None,
+            "trigger": calibration_epochs.get(mjd, {}).get("trigger"),
             "comment": None
         }
 
