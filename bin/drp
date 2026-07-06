@@ -16,7 +16,7 @@ import bottleneck as bn
 from astropy.stats import biweight_location
 
 from lvmdrp.core.constants import CALIBRATION_MAPPINGS, CALIBRATION_TYPES, LVM_REFERENCE_COLUMN, SKYLINES_FIBERFLAT
-from lvmdrp import path, __version__ as drpver
+from lvmdrp import __version__ as drpver
 from lvmdrp.main import run_drp, reduce_file, check_daily_mjd, parse_mjds, read_expfile, create_drpall, cache_std_xp_spectra, cache_sci_xp_spectra
 from lvmdrp.functions.skyMethod import configureSkyModel_drp
 from lvmdrp.utils.metadata import get_frames_metadata, get_master_metadata
@@ -37,12 +37,13 @@ from lvmdrp.functions.run_calseq import (
     tag_longterm_calibrations,
     create_twilight_fiberflats,
     create_fiberflats_corrections,
-    _measure_ffactors)
+    measure_fiberflat_factors)
 
 from sdss_access import Access
 
 
 calibration_types = set(CALIBRATION_TYPES) - {"bias", "dome"}
+CALIBRATION_SCRIPTS = ["detrend", "long-term", "nightly", "ffactors-experiment", "fiberflats"]
 
 
 class StrListType(click.ParamType):
@@ -422,22 +423,38 @@ def nightly(mjd, mjd_list, mjd_range, reject_cr,
             dry_run=dry_run)
 
 
-# TODO: this command will create an average flat field factor correction out of a set of science frame
-#       I need to refactor this to allow for a custom selection of science exposures and account for
-#       calibration epochs
 @cli.command('fiberflat-corrections', short_help='Run fiberflat skyline correction using science frames', context_settings=dict(show_default=True))
-@click.option('-m', '--mjd', type=int, required=True, help='an MJD for which fiberflats will be corrected')
-@click.option('-l', '--science-mjds', type=IntListType(), required=True, help='a list of specific MJDs to reduce')
-@click.option('-e', '--science-expnums', type=IntListType(), default=None, help='a list of specific exposure numbers to reduce')
-@click.option('--force-correction', is_flag=True, default=False, help='flag to force correction even if has been already done')
+@click.option('-m', '--mjd', type=int, help='an MJD for which fiberflats will be corrected')
+@click.option('-l', '--mjd-list', type=IntListType(), help='a list of specific MJDs to reduce')
+@click.option('-r', '--mjd-range', type=str, help='a range of MJDs to reduce')
+@click.option('--channels', type=str, default="brz", help="Spectrograph channels that will be analysed")
+@click.option('--calibration-epochs-file', type=str, default=None, help='Path to a calibrations epoch file')
+@click.option('--ffactor-epochs-file', type=str, default=None, help="Path to a fiber flat factors epoch file")
 @click.option('--undo-correction', is_flag=True, default=False, help='flag to undo correction if already applied')
 @click.option('-s', '--skip-done', is_flag=True, default=False, help='flag to skip reduction steps that have already been done')
 @click.option("--dry-run", is_flag=True, default=False, help="Shows useful information about the current setup without actually running reductions")
-def fiberflat_corrections(mjd, science_mjds, science_expnums, force_correction, undo_correction, skip_done, dry_run):
-    create_fiberflats_corrections(cals_mjd=mjd, science_mjds=science_mjds, science_expnums=science_expnums,
-                                  force_correction=force_correction, undo_correction=undo_correction,
-                                  skip_done=skip_done, dry_run=dry_run)
+@cloup.constraint(mutually_exclusive, ['mjd', 'mjd_list', 'mjd_range'])
+@cloup.constraint(RequireExactly(1), ['mjd', 'mjd_list', 'mjd_range'])
+def fiberflat_corrections(mjd, mjd_list, mjd_range, channels, calibration_epochs_file, ffactor_epochs_file,
+                          undo_correction, skip_done, dry_run):
 
+    # parse MJDs
+    mjds = parse_mjds(mjd=mjd or mjd_list or mjd_range or None)
+    if mjds is None:
+        raise click.UsageError("One of --mjd, --mjd-list, or --mjd-range is required.")
+
+    if not isinstance(mjds, (list, tuple)):
+        mjds = [mjds]
+    mjds = [int(mjd) for mjd in mjds]
+
+    # require either both epoch files or sience-mjds/expnums or twilight-mjds/expnums
+    calibration_epochs = load_epochs_file(epochs_kind="calibration", epochs_path=calibration_epochs_file, verbose=False)
+    ffactor_epochs = load_epochs_file(epochs_kind="ffactor", epochs_path=ffactor_epochs_file, verbose=False)
+
+    for channel in channels:
+        for mjd in mjds:
+            create_fiberflats_corrections(mjd=mjd, channel=channel, ffactor_epochs=ffactor_epochs, calibration_epochs=calibration_epochs,
+                                          skip_done=skip_done, undo_correction=undo_correction, dry_run=dry_run)
 
 
 @cli.command('ffactors-experiment', short_help='Run a fiber flat-field factor experiment with given parameters', context_settings=dict(show_default=True))
@@ -489,13 +506,13 @@ def ffactors_experiment(mjd, mjd_list, mjd_range, drpver, channel, b_skyline, r_
 
     sky_lines = {"b": b_skyline, "r": r_skyline, "z": z_skyline}
     for mjd in mjds:
-        _measure_ffactors(int(mjd), drpver=drpver, channel=channel, sky_lines=sky_lines, dwave=dwave,
-                          fiber_radius=fiber_radius, oversampling_factor=oversampling_factor,
-                          quantiles=quantiles, groupby=groupby, coadd_method=coadd_method,
-                          norm_stat=STATS[norm_stat], fit_gradient=fit_gradient, label=label,
-                          write_table=True, table_dir=table_dir, overwrite=overwrite,
-                          use_untagged_cals=use_untagged_cals, version_cals=version_cals,
-                          dry_run=dry_run)
+        measure_fiberflat_factors(int(mjd), drpver=drpver, channel=channel, sky_cwaves=sky_lines, dwave=dwave,
+                                  fiber_radius=fiber_radius, oversampling_factor=oversampling_factor,
+                                  quantiles=quantiles, groupby=groupby, coadd_method=coadd_method,
+                                  norm_stat=STATS[norm_stat], fit_gradient=fit_gradient, label=label,
+                                  write_table=True, table_dir=table_dir, overwrite=overwrite,
+                                  use_untagged_cals=use_untagged_cals, version_cals=version_cals,
+                                  dry_run=dry_run)
 
 
 @cli.command('fiberflats', short_help='Run twilight fiberflat reductions', context_settings=dict(show_default=True))
@@ -663,7 +680,7 @@ def qaqual_bad_hdrfix(mjd, mjd_list, mjd_range, expnum, expnum_list, expnum_rang
 @click.option('-r', '--mjd-range', type=str, default=None, help='a range of MJDs to reduce')
 @click.option('--from-epochs', is_flag=True, default=False, help="Use fiducial or given epochs file to produce long-term calibrations")
 @click.option('--epochs-file', type=str, default=None, help="Path to a calibrations epoch file")
-@click.option('--routine', type=click.Choice(["detrend", "long-term", "nightly", "ffactors-experiment", "fiberflats"]), default="long-term", help="run detrend, long-term, nightly, ffactors-experiment or fiberflats calibrations only")
+@click.option('--routine', type=click.Choice(CALIBRATION_SCRIPTS), default="long-term", help="run detrend, long-term, nightly, ffactors-experiment or fiberflats calibrations only")
 @click.option('-n', '--nodes', type=int, default=2, help='the number of nodes to use')
 @click.option('-p', '--ppn', type=int, default=64, help='the number of CPU cores to use per node')
 @click.option('-w', '--walltime', type=str, default="24:00:00", help='the time for which the job is allowed to run')

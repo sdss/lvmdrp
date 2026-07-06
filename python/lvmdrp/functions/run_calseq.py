@@ -41,7 +41,7 @@ from shutil import copy2, copytree
 from astropy.io import fits
 from astropy.table import Table
 from astropy.stats import biweight_location
-from typing import Union, Tuple, List, Dict
+from typing import Union, List, Dict
 from collections.abc import Callable
 from matplotlib.gridspec import GridSpec
 import matplotlib.pyplot as plt
@@ -50,7 +50,7 @@ from lvmdrp import log, path, __version__ as drpver
 from lvmdrp.utils import metadata as md
 from lvmdrp.utils import hdrfix
 from lvmdrp.utils.convert import tileid_grp
-from lvmdrp.utils.paths import get_calib_paths, group_calib_paths, get_frames_paths, get_master_mjd
+from lvmdrp.utils.paths import get_calib_paths, group_calib_paths, get_master_mjd
 from lvmdrp.utils import pixshifts
 from lvmdrp.core.plot import save_fig, slit
 from lvmdrp.core import dataproducts as dp
@@ -80,7 +80,9 @@ from lvmdrp.functions import imageMethod as image_tasks
 from lvmdrp.functions import rssMethod as rss_tasks
 from lvmdrp.core import sky
 from lvmdrp.main import start_logging, get_config_options, read_fibermap, reduce_2d, reduce_1d
-from lvmdrp.functions.run_twilights import lvmFlat, to_native_wave, fit_fiberflat, combine_twilight_sequence, fit_skyline_flatfield
+from lvmdrp.functions.run_twilights import (
+    lvmFlat, to_native_wave, fit_fiberflat, combine_twilight_sequence,
+    do_ffactor_correction, undo_ffactor_correction)
 
 
 SLITMAP = read_fibermap(as_table=True)
@@ -114,8 +116,9 @@ EPOCHS_FILE_PATH = {
 
 def _extract_ffactors(channel, header):
     columns = [
-        "obstime", "smjd", "tile_id", "exposure", "scira", "scidec", f"{channel} fiberflat grad",
-        f"{channel}1 fiberflat corr", f"{channel}2 fiberflat corr", f"{channel}3 fiberflat corr"]
+        "obstime", "smjd", "tile_id", "exposure", "scira", "scidec",
+        f"{channel} fiberflat gcoeff1", f"{channel} fiberflat gcoeff2", f"{channel} fiberflat gcoeff3", f"{channel} fiberflat gcoeff4",
+        f"{channel} fiberflat factor1", f"{channel} fiberflat factor2", f"{channel} fiberflat factor3"]
 
     metadata_row = {k.replace(" ", "_"): header.get(k) for k in columns}
     metadata_sky = sky.sky_pars_header(header)
@@ -136,11 +139,14 @@ def _read_ffactors(drpver, channel):
     return pd.DataFrame(metadata)
 
 
-def _measure_ffactors(mjd, drpver, channel, sky_lines=SKYLINES_FIBERFLAT, dwave=20.0,
-                      fiber_radius=0.01, oversampling_factor=100, quantiles=(5.0, 97.0),
-                      groupby="spec", coadd_method="fit", norm_stat=lambda x: biweight_location(x, ignore_nan=True),
-                      fit_gradient=False, label=None, write_table=False, table_dir=None, overwrite=False,
-                      use_untagged_cals=False, version_cals=None, display_plots=False, dry_run=False):
+def measure_fiberflat_factors(mjd, drpver, channel, expnums=None, sky_cwaves=SKYLINES_FIBERFLAT, cont_cwaves=CONTINUUM_FIBERFLAT, dwave=20.0,
+                              fiber_radius=0.01, oversampling_factor=100, quantiles=(5.0, 97.0),
+                              groupby="spec", coadd_method="fit", norm_stat=lambda x: biweight_location(x, ignore_nan=True),
+                              fit_gradient=False, label=None, write_table=False, table_dir=None, overwrite=False,
+                              use_untagged_cals=False, version_cals=None, display_plots=False, dry_run=False):
+
+    if channel not in "brz":
+        log.error(f"Invalid value for `channel`: {channel}. Expected one of 'brz'")
 
     if use_untagged_cals and version_cals is None:
         log.error(f"Invalid value for `version_cals`: {version_cals}. Expected a long-term calibration version tag, .e.g, '1.2.2dev'")
@@ -161,16 +167,16 @@ def _measure_ffactors(mjd, drpver, channel, sky_lines=SKYLINES_FIBERFLAT, dwave=
         return pd.read_csv(table_path)
 
     # grab all relevant DRP products: before/ after fiber flat fielding
-    channel_ = "?" if channel == "all" else channel
-    wframe_paths = sorted(
-        path.expand("lvm_anc", drpver=drpver, tileid="*", mjd=mjd, expnum="????????", imagetype="object", kind="w", camera=channel_),
-        key=lambda s: int(os.path.basename(s).split(".")[0].split("-")[-1]))
+    wframe_paths = path.expand("lvm_anc", drpver=drpver, tileid="*", mjd=mjd, expnum="????????", imagetype="object", kind="w", camera=channel)
+    if expnums is not None:
+        wframe_paths = filter(lambda s: int(os.path.basename(s).split(".")[0].split("-")[-1]) in expnums, wframe_paths)
+    wframe_paths = sorted(wframe_paths, key=lambda s: int(os.path.basename(s).split(".")[0].split("-")[-1]))
 
     if len(wframe_paths) == 0:
-        log.error(f"zero paths matched given {drpver = }, {mjd = }, channel = {channel_}; nothing to do")
+        log.error(f"zero paths matched given {drpver = }, {mjd = }, {channel = }; nothing to do")
         return
 
-    log.info(f"going to estimate flat field factors for {len(wframe_paths)} frames, {mjd = }, channel = {channel_}")
+    log.info(f"going to estimate flat field factors for {len(wframe_paths)} frames, {mjd = }, channel = {channel}")
 
     # grab master fiber flat fields
     if use_untagged_cals:
@@ -194,11 +200,10 @@ def _measure_ffactors(mjd, drpver, channel, sky_lines=SKYLINES_FIBERFLAT, dwave=
             metadata.append(_extract_ffactors(channel, rss._header))
             continue
 
-        channel_current = rss._header["CCD"][0]
         expnum = rss._header["EXPOSURE"]
-        sky_cwave = sky_lines[channel_current]
-        cont_cwave = CONTINUUM_FIBERFLAT[channel_current]
-        mflat = RSS.from_file(mflat_paths[channel_current])
+        sky_cwave = sky_cwaves[channel]
+        cont_cwave = cont_cwaves[channel]
+        mflat = RSS.from_file(mflat_paths[channel])
 
         fig = plt.figure(figsize=(14,3*2))
         fig.suptitle(f"Fiber flatfield correction for {expnum = } {channel = } around sky line @ {sky_cwave:.2f} Angstroms", fontsize="xx-large")
@@ -219,9 +224,6 @@ def _measure_ffactors(mjd, drpver, channel, sky_lines=SKYLINES_FIBERFLAT, dwave=
             fixed_coeffs=[3] if fit_gradient else [1, 2, 3],
             groupby=groupby, axs=axs, labels=True)
 
-        log.info("evaluating gradient model")
-        gradient_model = IFUGradient.ifu_gradient(coeffs, x=x, y=y, normalize=True)
-
         log.info("applying flatfield correction")
         fiber_groups = mflat._get_fiber_groups(by="spec")
         flatfield_corr = IFUGradient.ifu_factors(factor, fiber_groups)
@@ -229,21 +231,23 @@ def _measure_ffactors(mjd, drpver, channel, sky_lines=SKYLINES_FIBERFLAT, dwave=
         rss /= mflat
         skyline_slit /= flatfield_corr
 
-        # update pixel mask
-        rss._mask = np.isnan(rss._data)|np.isnan(rss._error)
-
         ax_cor = fig.add_subplot(gs_cor[-1, :])
         ax_cor.set_title(f"Flatfielded skyline @ {sky_cwave:.2f}+/-{dwave:.2f} Angstroms", loc="left")
         ax_cor.set_xlabel("Fiber ID", fontsize="large")
         ax_cor.set_ylabel("Normalized counts", fontsize="large")
         ax_cor.set_ylim(0.92, 1.08)
         slit(x=rss._slitmap["fiberid"].data, y=skyline_slit, data=rss._data, ax=ax_cor)
-        save_fig(fig, product_path=f"{table_path.replace('.csv', '')}-{expnum:>08d}.fits", figure_path="qa", to_display=display_plots)
+        save_fig(fig, product_path=wframe_path, figure_path="qa", label="fiberflat_correction", to_display=display_plots)
 
-        rss._header[f"HIERARCH {channel.upper()} FIBERFLAT GRAD"] = (np.round(bn.nanmax(gradient_model)/bn.nanmin(gradient_model), 5), "fiberflat field gradient")
-        rss._header[f"HIERARCH {channel.upper()}1 FIBERFLAT CORR"] =  (np.round(factor[0], 5), "fiberflat corr. spec. 1")
-        rss._header[f"HIERARCH {channel.upper()}2 FIBERFLAT CORR"] =  (np.round(factor[1], 5), "fiberflat corr. spec. 2")
-        rss._header[f"HIERARCH {channel.upper()}3 FIBERFLAT CORR"] =  (np.round(factor[2], 5), "fiberflat corr. spec. 3")
+        rss.setHdrValue(f"HIERARCH {channel} FIBERFLAT CWAVE", sky_cwave, "norm. wavelength [Angstrom]")
+        rss.setHdrValue(f"HIERARCH {channel} FIBERFLAT DWAVE", dwave, "norm. window width [Angstrom]")
+        rss.setHdrValue(f"HIERARCH {channel} FIBERFLAT COADD", coadd_method, "coadding method")
+        rss.setHdrValue(f"HIERARCH {channel} FIBERFLAT SKYCORR", True, "fiberflat skyline-corrected?")
+        rss.setHdrValue(f"HIERARCH {channel} FIBERFLAT GROUPBY", groupby, "fiber grouping")
+        for i, f in enumerate(factor):
+            rss.setHdrValue(f"HIERARCH {channel} FIBERFLAT FACTOR{i+1}", np.round(f, 5), f"fiberflat factor {groupby}{i+1}")
+        for i, c in enumerate(coeffs):
+            rss.setHdrValue(f"HIERARCH {channel} FIBERFLAT GCOEFF{i+1}", np.round(c, 5), f"IFU gradient coeff #{i+1}")
 
         # extract flat field factors and additional information
         metadata.append(_extract_ffactors(channel, rss._header))
@@ -900,7 +904,10 @@ def get_epoch(mjd, epochs, epochs_kind, error_on_missing_mjd=True):
         "ffactor": ["science", "twilight"]
     }
 
-    epoch = epochs[mjd] if error_on_missing_mjd else epochs.get(mjd, {})
+    try:
+        epoch = epochs[mjd] if error_on_missing_mjd else epochs.get(mjd, {})
+    except KeyError:
+        raise KeyError(f"Invalid {epochs_kind} epoch `mjd`: {mjd}. Expected one of {list(epochs.keys())}")
 
     flavors = epoch.get("flavors")
     if flavors is None:
@@ -2134,61 +2141,79 @@ def create_twilight_fiberflats(mjd: int, epochs: dict[int, dict] = None, cals_mj
             in_waves=calibs["wave"][channel], in_lsfs=calibs["lsf"][channel])
 
 
-def create_fiberflats_corrections(cals_mjd: int, science_mjds: Union[int, List[int]], science_expnums: List[int] = None,
-                                  sky_cwaves: Dict[str, float] = SKYLINES_FIBERFLAT, cont_cwaves: Dict[str, float] = CONTINUUM_FIBERFLAT,
-                                  groupby: str = "spec", quantiles: Tuple[float, float] = (5.0, 97.0), sky_fibers_only: bool = False,
-                                  nsigma: float = 2.0, comb_method: str = "median", fit_gradient: bool = False, force_correction: bool = False,
-                                  undo_correction: bool = False, skip_done: bool = False, display_plots: bool = False, dry_run: bool = False) -> None:
+def create_fiberflats_corrections(mjd, channel, ffactor_epochs, calibration_epochs, sky_cwaves=SKYLINES_FIBERFLAT, cont_cwaves=CONTINUUM_FIBERFLAT, dwave=10.0,
+                                  fiber_radius=1.0, oversampling_factor=100, quantiles=(5.0, 97.0),
+                                  groupby="spec", coadd_method="fit", norm_stat=lambda x: biweight_location(x, ignore_nan=True),
+                                  fit_gradient=False, use_science=True, skip_done=False, undo_correction=False, display_plots=True, dry_run=False):
 
-    if not all([cals_mjd <= sci_mjd for sci_mjd in science_mjds]):
-        log.error(f"some science MJDs are earlier than {cals_mjd = }: {science_mjds = }")
-        return
+    if not use_science:
+        raise NotImplementedError("Twilight fiber flat corrections are not implemented yet")
 
-    science_mjds = [science_mjds] if isinstance(science_mjds, int) else science_mjds
-    frames = pd.concat([md.get_frames_metadata(mjd=mjd).query("tileid != 11111 and qaqual != 'BAD'") for mjd in science_mjds], ignore_index=True)
-    if science_expnums is None:
-        science_expnums = frames.sort_values("expnum").drop_duplicates("expnum").expnum
-    else:
-        frames = frames.query("expnum in @science_expnums")
+    # determine the source MJDs for the `mjd` ffactor epoch
+    ffactor_epoch = get_epoch(mjd=mjd, epochs=ffactor_epochs, epochs_kind="ffactor", error_on_missing_mjd=True)
+    science_mjds = ffactor_epoch.get("science")
+    twilight_mjds = ffactor_epoch.get("twilight")
 
-    calibs = get_calib_paths(mjd=cals_mjd, version=drpver, flavors=CALIBRATION_NEEDS["object"], from_sandbox=False)
+    # determine the range of calibration epochs to be corrected
+    mjds = list(ffactor_epochs.keys())
+    i = mjds.index(mjd)
+    calibration_mjds = list(filter(lambda mjd: mjds[i] <= mjd < mjds[i+1], calibration_epochs.keys()))
+    mflat_paths = {mjd: get_calib_paths(mjd=mjd, version=drpver, from_sandbox=False, only_existing=True).get("fiberflat_twilight", {}).get(channel)}
 
-    if dry_run:
-        _log_dry_run(frames, calibs=calibs, settings=None, caller=create_fiberflats_corrections.__name__)
-        return
+    # undo correction
+    for mjd in calibration_mjds:
+        mflat_path = mflat_paths.get(mjd)
+        if mflat_path is None:
+            warnings.warn(f"master fiber flat for epoch {mjd = } and {channel = } not found, skipping")
+            continue
+
+        undo_ffactor_correction(in_mflat=mflat_path, write_output=True)
 
     if undo_correction:
-        for channel in "brz":
-            fit_skyline_flatfield(
-                in_sciences=[],
-                in_mflat=calibs["fiberflat_twilight"][channel],
-                out_mflat=calibs["fiberflat_twilight"][channel],
-                sky_cwave=sky_cwaves[channel], cont_cwave=cont_cwaves[channel],
-                undo_correction=undo_correction)
         return
 
-    # 2D and 1D reduction of science exposures
-    for sci_mjd in science_mjds:
-        reduce_2d(mjds=sci_mjd, calibrations=calibs, expnums=science_expnums, reject_cr=True, add_astro=True, sub_straylight=True, skip_done=skip_done)
-        reduce_1d(mjd=sci_mjd, calibrations=calibs, expnums=science_expnums, sub_straylight=True, skip_done=skip_done)
+    # determine exposures to be used for factors fitting
+    source_mjds = science_mjds if use_science else twilight_mjds
+    for mjd in source_mjds:
+        calibs = get_calib_paths(mjd, version=drpver, from_sandbox=False)
 
-    for channel in "brz":
-        wframe_paths = get_frames_paths(mjds=science_mjds, kind="w", camera_or_channel=channel, expnums=science_expnums)
-        if len(wframe_paths) == 0:
-            log.error(f"no good quality science frames found for {science_mjds = }, {science_expnums = } in {channel = }")
+        if use_science:
+            expnums = md.get_frames_metadata(mjd).query("tileid != 11111 and qaqual != 'BAD'").expnum.unique()
+        else:
+            expnums = md.get_calibrations_metadata(mjds=mjd, calibration="twilight").expnum.unique()
 
-        fit_skyline_flatfield(
-            in_sciences=wframe_paths,
-            in_mflat=calibs["fiberflat_twilight"][channel],
-            out_mflat=calibs["fiberflat_twilight"][channel],
-            groupby=groupby,
-            guess_coeffs=[1,0,0,0], fixed_coeffs=[3] if fit_gradient else [1, 2, 3],
-            sky_cwave=sky_cwaves[channel], cont_cwave=cont_cwaves[channel], dwave=20.0,
-            quantiles=quantiles, sky_fibers_only=sky_fibers_only,
-            nsigma=nsigma, comb_method=comb_method,
-            force_correction=force_correction,
-            undo_correction=undo_correction,
-            display_plots=display_plots)
+    if dry_run:
+        log.info(f"going to create fiber flat factors for channel {channel} using {'science' if use_science else 'twilight'} exposures from mjds: {source_mjds}")
+        log.info(f"selected exposures: {expnums}")
+        log.info(f"corrected calibration epochs: {calibration_mjds}")
+        return
+
+    # perform 2D, 1D reductions, down to wavelength calibrated products
+    for mjd in source_mjds:
+        # reduce science/twilight exposures down to wavelength calibration step
+        reduce_2d(mjds=mjd, calibrations=calibs, expnums=expnums, add_astro=use_science, sub_straylight=True, skip_done=skip_done)
+        reduce_1d(mjd=mjd, calibrations=calibs, expnums=expnums, sub_straylight=True, skip_done=skip_done)
+
+    ffactors = []
+    for mjd in source_mjds:
+        ffactors.append(measure_fiberflat_factors(mjd=mjd, drpver=drpver, channel=channel, expnums=expnums,
+                        sky_cwaves=sky_cwaves, cont_cwaves=cont_cwaves, dwave=dwave,
+                        fiber_radius=fiber_radius, oversampling_factor=oversampling_factor,
+                        quantiles=quantiles, groupby=groupby, coadd_method=coadd_method,
+                        norm_stat=norm_stat, fit_gradient=fit_gradient, write_table=False,
+                        use_untagged_cals=True, version_cals=drpver, display_plots=display_plots))
+
+    ffactors = pd.concat(ffactors, ignore_index=True)
+    factor = ffactors.filter(like="factor").sort_index(axis="columns").apply(lambda x: biweight_location(x, ignore_nan=True), axis="index").values
+    coeffs = ffactors.filter(like="gcoeff").sort_index(axis="columns").apply(lambda x: biweight_location(x, ignore_nan=True), axis="index").values
+
+    for mjd in calibration_mjds:
+        mflat_path = mflat_paths.get(mjd)
+        if mflat_path is None:
+            warnings.warn(f"master fiber flat for epoch {mjd = } and {channel = } not found, skipping correction")
+            continue
+
+        do_ffactor_correction(in_mflat=mflat_path, coeffs=coeffs, factor=factor, sky_cwave=sky_cwaves[channel], dwave=dwave, coadd_method=coadd_method, write_output=True)
 
 
 def create_illumination_corrections(mjd, use_longterm_cals=True, expnums=None):
