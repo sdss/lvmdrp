@@ -114,13 +114,12 @@ EPOCHS_FILE_PATH = {
     }
 
 
-def _extract_ffactors(channel, header):
-    columns = [
-        "obstime", "smjd", "tile_id", "exposure", "scira", "scidec",
-        f"{channel} fiberflat gcoeff1", f"{channel} fiberflat gcoeff2", f"{channel} fiberflat gcoeff3", f"{channel} fiberflat gcoeff4",
-        f"{channel} fiberflat factor1", f"{channel} fiberflat factor2", f"{channel} fiberflat factor3"]
+def _extract_ffactors(header):
+    columns = ["obstime", "smjd", "tile_id", "exposure", "scira", "scidec"]
+    columns += sorted(header["*gcoeff?"].keys())
+    columns += sorted(header["*factor?"].keys())
 
-    metadata_row = {k.replace(" ", "_"): header.get(k) for k in columns}
+    metadata_row = {k.replace(" ", "_").lower(): header.get(k) for k in columns}
     metadata_sky = sky.sky_pars_header(header)
     metadata_sky = {k.split()[-1].lower().replace("sci_", ""): v[0] for k, v in metadata_sky.items() if "SKYE_" not in k and "SKYW_" not in k}
     metadata_row.update(metadata_sky)
@@ -135,7 +134,7 @@ def _read_ffactors(drpver, channel):
     for p in tqdm(frame_paths, desc=f"extracting factors for {drpver = } | {channel = }", ascii=True, unit="exposure"):
         hdr = fits.getheader(p)
 
-        metadata.append(_extract_ffactors(channel, hdr))
+        metadata.append(_extract_ffactors(hdr))
     return pd.DataFrame(metadata)
 
 
@@ -144,6 +143,67 @@ def measure_fiberflat_factors(mjd, drpver, channel, expnums=None, sky_cwaves=SKY
                               groupby="spec", coadd_method="fit", norm_stat=lambda x: biweight_location(x, ignore_nan=True),
                               fit_gradient=False, label=None, write_table=False, table_dir=None, overwrite=False,
                               use_untagged_cals=False, version_cals=None, display_plots=False, dry_run=False):
+    """Measure fiberflat correction factors from science or twilight exposures.
+
+    The function inspects wavelength-calibrated frame products, estimates
+    skyline-based flatfield factors for each exposure using the current master
+    twilight fiberflat, and stores the fitted correction coefficients and
+    factors in a table for later use in master fiberflat corrections.
+
+    Parameters
+    ----------
+    mjd : int
+        MJD of the exposures to analyze.
+    drpver : str
+        DRP version tag used to locate input products.
+    channel : str
+        Spectrograph channel to process, one of ``"b"``, ``"r"``, or ``"z"``.
+    expnums : sequence of int, optional
+        Restrict the analysis to a specific set of exposure numbers.
+    sky_cwaves : dict, optional
+        Central wavelengths for skyline-based measurements per channel.
+    cont_cwaves : dict, optional
+        Central wavelengths for continuum regions used during factor fitting.
+    dwave : float, optional
+        Wavelength window width used for the measurement.
+    fiber_radius : float, optional
+        Fiber radius used by the skyline flatfield measurement.
+    oversampling_factor : int, optional
+        Oversampling factor used in the measurement.
+    quantiles : tuple of float, optional
+        Quantiles used for robust normalization in the fitting process.
+    groupby : str, optional
+        Fiber grouping used when fitting the correction factors.
+    coadd_method : str, optional
+        Coaddition method used during the skyline flatfield measurement.
+    norm_stat : callable, optional
+        Robust statistic used to normalize the measured factors.
+    fit_gradient : bool, optional
+        Whether to fit an IFU gradient component in addition to the factors.
+    label : str, optional
+        Label used to name the output table.
+    write_table : bool, optional
+        Whether to save the fitted factors to a CSV table.
+    table_dir : str, optional
+        Directory where the output table should be written.
+    overwrite : bool, optional
+        Whether to overwrite an existing output table.
+    use_untagged_cals : bool, optional
+        Whether to use the long-term calibration master fiberflat for the
+        requested MJD.
+    version_cals : str, optional
+        Calibration version tag to use when locating master fiberflats.
+    display_plots : bool, optional
+        Whether to display diagnostic plots produced during the measurement.
+    dry_run : bool, optional
+        Whether to print the planned inputs and skip the computation.
+
+    Returns
+    -------
+    pandas.DataFrame or None
+        A table of fitted fiberflat factors and gradient coefficients for the
+        analyzed exposures, or ``None`` if no valid frames were found.
+    """
 
     if channel not in "brz":
         log.error(f"Invalid value for `channel`: {channel}. Expected one of 'brz'")
@@ -197,7 +257,7 @@ def measure_fiberflat_factors(mjd, drpver, channel, expnums=None, sky_cwaves=SKY
         rss = RSS.from_file(wframe_path)
 
         if "ON" in [rss._header[lamp] for lamp in ARC_LAMPS + CON_LAMPS]:
-            metadata.append(_extract_ffactors(channel, rss._header))
+            metadata.append(_extract_ffactors(rss._header))
             continue
 
         expnum = rss._header["EXPOSURE"]
@@ -250,7 +310,7 @@ def measure_fiberflat_factors(mjd, drpver, channel, expnums=None, sky_cwaves=SKY
             rss.setHdrValue(f"HIERARCH {channel} FIBERFLAT GCOEFF{i+1}", np.round(c, 5), f"IFU gradient coeff #{i+1}")
 
         # extract flat field factors and additional information
-        metadata.append(_extract_ffactors(channel, rss._header))
+        metadata.append(_extract_ffactors(rss._header))
 
     metadata = pd.DataFrame(metadata)
     metadata.sort_values("exposure", inplace=True)
@@ -2145,6 +2205,62 @@ def create_fiberflats_corrections(mjd, channel, ffactor_epochs, calibration_epoc
                                   fiber_radius=1.0, oversampling_factor=100, quantiles=(5.0, 97.0),
                                   groupby="spec", coadd_method="fit", norm_stat=lambda x: biweight_location(x, ignore_nan=True),
                                   fit_gradient=False, use_science=True, skip_done=False, undo_correction=False, display_plots=True, dry_run=False):
+    """Create and apply fiberflat correction factors to master twilight flats.
+
+    The routine determines the relevant ffactor epoch, removes any existing
+    corrections from the affected master fiberflats when requested, reduces the
+    required science or twilight exposures to the wavelength-calibrated stage,
+    measures robust correction factors, and writes the corrected master
+    fiberflats back to disk.
+
+    Parameters
+    ----------
+    mjd : int
+        Reference MJD for the calibration epoch to correct.
+    channel : str
+        Spectrograph channel to process.
+    ffactor_epochs : dict
+        Definitions of the ffactor epochs and the associated science/twilight
+        MJDs.
+    calibration_epochs : dict
+        Calibration epoch definitions that should receive the correction.
+    sky_cwaves : dict, optional
+        Central wavelengths for the skyline-based correction per channel.
+    cont_cwaves : dict, optional
+        Central wavelengths for the continuum-based correction per channel.
+    dwave : float, optional
+        Wavelength window width used when measuring the correction factors.
+    fiber_radius : float, optional
+        Fiber radius used in the 2D extraction and fitting steps.
+    oversampling_factor : int, optional
+        Oversampling factor used for the correction measurement.
+    quantiles : tuple of float, optional
+        Quantiles used for robust normalization during factor fitting.
+    groupby : str, optional
+        Fiber grouping used by the correction model.
+    coadd_method : str, optional
+        Coaddition method used when fitting the factors.
+    norm_stat : callable, optional
+        Robust statistic used to combine the measured factors.
+    fit_gradient : bool, optional
+        Whether to fit an IFU gradient component in addition to the factors.
+    use_science : bool, optional
+        Whether to derive the factors from science exposures instead of twilight
+        exposures.
+    skip_done : bool, optional
+        Whether to skip processing steps that have already been completed.
+    undo_correction : bool, optional
+        Whether to remove existing corrections without recomputing them.
+    display_plots : bool, optional
+        Whether to display diagnostic plots during factor measurement.
+    dry_run : bool, optional
+        Whether to log the planned actions without performing the reduction.
+
+    Returns
+    -------
+    None
+        The function writes corrected master fiberflats to disk.
+    """
 
     if not use_science:
         raise NotImplementedError("Twilight fiber flat corrections are not implemented yet")
@@ -2174,13 +2290,12 @@ def create_fiberflats_corrections(mjd, channel, ffactor_epochs, calibration_epoc
 
     # determine exposures to be used for factors fitting
     source_mjds = science_mjds if use_science else twilight_mjds
+    expnums = []
     for mjd in source_mjds:
-        calibs = get_calib_paths(mjd, version=drpver, from_sandbox=False)
-
         if use_science:
-            expnums = md.get_frames_metadata(mjd).query("tileid != 11111 and qaqual != 'BAD'").expnum.unique()
+            expnums.extend(md.get_frames_metadata(mjd).query("tileid != 11111 and qaqual != 'BAD'").expnum.unique())
         else:
-            expnums = md.get_calibrations_metadata(mjds=mjd, calibration="twilight").expnum.unique()
+            expnums.extend(md.get_calibrations_metadata(mjds=mjd, calibration="twilight").expnum.unique())
 
     if dry_run:
         log.info(f"going to create fiber flat factors for channel {channel} using {'science' if use_science else 'twilight'} exposures from mjds: {source_mjds}")
@@ -2190,6 +2305,9 @@ def create_fiberflats_corrections(mjd, channel, ffactor_epochs, calibration_epoc
 
     # perform 2D, 1D reductions, down to wavelength calibrated products
     for mjd in source_mjds:
+        # get calibration paths from untagged epochs
+        calibs = get_calib_paths(get_master_mjd(mjd), version=drpver, from_sandbox=False)
+
         # reduce science/twilight exposures down to wavelength calibration step
         reduce_2d(mjds=mjd, calibrations=calibs, expnums=expnums, add_astro=use_science, sub_straylight=True, skip_done=skip_done)
         reduce_1d(mjd=mjd, calibrations=calibs, expnums=expnums, sub_straylight=True, skip_done=skip_done)

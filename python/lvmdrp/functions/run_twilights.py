@@ -700,6 +700,32 @@ def fit_fiberflat(in_rss, out_flat, out_rss, ref_kind=600, guess_coeffs=[1,2,3,0
     return flat, flat_g, rss_g, coeffs, factors
 
 def do_ffactor_correction(in_mflat, coeffs, factor, sky_cwave, dwave, coadd_method, write_output=False):
+    """Apply fiberflat skyline-factor corrections to a master flat.
+
+    Parameters
+    ----------
+    in_mflat : str or path-like
+        Path to the master fiberflat file to modify.
+    coeffs : sequence of float
+        IFU gradient coefficients used for the correction.
+    factor : sequence of float
+        Per-group fiberflat correction factors to apply.
+    sky_cwave : float
+        Central wavelength used for the correction.
+    dwave : float
+        Wavelength window width used for the correction.
+    coadd_method : str
+        Method used to coadd the spectra when the correction was derived.
+    write_output : bool, optional
+        Whether to overwrite the input master fiberflat file with the corrected
+        data, by default False.
+
+    Returns
+    -------
+    tuple
+        The corrected RSS object, the array of applied flatfield factors, and
+        the previous correction state.
+    """
     mflat = RSS.from_file(in_mflat)
     channel = mflat._header["CCD"]
 
@@ -731,6 +757,22 @@ def do_ffactor_correction(in_mflat, coeffs, factor, sky_cwave, dwave, coadd_meth
     return mflat, flatfield_corr, was_corrected
 
 def undo_ffactor_correction(in_mflat, write_output=False):
+    """Remove previously applied fiberflat skyline-factor corrections.
+
+    Parameters
+    ----------
+    in_mflat : str or path-like
+        Path to the master fiberflat file to modify.
+    write_output : bool, optional
+        Whether to overwrite the input master fiberflat file with the
+        uncorrected data, by default False.
+
+    Returns
+    -------
+    tuple
+        The uncorrected RSS object, the inverse flatfield factors, and the
+        previous correction state.
+    """
 
     mflat = RSS.from_file(in_mflat)
     channel = mflat._header["CCD"]
