@@ -2305,8 +2305,8 @@ def create_fiberflats_corrections(mjd, channel, ffactor_epochs, calibration_epoc
 
     # perform 2D, 1D reductions, down to wavelength calibrated products
     for mjd in source_mjds:
-        # get calibration paths from untagged epochs
-        calibs = get_calib_paths(get_master_mjd(mjd), version=drpver, from_sandbox=False)
+        # use the calibration epoch that covers this source MJD
+        calibs = get_calib_paths(mjd=mjd, version=drpver, flavors=CALIBRATION_NEEDS["twilight"], epochs=calibration_epochs, from_sandbox=False)
 
         # reduce science/twilight exposures down to wavelength calibration step
         reduce_2d(mjds=mjd, calibrations=calibs, expnums=expnums, add_astro=use_science, sub_straylight=True, skip_done=skip_done)
