@@ -731,13 +731,12 @@ def do_ffactor_correction(in_mflat, coeffs, factor, sky_cwave, dwave, coadd_meth
 
     was_corrected = mflat._header.get(f"{channel} FIBERFLAT SKYCORR")
     groupby = mflat._header.get(f"{channel} FIBERFLAT GROUPBY")
-    fiber_groups = mflat._get_fiber_groups(by=groupby)
 
     if was_corrected:
         log.info("correction already applied, nothing to do")
         return mflat, np.ones(mflat._fibers, dtype="float32"), was_corrected
 
-    flatfield_corr = IFUGradient.ifu_factors(factor, fiber_groups)
+    _, _, flatfield_corr = mflat.eval_ifu_gradient(coeffs=coeffs, factors=factor, groupby=groupby, normalize=True)
     log.info(f"fiber flat not corrected; doing '{groupby}' correction with: {factor}")
     mflat *= flatfield_corr[:, None]
     mflat.setHdrValue(f"HIERARCH {channel.upper()} FIBERFLAT CWAVE", sky_cwave, "norm. wavelength [Angstrom]")

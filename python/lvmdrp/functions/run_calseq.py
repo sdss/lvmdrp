@@ -281,7 +281,7 @@ def measure_fiberflat_factors(mjd, drpver, channel, expnums=None, sky_cwaves=SKY
             norm_method=norm_stat,
             quantiles=quantiles,
             guess_coeffs=[1,0,0,0],
-            fixed_coeffs=[3] if fit_gradient else [1, 2, 3],
+            fixed_coeffs=[3] if fit_gradient else [0, 1, 2, 3],
             groupby=groupby, axs=axs, labels=True)
 
         log.info("applying flatfield correction")
@@ -2146,7 +2146,7 @@ def create_twilight_fiberflats(mjd: int, epochs: dict[int, dict] = None, cals_mj
 
     # decompose twilight spectra into sun continuum and twilight components
     flat_channels = frames.groupby(frames.camera.str.__getitem__(0))
-    for channel in _channels:
+    for channel in sorted(_channels):
         flat_expnums = flat_channels.get_group(channel).groupby("expnum")
         xtwi_paths, fflat_paths, lvmflat_paths = [], [], []
         for expnum in flat_expnums.groups:
@@ -2201,10 +2201,27 @@ def create_twilight_fiberflats(mjd: int, epochs: dict[int, dict] = None, cals_mj
             in_waves=calibs["wave"][channel], in_lsfs=calibs["lsf"][channel])
 
 
-def create_fiberflats_corrections(mjd, channel, ffactor_epochs, calibration_epochs, sky_cwaves=SKYLINES_FIBERFLAT, cont_cwaves=CONTINUUM_FIBERFLAT, dwave=10.0,
-                                  fiber_radius=1.0, oversampling_factor=100, quantiles=(5.0, 97.0),
-                                  groupby="spec", coadd_method="fit", norm_stat=lambda x: biweight_location(x, ignore_nan=True),
-                                  fit_gradient=False, use_science=True, skip_done=False, undo_correction=False, display_plots=True, dry_run=False):
+def create_fiberflats_corrections(
+    mjd: int,
+    channel: str,
+    ffactor_epochs: Dict[int, Dict[str, List[int]]],
+    calibration_epochs: Dict[int, Dict[str, List[int]]],
+    sky_cwaves: Dict[str, float] = SKYLINES_FIBERFLAT,
+    cont_cwaves: Dict[str, float] = CONTINUUM_FIBERFLAT,
+    dwave: float = 10.0,
+    fiber_radius: float = 1.0,
+    oversampling_factor: int = 100,
+    quantiles: tuple[float, float] = (5.0, 97.0),
+    groupby: str = "spec",
+    coadd_method: str = "fit",
+    norm_stat: Callable[[np.ndarray], float] = lambda x: biweight_location(x, ignore_nan=True),
+    fit_gradient: bool = True,
+    use_science: bool = True,
+    skip_done: bool = False,
+    undo_correction: bool = False,
+    display_plots: bool = True,
+    dry_run: bool = False,
+) -> None:
     """Create and apply fiberflat correction factors to master twilight flats.
 
     The routine determines the relevant ffactor epoch, removes any existing
@@ -2309,6 +2326,7 @@ def create_fiberflats_corrections(mjd, channel, ffactor_epochs, calibration_epoc
         calibs = get_calib_paths(mjd=mjd, version=drpver, flavors=CALIBRATION_NEEDS["twilight"], epochs=calibration_epochs, from_sandbox=False)
 
         # reduce science/twilight exposures down to wavelength calibration step
+        # TODO: make sure to reduce only camera exposures matching given channel
         reduce_2d(mjds=mjd, calibrations=calibs, expnums=expnums, add_astro=use_science, sub_straylight=True, skip_done=skip_done)
         reduce_1d(mjd=mjd, calibrations=calibs, expnums=expnums, sub_straylight=True, skip_done=skip_done)
 

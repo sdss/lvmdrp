@@ -10,6 +10,7 @@ import matplotlib
 import matplotlib.gridspec as gridspec
 import numpy
 import yaml
+import warnings
 import bottleneck as bn
 from tqdm import tqdm
 from astropy import units as u
@@ -22,18 +23,16 @@ from numpy import polynomial
 from scipy import interpolate, ndimage
 
 from lvmdrp.utils.decorators import skip_on_missing_input_path, skip_if_drpqual_flags
-from lvmdrp.core.constants import CONFIG_PATH, ARC_LAMPS, REF_SKYLINES, SKYLINES_FIBERFLAT, CONTINUUM_FIBERFLAT
+from lvmdrp.core.constants import CONFIG_PATH, ARC_LAMPS, REF_SKYLINES, SKYLINES_FIBERFLAT
 from lvmdrp.core.cube import Cube
 from lvmdrp.core.tracemask import TraceMask
 from lvmdrp.core.image import loadImage
 from lvmdrp.core.passband import PassBand
-from lvmdrp.core import fit_profile as fp
 from lvmdrp.core.plot import (plt, create_subplots, save_fig,
                               plot_error,
                               plot_wavesol_coeffs, plot_wavesol_residuals,
                               plot_wavesol_spec, plot_wavesol_wave,
                               plot_wavesol_lsf,
-                              plot_gradient_fit,
                               slit)
 from lvmdrp.core.rss import RSS, _read_pixwav_map, loadRSS, lvmFrame, lvmFFrame, lvmCFrame
 from lvmdrp.core.spectrum1d import Spectrum1D, _spec_from_lines, _cross_match_float
@@ -1623,16 +1622,11 @@ def correctTraceMask_drp(trace_in, trace_out, logfile, ref_file, poly_smooth="")
 
 
 def apply_fiberflat(in_rss: str, out_frame: str, in_flat: str,
-                    fit_factors: bool = True,
-                    fit_gradient: bool = False,
-                    assume_factors: numpy.ndarray | None = None,
-                    assume_coeffs: numpy.ndarray | None = None,
                     sky_cwaves: Dict[str, float] = SKYLINES_FIBERFLAT,
-                    cont_cwaves: Dict[str, float] = CONTINUUM_FIBERFLAT,
-                    dwave: float = 20.0,
-                    fiber_radius: float = 0.01, oversampling_factor: int = 100,
-                    groupby: str = "spec", quantiles: Tuple[float, float] = (5.0, 97.0),
-                    coadd_method="fit", norm_method=lambda x: biweight_location(x, ignore_nan=True),
+                    dwave: float = 10.0,
+                    fiber_radius: float = 1.0, oversampling_factor: int = 100,
+                    groupby: str = "spec", coadd_method="fit",
+                    norm_method=lambda x: biweight_location(x, ignore_nan=True),
                     display_plots: bool = False) -> RSS:
     """applies fiberflat correction to target RSS file
 
@@ -1663,10 +1657,9 @@ def apply_fiberflat(in_rss: str, out_frame: str, in_flat: str,
     rss = RSS.from_file(in_rss)
     channel = rss._header["CCD"][0]
     sky_cwave = sky_cwaves[channel]
-    cont_cwave = cont_cwaves[channel]
 
     # load fiberflat
-    log.info(f"reading fiberflat from {os.path.basename(in_flat)}")
+    log.info(f"reading fiberflat from {in_flat}")
     mflat = RSS.from_file(in_flat)
     if mflat._wave is None:
         mflat.set_wave_trace(rss._wave_trace)
@@ -1681,40 +1674,22 @@ def apply_fiberflat(in_rss: str, out_frame: str, in_flat: str,
     if not numpy.isclose(rss._wave, mflat._wave).all():
         log.warning("target data and fiberflat have different wavelength grids")
         rss.add_header_comment("target data and fiberflat have different wavelength grids")
+    if not mflat._header.get(f"{channel} FIBERFLAT SKYCORR", False):
+        warnings.warn("Using a master fiber flat without spectrograph-to-spectrograph correction")
 
     # apply flatfield and measure sky lines
+    rss /= mflat
+    skyline_slit = rss.fit_lines_slit(cwaves=sky_cwave, dwave=dwave, fiber_radius=1.0, select_fibers="Sci")
+
     fig = plt.figure(figsize=(14,3*2))
     fig.suptitle(f"Fiber flatfield correction for {channel = } around sky line @ {sky_cwave:.2f} Angstroms", fontsize="xx-large")
     gs_gra = gridspec.GridSpec(2, 5, hspace=0.01, wspace=0.01, left=0.07, right=0.99, figure=fig)
     gs_cor = gridspec.GridSpec(2, 5, hspace=0.5, wspace=0.01, left=0.07, right=0.99, figure=fig)
     axs = [fig.add_subplot(gs_gra[0, j]) for j in range(5)]
-
-    fiber_groups = mflat._get_fiber_groups(by="spec")
-    factor = assume_factors if assume_factors is not None else numpy.ones(len(set(fiber_groups)), dtype="float")
-    coeffs = assume_coeffs if assume_coeffs is not None else numpy.array([1,0,0,0], dtype="float")
-    fixed_coeffs = [0,1,2,3] if not fit_gradient else [3]
-    log.info(f"measuring sky line {sky_cwave:.2f}+/-{dwave:.2f} Angstroms in {rss._fibers} fibers")
-    if fit_factors:
-        x, y, skyline_slit, coeffs, factor, _ = rss.measure_skyline_flatfield(
-                mflat=mflat, sky_cwave=sky_cwave, cont_cwave=cont_cwave, dwave=dwave,
-                fiber_radius=fiber_radius, oversampling_factor=oversampling_factor,
-                quantiles=quantiles, guess_coeffs=coeffs, fixed_coeffs=fixed_coeffs, groupby=groupby,
-                coadd_method=coadd_method, norm_method=norm_method,
-                axs=None, labels=True)
-
-        log.info("applying flatfield correction")
-    else:
-        skyline_slit, x, y = (rss / mflat).fit_lines_slit(
-            cwaves=sky_cwave, dwave=dwave,
-            fiber_radius=fiber_radius, oversampling_factor=oversampling_factor, select_fibers="Sci", return_xy=True)
-
-    flatfield_corr, g, f = fp.IFUGradient.ifu_joint_model(coeffs, factor, x, y, fiber_groups, normalize=True, return_components=True)
-    plot_gradient_fit(rss._slitmap, skyline_slit, g, f, telescope="Sci", axs=axs)
-
-    mflat *= flatfield_corr[:, None]
-    rss /= mflat
-    skyline_slit /= flatfield_corr
-
+    rss.fit_ifu_gradient(cwave=sky_cwave, dwave=dwave, groupby=groupby,
+                         fiber_radius=fiber_radius, oversampling_factor=oversampling_factor,
+                         guess_coeffs=[1,0,0,0], fixed_coeffs=[3], coadd_method=coadd_method,
+                         norm_method=norm_method, axs=axs)
     ax_cor = fig.add_subplot(gs_cor[-1, :])
     ax_cor.set_title(f"Flatfielded skyline @ {sky_cwave:.2f}+/-{dwave:.2f} Angstroms", loc="left")
     ax_cor.set_xlabel("Fiber ID", fontsize="large")
@@ -1740,15 +1715,6 @@ def apply_fiberflat(in_rss: str, out_frame: str, in_flat: str,
         superflat=mflat._data
     )
     lvmframe.set_header(orig_header=rss._header.copy(), flatname=os.path.basename(in_flat))
-    lvmframe.setHdrValue(f"HIERARCH {channel} FIBERFLAT CWAVE", sky_cwave, "norm. wavelength [Angstrom]")
-    lvmframe.setHdrValue(f"HIERARCH {channel} FIBERFLAT DWAVE", dwave, "norm. window width [Angstrom]")
-    lvmframe.setHdrValue(f"HIERARCH {channel} FIBERFLAT COADD", coadd_method, "coadding method")
-    lvmframe.setHdrValue(f"HIERARCH {channel} FIBERFLAT SKYCORR", True, "fiberflat skyline-corrected?")
-    lvmframe.setHdrValue(f"HIERARCH {channel} FIBERFLAT GROUPBY", groupby, "fiber grouping")
-    for i, f in enumerate(factor):
-        lvmframe.setHdrValue(f"HIERARCH {channel} FIBERFLAT FACTOR{i+1}", numpy.round(f, 5), f"fiberflat factor {groupby}{i+1}")
-    for i, c in enumerate(coeffs):
-        lvmframe.setHdrValue(f"HIERARCH {channel} FIBERFLAT GCOEFF{i+1}", numpy.round(c, 5), f"IFU gradient coeff #{i+1}")
     lvmframe.writeFitsData(out_frame)
 
     return rss, lvmframe
