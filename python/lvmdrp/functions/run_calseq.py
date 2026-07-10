@@ -2123,7 +2123,7 @@ def create_twilight_fiberflats(mjd: int, epochs: dict[int, dict] = None, cals_mj
     # 2D reduction of twilight sequence
     reduce_2d(mjds=mjds, calibrations=calibs, expnums=expnums,
               reject_cr=True, add_astro=False, sub_straylight=True,
-              skip_done=skip_done, **{"x_bins": 70})
+              skip_done=skip_done, **{"lam_x": 0.1, "lam_y": 100})
 
     for flat in frames.to_dict("records"):
         camera = flat["camera"]

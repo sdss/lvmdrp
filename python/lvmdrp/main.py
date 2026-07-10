@@ -1460,7 +1460,7 @@ def reduce_2d(mjds, calibrations, expnums=None, exptime=None, cameras=CAMERAS,
             # subtract straylight
             if sub_straylight:
                 with Timer(name='Straylight '+lframe_path, logger=log.info):
-                    straylight_pars = dict(x_bins=20)
+                    straylight_pars = dict()
                     straylight_pars.update(cfg_straylight)
                     subtract_straylight(in_image=dframe_path, out_image=lframe_path, out_stray=lstr_path,
                                         in_cent_trace=calibrations.get("centroids", {}).get(camera), **straylight_pars)
