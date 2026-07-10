@@ -18,7 +18,6 @@ from astropy.stats import biweight_location, biweight_scale, sigma_clip
 from astropy.visualization import simple_norm
 from scipy.sparse import csc_matrix
 from scipy.sparse import vstack as sp_vstack, eye as sp_eye, kron as sp_kron
-from scipy.sparse.linalg import spsolve
 from scipy import ndimage
 from scipy import interpolate
 import osqp
