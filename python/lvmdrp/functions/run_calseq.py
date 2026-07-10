@@ -26,19 +26,22 @@
 #
 
 import os
+import pathlib
 import yaml
 import warnings
 import numpy as np
 import bottleneck as bn
 import pandas as pd
 from itertools import product
+from tqdm import tqdm
 from pprint import pformat
 from copy import deepcopy as copy
 from datetime import datetime
 from shutil import copy2, copytree
 from astropy.io import fits
 from astropy.table import Table
-from typing import Union, Tuple, List, Dict
+from astropy.stats import biweight_location
+from typing import Union, List, Dict
 from collections.abc import Callable
 from matplotlib.gridspec import GridSpec
 import matplotlib.pyplot as plt
@@ -47,9 +50,9 @@ from lvmdrp import log, path, __version__ as drpver
 from lvmdrp.utils import metadata as md
 from lvmdrp.utils import hdrfix
 from lvmdrp.utils.convert import tileid_grp
-from lvmdrp.utils.paths import get_calib_paths, group_calib_paths, get_frames_paths
+from lvmdrp.utils.paths import get_calib_paths, group_calib_paths, get_master_mjd
 from lvmdrp.utils import pixshifts
-from lvmdrp.core.plot import save_fig
+from lvmdrp.core.plot import save_fig, slit
 from lvmdrp.core import dataproducts as dp
 from lvmdrp.core.constants import (
     LVM_NFIBERS,
@@ -71,12 +74,15 @@ from lvmdrp.core.constants import (
 from lvmdrp.core.tracemask import TraceMask
 from lvmdrp.core.image import loadImage
 from lvmdrp.core.rss import RSS, lvmFrame
-from lvmdrp.core.fit_profile import gaussians
+from lvmdrp.core.fit_profile import gaussians, IFUGradient
 
 from lvmdrp.functions import imageMethod as image_tasks
 from lvmdrp.functions import rssMethod as rss_tasks
+from lvmdrp.core import sky
 from lvmdrp.main import start_logging, get_config_options, read_fibermap, reduce_2d, reduce_1d
-from lvmdrp.functions.run_twilights import lvmFlat, to_native_wave, fit_fiberflat, combine_twilight_sequence, fit_skyline_flatfield
+from lvmdrp.functions.run_twilights import (
+    lvmFlat, to_native_wave, fit_fiberflat, combine_twilight_sequence,
+    do_ffactor_correction, undo_ffactor_correction)
 
 
 SLITMAP = read_fibermap(as_table=True)
@@ -97,7 +103,222 @@ FIBER_SMOOTHING_CONFIG = {
     "sigmas": ("polynomial", {"deg": 8, "nsigmas": np.inf, "min_samples_frac": 0.7})}
 
 
-CALIBRATION_EPOCHS_PATH = os.path.join(os.getenv("LVMCORE_DIR"), "calibrations", "calibration-epochs.yaml")
+lvmcore_dir = pathlib.Path(os.getenv("LVMCORE_DIR", "."))
+FFACTOR_EPOCHS_PATH = lvmcore_dir / "calibrations" / "fiberflat-factor-epochs.yaml"
+
+CALIBRATION_EPOCHS_PATH = lvmcore_dir / "calibrations" / "calibration-epochs.yaml"
+
+EPOCHS_FILE_PATH = {
+        "ffactor": FFACTOR_EPOCHS_PATH,
+        "calibration": CALIBRATION_EPOCHS_PATH
+    }
+
+
+def _extract_ffactors(header):
+    columns = ["obstime", "smjd", "tile_id", "exposure", "scira", "scidec"]
+    columns += sorted(header["*gcoeff?"].keys())
+    columns += sorted(header["*factor?"].keys())
+
+    metadata_row = {k.replace(" ", "_").lower(): header.get(k) for k in columns}
+    metadata_sky = sky.sky_pars_header(header)
+    metadata_sky = {k.split()[-1].lower().replace("sci_", ""): v[0] for k, v in metadata_sky.items() if "SKYE_" not in k and "SKYW_" not in k}
+    metadata_row.update(metadata_sky)
+
+    return metadata_row
+
+
+def _read_ffactors(drpver, channel):
+    frame_paths: list[str] = sorted(path.expand("lvm_frame", drpver=drpver, tileid="*", mjd="*", expnum="????????", kind=f"Frame-{channel}"))
+
+    metadata = []
+    for p in tqdm(frame_paths, desc=f"extracting factors for {drpver = } | {channel = }", ascii=True, unit="exposure"):
+        hdr = fits.getheader(p)
+
+        metadata.append(_extract_ffactors(hdr))
+    return pd.DataFrame(metadata)
+
+
+def measure_fiberflat_factors(mjd, drpver, channel, expnums=None, sky_cwaves=SKYLINES_FIBERFLAT, cont_cwaves=CONTINUUM_FIBERFLAT, dwave=20.0,
+                              fiber_radius=0.01, oversampling_factor=100, quantiles=(5.0, 97.0),
+                              groupby="spec", coadd_method="fit", norm_stat=lambda x: biweight_location(x, ignore_nan=True),
+                              fit_gradient=False, label=None, write_table=False, table_dir=None, overwrite=False,
+                              use_untagged_cals=False, version_cals=None, display_plots=False, dry_run=False):
+    """Measure fiberflat correction factors from science or twilight exposures.
+
+    The function inspects wavelength-calibrated frame products, estimates
+    skyline-based flatfield factors for each exposure using the current master
+    twilight fiberflat, and stores the fitted correction coefficients and
+    factors in a table for later use in master fiberflat corrections.
+
+    Parameters
+    ----------
+    mjd : int
+        MJD of the exposures to analyze.
+    drpver : str
+        DRP version tag used to locate input products.
+    channel : str
+        Spectrograph channel to process, one of ``"b"``, ``"r"``, or ``"z"``.
+    expnums : sequence of int, optional
+        Restrict the analysis to a specific set of exposure numbers.
+    sky_cwaves : dict, optional
+        Central wavelengths for skyline-based measurements per channel.
+    cont_cwaves : dict, optional
+        Central wavelengths for continuum regions used during factor fitting.
+    dwave : float, optional
+        Wavelength window width used for the measurement.
+    fiber_radius : float, optional
+        Fiber radius used by the skyline flatfield measurement.
+    oversampling_factor : int, optional
+        Oversampling factor used in the measurement.
+    quantiles : tuple of float, optional
+        Quantiles used for robust normalization in the fitting process.
+    groupby : str, optional
+        Fiber grouping used when fitting the correction factors.
+    coadd_method : str, optional
+        Coaddition method used during the skyline flatfield measurement.
+    norm_stat : callable, optional
+        Robust statistic used to normalize the measured factors.
+    fit_gradient : bool, optional
+        Whether to fit an IFU gradient component in addition to the factors.
+    label : str, optional
+        Label used to name the output table.
+    write_table : bool, optional
+        Whether to save the fitted factors to a CSV table.
+    table_dir : str, optional
+        Directory where the output table should be written.
+    overwrite : bool, optional
+        Whether to overwrite an existing output table.
+    use_untagged_cals : bool, optional
+        Whether to use the long-term calibration master fiberflat for the
+        requested MJD.
+    version_cals : str, optional
+        Calibration version tag to use when locating master fiberflats.
+    display_plots : bool, optional
+        Whether to display diagnostic plots produced during the measurement.
+    dry_run : bool, optional
+        Whether to print the planned inputs and skip the computation.
+
+    Returns
+    -------
+    pandas.DataFrame or None
+        A table of fitted fiberflat factors and gradient coefficients for the
+        analyzed exposures, or ``None`` if no valid frames were found.
+    """
+
+    if channel not in "brz":
+        log.error(f"Invalid value for `channel`: {channel}. Expected one of 'brz'")
+
+    if use_untagged_cals and version_cals is None:
+        log.error(f"Invalid value for `version_cals`: {version_cals}. Expected a long-term calibration version tag, .e.g, '1.2.2dev'")
+        return
+
+    if mjd is None:
+        log.error("no MJD given, nothing to do")
+        return
+    # define label if not given
+    label = label or "".join(filter(str.isalnum, norm_stat.__name__))
+
+    # define paths
+    name = f"ffactors-{drpver}-{mjd}-{channel}-{label}"
+    table_dir = table_dir or "./"
+    os.makedirs(table_dir, exist_ok=True)
+    table_path = os.path.join(table_dir, f"{name}.csv")
+    if not overwrite and os.path.exists(table_path):
+        return pd.read_csv(table_path)
+
+    # grab all relevant DRP products: before/ after fiber flat fielding
+    wframe_paths = path.expand("lvm_anc", drpver=drpver, tileid="*", mjd=mjd, expnum="????????", imagetype="object", kind="w", camera=channel)
+    if expnums is not None:
+        wframe_paths = filter(lambda s: int(os.path.basename(s).split(".")[0].split("-")[-1]) in expnums, wframe_paths)
+    wframe_paths = sorted(wframe_paths, key=lambda s: int(os.path.basename(s).split(".")[0].split("-")[-1]))
+
+    if len(wframe_paths) == 0:
+        log.error(f"zero paths matched given {drpver = }, {mjd = }, {channel = }; nothing to do")
+        return
+
+    log.info(f"going to estimate flat field factors for {len(wframe_paths)} frames, {mjd = }, channel = {channel}")
+
+    # grab master fiber flat fields
+    if use_untagged_cals:
+        cals_mjd = get_master_mjd(mjd)
+    else:
+        cals_mjd = mjd
+    mflat_paths = get_calib_paths(mjd=cals_mjd, from_sandbox=not use_untagged_cals, version=version_cals)["fiberflat_twilight"]
+    if dry_run:
+        log.info("using calibrations:")
+        for channel in mflat_paths:
+            log.info(f"  {channel = }: {mflat_paths[channel]}")
+        log.info(f"output table at {table_path}")
+        return
+
+    # measure/fit flat-field factors using given normalization statistic
+    metadata = []
+    for wframe_path in wframe_paths:
+        rss = RSS.from_file(wframe_path)
+
+        if "ON" in [rss._header[lamp] for lamp in ARC_LAMPS + CON_LAMPS]:
+            metadata.append(_extract_ffactors(rss._header))
+            continue
+
+        expnum = rss._header["EXPOSURE"]
+        sky_cwave = sky_cwaves[channel]
+        cont_cwave = cont_cwaves[channel]
+        mflat = RSS.from_file(mflat_paths[channel])
+
+        fig = plt.figure(figsize=(14,3*2))
+        fig.suptitle(f"Fiber flatfield correction for {expnum = } {channel = } around sky line @ {sky_cwave:.2f} Angstroms", fontsize="xx-large")
+        gs_gra = GridSpec(2, 5, hspace=0.01, wspace=0.01, left=0.07, right=0.99, figure=fig)
+        gs_cor = GridSpec(2, 5, hspace=0.5, wspace=0.01, left=0.07, right=0.99, figure=fig)
+        axs = [fig.add_subplot(gs_gra[0, j]) for j in range(5)]
+        x, y, skyline_slit, coeffs, factor, _ = rss.measure_skyline_flatfield(
+            mflat=mflat,
+            sky_cwave=sky_cwave,
+            cont_cwave=cont_cwave,
+            dwave=dwave,
+            fiber_radius=fiber_radius,
+            oversampling_factor=oversampling_factor,
+            coadd_method=coadd_method,
+            norm_method=norm_stat,
+            quantiles=quantiles,
+            guess_coeffs=[1,0,0,0],
+            fixed_coeffs=[3] if fit_gradient else [0, 1, 2, 3],
+            groupby=groupby, axs=axs, labels=True)
+
+        log.info("applying flatfield correction")
+        fiber_groups = mflat._get_fiber_groups(by="spec")
+        flatfield_corr = IFUGradient.ifu_factors(factor, fiber_groups)
+        mflat *= flatfield_corr[:, None]
+        rss /= mflat
+        skyline_slit /= flatfield_corr
+
+        ax_cor = fig.add_subplot(gs_cor[-1, :])
+        ax_cor.set_title(f"Flatfielded skyline @ {sky_cwave:.2f}+/-{dwave:.2f} Angstroms", loc="left")
+        ax_cor.set_xlabel("Fiber ID", fontsize="large")
+        ax_cor.set_ylabel("Normalized counts", fontsize="large")
+        ax_cor.set_ylim(0.92, 1.08)
+        slit(x=rss._slitmap["fiberid"].data, y=skyline_slit, data=rss._data, ax=ax_cor)
+        save_fig(fig, product_path=wframe_path, figure_path="qa", label="fiberflat_correction", to_display=display_plots)
+
+        rss.setHdrValue(f"HIERARCH {channel} FIBERFLAT CWAVE", sky_cwave, "norm. wavelength [Angstrom]")
+        rss.setHdrValue(f"HIERARCH {channel} FIBERFLAT DWAVE", dwave, "norm. window width [Angstrom]")
+        rss.setHdrValue(f"HIERARCH {channel} FIBERFLAT COADD", coadd_method, "coadding method")
+        rss.setHdrValue(f"HIERARCH {channel} FIBERFLAT SKYCORR", True, "fiberflat skyline-corrected?")
+        rss.setHdrValue(f"HIERARCH {channel} FIBERFLAT GROUPBY", groupby, "fiber grouping")
+        for i, f in enumerate(factor):
+            rss.setHdrValue(f"HIERARCH {channel} FIBERFLAT FACTOR{i+1}", np.round(f, 5), f"fiberflat factor {groupby}{i+1}")
+        for i, c in enumerate(coeffs):
+            rss.setHdrValue(f"HIERARCH {channel} FIBERFLAT GCOEFF{i+1}", np.round(c, 5), f"IFU gradient coeff #{i+1}")
+
+        # extract flat field factors and additional information
+        metadata.append(_extract_ffactors(rss._header))
+
+    metadata = pd.DataFrame(metadata)
+    metadata.sort_values("exposure", inplace=True)
+    if write_table:
+        log.info(f"saving output table at {table_path}")
+        metadata.to_csv(table_path, index=False)
+
+    return metadata
 
 
 def _reject_pixelshifted(frames, pixelshifts_path=PIXELSHIFTS_PATH):
@@ -191,7 +412,7 @@ def choose_sequence(frames, calibration, ref_mjd=None, kind="longterm", ring="pr
     ref_mjd : int, optional
         Reference MJD around which a sequence will be chosen, by default None
     kind : str, optional
-        Calibration sequence length, either 'nightly' (short) or 'longterm' (long), by default "longterm"
+        Calibration sequence length, either 'nightly' (short), 'longterm' (long), by default "longterm" or None
     ring : str, optional
         Standard fibers ring to select, either 'primary', 'secondary', 'both'. By default 'primary'
 
@@ -217,8 +438,12 @@ def choose_sequence(frames, calibration, ref_mjd=None, kind="longterm", ring="pr
         raise ValueError(f"Invalid value for `ring`: {ring}. Expected either 'primary', 'secondary' or 'both'")
     if not isinstance(calibration, str) or calibration not in CALIBRATION_TYPES:
         raise ValueError(f"Invalid value for `calibration`: {calibration}. Expected one of {','.join(CALIBRATION_TYPES)}")
-    if not isinstance(kind, str) or kind not in {"nightly", "longterm"}:
+    if kind is not None and (not isinstance(kind, str) or kind not in {"nightly", "longterm"}):
         raise ValueError(f"Invalid value for `kind`: {kind}. Expected either 'longterm' or 'nightly'")
+
+    # skip sequence selection if
+    if kind is None:
+        return frames, frames.expnum.unique()
 
     nstandards = 12 if ring in {"primary", "secondary"} else 24
     EXPECTED_SEQUENCE_LENGTH = {
@@ -575,8 +800,119 @@ def _parse_list(items_str):
     return items
 
 
-def load_calibration_epochs(epochs_path=None, filter_by=None, verbose=True):
-    epochs_path = epochs_path or CALIBRATION_EPOCHS_PATH
+def update_fflat_epochs(ffactor_epoch_path=None, calibration_epoch_path=None, n_nights=None, max_mjd=62000):
+    """Update the fiber flat factor epoch definitions from calibration epochs.
+
+    Parameters
+    ----------
+    ffactor_epoch_path : pathlib.Path or None, optional
+        Path to the fiber flat factor epochs YAML file. If None, the default
+        path from ``EPOCHS_FILE_PATH["ffactor"]`` is used.
+    calibration_epoch_path : pathlib.Path or None, optional
+        Path to the calibration epochs YAML file. If None, the default path
+        from ``EPOCHS_FILE_PATH["calibration"]`` is used.
+    n_nights : int or None, optional
+        Maximum number of nights that should be included in each fiber-flat
+        factor epoch. If provided, intervals between the selected calibration
+        boundaries are split into chunks of at most this size.
+    max_mjd : int, optional
+        Maximum MJD to include when building the factor epochs.
+
+    Returns
+    -------
+    None
+        The function writes or updates the YAML file in place.
+
+    Notes
+    -----
+    The function derives the relevant MJD epochs from the earliest science
+    period, the survey-start trigger, and any instrument intervention events.
+    Existing fiber flat factor epochs are preserved when the target file already
+    exists.
+    """
+
+    calibration_epoch_path = calibration_epoch_path or EPOCHS_FILE_PATH["calibration"]
+    ffactor_epoch_path = ffactor_epoch_path or EPOCHS_FILE_PATH["ffactor"]
+
+    if n_nights is not None and (not isinstance(n_nights, (int, np.integer)) or n_nights < 1):
+        raise ValueError(f"`n_nights` must be a positive integer; got {n_nights!r}")
+    n_nights = 999 if n_nights is None else n_nights
+
+    calibration_epochs = load_epochs_file(epochs_kind="calibration", epochs_path=calibration_epoch_path, verbose=False)
+
+    # locate early science start
+    mjd_early = list(calibration_epochs.keys())[:1]
+    # locate survey start
+    mjd_start = [mjd for mjd, epoch in calibration_epochs.items() if epoch["trigger"] == "Survey start"]
+    # locate instrument intervention epochs
+    intervention_epochs = {mjd: epoch for mjd, epoch in calibration_epochs.items() if epoch["trigger"] == "Instrument intervention"}
+    mjd_interventions = list(intervention_epochs.keys())
+    # combine all relevant MJDs
+    mjds = sorted(set(mjd_early + mjd_start + mjd_interventions + [max_mjd]))
+
+    # define empty ffactor epochs
+    schema = {
+        "name": "epochs",
+        "dtype": "dict[int, dict]",
+        "description": "Dictionary mapping fiber flat factors to exposure numbers used to generate those factors, epochs are divided by 'Instrument intervention' event.",
+        "keyschmas": [
+            {"name": "flavors", "dtype": "dict[int, int|str]", "description": "Dictionary mapping frame flavors, either 'science' or 'twilight' to a list of MJDs to source from."},
+            {"name": "trigger", "dtype": "str | null", "description": "Reason for which these factors were measured, see calibration epochs `trigger`."},
+            {"name": "comment", "dtype": "str | null", "description": "Optional comment providing more context about the factors measurements."}
+        ]
+    }
+    epochs = {}
+    for i, mjd in enumerate(mjds[:-1]):
+        mjd_end = min(mjd + n_nights, mjds[i + 1]) - 1
+        epochs[mjd] = {
+            "flavors": {
+                "science": f"{mjd}-{mjd_end}",
+                "twilight": f"{mjd}-{mjd_end}"
+            },
+            "trigger": calibration_epochs.get(mjd, {}).get("trigger"),
+            "comment": None
+        }
+
+    # create new ffactor epochs file
+    if not ffactor_epoch_path.exists():
+        with open(ffactor_epoch_path, 'w+') as f:
+            f.write(yaml.safe_dump({"schema": schema, "epochs": epochs}, sort_keys=False, indent=2))
+        return
+
+    # update existing ffactor epochs file using information in calibration epochs file
+    ffactor_epochs = load_epochs_file(epochs_kind="ffactor", verbose=False)
+    epochs.update(ffactor_epochs)
+    with open(ffactor_epoch_path, 'w+') as f:
+        f.write(yaml.safe_dump({"schema": schema, "epochs": epochs}, sort_keys=False, indent=2))
+
+
+def load_epochs_file(epochs_kind, epochs_path=None, filter_by_mjds=None, verbose=True):
+    """Load epoch definitions from a YAML file.
+
+    Parameters
+    ----------
+    epochs_kind : str
+        Kind of epoch file to load. Supported values are typically
+        ``"calibration"`` and ``"ffactor"``.
+    epochs_path : str or pathlib.Path, optional
+        Explicit path to the YAML file. If omitted, the default path is chosen
+        from ``EPOCHS_FILE_PATH[epochs_kind]``.
+    filter_by_mjds : int, tuple, list, set, numpy.ndarray, optional
+        One or more MJDs to keep from the loaded epoch mapping.
+    verbose : bool, optional
+        If True, log the loaded and filtered epoch information.
+
+    Returns
+    -------
+    dict or None
+        The epoch mapping loaded from the YAML file, or ``None`` if the file is
+        missing.
+    """
+
+    if filter_by_mjds is not None and not isinstance(filter_by_mjds, (tuple, list, set, np.ndarray)):
+        filter_by_mjds = [filter_by_mjds]
+
+    epochs_path = epochs_path or EPOCHS_FILE_PATH[epochs_kind]
     if not os.path.exists(epochs_path):
         log.error(f"calibration epochs file not found: {epochs_path}")
         return
@@ -589,21 +925,53 @@ def load_calibration_epochs(epochs_path=None, filter_by=None, verbose=True):
         for mjd in epochs:
             log.info(f"  {mjd}: {epochs[mjd]}")
 
-    if filter_by is not None and isinstance(filter_by, (list, tuple)):
-        epochs = {mjd: epochs[mjd] for mjd in filter_by if mjd in epochs}
+    if filter_by_mjds is not None:
+        epochs = {mjd: epochs[mjd] for mjd in filter_by_mjds if mjd in epochs}
         if len(epochs) == 0:
-            log.error(f"epoch(s) {filter_by} not found in calibration epochs file: '{epochs_path}'")
+            log.error(f"epoch(s) {filter_by_mjds} not found in calibration epochs file: '{epochs_path}'")
             return epochs
         if verbose:
-            log.info(f"after filtering by MJD = {filter_by}, {len(epochs)} remaining epoch(s):")
+            log.info(f"after filtering by MJD = {filter_by_mjds}, {len(epochs)} remaining epoch(s):")
             for mjd in epochs:
                 log.info(f"  {mjd}: {epochs[mjd]}")
     return epochs
 
 
-def get_calibration_epoch(mjd, flavors=None, trigger=None, comment=None):
+def get_epoch(mjd, epochs, epochs_kind, error_on_missing_mjd=True):
+    """Retrieve the source MJDs associated with a given epoch.
+
+    Parameters
+    ----------
+    mjd : int
+        Modified Julian Date identifying the epoch of interest.
+    epochs : dict
+        Mapping of MJDs to epoch metadata loaded from an epochs YAML file.
+    epochs_kind : str
+        Kind of epochs being queried. Supported values include ``"calibration"``
+        and ``"ffactor"``.
+    error_on_missing_mjd : bool, optional
+        If True, raise a ``KeyError`` when the requested MJD is absent. If
+        False, an empty mapping is returned for missing entries.
+
+    Returns
+    -------
+    dict
+        Dictionary mapping each flavor to the corresponding source MJD(s).
+    """
+
+    _FLAVORS = {
+        "calibration": CALIBRATION_TYPES,
+        "ffactor": ["science", "twilight"]
+    }
+
+    try:
+        epoch = epochs[mjd] if error_on_missing_mjd else epochs.get(mjd, {})
+    except KeyError:
+        raise KeyError(f"Invalid {epochs_kind} epoch `mjd`: {mjd}. Expected one of {list(epochs.keys())}")
+
+    flavors = epoch.get("flavors")
     if flavors is None:
-        return {flavor: _parse_list(mjd) for flavor in CALIBRATION_TYPES}
+        return {flavor: _parse_list(mjd) for flavor in _FLAVORS[epochs_kind]}
 
     calibs_mjds = {flavor: _parse_list(source_mjd) for flavor, source_mjd in flavors.items()}
     return calibs_mjds
@@ -921,6 +1289,9 @@ def tag_longterm_calibrations(mjd, version, flavors=None, dry_run=False):
     dry_run : bool, optional
         Logs useful information abaut the current setup without actually tagging, by default False
     """
+
+    # TODO: clean all MJD directories from the calib
+
     # handle possible acceptable flavors
     if isinstance(flavors, (list, tuple, set, np.ndarray)):
         flavors = set(flavors)
@@ -1163,7 +1534,7 @@ def validate_calibration_epochs(mjd=None, calibrations=CALIBRATION_TYPES, epochs
             log.info(f"{nstds} exposed standards{label}: {', '.join(stds)}")
 
 
-    epochs = load_calibration_epochs(epochs_path=epochs_path, verbose=False)
+    epochs = load_epochs_file(epochs_kind="calibration", epochs_path=epochs_path, verbose=False)
     if mjd is not None and mjd not in epochs:
         log.error(f"no calibrations epoch found for {mjd} in file {epochs_path}")
         return
@@ -1177,7 +1548,7 @@ def validate_calibration_epochs(mjd=None, calibrations=CALIBRATION_TYPES, epochs
 
     for mjd in epoch_mjds:
         log.info(f"validating {calibrations = } for epoch = {mjd}")
-        epoch = get_calibration_epoch(mjd, **epochs[mjd])
+        epoch = get_epoch(mjd=mjd, epochs=epochs, epochs_kind="calibration", error_on_missing_mjd=True)
         for calibration in calibrations:
             source_mjds = epoch.get(calibration, [])
             log.info(f"MJDs for {calibration = }: {', '.join(map(str, source_mjds))}")
@@ -1200,7 +1571,7 @@ def validate_calibration_epochs(mjd=None, calibrations=CALIBRATION_TYPES, epochs
 
 
 def check_epochs_completeness(mjd=None, version=drpver, calibrations=CALIBRATION_TYPES, epochs_path=CALIBRATION_EPOCHS_PATH):
-    epochs = load_calibration_epochs(epochs_path=epochs_path, verbose=False)
+    epochs = load_epochs_file(epochs_kind="calibration", epochs_path=epochs_path, verbose=False)
     if mjd is not None and mjd not in epochs:
         log.error(f"no calibrations epoch found for {mjd} in file {epochs_path}")
         return
@@ -1247,7 +1618,7 @@ def create_bias(mjd, epochs=None, use_longterm_cals=True, skip_done=True, dry_ru
     dry_run : bool, optional
         Logs useful information abaut the current setup without actually reducing, by default False
     """
-    epoch = get_calibration_epoch(mjd=mjd, **(epochs or {}).get(mjd, {}))
+    epoch = get_epoch(mjd=mjd, epochs=epochs or {}, epochs_kind="calibration", error_on_missing_mjd=False)
     mjds = epoch["bias"]
 
     frames = md.get_calibrations_metadata(mjds=mjds, calibration="bias")
@@ -1465,7 +1836,7 @@ def create_traces(mjd, epochs=None, cameras=CAMERAS, ring="primary",
         Skip pipeline steps that have already been done, by default True
     """
 
-    epoch = get_calibration_epoch(mjd=mjd, **(epochs or {}).get(mjd, {}))
+    epoch = get_epoch(mjd=mjd, epochs=epochs or {}, epochs_kind="calibration", error_on_missing_mjd=False)
     mjds = epoch["trace"]
 
     frames = md.get_calibrations_metadata(mjds=mjds, calibration="trace")
@@ -1679,12 +2050,14 @@ def create_dome_fiberflats(mjd, expnums_ldls=None, expnums_qrtz=None, cals_mjd=N
         lvmflat.writeFitsData(path.full("lvm_frame", mjd=mjd, tileid=11111, drpver=drpver, expnum=expnum_str, kind=f'DFlat-{channel}'))
 
 
-def create_twilight_fiberflats(mjd: int, epochs: dict[int, dict] = None, cals_mjd: int = None, use_longterm_cals: bool = True,
+def create_twilight_fiberflats(mjd: int, epochs: dict[int, dict] = None, cals_mjd: int = None, channels: str = "brz",
                       ref_kind: Union[int, Callable[[np.ndarray, int], np.ndarray]] = bn.nanmedian,
-                      groupby: str = "spec", guess_coeffs: List[int] = [1,0,0,0], fixed_coeffs: List[int] = [0,1,2,3],
+                      groupby: str = "spec", guess_coeffs: List[int] = [1,0,0,0], fixed_coeffs: List[int] = [3],
                       cnorms: Dict[str, float] = SKYLINES_FIBERFLAT, dwave: float = 20.0,
                       smoothing: float = 0.07,
                       interpolate_invalid: bool = True,
+                      skip_sequence_selection: bool = False,
+                      skip_combination: bool = False,
                       skip_done: bool = False,
                       display_plots: bool = False,
                       dry_run: bool = False) -> None:
@@ -1710,7 +2083,7 @@ def create_twilight_fiberflats(mjd: int, epochs: dict[int, dict] = None, cals_mj
     guess_coeffs : list[int], optional
         Initial guess for polynomial coefficients in gradient fitting. Defaults to [1,0,0,0].
     fixed_coeffs : list[int], optional
-        Indices of coefficients to fix during fitting. Defaults to [1,2,3].
+        Indices of coefficients to fix during fitting. Defaults to [3].
     cnorms : dict, optional
         Dictionary of normalization wavelengths per channel. Defaults to SKYLINES_FIBERFLAT.
     dwave : float, optional
@@ -1726,11 +2099,16 @@ def create_twilight_fiberflats(mjd: int, epochs: dict[int, dict] = None, cals_mj
     dry_run : bool, optional
         Logs useful information abaut the current setup without actually reducing, by default False
     """
-    epoch = get_calibration_epoch(mjd=mjd, **(epochs or {}).get(mjd, {}))
+
+    _channels = set(channels)
+    if not _channels.issubset(set("brz")):
+        raise ValueError(f"Invalid value in `channels`: {channels}. Expected a subset of 'brz'")
+
+    epoch = get_epoch(mjd=mjd, epochs=epochs or {}, epochs_kind="calibration", error_on_missing_mjd=False)
     mjds = epoch["twilight"]
 
     frames = md.get_calibrations_metadata(mjds=mjds, calibration="twilight")
-    frames, expnums = choose_sequence(frames, calibration="twilight", kind="longterm")
+    frames, expnums = choose_sequence(frames, calibration="twilight", kind=None if skip_sequence_selection else "longterm")
     if frames.empty:
         log.error("no twilight frames found, skipping production of twilight fiberflats")
         return
@@ -1767,9 +2145,8 @@ def create_twilight_fiberflats(mjd: int, epochs: dict[int, dict] = None, cals_mj
         calibs[flavor] = group_calib_paths(calibs[flavor])
 
     # decompose twilight spectra into sun continuum and twilight components
-    channels = "brz"
     flat_channels = frames.groupby(frames.camera.str.__getitem__(0))
-    for channel in channels:
+    for channel in sorted(_channels):
         flat_expnums = flat_channels.get_group(channel).groupby("expnum")
         xtwi_paths, fflat_paths, lvmflat_paths = [], [], []
         for expnum in flat_expnums.groups:
@@ -1809,6 +2186,12 @@ def create_twilight_fiberflats(mjd: int, epochs: dict[int, dict] = None, cals_mj
                           norm_cwave=cnorms[channel], norm_dwave=dwave, smoothing=smoothing, interpolate_invalid=interpolate_invalid,
                           display_plots=display_plots)
 
+
+        # skip creation of master fiberflats
+        if skip_combination:
+            log.info(f"skipping creation of master fiberflat for {channel = }")
+            continue
+
         # combine individual fiberflats into master fiberflat
         mflat_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, kind="mfiberflat_twilight", camera=channel)
         combine_twilight_sequence(
@@ -1818,48 +2201,155 @@ def create_twilight_fiberflats(mjd: int, epochs: dict[int, dict] = None, cals_mj
             in_waves=calibs["wave"][channel], in_lsfs=calibs["lsf"][channel])
 
 
-def create_fiberflats_corrections(cals_mjd: int, science_mjds: Union[int, List[int]], use_longterm_cals: bool = True, science_expnums: List[int] = None,
-                                  sky_cwaves: Dict[str, float] = SKYLINES_FIBERFLAT, cont_cwaves: Dict[str, float] = CONTINUUM_FIBERFLAT,
-                                  groupby: str = "spec", quantiles: Tuple[float, float] = (5.0, 97.0), sky_fibers_only: bool = False,
-                                  nsigma: float = 2.0, comb_method: str = "median", force_correction: bool = False,
-                                  skip_done: bool = False, display_plots: bool = False, dry_run: bool = False) -> None:
+def create_fiberflats_corrections(
+    mjd: int,
+    channel: str,
+    ffactor_epochs: Dict[int, Dict[str, List[int]]],
+    calibration_epochs: Dict[int, Dict[str, List[int]]],
+    sky_cwaves: Dict[str, float] = SKYLINES_FIBERFLAT,
+    cont_cwaves: Dict[str, float] = CONTINUUM_FIBERFLAT,
+    dwave: float = 10.0,
+    fiber_radius: float = 1.0,
+    oversampling_factor: int = 100,
+    quantiles: tuple[float, float] = (5.0, 97.0),
+    groupby: str = "spec",
+    coadd_method: str = "fit",
+    norm_stat: Callable[[np.ndarray], float] = lambda x: biweight_location(x, ignore_nan=True),
+    fit_gradient: bool = True,
+    use_science: bool = True,
+    skip_done: bool = False,
+    undo_correction: bool = False,
+    display_plots: bool = True,
+    dry_run: bool = False,
+) -> None:
+    """Create and apply fiberflat correction factors to master twilight flats.
 
-    if not all([cals_mjd <= sci_mjd for sci_mjd in science_mjds]):
-        log.error(f"some science MJDs are earlier than {cals_mjd = }: {science_mjds = }")
+    The routine determines the relevant ffactor epoch, removes any existing
+    corrections from the affected master fiberflats when requested, reduces the
+    required science or twilight exposures to the wavelength-calibrated stage,
+    measures robust correction factors, and writes the corrected master
+    fiberflats back to disk.
+
+    Parameters
+    ----------
+    mjd : int
+        Reference MJD for the calibration epoch to correct.
+    channel : str
+        Spectrograph channel to process.
+    ffactor_epochs : dict
+        Definitions of the ffactor epochs and the associated science/twilight
+        MJDs.
+    calibration_epochs : dict
+        Calibration epoch definitions that should receive the correction.
+    sky_cwaves : dict, optional
+        Central wavelengths for the skyline-based correction per channel.
+    cont_cwaves : dict, optional
+        Central wavelengths for the continuum-based correction per channel.
+    dwave : float, optional
+        Wavelength window width used when measuring the correction factors.
+    fiber_radius : float, optional
+        Fiber radius used in the 2D extraction and fitting steps.
+    oversampling_factor : int, optional
+        Oversampling factor used for the correction measurement.
+    quantiles : tuple of float, optional
+        Quantiles used for robust normalization during factor fitting.
+    groupby : str, optional
+        Fiber grouping used by the correction model.
+    coadd_method : str, optional
+        Coaddition method used when fitting the factors.
+    norm_stat : callable, optional
+        Robust statistic used to combine the measured factors.
+    fit_gradient : bool, optional
+        Whether to fit an IFU gradient component in addition to the factors.
+    use_science : bool, optional
+        Whether to derive the factors from science exposures instead of twilight
+        exposures.
+    skip_done : bool, optional
+        Whether to skip processing steps that have already been completed.
+    undo_correction : bool, optional
+        Whether to remove existing corrections without recomputing them.
+    display_plots : bool, optional
+        Whether to display diagnostic plots during factor measurement.
+    dry_run : bool, optional
+        Whether to log the planned actions without performing the reduction.
+
+    Returns
+    -------
+    None
+        The function writes corrected master fiberflats to disk.
+    """
+
+    if not use_science:
+        raise NotImplementedError("Twilight fiber flat corrections are not implemented yet")
+
+    # determine the source MJDs for the `mjd` ffactor epoch
+    ffactor_epoch = get_epoch(mjd=mjd, epochs=ffactor_epochs, epochs_kind="ffactor", error_on_missing_mjd=True)
+    science_mjds = ffactor_epoch.get("science")
+    twilight_mjds = ffactor_epoch.get("twilight")
+
+    # determine the range of calibration epochs to be corrected
+    mjds = list(ffactor_epochs.keys())
+    i = mjds.index(mjd)
+    calibration_mjds = list(filter(lambda mjd: mjds[i] <= mjd < mjds[i+1], calibration_epochs.keys()))
+    mflat_paths = {mjd: get_calib_paths(mjd=mjd, version=drpver, from_sandbox=False, only_existing=True).get("fiberflat_twilight", {}).get(channel)}
+
+    # undo correction
+    for mjd in calibration_mjds:
+        mflat_path = mflat_paths.get(mjd)
+        if mflat_path is None:
+            warnings.warn(f"master fiber flat for epoch {mjd = } and {channel = } not found, skipping")
+            continue
+
+        undo_ffactor_correction(in_mflat=mflat_path, write_output=True)
+
+    if undo_correction:
         return
 
-    science_mjds = [science_mjds] if isinstance(science_mjds, int) else science_mjds
-    if science_expnums is None:
-        frames = pd.concat([md.get_frames_metadata(mjd=mjd).query("tileid != 11111 and qaqual != 'BAD'") for mjd in science_mjds], ignore_index=True)
-        science_expnums = frames.sort_values("expnum").drop_duplicates("expnum").expnum
-
-    calibs = get_calib_paths(mjd=cals_mjd, version=drpver, flavors=CALIBRATION_NEEDS["object"], from_sandbox=False)
+    # determine exposures to be used for factors fitting
+    source_mjds = science_mjds if use_science else twilight_mjds
+    expnums = []
+    for mjd in source_mjds:
+        if use_science:
+            expnums.extend(md.get_frames_metadata(mjd).query("tileid != 11111 and qaqual != 'BAD'").expnum.unique())
+        else:
+            expnums.extend(md.get_calibrations_metadata(mjds=mjd, calibration="twilight").expnum.unique())
 
     if dry_run:
-        _log_dry_run(frames, calibs=calibs, settings=None, caller=create_fiberflats_corrections.__name__)
+        log.info(f"going to create fiber flat factors for channel {channel} using {'science' if use_science else 'twilight'} exposures from mjds: {source_mjds}")
+        log.info(f"selected exposures: {expnums}")
+        log.info(f"corrected calibration epochs: {calibration_mjds}")
         return
 
-    # 2D and 1D reduction of science exposures
-    for sci_mjd in science_mjds:
-        reduce_2d(mjds=sci_mjd, calibrations=calibs, expnums=science_expnums, reject_cr=True, add_astro=True, sub_straylight=True, skip_done=skip_done)
-        reduce_1d(mjd=sci_mjd, calibrations=calibs, expnums=science_expnums, sub_straylight=True, skip_done=skip_done)
+    # perform 2D, 1D reductions, down to wavelength calibrated products
+    for mjd in source_mjds:
+        # use the calibration epoch that covers this source MJD
+        calibs = get_calib_paths(mjd=mjd, version=drpver, flavors=CALIBRATION_NEEDS["twilight"], epochs=calibration_epochs, from_sandbox=False)
 
-    for channel in "brz":
-        wframe_paths = get_frames_paths(mjds=science_mjds, kind="w", camera_or_channel=channel, expnums=science_expnums)
-        if len(wframe_paths) == 0:
-            log.error(f"no good quality science frames found for {science_mjds = }, {science_expnums = } in {channel = }")
+        # reduce science/twilight exposures down to wavelength calibration step
+        # TODO: make sure to reduce only camera exposures matching given channel
+        reduce_2d(mjds=mjd, calibrations=calibs, expnums=expnums, add_astro=use_science, sub_straylight=True, skip_done=skip_done)
+        reduce_1d(mjd=mjd, calibrations=calibs, expnums=expnums, sub_straylight=True, skip_done=skip_done)
 
-        fit_skyline_flatfield(
-            in_sciences=wframe_paths,
-            in_mflat=calibs["fiberflat_twilight"][channel],
-            out_mflat=calibs["fiberflat_twilight"][channel],
-            groupby=groupby,
-            guess_coeffs=[1,0,0,0], fixed_coeffs=[0,1,2,3],
-            sky_cwave=sky_cwaves[channel], cont_cwave=cont_cwaves[channel], dwave=20.0,
-            quantiles=quantiles, sky_fibers_only=sky_fibers_only,
-            nsigma=nsigma, comb_method=comb_method,
-            force_correction=force_correction,
-            display_plots=display_plots)
+    ffactors = []
+    for mjd in source_mjds:
+        ffactors.append(measure_fiberflat_factors(mjd=mjd, drpver=drpver, channel=channel, expnums=expnums,
+                        sky_cwaves=sky_cwaves, cont_cwaves=cont_cwaves, dwave=dwave,
+                        fiber_radius=fiber_radius, oversampling_factor=oversampling_factor,
+                        quantiles=quantiles, groupby=groupby, coadd_method=coadd_method,
+                        norm_stat=norm_stat, fit_gradient=fit_gradient, write_table=False,
+                        use_untagged_cals=True, version_cals=drpver, display_plots=display_plots))
+
+    ffactors = pd.concat(ffactors, ignore_index=True)
+    factor = ffactors.filter(like="factor").sort_index(axis="columns").apply(lambda x: biweight_location(x, ignore_nan=True), axis="index").values
+    coeffs = ffactors.filter(like="gcoeff").sort_index(axis="columns").apply(lambda x: biweight_location(x, ignore_nan=True), axis="index").values
+
+    for mjd in calibration_mjds:
+        mflat_path = mflat_paths.get(mjd)
+        if mflat_path is None:
+            warnings.warn(f"master fiber flat for epoch {mjd = } and {channel = } not found, skipping correction")
+            continue
+
+        do_ffactor_correction(in_mflat=mflat_path, coeffs=coeffs, factor=factor, sky_cwave=sky_cwaves[channel], dwave=dwave, coadd_method=coadd_method, write_output=True)
 
 
 def create_illumination_corrections(mjd, use_longterm_cals=True, expnums=None):
@@ -1919,7 +2409,7 @@ def create_wavelengths(mjd, epochs=None, use_longterm_cals=True, kind="longterm"
         _create_wavelengths_60177(use_longterm_cals=use_longterm_cals, skip_done=skip_done, dry_run=dry_run)
         return
 
-    epoch = get_calibration_epoch(mjd=mjd, **(epochs or {}).get(mjd, {}))
+    epoch = get_epoch(mjd=mjd, epochs=epochs or {}, epochs_kind="calibration", error_on_missing_mjd=False)
     mjds = epoch["wave"]
 
     frames = md.get_calibrations_metadata(mjds=mjds, calibration="wave")
@@ -2093,7 +2583,7 @@ def reduce_nightly_sequence(mjd, use_longterm_cals=False, reject_cr=True, only_c
         create_dome_fiberflats(mjd=mjd, use_longterm_cals=use_longterm_cals, kind="nightly", skip_done=skip_done, dry_run=dry_run)
 
     if "twilight" in only_cals:
-        create_twilight_fiberflats(mjd=mjd, use_longterm_cals=use_longterm_cals, skip_done=skip_done, dry_run=dry_run)
+        create_twilight_fiberflats(mjd=mjd, skip_done=skip_done, dry_run=dry_run)
 
     # if not keep_ancillary:
     #     _clean_ancillary(mjd)
@@ -2104,6 +2594,8 @@ def reduce_longterm_sequence(mjd, epochs=None, use_longterm_cals=True,
                              counts_thresholds=COUNTS_THRESHOLDS,
                              cent_guess_ncolumns=140, trace_full_ncolumns=40,
                              extract_metadata=False,
+                             skip_sequence_selection=False,
+                             skip_combination=False,
                              skip_done=True, keep_ancillary=False,
                              link_pixelmasks=True,
                              dry_run=False):
@@ -2132,7 +2624,11 @@ def reduce_longterm_sequence(mjd, epochs=None, use_longterm_cals=True,
         Only produce this calibrations, by default {'bias', 'trace', 'wave', 'dome', 'twilight'}
     extract_metadata : bool, optional
         Extract or use cached metadata if exist, by default False (use cache)
-    skip_done : bool
+    skip_sequence_selection : bool, optional
+        Skip calibration sequence selection, by default False
+    skip_combination : bool, optional
+        Skip combination of calibrations into final master frames, by default False
+    skip_done : bool, optional
         Skip pipeline steps that have already been done
     keep_ancillary : bool
         Keep ancillary files, by default False
@@ -2176,7 +2672,14 @@ def reduce_longterm_sequence(mjd, epochs=None, use_longterm_cals=True,
         create_dome_fiberflats(mjd=mjd, cals_mjd=mjd, use_longterm_cals=use_longterm_cals, kind="longterm", skip_done=skip_done, dry_run=dry_run)
 
     if "twilight" in only_cals:
-        create_twilight_fiberflats(mjd=mjd, epochs=epochs, cals_mjd=mjd, use_longterm_cals=use_longterm_cals, skip_done=skip_done, dry_run=dry_run)
+        create_twilight_fiberflats(
+            mjd=mjd,
+            epochs=epochs,
+            cals_mjd=mjd,
+            skip_sequence_selection=skip_sequence_selection,
+            skip_combination=skip_combination,
+            skip_done=skip_done,
+            dry_run=dry_run)
 
     # if not keep_ancillary:
     #     _clean_ancillary(mjd)
