@@ -17,6 +17,7 @@ This is the Sphinx documentation for the SDSS Python product lvmdrp
    Installation
    DirectoryStructure
    Overview
+   SummaryFile
    Calibration
    CHANGELOG
    api

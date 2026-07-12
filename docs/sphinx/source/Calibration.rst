@@ -28,6 +28,21 @@ Master calibrations are stored under::
 and are selected at science-reduction time by :func:`~lvmdrp.utils.paths.get_calib_paths`,
 which searches for the most appropriate epoch given the science MJD.
 
+Epoch boundaries themselves are defined in YAML files under
+``$LVMCORE_DIR/calibrations/`` and are loaded with
+:func:`~lvmdrp.functions.run_calseq.load_epochs_file` /
+:func:`~lvmdrp.functions.run_calseq.get_epoch`. Two independent kinds of epochs
+are tracked:
+
+- ``calibration`` (``calibration-epochs.yaml``) — boundaries for the master
+  calibrations described in this document (bias, traces, wave/LSF, twilight
+  fiberflat).
+- ``ffactor`` (``fiberflat-factor-epochs.yaml``) — boundaries for the
+  fiberflat factor corrections described in :ref:`fiberflat-refinement`. These
+  can be finer-grained than the calibration epochs (e.g., capped to a maximum
+  number of nights) and are kept in sync with them by
+  :func:`~lvmdrp.functions.run_calseq.update_fflat_epochs`.
+
 Calibration Types and Dependencies
 -----------------------------------
 
@@ -274,18 +289,46 @@ fiber at the time of the calibration sequence.
 **Application to science**: Applied by
 :func:`~lvmdrp.functions.rssMethod.apply_fiberflat` to the
 wavelength-calibrated science RSS to remove fiber-to-fiber throughput
-variations before sky subtraction.
+variations before sky subtraction. This step simply divides the science RSS
+by the master fiberflat; it no longer fits any correction factors itself
+(see :ref:`fiberflat-refinement` for where those come from) and emits a
+warning if the master fiberflat's ``<channel> FIBERFLAT SKYCORR`` header
+keyword is not set, meaning it has not received the spectrograph-to-spectrograph
+correction below.
+
+.. _fiberflat-refinement:
 
 Science Fiberflat Refinement
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-An optional refinement step,
-:func:`~lvmdrp.functions.run_calseq.create_fiberflats_corrections`, uses sky
-emission lines detected in a set of science frames to correct residual
-large-scale throughput errors in the master twilight fiberflat. The correction
-is derived by fitting the ratio of the per-fiber sky line flux to the median,
-sigma-clipping outliers, and multiplying the master fiberflat by the resulting
-smooth correction map. The master fiberflat is updated in place.
+The master twilight fiberflat corrects fiber-to-fiber throughput but can
+retain residual spectrograph-to-spectrograph (sp1/sp2/sp3) offsets. These are
+measured from science exposures and baked into the master fiberflat itself,
+rather than being re-fit for every exposure at apply time.
+
+**Measuring the factors** —
+:func:`~lvmdrp.functions.run_calseq.measure_fiberflat_factors` inspects
+wavelength-calibrated science (or twilight) frames for a given MJD/channel,
+fits the ratio of each fiber's flux around a bright sky line (and a nearby
+continuum region) to the group median, and records per-group correction
+factors plus an optional IFU illumination-gradient term
+(:class:`~lvmdrp.core.fit_profile.IFUGradient`, ``fit_gradient=True``). Factors
+and gradient coefficients are written to the frame header (``FIBERFLAT
+FACTOR<n>``, ``FIBERFLAT GCOEFF<n>``) and can be dumped to a CSV table
+(``write_table=True``) for offline experimentation. This is exposed via the
+``drp ffactors-experiment`` CLI command.
+
+**Applying the correction** —
+:func:`~lvmdrp.functions.run_calseq.create_fiberflats_corrections` resolves
+the requested MJD to a ``ffactor`` epoch (:func:`~lvmdrp.functions.run_calseq.get_epoch`
+with ``epochs_kind="ffactor"``), which lists the science (or twilight) MJDs to
+source the correction from and the range of ``calibration`` epochs it should
+be applied to. For each affected calibration epoch it undoes any previously
+applied correction, re-derives the factors from the epoch's science
+exposures, multiplies the master fiberflat by the resulting smooth correction
+map, and sets the ``SKYCORR`` header keyword. This is exposed via the
+``drp fiberflat-corrections`` CLI command, which also accepts
+``--undo-correction`` to strip a correction without recomputing one.
 
 Running the Calibration Pipeline
 ---------------------------------
@@ -298,11 +341,23 @@ Master calibrations can be created with the ``drp`` CLI::
     # Run a nightly calibration sequence
     drp nightly -m <mjd>
 
-    # Run individual calibration steps
-    drp create-bias -m <mjd>
-    drp create-traces -m <mjd>
-    drp create-wavelengths -m <mjd>
-    drp create-fiberflats -m <mjd>
+    # Run only a subset of the long-term sequence (e.g., bias only)
+    drp long-term -m <mjd> --skip-trace --skip-wavelength --skip-dome --skip-twilight
+
+    # Run twilight fiberflats separately
+    drp fiberflats -m <mjd>
+
+Fiberflat factor corrections (see :ref:`fiberflat-refinement`) have their own
+commands::
+
+    # Experiment with fiberflat factor measurement parameters, without applying them
+    drp ffactors-experiment -m <mjd> --drpver <drpver> --channel b
+
+    # Apply the correction to the master fiberflat for a calibration epoch
+    drp fiberflat-corrections -m <mjd>
+
+    # Undo a previously applied correction
+    drp fiberflat-corrections -m <mjd> --undo-correction
 
 Pre-built master calibrations can be downloaded from the SAS::
 

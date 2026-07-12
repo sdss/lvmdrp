@@ -36,11 +36,37 @@ The 2D reduction stage (:func:`~lvmdrp.main.reduce_2d`) processes the raw CCD im
 
 - Adds astrometric solution to detrended frames using guide camera coadds
 - Processes science, SkyE, and SkyW telescope pointings
+- For each telescope, :func:`~lvmdrp.core.astrometry.set_telescope_astrometry`
+  writes the ``SCIRA``/``SCIDEC``, ``SKYERA``/``SKYEDEC``, and
+  ``SKYWRA``/``SKYWDEC`` keywords (plus ``ALT``/airmass via
+  :func:`~lvmdrp.core.astrometry.set_altaz_params`) that the rest of the DRP
+  and the drpall summary file rely on (see :doc:`SummaryFile`). These are
+  derived one of two ways, recorded in the ``<TEL>ASRC`` keyword
+  (``SCIASRC``/``SKYEASRC``/``SKYWASRC``):
+
+  - ``'GDR coadd'`` — fit independently from that telescope's own guide
+    camera coadd WCS solution (used whenever the coadd has ``SOLVED=True``).
+  - ``'CMD position'`` — a fallback that copies the *commanded* pointing
+    straight from the raw header (``POSCIRA``/``POSKYERA``/``POSKYWRA``,
+    etc.) when no guider astrometric solution is available. This path does
+    not independently verify telescope identity — if the commanded
+    coordinates for SkyE/SkyW were already swapped upstream (e.g. by the
+    telescope-control/scheduling system, before the file reaches lvmdrp),
+    this fallback will silently propagate that swap into ``SKYERA``/``SKYWRA``
+    and everything derived from them. Checking ``<TEL>ASRC`` for an affected
+    exposure shows which path was used.
 
 **Stray Light Subtraction** (:func:`~lvmdrp.functions.imageMethod.subtract_straylight`):
 
 - Models and removes scattered light contamination
-- Uses fiber centroid traces to mask fibers before fitting the stray light field
+- Uses fiber centroid traces to mask fibers, then samples the remaining
+  inter-fiber background in strips across the CCD
+- Fits a 2D tensor-product P-spline surface to the background samples, posed
+  and solved as a quadratic program (via ``osqp``) with independent
+  smoothness penalties along the dispersion and cross-dispersion axes
+  (:meth:`~lvmdrp.core.image.Image.fit_pspline2d`)
+- Iterates with sigma-clipping to reject outlying pixels before the final fit
+  (:meth:`~lvmdrp.core.image.Image.fit_pspline2d_iterative`)
 
 2. 1D Extraction
 ^^^^^^^^^^^^^^^^
@@ -73,6 +99,10 @@ performed per spectral channel (b, r, z) before final combination:
 
 - Corrects for fiber-to-fiber throughput variations
 - Uses master fiberflat derived from twilight observations
+- Spectrograph-to-spectrograph residual factors are no longer fit on the fly
+  here; they are pre-measured from science exposures and baked into the
+  master fiberflat ahead of time (see :ref:`fiberflat-refinement`). This step
+  warns if the master fiberflat has not received that correction
 
 **Thermal Shift Correction** (:func:`~lvmdrp.functions.rssMethod.shift_wave_skylines`):
 
@@ -104,11 +134,16 @@ Flux calibration converts instrumental counts to physical flux units:
 
 - Selects appropriate stellar atmosphere models for calibration stars
 - Uses cached Gaia XP spectra and Pollux library models
+- Retrieves Gaia DR3 stellar physical parameters (:math:`T_\mathrm{eff}`,
+  :math:`\log g`, [M/H]) for each standard star via
+  :func:`~lvmdrp.core.fluxcal.get_stellar_params`, preferring a local
+  calibration table and falling back to a live Gaia query
 
 **Standard Star Calibration** (:func:`~lvmdrp.functions.fluxCalMethod.fluxcal_standard_stars`):
 
 - Derives sensitivity curves from standard stars observed in the spec telescope
-- Uses Gaia XP spectra as reference
+- Uses Gaia XP spectra as reference, retrieved and cached through the
+  :class:`~lvmdrp.core.fluxcal.GaiaXPSpectra` class
 
 **Science IFU Star Calibration** (:func:`~lvmdrp.functions.fluxCalMethod.fluxcal_sci_ifu_stars`):
 
@@ -137,6 +172,8 @@ Flux calibration converts instrumental counts to physical flux units:
 - Subtracts the interpolated sky model from science fibers
 - Produces the final sky-subtracted frame (SFrame)
 
+.. _summary-generation:
+
 7. Summary Generation
 ^^^^^^^^^^^^^^^^^^^^^
 
@@ -144,6 +181,8 @@ Flux calibration converts instrumental counts to physical flux units:
 
 - Updates the drpall summary file with metadata from the reduction
 - Includes quality metrics and observation parameters
+- See :doc:`SummaryFile` for a full description of the drpall file structure
+  and a table mapping each column to its source ``lvmSFrame`` header keyword
 
 Output Data Products
 --------------------
