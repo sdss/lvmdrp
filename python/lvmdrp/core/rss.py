@@ -315,15 +315,21 @@ class RSS(FiberRows):
         # update header
         if len(hdrs) > 0:
             hdr_out = hdrs[0]._header.copy()
+            channel = hdr_out["CCD"][0]
             for hdr in hdrs[1:]:
                 hdr_out.update(hdr._header)
-            hdr_out["CCD"] = hdr_out["CCD"][0]
+            hdr_out["CCD"] = channel
         else:
             hdr_out = None
-
+            channel = None
 
         # update slitmap
-        slitmap_out = rss._slitmap
+        slitmap_out = copy(rsss[-1]._slitmap)
+        for i in range(len(rsss)-1):
+            spec_idx = numpy.where(slitmap_out["spectrographid"] == i+1)
+            if channel is not None:
+                slitmap_out[f"ypix_{channel}"][spec_idx] = rsss[i]._slitmap[f"ypix_{channel}"][spec_idx]
+            slitmap_out["fibstatus"][spec_idx] = rsss[i]._slitmap["fibstatus"][spec_idx]
 
         return cls(
             data=data_out,
@@ -551,11 +557,17 @@ class RSS(FiberRows):
             else:
                 new_fluxcal_mod = None
 
-        # create RSS
+        # update header
         new_hdr = rsss[0]._header.copy()
         for rss in rsss[1:]:
             new_hdr.update(rss._header)
 
+        # update slitmap
+        new_slitmap = rsss[0]._slitmap.copy()
+        new_slitmap["ypix_r"] = rsss[1]._slitmap["ypix_r"]
+        new_slitmap["ypix_z"] = rsss[2]._slitmap["ypix_z"]
+
+        # create RSS
         new_rss = RSS(
             data=new_data,
             error=new_error,
@@ -572,7 +584,7 @@ class RSS(FiberRows):
             fluxcal_sci=new_fluxcal_sci,
             fluxcal_mod=new_fluxcal_mod,
             header=new_hdr,
-            slitmap=rsss[0]._slitmap
+            slitmap=new_slitmap
         )
         return new_rss
 
@@ -3328,7 +3340,7 @@ class RSS(FiberRows):
 
         return wave_offsets, wave_offsets_mod
 
-    def fit_lines_slit(rss, cwaves, dwave=8, return_xy=False, select_fibers=None, axs=None):
+    def fit_lines_slit(rss, cwaves, dwave=8, fiber_radius=0.01, oversampling_factor=100, return_xy=False, select_fibers=None, axs=None):
 
         cwaves_ = numpy.atleast_1d(cwaves)
 
@@ -3351,7 +3363,10 @@ class RSS(FiberRows):
                 continue
 
             try:
-                flux, _, _, _ = spec.fit_lines(cwaves_, dwave=dwave, axs=axs[iax] if axs is not None else axs)
+                flux, _, _, _ = spec.fit_lines(cwaves_, dwave=dwave,
+                                               fiber_radius=fiber_radius,
+                                               oversampling_factor=oversampling_factor,
+                                               axs=axs[iax] if axs is not None else axs)
             except ValueError as e:
                 warnings.warn(f"while fitting fiber {ifiber}: {e}")
                 continue
@@ -3362,18 +3377,28 @@ class RSS(FiberRows):
             return flux_slit.squeeze(), rss._slitmap["xpmm"].data, rss._slitmap["ypmm"].data
         return flux_slit.squeeze()
 
-    def fit_ifu_gradient(self, cwave, dwave=8, guess_coeffs=[1,2,3,0], fixed_coeffs=[3], groupby="spec", coadd_method="average", axs=None):
+    def fit_ifu_gradient(self,
+                         cwave, dwave=8,
+                         fiber_radius=0.01,
+                         oversampling_factor=100,
+                         guess_coeffs=[1,2,3,0], fixed_coeffs=[3], groupby="spec",
+                         coadd_method="average", norm_method=lambda x: biweight_location(x, ignore_nan=True),
+                         axs=None):
 
         if coadd_method == "average":
             z, x, y = self.coadd_flux(cwave=cwave, dwave=dwave, comb_stat=bn.nanmean, return_xy=True, telescope="Sci")
         elif coadd_method == "integrate":
-            z, x, y = self.coadd_flux(cwave=cwave, dwave=dwave, comb_stat=lambda a, axis: numpy.trapz(numpy.nan_to_num(a, nan=0), self._wave, axis=axis), return_xy=True, telescope="Sci")
+            z, x, y = self.coadd_flux(cwave=cwave, dwave=dwave,
+                                      comb_stat=lambda a, axis: numpy.trapz(numpy.nan_to_num(a, nan=0), self._wave, axis=axis),
+                                      return_xy=True, telescope="Sci")
         elif coadd_method == "fit":
-            z, x, y = self.fit_lines_slit(cwaves=cwave, return_xy=True, select_fibers="Sci")
+            z, x, y = self.fit_lines_slit(cwaves=cwave, dwave=dwave,
+                                          fiber_radius=fiber_radius, oversampling_factor=oversampling_factor,
+                                          return_xy=True, select_fibers="Sci")
         else:
             raise ValueError(f"Invalid value for `coadd_method`: {coadd_method}. Expected either 'average', 'integrate' or 'fit'")
 
-        mu = biweight_location(z, ignore_nan=True)
+        mu = norm_method(z)
         z_ = z / mu
 
         # define guess and boundary values
@@ -3442,9 +3467,10 @@ class RSS(FiberRows):
         return rejects
 
     def measure_skyline_flatfield(self, mflat,
-                                  sky_cwave, cont_cwave, dwave=8, quantiles=(5, 97),
-                                  guess_coeffs=[1,2,3,0], fixed_coeffs=[3], groupby="spec",
-                                  coadd_method="fit", axs=None, labels=False):
+                                  sky_cwave, cont_cwave, dwave=8, fiber_radius=0.01, oversampling_factor=100,
+                                  quantiles=(5, 97), guess_coeffs=[1,2,3,0], fixed_coeffs=[3], groupby="spec",
+                                  coadd_method="fit", norm_method=lambda x: biweight_location(x, ignore_nan=True),
+                                  axs=None, labels=False):
         expnum = self._header["EXPOSURE"]
         imagetyp = self._header["IMAGETYP"]
 
@@ -3471,8 +3497,10 @@ class RSS(FiberRows):
         fscience._wave = wave_trace.eval_coeffs()
 
         log.info(f"  fitting gradient and factors around sky line @ {sky_cwave:.2f} Angstroms for '{imagetyp}' exposure {expnum = }")
-        x, y, z, coeffs, factor = fscience.fit_ifu_gradient(cwave=sky_cwave, dwave=dwave, groupby=groupby,
-                                                            guess_coeffs=guess_coeffs, fixed_coeffs=fixed_coeffs, coadd_method=coadd_method)
+        x, y, z, coeffs, factor = fscience.fit_ifu_gradient(cwave=sky_cwave, dwave=dwave,
+                                                            fiber_radius=fiber_radius, oversampling_factor=oversampling_factor,
+                                                            groupby=groupby, guess_coeffs=guess_coeffs, fixed_coeffs=fixed_coeffs,
+                                                            coadd_method=coadd_method, norm_method=norm_method)
         gradient_model = IFUGradient.ifu_gradient(coeffs, x=x, y=y, normalize=True)
         log.info(f"  factors          = {numpy.round(factor, 4)}")
         log.info(f"  gradient across  = {bn.nanmax(gradient_model)/bn.nanmin(gradient_model):.4f}")

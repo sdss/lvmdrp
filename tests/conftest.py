@@ -214,6 +214,9 @@ def create_fake_frame_fits(path, kind='S', tileid=11111, mjd=61234, expnum=6817,
            'STDSENMB': 2.0e-14, 'STDSENMR': 2.0e-14, 'STDSENMZ': 2.0e-14,
            'SCISENMB': 2.0e-14, 'SCISENMR': 2.0e-14, 'SCISENMZ': 2.0e-14,
            'MODSENMB': 2.0e-14, 'MODSENMR': 2.0e-14, 'MODSENMZ': 2.0e-14,
+           'STDSENRB': 2.0e-14, 'STDSENRR': 2.0e-14, 'STDSENRZ': 2.0e-14,
+           'SCISENRB': 2.0e-14, 'SCISENRR': 2.0e-14, 'SCISENRZ': 2.0e-14,
+           'MODSENRB': 2.0e-14, 'MODSENRR': 2.0e-14, 'MODSENRZ': 2.0e-14,
            'FLUXCAL': "MOD"}
 
     # create fake file

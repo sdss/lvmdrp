@@ -34,6 +34,7 @@ DEFAULT_BACKEND = plt.get_backend()
 if not IS_INTERACTIVE:
     plt.switch_backend(newbackend="Agg")
 plt.style.use("seaborn-v0_8-talk")
+plt.rcParams['text.usetex'] = False
 
 
 def create_subplots(to_display, flatten_axes=True, **subplots_params):

@@ -8,6 +8,12 @@ from tree import Tree
 from sdss_access.path import Path
 import subprocess
 
+import gaiaxpy
+import matplotlib as mpl
+
+
+mpl.rcParams["text.usetex"] = False
+
 
 NAME = 'lvmdrp'
 
