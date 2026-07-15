@@ -426,7 +426,7 @@ def readWaveInfo(dir, resFile, verbose=False):
         # extract cheby coefs, sorted
         info = np.array(info)
         sa = info[:, 1].argsort()
-        coefs = np.array(info[sa, 3], dtype=np.float)
+        coefs = np.array(info[sa, 3], dtype=float)
 
     fp2.close()
 
