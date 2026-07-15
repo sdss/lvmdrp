@@ -1819,7 +1819,7 @@ def science_sensitivity(rss, res_sci, ext, GAIA_CACHE_DIR, NSCI_MAX=15, r_spaxel
         d = np.sqrt((data['ra']-scifibs['ra'])**2 + (data['dec']-scifibs['dec'])**2) # in degrees
         fib = np.where(d<r_spaxel)[0] # there can only be zero or one fiber with a distance cut smaller than a fiber diameter
         if fib.size > 0:
-            fibs[i] = fib
+            fibs[i] = fib[0]
 
     # locate the science ifu fibers the stars are in
     for i in range(len(calibrated_spectra)):

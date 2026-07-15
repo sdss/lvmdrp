@@ -4450,8 +4450,8 @@ def trace_Voigt_fibers(
             trace_fwhm_L.setSlice(icolumn, axis="y", data=fwhm_L_slice, mask=fwhm_L_mask)
 
         # compute residuals
-        integral_mod = numpy.trapz(mod_joint(img_slice._pixels), img_slice._pixels) or numpy.nan
-        integral_dat = numpy.trapz(img_slice._data, img_slice._pixels)
+        integral_mod = numpy.trapezoid(mod_joint(img_slice._pixels), img_slice._pixels) or numpy.nan
+        integral_dat = numpy.trapezoid(img_slice._data, img_slice._pixels)
         residuals.append((integral_dat - integral_mod) / integral_dat * 100)
 
         # compute fitted model stats

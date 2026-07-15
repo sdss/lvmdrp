@@ -830,7 +830,7 @@ def plot_flatfield_validation(fframe, cwaves, dwave=8, coadd_method="average", l
         if coadd_method == "average":
             z, y, y = fframe.coadd_flux(cwave=cwaves[i], dwave=dwave, comb_stat=bn.nanmean, return_xy=True)
         elif coadd_method == "integrate":
-            z, y, y = fframe.coadd_flux(cwave=cwaves[i], dwave=dwave, comb_stat=lambda a, axis: np.trapz(np.nan_to_num(a, nan=0), fframe._wave, axis=axis), return_xy=True)
+            z, y, y = fframe.coadd_flux(cwave=cwaves[i], dwave=dwave, comb_stat=lambda a, axis: np.trapezoid(np.nan_to_num(a, nan=0), fframe._wave, axis=axis), return_xy=True)
         elif coadd_method == "fit":
             z, x, y = fframe.fit_lines_slit(cwaves=cwaves[i], dwave=dwave, return_xy=True)
         else:

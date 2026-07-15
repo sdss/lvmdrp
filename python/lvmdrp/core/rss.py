@@ -3298,7 +3298,7 @@ class RSS(FiberRows):
                 continue
 
             # skip fibers with low S/N
-            sky_snr = numpy.asarray([numpy.trapz(snr[ifiber, (w-dwave//2<spec._wave)&(spec._wave<w+dwave//2)], dx=0.6) for w in cwaves]).round(2)
+            sky_snr = numpy.asarray([numpy.trapezoid(snr[ifiber, (w-dwave//2<spec._wave)&(spec._wave<w+dwave//2)], dx=0.6) for w in cwaves]).round(2)
             if numpy.any(sky_snr < min_snr):
                 warnings.warn(f"skipping fiber {ifiber} with S/N < {min_snr} around sky lines {sky_snr = }")
                 continue
@@ -3389,7 +3389,7 @@ class RSS(FiberRows):
             z, x, y = self.coadd_flux(cwave=cwave, dwave=dwave, comb_stat=bn.nanmean, return_xy=True, telescope="Sci")
         elif coadd_method == "integrate":
             z, x, y = self.coadd_flux(cwave=cwave, dwave=dwave,
-                                      comb_stat=lambda a, axis: numpy.trapz(numpy.nan_to_num(a, nan=0), self._wave, axis=axis),
+                                      comb_stat=lambda a, axis: numpy.trapezoid(numpy.nan_to_num(a, nan=0), self._wave, axis=axis),
                                       return_xy=True, telescope="Sci")
         elif coadd_method == "fit":
             z, x, y = self.fit_lines_slit(cwaves=cwave, dwave=dwave,

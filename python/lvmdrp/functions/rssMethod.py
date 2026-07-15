@@ -755,7 +755,7 @@ def shift_wave_skylines(in_frame: str, out_frame: str, dwave: float = 8.0, skyli
             continue
 
         # skip fibers with low S/N
-        sky_snr = numpy.asarray([numpy.trapz(snr[ifiber, (w-dwave//2<spec._wave)&(spec._wave<w+dwave//2)], dx=0.6) for w in skylines]).round(2)
+        sky_snr = numpy.asarray([numpy.trapezoid(snr[ifiber, (w-dwave//2<spec._wave)&(spec._wave<w+dwave//2)], dx=0.6) for w in skylines]).round(2)
         if numpy.any(sky_snr < 10):
             log.warning(f"skipping fiber {ifiber} with S/N < 10 around sky lines {sky_snr = }")
             continue

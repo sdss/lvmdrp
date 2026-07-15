@@ -790,7 +790,7 @@ def evalESOSky_drp(
 
     nradi = len(list(filter(lambda c: c.startswith("flux"), sky_model.columns)))
     ntran = len(list(filter(lambda c: c.startswith("trans"), sky_model.columns)))
-    err_comp = np.row_stack(
+    err_comp = np.vstack(
         (np.tile(err_radi, (nradi, 1)), np.tile(err_tran, (ntran, 1)))
     )
     # create initial RSS containing the sky model components

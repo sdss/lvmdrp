@@ -796,7 +796,7 @@ class SkewedGaussians(Profile1D):
         x_os = self._oversample_x(x)
         shape = self._skewed_gaussian_shapes(x_os, locations, scales, alphas)
         # calculate normalization
-        norms = numpy.trapz(shape, x_os, axis=1)
+        norms = numpy.trapezoid(shape, x_os, axis=1)
 
         models_os = counts[:, numpy.newaxis] * shape / norms[:, numpy.newaxis]
         models = self._pixelate(x_os, models_os)
@@ -1359,7 +1359,7 @@ class parFile(fit_profile1D):
                             self._template_spec[n]._wave
                             <= float(self._parameters[n]["end_wave"]),
                         ),
-                        numpy.in1d(self._template_spec[n]._wave, x),
+                        numpy.isin(self._template_spec[n]._wave, x),
                     )
                     scale_guess = (
                         bn.nansum(y[select_match])
@@ -1451,7 +1451,7 @@ class parFile(fit_profile1D):
                 scale_wave = self._template_spec[n]._wave
                 scale_spec[scale_wave <= float(self._parameters[n]["start_wave"])] = 0
                 scale_spec[scale_wave >= float(self._parameters[n]["end_wave"])] = 0
-                select_match = numpy.in1d(scale_wave, x)
+                select_match = numpy.isin(scale_wave, x)
                 y += scale_spec[select_match] * scale
 
             elif self._profile_type[n] == "Poly":

@@ -229,7 +229,7 @@ class GaiaXPSpectra(object):
                                                          truncation=False, save_file=True, output_path=self.cache_dir,
                                                          output_file=f"gaia_spec_{coeff.iloc[0].source_id}", output_format="csv")
                 spectra_xp.append(spectrum_xp.loc[0, "flux"])
-        spectra_xp = np.row_stack(spectra_xp)
+        spectra_xp = np.vstack(spectra_xp)
 
         if convert_to_cgs:
             return self._convert_to_csg(wave_xp, spectra_xp)
@@ -257,7 +257,7 @@ class GaiaXPSpectra(object):
             for source_id in source_ids:
                 wave_xp, spectrum = self.load_xp_spectra(source_ids=source_id, convert_to_cgs=False)
                 spectra_xp.append(spectrum)
-            spectra_xp = np.row_stack(spectra_xp)
+            spectra_xp = np.vstack(spectra_xp)
 
             if convert_to_cgs:
                 return self._convert_to_csg(wave_xp, spectra_xp)
