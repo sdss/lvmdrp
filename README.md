@@ -2,9 +2,26 @@
 
 The LVM DRP is based in a collection of routines from [Py3D](https://github.com/brandherd/Py3D).
 
+> **Known issue on this branch (`upgrade`)**: reductions run on Python 3.12 are currently
+> ~20% slower wall-clock than the same code on Python 3.10, even with identical scipy/NumPy
+> versions. This is under active investigation (traced to per-call overhead in scipy's
+> `least_squares`/`trf` solver chain used during extraction, wavelength refinement, and
+> fiberflat correction) and is not specific to any one machine. If you see this, it's expected
+> for now, not a broken setup.
+
 ## Prerequisites
 
-This code is being developed/tested in an Ubuntu-based OS, using **Python 3.10**. We recommend you use a Python environment manager such as Anaconda or similar, in order to work on the same python version and to avoid cluttering the OS's python installation. We assume you are a member of the [Github sdss organization](https://github.com/sdss). We also assume that you have an SSH key set up on your local machine and registered in your Github account. If not, please follow [these instructions](https://docs.github.com/en/authentication/connecting-to-github-with-ssh/adding-a-new-ssh-key-to-your-github-account) to set up one.
+This code is being developed/tested in an Ubuntu-based OS, using **Python 3.12** on this
+branch (`upgrade`; `master` still targets Python 3.10). We recommend you use a Python
+environment manager such as Anaconda or similar, in order to work on the same python version
+and to avoid cluttering the OS's python installation. We assume you are a member of the
+[Github sdss organization](https://github.com/sdss). We also assume that you have an SSH key
+set up on your local machine and registered in your Github account. If not, please follow
+[these instructions](https://docs.github.com/en/authentication/connecting-to-github-with-ssh/adding-a-new-ssh-key-to-your-github-account) to set up one.
+
+You will also need a working C/C++ compiler toolchain (Xcode Command Line Tools on macOS,
+`build-essential`/`gcc` on Linux) — the DRP builds a small C++ extension (`fast_median`) as
+part of installation.
 
 To properly install and run the DRP you'll need to follow these steps first:
 
@@ -36,7 +53,7 @@ To properly install and run the DRP you'll need to follow these steps first:
 3. Create a new python environment. This is optional, but strongly recommended. With conda this is done like this:
 
     ```bash
-    conda create -n lvmdrp python=3.10
+    conda create -n lvmdrp python=3.12
     ```
 
 4. Make sure you are in the intended python environment and directory:
@@ -67,8 +84,17 @@ To install the DRP along with its dependencies, you need to run the following st
 
     ```bash
     cd lvmdrp
+    pip install "setuptools<81"
     pip install .
     ```
+
+    **Note on the `setuptools<81` step**: one of this DRP's dependencies (`skycalc_cli`) still
+    relies on the deprecated `pkg_resources` API, which newer `setuptools` releases (81+) have
+    dropped. Installing a capped `setuptools` *before* installing the DRP avoids that failure.
+    If you skip this step and later see `ModuleNotFoundError: No module named 'pkg_resources'`,
+    run `pip install "setuptools<81" --force-reinstall` and retry. (`setup.cfg` also declares
+    this constraint as a dependency, but that only takes effect *after* the DRP's own build
+    step runs, so it can't substitute for installing it first.)
 
 ## Testing the installation
 
@@ -227,7 +253,9 @@ There are two ways in which you can contribute:
 
 For those willing to contribute by coding, there are some steps to streamline the development process:
 
-1. Make sure you install the pipeline on your environment in edit (developer) mode, like this:
+1. Make sure you install the pipeline on your environment in edit (developer) mode, like this
+   (see the note on `setuptools<81` in the [installation section](#installation) above — run
+   that step first):
 
     ```bash
     pip install -e .'[dev]'
