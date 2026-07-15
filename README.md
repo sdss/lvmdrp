@@ -4,10 +4,10 @@ The LVM DRP is based in a collection of routines from [Py3D](https://github.com/
 
 > **Known issue on this branch (`upgrade`)**: reductions run on Python 3.12 are currently
 > ~20% slower wall-clock than the same code on Python 3.10, even with identical scipy/NumPy
-> versions. This is under active investigation (traced to per-call overhead in scipy's
-> `least_squares`/`trf` solver chain used during extraction, wavelength refinement, and
-> fiberflat correction) and is not specific to any one machine. If you see this, it's expected
-> for now, not a broken setup.
+> versions. Root cause is not yet identified — a `least_squares`/`trf` per-call overhead was
+> suspected but ruled out under direct unprofiled testing — and this is not specific to any
+> one machine. This is under active investigation. If you see this, it's expected for now, not
+> a broken setup.
 
 ## Prerequisites
 
