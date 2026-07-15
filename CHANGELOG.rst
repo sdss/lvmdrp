@@ -9,6 +9,16 @@ This document records the main changes to the drp code.
 1.2.2dev (unreleased)
 ---------------------
 
+- Upgraded to Python 3.12 (from 3.10) and NumPy 2.x (from <2.0)
+- Fixed NumPy 2.0 removed-API breakages: ``numpy.trapz``, ``numpy.in1d``, ``numpy.row_stack``,
+  and a scalar-array-assignment strictness change in science flux calibration
+- Fixed a ``setup.py`` build failure under Python 3.12 caused by the removal of ``distutils``
+  from the standard library
+- Removed the pipeline's own use of the deprecated ``pkg_resources`` API
+- Known issue: reductions run up to ~20% slower wall-clock on Python 3.12 than on Python 3.10,
+  traced to per-call overhead in scipy's ``least_squares``/``trf`` solver chain (used during
+  extraction, wavelength refinement, and fiberflat correction); root cause still under
+  investigation
 
 
 1.2.1 (16-02-2026)
