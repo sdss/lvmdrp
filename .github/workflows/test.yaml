@@ -44,6 +44,10 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
+        # pinned below 81 to bootstrap a working setuptools before lvmdrp's own build
+        # runs; setup.cfg's install_requires also constrains setuptools<81 for the
+        # same reason (skycalc_cli still needs pkg_resources), but that constraint
+        # only takes effect after this build step, so both are needed
         pip install setuptools==75.6.0
         pip install wheel
         pip install .[dev]
