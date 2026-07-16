@@ -1,5 +1,4 @@
 import time
-import tracemalloc
 from contextlib import ContextDecorator
 from dataclasses import dataclass, field
 from typing import Any, Callable, ClassVar, Dict, Optional
@@ -43,7 +42,6 @@ class Timer(ContextDecorator):
         if self._start_time is not None:
             raise TimerError("Timer is running. Use .stop() to stop it")
 
-        tracemalloc.start()
         self._start_time = time.perf_counter()
 
     def stop(self) -> float:
@@ -55,9 +53,11 @@ class Timer(ContextDecorator):
         elapsed_time = time.perf_counter() - self._start_time
         self._start_time = None
 
-        _, peak = tracemalloc.get_traced_memory()
-        peak = peak / (1024**2) # in MB
-        tracemalloc.stop()  # Stop memory tracking
+        # NOTE: peak memory reporting via tracemalloc was removed. tracemalloc traces every
+        # memory allocation while active, and for allocation-heavy code (e.g. per-fiber/
+        # per-point Python loops calling scipy) that overhead is enormous and highly
+        # Python-version-dependent, to the point of dwarfing the timed code's own runtime.
+        peak = 0.0
 
         # Report elapsed time
         if self.logger:
