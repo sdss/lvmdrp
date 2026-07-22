@@ -680,7 +680,7 @@ def qaqual_bad_hdrfix(mjd, mjd_list, mjd_range, expnum, expnum_list, expnum_rang
 @click.option('-r', '--mjd-range', type=str, default=None, help='a range of MJDs to reduce')
 @click.option('--from-epochs', is_flag=True, default=False, help="Use fiducial or given epochs file to produce long-term calibrations")
 @click.option('--epochs-file', type=str, default=None, help="Path to a calibrations epoch file")
-@click.option('--routine', type=click.Choice(CALIBRATION_SCRIPTS), default="long-term", help="run detrend, long-term, nightly, ffactors-experiment or fiberflats calibrations only")
+@click.option('--routine', type=click.Choice(CALIBRATION_SCRIPTS), default="long-term", help="run detrend, long-term, nightly, ffactors-experiment, fiberflats or fiberflat-corrections calibrations only")
 @click.option('-n', '--nodes', type=int, default=2, help='the number of nodes to use')
 @click.option('-p', '--ppn', type=int, default=64, help='the number of CPU cores to use per node')
 @click.option('-w', '--walltime', type=str, default="24:00:00", help='the time for which the job is allowed to run')
@@ -694,7 +694,11 @@ def cluster_calibs(mjd_list, mjd_range, from_epochs, epochs_file, routine, nodes
     mjds = parse_mjds(mjd=mjd_list or mjd_range or None)
     # if no MJD, get fiducial calibration epochs
     if from_epochs or mjds is None:
-        epochs = load_epochs_file(epochs_kind="calibration", epochs_path=epochs_file, filter_by_mjds=mjds, verbose=verbose)
+        epochs = load_epochs_file(
+            epochs_kind="ffactor" if routine == "fiberflat-corrections" else "calibration",
+            epochs_path=epochs_file,
+            filter_by_mjds=mjds,
+            verbose=verbose)
         mjds = sorted(list(epochs.keys()))
 
     run_cluster_cals(mjds, from_epochs=from_epochs, nodes=nodes, ppn=ppn, walltime=walltime, alloc=alloc, submit=submit,
