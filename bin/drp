@@ -43,7 +43,7 @@ from sdss_access import Access
 
 
 calibration_types = set(CALIBRATION_TYPES) - {"bias", "dome"}
-CALIBRATION_SCRIPTS = ["detrend", "long-term", "nightly", "ffactors-experiment", "fiberflats"]
+CALIBRATION_SCRIPTS = ["detrend", "long-term", "nightly", "ffactors-experiment", "fiberflats", "fiberflat-corrections"]
 
 
 class StrListType(click.ParamType):
