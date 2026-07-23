@@ -2291,19 +2291,7 @@ def create_fiberflats_corrections(
     mjds = list(ffactor_epochs.keys())
     i = mjds.index(mjd)
     calibration_mjds = list(filter(lambda mjd: mjds[i] <= mjd < mjds[i+1], calibration_epochs.keys()))
-    mflat_paths = {mjd: get_calib_paths(mjd=mjd, version=drpver, from_sandbox=False, only_existing=True).get("fiberflat_twilight", {}).get(channel)}
-
-    # undo correction
-    for mjd in calibration_mjds:
-        mflat_path = mflat_paths.get(mjd)
-        if mflat_path is None:
-            warnings.warn(f"master fiber flat for epoch {mjd = } and {channel = } not found, skipping")
-            continue
-
-        undo_ffactor_correction(in_mflat=mflat_path, write_output=True)
-
-    if undo_correction:
-        return
+    mflat_paths = {mjd_cal: get_calib_paths(mjd=mjd_cal, version=drpver, from_sandbox=False, only_existing=True).get("fiberflat_twilight", {}).get(channel) for mjd_cal in calibration_mjds}
 
     # determine exposures to be used for factors fitting
     source_mjds = science_mjds if use_science else twilight_mjds
@@ -2316,8 +2304,20 @@ def create_fiberflats_corrections(
 
     if dry_run:
         log.info(f"going to create fiber flat factors for channel {channel} using {'science' if use_science else 'twilight'} exposures from mjds: {source_mjds}")
-        log.info(f"selected exposures: {expnums}")
-        log.info(f"corrected calibration epochs: {calibration_mjds}")
+        log.info(f"selected {len(expnums)} exposures: {expnums}")
+        log.info(f"corrected {len(calibration_mjds)} calibration epochs: {calibration_mjds}")
+        return
+
+    # undo correction
+    for mjd in calibration_mjds:
+        mflat_path = mflat_paths.get(mjd)
+        if mflat_path is None:
+            warnings.warn(f"master fiber flat for epoch {mjd = } and {channel = } not found, skipping")
+            continue
+
+        undo_ffactor_correction(in_mflat=mflat_path, write_output=True)
+
+    if undo_correction:
         return
 
     # perform 2D, 1D reductions, down to wavelength calibrated products
