@@ -9,6 +9,7 @@ This document records the main changes to the drp code.
 1.2.2dev (unreleased)
 ---------------------
 
+- Added optional per-exposure radial velocity correction (e.g. barycentric), applied to flux during wavelength resampling without changing the output wavelength grid (new ``apply_bary_corr`` toggle, default on)
 
 
 1.2.1 (16-02-2026)

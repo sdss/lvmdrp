@@ -1524,6 +1524,7 @@ def science_reduction(expnum: int,
                       use_longterm_cals: bool = True, from_sandbox: bool = True,
                       sky_weights: Tuple[float, float] = None,
                       fluxcal_method: str = 'MOD',
+                      apply_bary_corr: bool = True,
                       ncpus: int = None,
                       aperture_extraction: bool = False,
                       clean_ancillary: bool = False,
@@ -1698,7 +1699,7 @@ def science_reduction(expnum: int,
 
             # resample wavelength into uniform grid along fiber IDs for science and sky fibers
             with Timer(name='Resample '+hsci_path, logger=log.info):
-                resample_wavelength(in_rss=ssci_path,  out_rss=hsci_path, wave_range=SPEC_CHANNELS[channel], wave_disp=0.5, convert_to_density=True)
+                resample_wavelength(in_rss=ssci_path,  out_rss=hsci_path, wave_range=SPEC_CHANNELS[channel], wave_disp=0.5, convert_to_density=True, apply_bary_corr=apply_bary_corr)
 
 
     if skip_fluxcal:
@@ -1782,6 +1783,7 @@ def science_reduction(expnum: int,
 def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
             with_cals: bool = False, no_sci: bool = False,
             fluxcal_method: str = 'MOD',
+            apply_bary_corr: bool = True,
             skip_2d: bool = False, skip_1d: bool = False, skip_wavecal: bool = False,
             skip_fluxcal: bool = False, skip_skysub: bool = False, skip_drpall: bool = False,
             use_nightly_cals: bool = False, use_untagged_cals: bool = False,
@@ -1806,6 +1808,10 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
         Flag to turn off science frame reduction, by default False
     fluxcal_method : str, optional
         'NONE' or 'STD' for standard stars, 'SCI' for field stars in science IFU, 'MOD' for standard stars with template matching
+    apply_bary_corr : bool, optional
+        Apply the per-exposure radial velocity correction (e.g. barycentric) to
+        the flux during wavelength resampling, by default True. The output
+        wavelength grid is unaffected either way.
     skip_2d : bool, optional
         Skip preprocessing and detrending, by default False
     skip_1d : bool, optional
@@ -1847,6 +1853,7 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
         for mjd in mjds:
             run_drp(mjd=mjd, expnum=expnum, with_cals=with_cals, no_sci=no_sci,
                     fluxcal_method=fluxcal_method,
+                    apply_bary_corr=apply_bary_corr,
                     skip_2d=skip_2d,
                     skip_1d=skip_1d,
                     skip_wavecal=skip_wavecal,
@@ -1953,6 +1960,7 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
                     try:
                         science_reduction(expnum,
                                         fluxcal_method=fluxcal_method,
+                                        apply_bary_corr=apply_bary_corr,
                                         skip_2d=skip_2d,
                                         skip_1d=skip_1d,
                                         skip_wavecal=skip_wavecal,

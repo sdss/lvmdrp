@@ -844,12 +844,14 @@ def shift_wave_skylines(in_frame: str, out_frame: str, dwave: float = 8.0, skyli
 # * merge arc_wave and arc_lsfs into lvmArc product, change variable name to in_arc
 # @skip_on_missing_input_path(["in_rss", "in_waves", "in_lsfs"])
 # @skip_if_drpqual_flags(["EXTRACTBAD", "BADTRACE"], "in_rss")
-def create_pixel_table(in_rss: str, out_rss: str, in_waves: str, in_lsfs: str, calculate_heliorv: bool = True, apply_heliorv: bool = False):
+def create_pixel_table(in_rss: str, out_rss: str, in_waves: str, in_lsfs: str, calculate_heliorv: bool = True):
     """Applies the wavelength and the spectral resolution (LSF) to an RSS
 
-    Additionally barycentric correction in velocity can be applied if
-    information is supplied as input parameter or in the header of the input
-    RSS.
+    Additionally calculates the single-valued radial velocity correction
+    (e.g. barycentric) for the exposure, stored in the header for later
+    application to the flux during wavelength resampling (see
+    `resample_wavelength`/`RSS.rectify_wave`) — the wavelength array written
+    here is left uncorrected.
 
     Parameters
     ----------
@@ -863,8 +865,8 @@ def create_pixel_table(in_rss: str, out_rss: str, in_waves: str, in_lsfs: str, c
     in_lsfs : string, optional with default: ''
         RSS FITS file containing the spectral resolution (LSF in FWHM)
     calculate_heliorv : bool, optional
-        Calculates per-telescope heliocentric velocity corrections
-    apply_heliorv : bool, optional
+        Calculates heliocentric/barycentric velocity corrections (both the
+        per-telescope QA values and the single applied value)
 
     """
     log.info(f"loading RSS for wavelength calibration: {in_rss}")
@@ -890,10 +892,17 @@ def create_pixel_table(in_rss: str, out_rss: str, in_waves: str, in_lsfs: str, c
         camera = lsf_trace._header["CCD"]
         rss.add_header_comment(f"{in_lsf}, LSF used for {camera}")
 
-    # set header keywords for heliocentric velocity corrections
-    log.info("calculating heliocentric velocity corrections")
-    helio_rvs = rss.get_helio_rv(apply_heliorv)
-    log.info(f"heliocentric velocities [km/s]: {helio_rvs}")
+    if calculate_heliorv:
+        # set header keywords for heliocentric velocity corrections (QA only)
+        log.info("calculating heliocentric velocity corrections")
+        helio_rvs = rss.get_helio_rv()
+        log.info(f"heliocentric velocities [km/s]: {helio_rvs}")
+
+        # single, uniform, per-exposure RV correction actually applied later
+        # (in RSS.rectify_wave, at the resample_wavelength step)
+        bary_rv = rss.get_bary_rv()
+        rss.setHdrValue("HIERARCH WAVE BARYRV_APPLIED", bary_rv, "single-scalar RV to apply at rectify_wave [km/s]")
+        log.info(f"barycentric velocity correction to be applied [km/s]: {bary_rv}")
 
     log.info(f"writing output RSS to {out_rss}")
     rss.writeFitsData(out_rss)
@@ -1150,12 +1159,20 @@ def correctPixTable_drp(
 @skip_if_drpqual_flags(["BADTRACE", "EXTRACTBAD"], "in_rss")
 def resample_wavelength(in_rss: str, out_rss: str, method: str = "spline",
                         wave_range: Tuple[float,float] = None, wave_disp: float = None,
-                        convert_to_density: bool = False, display_plots: bool = False) -> RSS:
+                        convert_to_density: bool = False, display_plots: bool = False,
+                        apply_bary_corr: bool = True) -> RSS:
     """Resamples the RSS wavelength solutions to a common wavelength solution
 
     A common wavelength solution is computed for the RSS by resampling the
     wavelength solution of each fiber to a common wavelength grid. The
     resampling is performed using a linear or spline interpolation scheme.
+
+    If `apply_bary_corr` is True, the single-valued RV correction computed
+    earlier by `create_pixel_table` (stored in the `HIERARCH WAVE
+    BARYRV_APPLIED` header keyword) is folded into this same resampling
+    step, applied identically to every fiber. This changes the flux values
+    only — the output wavelength grid is unaffected, so it stays identical
+    across exposures regardless of their individual RV correction.
 
     Parameters
     ----------
@@ -1178,6 +1195,9 @@ def resample_wavelength(in_rss: str, out_rss: str, method: str = "spline",
         If True, the resampled RSS will be converted to density units.
     display_plots : bool, optional
         If True, display plots to screen, by default False
+    apply_bary_corr : bool, optional with default: True
+        If True, apply the per-exposure RV correction (from `HIERARCH WAVE
+        BARYRV_APPLIED`, set by `create_pixel_table`) during resampling.
 
     Returns
     -------
@@ -1198,9 +1218,15 @@ def resample_wavelength(in_rss: str, out_rss: str, method: str = "spline",
         wave_disp = numpy.min(rss._wave[:, 1:] - rss._wave[:, :-1])
     log.info(f"using wavelength range {wave_range = } angstrom and {wave_disp = } angstrom pixel size")
 
+    # single-valued per-exposure RV correction, applied identically to every
+    # fiber during the resampling interpolation (see RSS.rectify_wave)
+    rv_corr = rss._header.get("HIERARCH WAVE BARYRV_APPLIED", 0.0) if apply_bary_corr else 0.0
+    if rv_corr:
+        log.info(f"applying RV correction of {rv_corr} km/s during resampling")
+
     # resample the wavelength solution
     log.info("resampling the spectra ...")
-    new_rss = rss.rectify_wave(wave_range=wave_range, wave_disp=wave_disp, method=method, return_density=convert_to_density)
+    new_rss = rss.rectify_wave(wave_range=wave_range, wave_disp=wave_disp, method=method, return_density=convert_to_density, rv_corr=rv_corr)
 
     # create error propagation plot
     fig = plt.figure(figsize=(15, 5), layout="constrained")

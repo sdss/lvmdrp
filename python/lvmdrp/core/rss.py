@@ -13,6 +13,7 @@ from astropy.coordinates import SkyCoord
 from astropy.coordinates import EarthLocation
 from astropy.stats import biweight_location, biweight_scale
 from astropy import units as u
+from astropy import constants as const
 
 from lvmdrp import log
 from lvmdrp.core.constants import LVM_ELEVATION, LVM_LAT, LVM_LON, CONFIG_PATH, CON_LAMPS, ARC_LAMPS
@@ -1619,7 +1620,7 @@ class RSS(FiberRows):
         select = numpy.logical_or(numbers < min, numbers > numbers[-1] - max)
         return arg[select]
 
-    def rectify_wave(self, wave=None, wave_range=None, wave_disp=None, method="spline", return_density=True, **interp_kwargs):
+    def rectify_wave(self, wave=None, wave_range=None, wave_disp=None, method="spline", return_density=True, rv_corr=0.0, **interp_kwargs):
         """Wavelength rectifies the RSS object
 
         This method rectifies the RSS object to an uniform wavelength grid. The
@@ -1637,6 +1638,14 @@ class RSS(FiberRows):
             one-dimensional array with the same number of elements as the
             wavelength dimension of the data array.
 
+        An optional single-valued radial velocity correction (e.g. barycentric)
+        can be applied at the same time. This does NOT change the output
+        wavelength grid: instead the native, per-fiber wavelength array is
+        relabelled (`wave_native * (1 + rv_corr/c)`) before interpolating onto
+        the fixed output grid, so the correction is absorbed into the flux
+        values while every exposure ends up on an identical wavelength array.
+        The sign matches `astropy.coordinates.SkyCoord.radial_velocity_correction`.
+
         NOTE: all operations are perfomed in a copy of the RSS object, so the
         original object is not modified.
 
@@ -1652,6 +1661,10 @@ class RSS(FiberRows):
             Interpolation method, by default "spline"
         return_density : bool, optional
             If True, returns the density of the rectification, by default False
+        rv_corr : float, optional
+            Single-valued radial velocity correction, in km/s, applied
+            uniformly to every fiber by relabelling the native wavelength
+            array before interpolation, by default 0.0 (no correction)
 
         Returns
         -------
@@ -1665,6 +1678,8 @@ class RSS(FiberRows):
             self._wave = trace.eval_coeffs()
 
         if self._header is not None and self._header.get("WAVREC", False) or len(self._wave.shape) == 1:
+            if rv_corr:
+                log.warning("rv_corr requested but RSS is already rectified/1D wave; correction not applied")
             return self
 
         if wave is not None:
@@ -1729,36 +1744,57 @@ class RSS(FiberRows):
         else:
             raise ValueError(f"Invalid interpolation {method = }. Expected either 'linear' or 'spline'")
 
+        # Relabel the native (per-fiber) wavelength array to absorb a single
+        # exposure-wide RV correction (e.g. barycentric) into the flux values
+        # instead of the output wavelength grid. The `wave` query grid above
+        # (and thus `new_rss._wave`) is left untouched by design, so every
+        # exposure ends up on an identical wavelength array regardless of its
+        # individual RV correction. Sign matches
+        # `SkyCoord.radial_velocity_correction`, i.e. `wave_native` below is
+        # the observed wavelength relabelled into the corrected frame.
+        # NOTE: standard-star fibers used for flux calibration go through
+        # this same relabelling. `model_selection()`'s velocity-shift fit
+        # against stellar templates (`derive_vecshift(..., max_ampl=3)` in
+        # `fluxCalMethod.py`) has a capture range of only ~±46 km/s, so a
+        # large `rv_corr` combined with a standard star's own RV could clip
+        # that fit; not handled here, see BarycentricCorrection.md.
+        if rv_corr:
+            c_kms = const.c.to(u.km / u.s).value
+            wave_native = rss._wave * (1.0 + rv_corr / c_kms)
+            new_rss._header["HIERARCH WAVE RVCORR_APPLIED"] = (rv_corr, "RV corr. applied during rectify_wave [km/s]")
+        else:
+            wave_native = rss._wave
+
         for ifiber in range(rss._fibers):
             sel = ~rss._mask[ifiber]
             if sel.sum() == 0:
                 continue
-            f = interpolate.interp1d(rss._wave[ifiber][sel], rss._data[ifiber][sel], kind=method, bounds_error=False, fill_value=numpy.nan, assume_sorted=True)
+            f = interpolate.interp1d(wave_native[ifiber][sel], rss._data[ifiber][sel], kind=method, bounds_error=False, fill_value=numpy.nan, assume_sorted=True)
             new_rss._data[ifiber] = f(wave).astype("float32")
-            f = interpolate.interp1d(rss._wave[ifiber][sel], rss._error[ifiber][sel], kind=method, bounds_error=False, fill_value=numpy.nan, assume_sorted=True)
+            f = interpolate.interp1d(wave_native[ifiber][sel], rss._error[ifiber][sel], kind=method, bounds_error=False, fill_value=numpy.nan, assume_sorted=True)
             new_rss._error[ifiber] = f(wave).astype("float32")
-            f = interpolate.interp1d(rss._wave[ifiber], rss._mask[ifiber], kind="nearest", bounds_error=False, fill_value=1, assume_sorted=True)
+            f = interpolate.interp1d(wave_native[ifiber], rss._mask[ifiber], kind="nearest", bounds_error=False, fill_value=1, assume_sorted=True)
             new_rss._mask[ifiber] = f(wave).astype("bool")
             if rss._lsf is not None:
-                f = numpy.interp(wave, rss._wave[ifiber], rss._lsf[ifiber])
+                f = numpy.interp(wave, wave_native[ifiber], rss._lsf[ifiber])
                 new_rss._lsf[ifiber] = f.astype("float32")
             if rss._sky is not None:
-                f = interpolate.interp1d(rss._wave[ifiber][sel], rss._sky[ifiber][sel], kind=method, bounds_error=False, fill_value=numpy.nan, assume_sorted=True)
+                f = interpolate.interp1d(wave_native[ifiber][sel], rss._sky[ifiber][sel], kind=method, bounds_error=False, fill_value=numpy.nan, assume_sorted=True)
                 new_rss._sky[ifiber] = f(wave).astype("float32")
             if rss._sky_error is not None:
-                f = interpolate.interp1d(rss._wave[ifiber][sel], rss._sky_error[ifiber][sel], kind=method, bounds_error=False, fill_value=numpy.nan, assume_sorted=True)
+                f = interpolate.interp1d(wave_native[ifiber][sel], rss._sky_error[ifiber][sel], kind=method, bounds_error=False, fill_value=numpy.nan, assume_sorted=True)
                 new_rss._sky_error[ifiber] = f(wave).astype("float32")
             if rss._sky_east is not None:
-                f = interpolate.interp1d(rss._wave[ifiber][sel], rss._sky_east[ifiber][sel], kind=method, bounds_error=False, fill_value=numpy.nan, assume_sorted=True)
+                f = interpolate.interp1d(wave_native[ifiber][sel], rss._sky_east[ifiber][sel], kind=method, bounds_error=False, fill_value=numpy.nan, assume_sorted=True)
                 new_rss._sky_east[ifiber] = f(wave).astype("float32")
             if rss._sky_east_error is not None:
-                f = interpolate.interp1d(rss._wave[ifiber][sel], rss._sky_east_error[ifiber][sel], kind=method, bounds_error=False, fill_value=numpy.nan, assume_sorted=True)
+                f = interpolate.interp1d(wave_native[ifiber][sel], rss._sky_east_error[ifiber][sel], kind=method, bounds_error=False, fill_value=numpy.nan, assume_sorted=True)
                 new_rss._sky_east_error[ifiber] = f(wave).astype("float32")
             if rss._sky_west is not None:
-                f = interpolate.interp1d(rss._wave[ifiber][sel], rss._sky_west[ifiber][sel], kind=method, bounds_error=False, fill_value=numpy.nan, assume_sorted=True)
+                f = interpolate.interp1d(wave_native[ifiber][sel], rss._sky_west[ifiber][sel], kind=method, bounds_error=False, fill_value=numpy.nan, assume_sorted=True)
                 new_rss._sky_west[ifiber] = f(wave).astype("float32")
             if rss._sky_west_error is not None:
-                f = interpolate.interp1d(rss._wave[ifiber][sel], rss._sky_west_error[ifiber][sel], kind=method, bounds_error=False, fill_value=numpy.nan, assume_sorted=True)
+                f = interpolate.interp1d(wave_native[ifiber][sel], rss._sky_west_error[ifiber][sel], kind=method, bounds_error=False, fill_value=numpy.nan, assume_sorted=True)
                 new_rss._sky_west_error[ifiber] = f(wave).astype("float32")
 
         if not return_density:
@@ -3211,13 +3247,16 @@ class RSS(FiberRows):
             return data, self._slitmap["xpmm"].data, self._slitmap["ypmm"].data
         return data
 
-    def get_helio_rv(self, apply_hrv_corr=False):
+    def get_helio_rv(self):
         """Calculates heliocentric velocity corrections for each telescope and standard fiber
 
-        Parameters
-        ----------
-        apply_heliorv : bool, optional
-            Apply heliocentric correction to all fibers
+        NOTE: these per-telescope/per-standard values are informational only
+        (written to header for QA/provenance). They are not applied to the
+        data: SCIRA/SKYERA/SKYWRA correspond to different pointings, so
+        applying a different correction to each would misalign sky emission
+        lines between SCI and SKY fibers and break sky subtraction. See
+        `get_bary_rv` for the single, uniform, per-exposure value that
+        actually gets applied (in `RSS.rectify_wave`).
 
         Returns
         -------
@@ -3269,19 +3308,48 @@ class RSS(FiberRows):
             std_hrv_corr = std_radec.radial_velocity_correction(kind="heliocentric", obstime=std_obstime, location=lvm_location).to(u.km / u.s).value
             self._header[f"STD{istd}HRV"] = (numpy.round(std_hrv_corr, 4), f"standard {istd} heliocentric vel. corr. [km/s]")
 
-        if apply_hrv_corr: ...
-            # if helio_vel is None or helio_vel == 0.0:
-            #     helio_vel = rss._header.get(helio_vel_keyword)
-            #     if helio_vel is None:
-            #         helio_vel = 0.0
-            #         log.warning(f"no heliocentric velocity found in header by keywords {helio_vel_keyword = }, assuming {helio_vel = } km/s")
-            #         rss.add_header_comment(f"no heliocentric velocity {helio_vel_keyword = }, assuming {helio_vel = } km/s")
-            # else:
-            #     log.info(f"applying heliocentric velocity correction of {helio_vel = } km/s")
-
-            # rss._wave = rss._wave * (1 + helio_vel / c.to("km/s").value)
-
         return hrv_corrs
+
+    def get_bary_rv(self):
+        """Calculates the single, uniform radial velocity correction applied to the exposure
+
+        Computed from the SCI telescope field-center pointing (`SCIRA`/`SCIDEC`)
+        and `OBSTIME`. This is the single scalar value applied identically to
+        every fiber (SCI, SKYE, SKYW, standards) in `RSS.rectify_wave`, as
+        opposed to `get_helio_rv`'s per-telescope/per-standard values, which
+        are informational only. Applying the same correction to every fiber
+        preserves intra-exposure self-consistency for sky subtraction and
+        for flux calibration (the sensitivity curve derived from standard
+        fibers is applied to science fibers of the same exposure at matching
+        wavelength-grid index).
+
+        Returns
+        -------
+        bary_rv : float
+            Radial velocity correction, in km/s. 0.0 if required header
+            information (RA/Dec/OBSTIME) is missing.
+        """
+        if self._header is None or self._header.get("IMAGETYP") != "object":
+            return 0.0
+
+        ra = self._header.get("SCIRA", 0.0) or 0.0
+        dec = self._header.get("SCIDEC", 0.0) or 0.0
+        if -999.0 in [ra, dec] or ra == 0 or dec == 0:
+            log.warning(f"on barycentric velocity correction, missing SCIRA/SCIDEC in header, assuming: {ra = }, {dec = }")
+            self.add_header_comment(f"on barycentric velocity correction, missing SCIRA/SCIDEC, assuming: {ra = }, {dec = }")
+            return 0.0
+
+        obstime = self._header.get("OBSTIME")
+        if obstime is None:
+            log.warning("on barycentric velocity correction, missing OBSTIME in header")
+            self.add_header_comment("on barycentric velocity correction, missing OBSTIME")
+            return 0.0
+
+        lvm_location = EarthLocation(lat=LVM_LAT, lon=LVM_LON, height=LVM_ELEVATION * u.m)
+        obs_time = Time(obstime)
+        radec = SkyCoord(ra, dec, unit="deg")
+        bary_rv = radec.radial_velocity_correction(kind="heliocentric", obstime=obs_time, location=lvm_location).to(u.km / u.s).value
+        return float(numpy.round(bary_rv, 4))
 
     def measure_wave_shifts(self, cwaves, dwave=8, min_snr=10, flux2bg=0.7, smooth=True):
 
