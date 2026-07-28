@@ -399,6 +399,17 @@ def prepare_spec(in_rss, width=3):
             # return res_std, mean_std, rms_std, rss
             stds = []
 
+        # drop standards with no Gaia XP continuous (BP/RP) spectrum: these can never be
+        # downloaded (has_xp_continuous=False is permanent in Gaia DR3) and would otherwise
+        # crash the XP spectra fetch later in model_selection()
+        if stds:
+            no_xp_ids = fluxcal.gaia_ids_without_xp_continuous([s[2] for s in stds])
+            if no_xp_ids:
+                for s in [s for s in stds if s[2] in no_xp_ids]:
+                    log.warning(f"star '{s[2]}' (fiber {s[1]}) has no Gaia XP continuous spectrum "
+                                "(has_xp_continuous=False), excluding from flux calibration standards")
+                stds = [s for s in stds if s[2] not in no_xp_ids]
+
         # wavelength array
         w_tmp = rss_tmp._wave
         w.append(w_tmp)
@@ -1939,6 +1950,16 @@ def fluxcal_standard_stars(in_rss, plot=True, GAIA_CACHE_DIR=None):
         rss.set_fluxcal(fluxcal=res_std, source='std')
         rss.writeFitsData(in_rss)
         return res_std, mean_std, rms_std, rss
+
+    # drop standards with no Gaia XP continuous (BP/RP) spectrum: these can never be
+    # downloaded (has_xp_continuous=False is permanent in Gaia DR3) and would otherwise
+    # crash the XP spectra fetch in standard_sensitivity()
+    no_xp_ids = fluxcal.gaia_ids_without_xp_continuous([s[2] for s in stds])
+    if no_xp_ids:
+        for s in [s for s in stds if s[2] in no_xp_ids]:
+            log.warning(f"star '{s[2]}' (fiber {s[1]}) has no Gaia XP continuous spectrum "
+                        "(has_xp_continuous=False), excluding from flux calibration standards")
+        stds = [s for s in stds if s[2] not in no_xp_ids]
 
     # early stop if not standards exposed in current spectrograph
     if len(stds) == 0:

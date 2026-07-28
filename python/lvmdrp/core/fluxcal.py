@@ -220,6 +220,12 @@ class GaiaXPSpectra(object):
         tuple[ndarray, ndarray]
             Wavelength sampling and stacked spectrum array for the last source.
         """
+        if coeffs.shape[0] == 0:
+            log.warning("Gaia returned 0 XP continuous spectrum rows for the requested source(s); "
+                        "these stars likely have has_xp_continuous=False and no spectrum will ever be available. "
+                        "Skipping caching for them.")
+            return None, None
+
         # calibrate gaia XP coefficients into spectra
         with open(os.devnull, 'w') as f, redirect_stdout(f):
             spectra_xp = []
@@ -505,6 +511,47 @@ def get_stellar_params(source_ids):
             log.warning(f"{e}, returning dummy parameters")
             stellar_params = DUMMY_TABLE.copy()
     return stellar_params
+
+
+def gaia_ids_without_xp_continuous(source_ids):
+    """Identify which Gaia source IDs have no Gaia XP continuous (BP/RP) spectrum.
+
+    Some standard stars acquired at the telescope turn out to have
+    ``has_xp_continuous = False`` in Gaia DR3, i.e. no BP/RP continuous
+    spectrum was ever published for them. Requesting one of these from
+    ``gaiadr3.xp_continuous_mean_spectrum`` returns zero rows, which crashes
+    :meth:`GaiaXPSpectra.cache_xp_spectra` (division by zero in ``np.split``).
+    Callers should exclude these IDs before fetching XP spectra.
+
+    Parameters
+    ----------
+    source_ids : sequence
+        Gaia source identifiers to check.
+
+    Returns
+    -------
+    set
+        Subset of source_ids known (from the local calibration table) to lack
+        a Gaia XP continuous spectrum. IDs absent from the local table are not
+        included, since their availability is unknown.
+    """
+    params_path = pathlib.Path(MASTERS_DIR) / "stellar_models" / "lvm-many_Gaia_stars_5-9_ftype_v4-all.fits"
+
+    gaia_stars = Table.read(params_path, format='fits').to_pandas()
+    gaia_stars = gaia_stars.filter(items=["source_id", "has_xp_continuous"])
+    gaia_stars.set_index('source_id', drop=True, inplace=True)
+
+    def _is_false(value):
+        # FITS stores this column as an ASCII 'True'/'False' string (sometimes as bytes),
+        # not a real boolean, so astype(bool) would be True for any non-empty string
+        if isinstance(value, bytes):
+            value = value.decode()
+        return str(value).strip().lower() == "false"
+
+    known_ids = gaia_stars.index.intersection(source_ids)
+    no_xp = gaia_stars.loc[known_ids]
+    no_xp = no_xp[no_xp["has_xp_continuous"].apply(_is_false)]
+    return set(no_xp.index)
 
 
 def mean_absolute_deviation(vals):
