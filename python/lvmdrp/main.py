@@ -1590,8 +1590,10 @@ def science_reduction(expnum: int,
     log.info(f"Reducing MJD {sci_mjd}, exposure {expnum}, tile_id {sci_tileid} ... ")
 
     # overwrite fiducial masters dir
+    # TODO: enforce use of defined calibration epochs from calibration-epochs.yaml
+    # and remove option to use nightly calibration
     calibs, cals_mjd = get_calib_paths(
-        mjd=sci_mjd,
+        mjd=get_master_mjd(sci_mjd),
         version=drpver,
         nightly=not use_longterm_cals,
         from_sandbox=from_sandbox,
