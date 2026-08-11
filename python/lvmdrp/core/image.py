@@ -713,7 +713,7 @@ class Image(Header):
         s2 = bn.nanmedian(self._data[cmin-10:cmax+10,guess_column-500:guess_column+500], axis=1)
         guess_shift = _align_fiber_blocks(s1, s2, axs=None)
 
-        if numpy.abs(guess_shift) >= 4:
+        if numpy.abs(guess_shift) >= 3:
             warnings.warn(f"guess fiber thermal shift too large {guess_shift = } pixels, setting guess shift to zero")
             self.add_header_comment(f"guess fiber thermal shift too large {guess_shift = } pixels, setting guess shift to zero")
             guess_shift = 0

@@ -339,7 +339,7 @@ def _get_wave_selection(waves, lines_list, window):
 
 def _fix_fiber_thermal_shifts(image, trace_cent, trace_width=None, trace_amp=None, fiber_model=None,
                               columns=[500, 1000, 1500, 2000, 2500, 3000],
-                              column_width=25, shift_range=[-5,5], per_block=False, axs=None):
+                              column_width=100, shift_range=[-5,5], per_block=False, axs=None):
     """Returns the updated fiber trace centroids after fixing the thermal shifts
 
     Parameters
@@ -357,7 +357,7 @@ def _fix_fiber_thermal_shifts(image, trace_cent, trace_width=None, trace_amp=Non
     columns : list
         list of columns to evaluate the continuum model, defaults to [500, 1000, 1500, 2000, 2500, 3000, 3500]
     column_width : int
-        number of columns to add around the given columns, defaults to 25
+        number of columns to add around the given columns, defaults to 100
     shift_range : list
         range of shifts to consider, defaults to [-5,5]
 
@@ -413,8 +413,9 @@ def _fix_fiber_thermal_shifts(image, trace_cent, trace_width=None, trace_amp=Non
     threshold = 0.5
     for idx in zip(*numpy.where(numpy.abs(column_shifts) > threshold)):
         if any(idx):
-            warnings.warn(f"large thermal shift @ (block, column) = {idx}: {column_shifts[idx]:.3f}")
-            image.add_header_comment(f"large thermal shift @ (block, column) = {idx}: {column_shifts[idx]:.3f}")
+            b, c = idx[0] + 1, columns[idx[1]]
+            warnings.warn(f"large thermal shift @ (block, column) = {(b, c)}: {column_shifts[idx]:.3f}")
+            image.add_header_comment(f"large thermal shift @ (block, column) = {(b, c)}: {column_shifts[idx]:.3f}")
 
     # report measured shifts
     for iblock, (block_shifts, block_median, block_std) in enumerate(zip(column_shifts, mu_blk, sg_blk)):
@@ -458,20 +459,23 @@ def _fix_fiber_thermal_shifts(image, trace_cent, trace_width=None, trace_amp=Non
             ax_col.plot(columns, mu_col, "-k")
             ax_col.fill_between(columns, mu_col-sg_col, mu_col+sg_col, lw=0, color="0.7", alpha=0.5, zorder=-1)
             ax_col.set_ylim((mu-3*sg).max(), (mu+3*sg).max())
+            ax_col.set_xticks(columns)
 
         if ax_blk is not None:
             for shift in column_shifts.T:
                 ax_blk.plot(blocks, shift, ".-", lw=0.5, alpha=0.5)
             ax_blk.plot(blocks, mu_blk, "-k")
             ax_blk.fill_between(blocks, mu_blk-sg_blk, mu_blk+sg_blk, lw=0, color="0.7", alpha=0.5, zorder=-1)
+            ax_blk.set_xlim(0.5, 18.5)
             ax_blk.set_ylim((mu-3*sg).max(), (mu+3*sg).max())
+            ax_blk.set_xticks(blocks)
 
         if ax_flg is not None:
             for b, c in worse:
                 ax_flg.plot(b+1, c+1, "ow", mew=0, ms=15)
             for b, c in flagged:
                 ax_flg.plot(b+1, c+1, "x", mew=2, color="tab:red", ms=10)
-            im = ax_flg.imshow(column_shifts.T, origin="lower", extent=[0.5, 18.5, 0.5, 11.5], interpolation="none", cmap="coolwarm", vmin=-threshold, vmax=threshold, aspect="auto")
+            im = ax_flg.imshow(column_shifts.T, origin="lower", extent=[0.5, 18.5, 0.5, len(columns)+0.5], interpolation="none", cmap="coolwarm", vmin=-threshold, vmax=threshold, aspect="auto")
             ax_flg.set_xticks(range(1, len(blocks)+1))
             ax_flg.set_yticks(range(1, len(columns)+1))
             ax_flg.set_yticklabels(columns)
@@ -479,7 +483,7 @@ def _fix_fiber_thermal_shifts(image, trace_cent, trace_width=None, trace_amp=Non
                              width="20%",
                              height="5%",
                              loc="upper right",
-                             bbox_transform=ax_flg.transAxes,
+                            #  bbox_transform=ax_flg.transAxes,
                              borderpad=0.3)
             cb = ax_flg.figure.colorbar(im, cax=cax, orientation="horizontal")
             cb.ax.xaxis.set_ticks_position("bottom")
@@ -2279,7 +2283,7 @@ def extract_spectra(
     in_acorr: str = None,
     assume_thermal_shift: float = None,
     columns: List[int] = [500, 750, 1000, 1250, 1500, 1750, 2000, 2250, 2500, 2750, 3000],
-    column_width: int = 50,
+    column_width: int = 100,
     method: str = "optimal",
     aperture: int = 3,
     fwhm: float = 2.5,
@@ -2357,7 +2361,7 @@ def extract_spectra(
     else:
         fiber_model = None
 
-    fig = plt.figure(figsize=(15, 4*4), layout="tight")
+    fig = plt.figure(figsize=(15, 4*4), layout="constrained")
     fig.subplots_adjust(hspace=0.5)
     fig.suptitle(f"Thermal fiber shifts for {mjd = }, {camera = }, {expnum = }", fontsize="x-large")
     gs = GridSpec(4, 15, figure=fig)
