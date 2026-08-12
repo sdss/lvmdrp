@@ -6,9 +6,19 @@ Change Log
 
 This document records the main changes to the drp code.
 
-1.2.2dev (unreleased)
+1.3.0dev (unreleased)
 ---------------------
 
+- Improved QA plots including fiber shift, sky parameters, and layout handling
+- Implemented fiber flat factor epochs and improved factor calibration routines
+- Enhanced straylight subtraction with robust 2D P-Spline fitting
+- Improved Gaia XP integration with better caching and stellar parameter extraction
+- Implemented Voigt profile for fiber tracing with better convergence
+- Performance optimizations including memory usage cleanup
+- Added RMS sensitivities to summary file
+- Improved outlier rejection in stray light binning and saturated strip handling
+- Enhanced flux calibration with better handling of standard star selection
+- Various bug fixes and stability improvements
 
 
 1.2.1 (16-02-2026)
