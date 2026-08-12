@@ -141,6 +141,7 @@ def cli():
 @click.option('-2d', '--skip-2d', is_flag=True, default=False, help='Skip preprocessing and detrending')
 @click.option('-1d', '--skip-1d', is_flag=True, default=False, help='Skip astrometry, straylight subtraction and extraction')
 @click.option('-wc', '--skip-wavecal', is_flag=True, default=False, help='Skip wavelength calibration and fiber flat fielding')
+@click.option('-wr', '--skip-waveres', is_flag=True, default=False, help='Skip wavelength resampling and sky spline extrapolation')
 @click.option('-fl', '--skip-fluxcal', is_flag=True, default=False, help='Skip flux calibration')
 @click.option('-sk', '--skip-skysub', is_flag=True, default=False, help='Skip sky subtraction')
 @click.option('-da', '--skip-drpall', is_flag=True, default=False, help='Skip create/update drpall summary file')
@@ -153,7 +154,7 @@ def cli():
 # @cloup.constraint(RequireExactly(1), ['mjd', 'mjd_list', 'mjd_range'])
 @cloup.constraint(mutually_exclusive, ['expnum', 'exp_list', 'exp_range'])
 def run(mjd, mjd_list, mjd_range, with_cals, no_sci, expnum, exp_list, exp_range, exp_file, fluxcal_method,
-        skip_2d, skip_1d, skip_wavecal, skip_fluxcal, skip_skysub, skip_drpall, clean_ancillary, debug_mode, force_run,
+        skip_2d, skip_1d, skip_wavecal, skip_waveres, skip_fluxcal, skip_skysub, skip_drpall, clean_ancillary, debug_mode, force_run,
         use_nightly_cals, use_untagged_cals):
     """ Run the DRP reduction for a given MJD or range of MJDs
 
@@ -178,6 +179,7 @@ def run(mjd, mjd_list, mjd_range, with_cals, no_sci, expnum, exp_list, exp_range
             skip_2d=skip_2d,
             skip_1d=skip_1d,
             skip_wavecal=skip_wavecal,
+            skip_waveres=skip_waveres,
             skip_fluxcal=skip_fluxcal,
             skip_skysub=skip_skysub,
             skip_drpall=skip_drpall,
