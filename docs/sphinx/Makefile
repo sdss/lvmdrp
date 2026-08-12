@@ -3,10 +3,10 @@
 
 # You can set these variables from the command line.
 SPHINXOPTS    =
-SPHINXBUILD   = python -msphinx
-SPHINXPROJ    = BMO
-SOURCEDIR     = .
-BUILDDIR      = _build
+SPHINXBUILD   = sphinx-build
+SPHINXPROJ    = lvmdrp
+SOURCEDIR     = source
+BUILDDIR      = .
 
 # Put it first so that "make" without argument is like "make help".
 help:
@@ -14,7 +14,13 @@ help:
 
 .PHONY: help Makefile
 
+livehtml:
+	sphinx-autobuild "$(SOURCEDIR)" "$(BUILDDIR)/html" $(SPHINXOPTS) $(O)
+
 # Catch-all target: route all unknown targets to Sphinx using the new
 # "make mode" option.  $(O) is meant as a shortcut for $(SPHINXOPTS).
 %: Makefile
 	@$(SPHINXBUILD) -M $@ "$(SOURCEDIR)" "$(BUILDDIR)" $(SPHINXOPTS) $(O)
+
+clean:
+	rm -rf doctrees/ html/

@@ -8,6 +8,7 @@ import shutil
 import traceback
 import pandas as pd
 from typing import Union, List
+from collections.abc import Iterator
 from functools import lru_cache
 from itertools import groupby
 from pprint import pformat
@@ -23,9 +24,10 @@ from astropy.time import Time
 from astropy.wcs import WCS
 from lvmdrp.core.constants import CAMERAS, SPEC_CHANNELS, MASTERS_DIR
 from lvmdrp.core.rss import RSS
+from lvmdrp.functions.astrometryMethod import add_astrometry
 from lvmdrp.functions.imageMethod import (preproc_raw_frame, create_master_frame,
                                           create_pixelmask, detrend_frame,
-                                          add_astrometry, subtract_straylight,
+                                          subtract_straylight,
                                           trace_peaks,
                                           extract_spectra)
 
@@ -33,8 +35,8 @@ from lvmdrp.functions.rssMethod import (determine_wavelength_solution, create_pi
                                         resample_wavelength, shift_wave_skylines, join_spec_channels, stack_spectrographs)
 from lvmdrp.functions.skyMethod import interpolate_sky, combine_skies, quick_sky_subtraction
 from lvmdrp.core import fluxcal
-from lvmdrp.functions.fluxCalMethod import fluxcal_standard_stars, fluxcal_sci_ifu_stars, apply_fluxcal
-from lvmdrp.utils.metadata import (get_frames_metadata, get_master_metadata, extract_metadata,
+from lvmdrp.functions.fluxCalMethod import fluxcal_standard_stars, fluxcal_sci_ifu_stars, apply_fluxcal, model_selection
+from lvmdrp.utils.metadata import (get_frames_metadata, update_metadata, get_master_metadata, extract_metadata,
                                    get_analog_groups, match_master_metadata, create_master_path,
                                    update_summary_file, convert_h5_to_fits)
 from lvmdrp.utils.convert import tileid_grp
@@ -108,7 +110,7 @@ def create_masters(flavor: str, frames: pd.DataFrame):
 
     Create the master calibration frames for a given flavor
     or imagetyp.  These files live in the "calib" subdirectory
-    with the "lvm-m(flavor)-*" prefix.
+    with the ``lvm-m(flavor)-*`` prefix.
 
     Parameters
     ----------
@@ -677,7 +679,7 @@ def reduce_masters(mjd: int):
         reduce_frame(path, master=True, **row)
 
 
-def start_logging(mjd: int, tileid: int):
+def start_logging(mjd: int, tileid: int, for_calibrations=False):
     """ Starts a file logger
 
     Starts a file logger for a given MJD and tile ID.
@@ -688,10 +690,13 @@ def start_logging(mjd: int, tileid: int):
         The MJD of the observations
     tileid : int
         The tile ID of the observations
+    for_calibrations : bool, optional
+        Whether the run will be for calibrations or not, by default False
     """
     tilegrp = tileid_grp(tileid)
-    lpath = (os.path.join(os.getenv('LVM_SPECTRO_REDUX'),
-             "{drpver}/{tilegrp}/{tileid}/{mjd}/lvm-drp-{tileid}-{mjd}.log"))
+    lpath = os.path.join(os.getenv('LVM_SPECTRO_REDUX'),
+                         "{drpver}", "{tilegrp}", "{tileid}", "{mjd}",
+                         "lvm-calibrations-{tileid}-{mjd}.log" if for_calibrations else "lvm-drp-{tileid}-{mjd}.log")
     logpath = lpath.format(drpver=drpver, mjd=mjd, tileid=tileid, tilegrp=tilegrp)
     logpath = pathlib.Path(logpath)
 
@@ -1158,7 +1163,7 @@ def add_extension(hdu: Union[fits.ImageHDU, fits.BinTableHDU], filename: str):
             hdulist.flush()
 
 
-def _yield_dir(root: pathlib.Path, mjd: int) -> pathlib.Path:
+def _yield_dir(root: pathlib.Path, mjd: int) -> Iterator[pathlib.Path]:
     """ Iteratively yield a pathlib directory
 
     Parameters
@@ -1346,7 +1351,7 @@ def update_error_file(tileid: int, mjd: int, expnum: int, error: str,
         f.write('\n')
 
 
-def reduce_2d(mjd, calibrations, expnums=None, exptime=None, cameras=CAMERAS,
+def reduce_2d(mjds, calibrations, expnums=None, exptime=None, cameras=CAMERAS,
               replace_with_nan=True, assume_imagetyp=None, reject_cr=True,
               add_astro=True, sub_straylight=True, parallel_run=1,
               skip_done=True, keep_ancillary=False, **cfg_straylight):
@@ -1358,10 +1363,10 @@ def reduce_2d(mjd, calibrations, expnums=None, exptime=None, cameras=CAMERAS,
     straylight-subtracted frames in the corresponding calibration directory in
     the `masters_mjd` or by default in the smallest MJD in `mjds`.
 
-    Parameters:
+    Parameters
     ----------
-    mjd : int
-        MJD to reduce
+    mjds : int|list[int]
+        Single MJD or a list of MJDs
     calibrations : dict[str, dict[str, str]]
         Paths to calibrations to use, including bias and pixel masks and flats
     expnums : list
@@ -1392,7 +1397,15 @@ def reduce_2d(mjd, calibrations, expnums=None, exptime=None, cameras=CAMERAS,
         Keep ancillary files, by default False
     """
 
-    frames = get_frames_metadata(mjd)
+    if isinstance(mjds, (list, tuple, set)):
+        for mjd in mjds:
+            reduce_2d(mjds=mjd, calibrations=calibrations, expnums=expnums, exptime=exptime, cameras=cameras,
+                      replace_with_nan=replace_with_nan, assume_imagetyp=assume_imagetyp, reject_cr=reject_cr,
+                      add_astro=add_astro, sub_straylight=sub_straylight, parallel_run=parallel_run,
+                      skip_done=skip_done, keep_ancillary=keep_ancillary, **cfg_straylight)
+        return
+
+    frames = get_frames_metadata(mjds)
     if expnums is not None:
         frames.query("expnum in @expnums", inplace=True)
     if exptime is not None:
@@ -1409,16 +1422,9 @@ def reduce_2d(mjd, calibrations, expnums=None, exptime=None, cameras=CAMERAS,
         imagetyp = assume_imagetyp or frame["imagetyp"]
 
         rframe_path = path.full("lvm_raw", camspec=frame["camera"], **frame)
-        eframe_path = path.full("lvm_anc", drpver=drpver, kind="e", imagetype=imagetyp, **frame)
-        frame_path = eframe_path if os.path.exists(eframe_path) else rframe_path
         pframe_path = path.full("lvm_anc", drpver=drpver, kind="p", imagetype=imagetyp, **frame)
         lframe_path = path.full("lvm_anc", drpver=drpver, kind="l", imagetype=imagetyp, **frame)
         lstr_path = path.full("lvm_anc", drpver=drpver, kind="d", imagetype="stray", **frame)
-
-        # define agc coadd path
-        agcsci_path = path.full('lvm_agcam_coadd', mjd=mjd, specframe=frame["expnum"], tel='sci')
-        agcskye_path = path.full('lvm_agcam_coadd', mjd=mjd, specframe=frame["expnum"], tel='skye')
-        agcskyw_path = path.full('lvm_agcam_coadd', mjd=mjd, specframe=frame["expnum"], tel='skyw')
 
         # bypass creation of detrended frame in case of imagetyp=bias
         if imagetyp != "bias":
@@ -1432,34 +1438,32 @@ def reduce_2d(mjd, calibrations, expnums=None, exptime=None, cameras=CAMERAS,
             log.info(f"skipping {final_2d_dp}, file already exist")
         else:
             with Timer(name='Preproc '+pframe_path, logger=log.info):
-                preproc_raw_frame(in_image=frame_path, out_image=pframe_path,
-                                  in_mask=calibrations["pixmask"][camera], replace_with_nan=replace_with_nan, assume_imagetyp=assume_imagetyp)
-            if imagetyp == "bias":
-                continue
+                preproc_raw_frame(in_image=rframe_path, out_image=pframe_path,
+                                  in_mask=calibrations.get("pixmask", {}).get(camera), replace_with_nan=replace_with_nan, assume_imagetyp=assume_imagetyp)
             with Timer(name='Detrend '+dframe_path, logger=log.info):
                 detrend_frame(in_image=pframe_path, out_image=dframe_path,
-                            in_bias=calibrations["bias"][camera],
-                            in_pixelflat=calibrations["pixflat"][camera],
+                            in_bias=calibrations.get("bias", {}).get(camera),
+                            in_pixelflat=calibrations.get("pixflat", {}).get(camera),
                             replace_with_nan=replace_with_nan,
                             reject_cr=reject_cr,
                             in_slitmap=fibermap if imagetyp in {"flat", "arc", "object"} else None)
 
             # add astrometry to frame
             if add_astro:
+                # define agc coadd path
+                agcsci_path = path.full('lvm_agcam_coadd', mjd=mjds, specframe=frame["expnum"], tel='sci')
+                agcskye_path = path.full('lvm_agcam_coadd', mjd=mjds, specframe=frame["expnum"], tel='skye')
+                agcskyw_path = path.full('lvm_agcam_coadd', mjd=mjds, specframe=frame["expnum"], tel='skyw')
                 with Timer(name='Astrometry '+dframe_path, logger=log.info):
                     add_astrometry(in_image=dframe_path, out_image=dframe_path, in_agcsci_image=agcsci_path, in_agcskye_image=agcskye_path, in_agcskyw_image=agcskyw_path)
 
             # subtract straylight
             if sub_straylight:
                 with Timer(name='Straylight '+lframe_path, logger=log.info):
-                    straylight_pars = dict(
-                        select_nrows=(0,0), use_weights=True, aperture=11,
-                        x_bins=20, x_bounds=(None,None), y_bounds=(None,None),
-                        x_nbound=20, y_nbound=5, clip=(0.0,None),
-                        nsigma=1.0, smoothing=40, median_box=None)
+                    straylight_pars = dict()
                     straylight_pars.update(cfg_straylight)
                     subtract_straylight(in_image=dframe_path, out_image=lframe_path, out_stray=lstr_path,
-                                        in_cent_trace=calibrations["centroids"][camera], parallel=parallel_run, **straylight_pars)
+                                        in_cent_trace=calibrations.get("centroids", {}).get(camera), **straylight_pars)
 
 
 def reduce_1d(mjd, calibrations, expnums=None, cameras=CAMERAS, replace_with_nan=True, sub_straylight=True, skip_done=True, keep_ancillary=False):
@@ -1519,13 +1523,16 @@ def reduce_1d(mjd, calibrations, expnums=None, cameras=CAMERAS, replace_with_nan
 def science_reduction(expnum: int,
                       use_longterm_cals: bool = True, from_sandbox: bool = True,
                       sky_weights: Tuple[float, float] = None,
-                      fluxcal_method: str = 'STD',
+                      fluxcal_method: str = 'MOD',
                       ncpus: int = None,
                       aperture_extraction: bool = False,
                       clean_ancillary: bool = False,
                       skip_2d: bool = False,
                       skip_1d: bool = False,
-                      skip_post_1d: bool = False,
+                      skip_wavecal: bool = False,
+                      skip_waveres: bool = False,
+                      skip_fluxcal: bool = False,
+                      skip_skysub: bool = False,
                       skip_drpall: bool = False,
                       debug_mode: bool = False,
                       force_run: bool = False) -> None:
@@ -1557,8 +1564,12 @@ def science_reduction(expnum: int,
 
     # get target frames metadata or extract if it doesn't exist
     sci_mjd = mjd_from_expnum(expnum)[0]
+    # update metadata if there are new paths to cache
+    update_metadata(mjd=sci_mjd)
     sci_metadata = get_frames_metadata(mjd=sci_mjd)
     sci_metadata.query("expnum == @expnum", inplace=True)
+    if sci_metadata.empty:
+        log.error(f"exposure {expnum = } not found in metadata for MJD = {sci_mjd}")
     sci_metadata.sort_values("expnum", ascending=False, inplace=True)
     if not force_run:
         try:
@@ -1580,10 +1591,12 @@ def science_reduction(expnum: int,
     log.info(f"Reducing MJD {sci_mjd}, exposure {expnum}, tile_id {sci_tileid} ... ")
 
     # overwrite fiducial masters dir
+    # TODO: enforce use of defined calibration epochs from calibration-epochs.yaml
+    # and remove option to use nightly calibration
     calibs, cals_mjd = get_calib_paths(
-        mjd=sci_mjd,
+        mjd=get_master_mjd(sci_mjd),
         version=drpver,
-        longterm_cals=use_longterm_cals,
+        nightly=not use_longterm_cals,
         from_sandbox=from_sandbox,
         flavors=["pixmask", "pixflat", "bias", "centroids", "sigmas", "model", "wave", "lsf", "fiberflat_twilight"],
         return_mjd=True)
@@ -1602,7 +1615,7 @@ def science_reduction(expnum: int,
         log.info("skipping 2D reduction")
     else:
         with Timer(name='Reduce2d', logger=log.info):
-            reduce_2d(mjd=sci_mjd, calibrations=calibs, expnums=[sci_expnum], reject_cr=reject_cr, skip_done=False)
+            reduce_2d(mjds=sci_mjd, calibrations=calibs, expnums=[sci_expnum], reject_cr=reject_cr, skip_done=False)
 
     # run reduction loop for each science camera exposure
     if skip_1d:
@@ -1636,11 +1649,12 @@ def science_reduction(expnum: int,
     # per channel reduction
     cframe_path = path.full("lvm_frame", drpver=drpver, tileid=sci_tileid, mjd=sci_mjd, expnum=sci_expnum, kind='CFrame')
     sframe_path = path.full("lvm_frame", mjd=sci_mjd, drpver=drpver, tileid=sci_tileid, expnum=sci_expnum, kind='SFrame')
-    if skip_post_1d:
-        log.info("skipping post 1D reduction")
+    if skip_wavecal:
+        log.info("skipping wavelength calibration and fiber flat fielding")
     else:
         mwave_groups = group_calib_paths(calibs["wave"])
         mlsf_groups = group_calib_paths(calibs["lsf"])
+
         for channel in "brz":
             xsci_paths = sorted(path.expand('lvm_anc', mjd=sci_mjd, tileid=sci_tileid, drpver=drpver,
                                             kind='x', camera=f'{channel}[123]', imagetype=sci_imagetyp, expnum=expnum))
@@ -1653,17 +1667,13 @@ def science_reduction(expnum: int,
             mflat_path = calibs["fiberflat_twilight"][channel]
 
             frame_path = path.full('lvm_frame', mjd=sci_mjd, tileid=sci_tileid, drpver=drpver, expnum=sci_expnum, kind=f'Frame-{channel}')
-            ssci_path = path.full('lvm_anc', mjd=sci_mjd, tileid=sci_tileid, drpver=drpver,
-                                kind='s', camera=channel, imagetype=sci_imagetyp, expnum=expnum)
-            hsci_path = path.full('lvm_anc', mjd=sci_mjd, tileid=sci_tileid, drpver=drpver,
-                                kind='h', camera=channel, imagetype=sci_imagetyp, expnum=expnum)
 
             # stack spectrographs
             with Timer(name='Stack Spectrographs '+xsci_path, logger=log.info):
                 stack_spectrographs(in_rsss=xsci_paths, out_rss=xsci_path)
             if not os.path.exists(xsci_path):
                 log.error(f'No stacked file found: {xsci_path}. Skipping remaining pipeline.')
-                continue
+                return
 
             # wavelength calibrate
             with Timer(name='Wavelengths '+wsci_path, logger=log.info):
@@ -1677,6 +1687,16 @@ def science_reduction(expnum: int,
             with Timer(name='Thermal Shifts '+frame_path, logger=log.info):
                 shift_wave_skylines(in_frame=frame_path, out_frame=frame_path)
 
+    if skip_waveres:
+            log.info("skipping wavelength resampling and spline sky extrapolation")
+    else:
+        for channel in "brz":
+            frame_path = path.full('lvm_frame', mjd=sci_mjd, tileid=sci_tileid, drpver=drpver, expnum=sci_expnum, kind=f'Frame-{channel}')
+            ssci_path = path.full('lvm_anc', mjd=sci_mjd, tileid=sci_tileid, drpver=drpver,
+                                kind='s', camera=channel, imagetype=sci_imagetyp, expnum=expnum)
+            hsci_path = path.full('lvm_anc', mjd=sci_mjd, tileid=sci_tileid, drpver=drpver,
+                                kind='h', camera=channel, imagetype=sci_imagetyp, expnum=expnum)
+
             # interpolate sky fibers
             with Timer(name='Interpolate Sky '+ssci_path, logger=log.info):
                 interpolate_sky(in_frame=frame_path, out_rss=ssci_path)
@@ -1689,8 +1709,22 @@ def science_reduction(expnum: int,
             with Timer(name='Resample '+hsci_path, logger=log.info):
                 resample_wavelength(in_rss=ssci_path,  out_rss=hsci_path, wave_range=SPEC_CHANNELS[channel], wave_disp=0.5, convert_to_density=True)
 
+
+    if skip_fluxcal:
+        log.info("skipping flux calibration")
+    else:
+        hsci_all_bands = [path.full('lvm_anc', mjd=sci_mjd, tileid=sci_tileid, drpver=drpver, kind='h',
+                                camera=channel, imagetype=sci_imagetyp, expnum=expnum) for channel in "brz"]
+
+        # #The model stellar atmosphere spectra selection
+        model_selection(hsci_all_bands, GAIA_CACHE_DIR=MASTERS_DIR + '/gaia_cache')
+
+        for channel in "brz":
+            hsci_path = path.full('lvm_anc', mjd=sci_mjd, tileid=sci_tileid, drpver=drpver,
+                                kind='h', camera=channel, imagetype=sci_imagetyp, expnum=expnum)
             # use resampled frames for flux calibration in each camera, using standard stars observed in the spec telescope
             #  and field stars found in the sci ifu
+            # mode='GAIA' -> old behavior; 'model' -> new version with the spectra from the Pollux library
             with Timer(name='Fluxcal '+hsci_path, logger=log.info):
                 fluxcal_standard_stars(hsci_path, GAIA_CACHE_DIR=MASTERS_DIR+'/gaia_cache')
                 fluxcal_sci_ifu_stars(hsci_path, GAIA_CACHE_DIR=MASTERS_DIR+'/gaia_cache')
@@ -1708,6 +1742,9 @@ def science_reduction(expnum: int,
         with Timer(name='Join Channels '+cframe_path, logger=log.info):
             join_spec_channels(in_fframes=fframe_paths, out_cframe=cframe_path, use_weights=True)
 
+    if skip_skysub:
+        log.info("skipping sky subtraction")
+    else:
         # sky subtraction
         with Timer(name='QSky '+sframe_path, logger=log.info):
             quick_sky_subtraction(in_cframe=cframe_path, out_sframe=sframe_path)
@@ -1752,9 +1789,10 @@ def science_reduction(expnum: int,
 
 def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
             with_cals: bool = False, no_sci: bool = False,
-            fluxcal_method: str = 'STD',
-            skip_2d: bool = False, skip_1d: bool = False, skip_post_1d: bool = False, skip_drpall: bool = False,
-            use_nightly_cals: bool = False, use_untagged_cals: bool = False,
+            fluxcal_method: str = 'MOD',
+            skip_2d: bool = False, skip_1d: bool = False, skip_wavecal: bool = False,
+            skip_waveres: bool = False, skip_fluxcal: bool = False, skip_skysub: bool = False,
+            skip_drpall: bool = False, use_nightly_cals: bool = False, use_untagged_cals: bool = False,
             clean_ancillary: bool = False, debug_mode: bool = False, force_run: bool = False):
     """ Run the quick DRP
 
@@ -1775,13 +1813,17 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
     no_sci : bool, optional
         Flag to turn off science frame reduction, by default False
     fluxcal_method : str, optional
-        'NONE' or 'STD' for standard stars, 'SCI' for field stars in science IFU
+        'NONE' or 'STD' for standard stars, 'SCI' for field stars in science IFU, 'MOD' for standard stars with template matching
     skip_2d : bool, optional
         Skip preprocessing and detrending, by default False
     skip_1d : bool, optional
         Skip astrometry, straylight subtraction and extraction, by default False
-    skip_post_1d : bool, optional
-        Skip wavelength calibration, flatfielding, sky processing and flux calibration
+    skip_wavecal : bool, optional
+        Skip wavelength calibration, flatfielding, sky processing and flux calibration, by default False
+    skip_fluxcal : bool, optional
+        Skip flux calibration and channel combine, by default False
+    skip_skysub : bool, optional
+        Skip sky subtraction, by default False
     skip_drpall : bool, optional
         Skip create/update drpall summary file
     use_nightly_cals : bool, optional
@@ -1798,6 +1840,10 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
     # # write the drp parameter configuration
     # write_config_file()
 
+    if mjd is None and expnum is None:
+        log.error("you must provide either an exposure number `expnum` or an MJD `mjd`. None was given")
+        return
+
     if mjd is None:
         # parse expnums and get MJDs
         mjds = mjd_from_expnum(expnum)
@@ -1811,7 +1857,10 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
                     fluxcal_method=fluxcal_method,
                     skip_2d=skip_2d,
                     skip_1d=skip_1d,
-                    skip_post_1d=skip_post_1d,
+                    skip_wavecal=skip_wavecal,
+                    skip_waveres=skip_waveres,
+                    skip_fluxcal=skip_fluxcal,
+                    skip_skysub=skip_skysub,
                     skip_drpall=skip_drpall,
                     clean_ancillary=clean_ancillary,
                     use_nightly_cals=use_nightly_cals,
@@ -1837,6 +1886,9 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
         log.info(f"MJD {mjd} falls within excluded period in {exclude_file}, skipping ...")
         return
 
+    # update metadata if there are new paths to cache
+    update_metadata(mjd=mjd)
+
     # generate the MJD metadata
     frames = get_frames_metadata(mjd=mjd)
     sub = frames.copy()
@@ -1860,8 +1912,11 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
 
     # filter on exposure number
     if expnum:
-        log.info(f'Filtering on exposure numbers {expnum}.')
+        log.info(f'Filtering on exposure number {expnum}.')
         sub = filter_expnum(sub, expnum)
+        if sub.empty:
+            log.error(f"exposure {expnum = } not found in metadata for MJD = {mjd}")
+            return
 
     # sort the frames
     sub = sub.sort_values(['expnum', 'camera'])
@@ -1909,7 +1964,10 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
                                         fluxcal_method=fluxcal_method,
                                         skip_2d=skip_2d,
                                         skip_1d=skip_1d,
-                                        skip_post_1d=skip_post_1d,
+                                        skip_wavecal=skip_wavecal,
+                                        skip_waveres=skip_waveres,
+                                        skip_fluxcal=skip_fluxcal,
+                                        skip_skysub=skip_skysub,
                                         skip_drpall=skip_drpall,
                                         clean_ancillary=clean_ancillary,
                                         use_longterm_cals=not use_nightly_cals,
@@ -1939,9 +1997,14 @@ def create_drpall(drp_version: str = None, overwrite: bool = False) -> None:
     """
     drp_version = drp_version or drpver
 
+    drpall = path.full('lvm_drpall', drpver=drp_version)
+    drpall_h5 = drpall.replace('.fits', '.h5')
     if overwrite:
-        drpall = path.full('lvm_drpall', drpver=drp_version)
-        drpall = drpall.replace('.fits', '.h5')
+        if os.path.isfile(drpall_h5):
+            log.info(f"removing existing {drpall_h5}")
+            os.remove(drpall_h5)
+        else:
+            log.info(f"no drpall file found for {drp_version = }")
         if os.path.isfile(drpall):
             log.info(f"removing existing {drpall}")
             os.remove(drpall)
@@ -1970,30 +2033,22 @@ def create_drpall(drp_version: str = None, overwrite: bool = False) -> None:
             failed.append(sframe_path)
             continue
 
-    log.info(f"finished summarizing {nframes-nfailed} lvmSFrames in {drpall}")
+    log.info(f"finished summarizing {nframes-nfailed} lvmSFrames in {drpall_h5}")
+    if nfailed == nframes:
+        log.error("all attempted frames failed:")
+        log.error(f"{failed = }")
+        return
     if nfailed != 0:
         log.warning(f"with {nfailed} failed frames:")
         log.warning(f"{failed = }")
 
-    convert_h5_to_fits(drpall)
-    log.info(f"finished converting HDF5 to FITS format in {drpall.replace('h5', '.fits')}")
+    convert_h5_to_fits(drpall_h5)
+    log.info(f"finished converting HDF5 to FITS format in {drpall}")
 
 
-def cache_gaia_spectra(mjds: Union[int, str, list], min_acquired=999, dry_run: bool = False) -> None:
-    """Caches Gaia XP spectra for science field calibration
-
-    Parameters
-    ----------
-    mjds : int|str|list[int]
-        MJDs for which the caching should be run
-    min_acquired : int, optional
-        minimum number of acquired standard stars to skip caching, defaults to 999 (no skipping)
-    dry_run : bool, optional
-        lists exposures that will be targeted
-    """
+def cache_std_xp_spectra(mjds: Union[int, str, list], ignore_cache: bool = False, dry_run: bool = False) -> None:
     log.info("start of Gaia XP spectra caching for science field flux calibration")
     gaia_cache_dir = os.path.join(os.getenv("LVM_MASTER_DIR"), "gaia_cache")
-    os.makedirs(gaia_cache_dir, exist_ok=True)
     # parse MJDs
     mjds = parse_mjds(mjds)
     if isinstance(mjds, int):
@@ -2008,6 +2063,58 @@ def cache_gaia_spectra(mjds: Union[int, str, list], min_acquired=999, dry_run: b
 
         failed_expnums = []
         for exposure in frames.to_dict("records"):
+            log.info(f"going to cache XP spectra for expnum = {exposure['expnum']}")
+            raw_path = path.full("lvm_raw", camspec=exposure["camera"], **exposure)
+            # check for presence of standard stars metadata
+            with fits.open(raw_path) as f:
+                header = f[0].header
+                expnum = exposure["expnum"]
+                source_ids = list(filter(lambda s: s is not None, header["STD*ID"].values()))
+                acquired_stds = list(header["STD*ACQ"].values())
+                total_acquired = sum(acquired_stds)
+                log.info(f"{expnum = } has standard stars metadata and {total_acquired} were acquired")
+            # cache corresponding gaia spectra
+            if not dry_run:
+                try:
+                    fluxcal.get_xp_spectra_from_ids(source_ids, cache_only=True, cache_dir=gaia_cache_dir, ignore_cache=ignore_cache)
+                except Exception as e:
+                    log.error(f"failed caching of Gaia spectra for {expnum = }: {e}")
+                    failed_expnums.append(expnum)
+                    continue
+
+    # summarize run
+    log.info(f"cached Gaia XP metadata for {len(frames) - len(failed_expnums)} exposures, with {len(failed_expnums)} fails, {failed_expnums = }")
+
+
+def cache_sci_xp_spectra(mjds: Union[int, str, list], min_acquired=999, ignore_cache: bool = False, dry_run: bool = False) -> None:
+    """Caches Gaia XP spectra for science field calibration
+
+    Parameters
+    ----------
+    mjds : int|str|list[int]
+        MJDs for which the caching should be run
+    min_acquired : int, optional
+        minimum number of acquired standard stars to skip caching, defaults to 999 (no skipping)
+    dry_run : bool, optional
+        lists exposures that will be targeted
+    """
+    log.info("start of Gaia XP spectra caching for science field flux calibration")
+    gaia_cache_dir = os.path.join(os.getenv("LVM_MASTER_DIR"), "gaia_cache")
+    # parse MJDs
+    mjds = parse_mjds(mjds)
+    if isinstance(mjds, int):
+        mjds = [mjds]
+    log.info(f"selecting MJDs: {','.join(map(str, mjds))}")
+
+    for mjd in mjds:
+        # load metadata and filter good quality science frames
+        frames = get_frames_metadata(mjd=mjd)
+        frames.query("imagetyp == 'object' and qaqual == 'GOOD'", inplace=True)
+        frames = frames.drop_duplicates(subset=["expnum"], keep="first")
+
+        failed_expnums = []
+        for exposure in frames.to_dict("records"):
+            log.info(f"going to cache XP spectra for expnum = {exposure['expnum']}")
             raw_path = path.full("lvm_raw", camspec=exposure["camera"], **exposure)
             # check for presence of standard stars metadata
             with fits.open(raw_path) as f:
@@ -2019,23 +2126,21 @@ def cache_gaia_spectra(mjds: Union[int, str, list], min_acquired=999, dry_run: b
                     if total_acquired >= min_acquired:
                         log.info(f"{expnum = } has standard stars metadata and {total_acquired} were acquired, skipping")
                         continue
-                    log.info(f"{expnum = } has standard stars metadata and {total_acquired} were acquired")
                 # get exposure parameters
                 ra = header.get("POSCIRA", header.get("TESCIRA"))
                 dec = header.get("POSCIDE", header.get("TESCIDE"))
 
             # cache corresponding gaia spectra
-            log.info(f"going to download 15 field stars spectra with G<13.5 around {ra = }, {dec = } for {expnum = }")
             if not dry_run:
                 try:
-                    fluxcal.get_XP_spectra(expnum, ra, dec, plot=False, lim_mag=13.5, n_spec=15, GAIA_CACHE_DIR=gaia_cache_dir)
+                    fluxcal.get_xp_spectra_from_tile(expnum, ra, dec, lim_mag=13.5, n_spectra=15, cache_only=True, cache_dir=gaia_cache_dir, ignore_cache=ignore_cache)
                 except Exception as e:
                     log.error(f"failed caching of Gaia spectra for {expnum = }: {e}")
                     failed_expnums.append(expnum)
                     continue
 
     # summarize run
-    log.info(f"cached metadata for {len(frames) - len(failed_expnums)} exposures, with {len(failed_expnums)} fails, {failed_expnums = }")
+    log.info(f"cached Gaia XP metadata for {len(frames) - len(failed_expnums)} exposures, with {len(failed_expnums)} fails, {failed_expnums = }")
 
 
 def reduce_calib_frame(row: dict):

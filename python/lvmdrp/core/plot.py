@@ -14,9 +14,10 @@ import numpy as np
 import bottleneck as bn
 from astropy.visualization import AsinhStretch, ImageNormalize, PercentileInterval, simple_norm
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
+from matplotlib.gridspec import GridSpec
 import warnings
 
-from lvmdrp.core.constants import LVM_NCOLS, LVM_NROWS
+from lvmdrp.core.constants import LVM_NCOLS, LVM_NROWS, LVM_NOVER
 
 warnings.filterwarnings(
     action="ignore",
@@ -33,6 +34,7 @@ DEFAULT_BACKEND = plt.get_backend()
 if not IS_INTERACTIVE:
     plt.switch_backend(newbackend="Agg")
 plt.style.use("seaborn-v0_8-talk")
+plt.rcParams['text.usetex'] = False
 
 
 def create_subplots(to_display, flatten_axes=True, **subplots_params):
@@ -57,6 +59,41 @@ def create_subplots(to_display, flatten_axes=True, **subplots_params):
         axs = axs.flatten()
     return fig, axs
 
+
+def create_straylight_axes(img, y_bins):
+    unit = img._header["BUNIT"]
+    in_image = img._header["FILENAME"]
+
+    fig = plt.figure(figsize=(13, 10+3*(y_bins)), layout="constrained")
+    fig.suptitle(f"Stray Light Subtraction for frame {in_image}")
+    gs = GridSpec(5+(y_bins), 5, figure=fig)
+
+    ax_img = fig.add_subplot(gs[1:5, :-1])
+    ax_img.set_xlim(0, img._dim[1])
+    ax_img.set_ylim(0, img._dim[0])
+    ax_img.tick_params(labelbottom=False)
+    ax_img.set_ylabel("Y (pixels)", fontsize="large")
+    ax_xma = fig.add_subplot(gs[0, :-1], sharex=ax_img)
+    ax_yma = fig.add_subplot(gs[1:5, -1], sharey=ax_img)
+    ax_xma.tick_params(labelbottom=False)
+    ax_yma.tick_params(labelleft=False)
+    ax_xma.set_ylabel(f"Counts ({unit})", fontsize="large")
+    ax_yma.set_xlabel(f"Counts ({unit})", fontsize="large")
+    ax_col = inset_axes(ax_img, width="60%", height="2%", loc="upper right")
+    ax_col.tick_params(labelsize="small", labelcolor="tab:red")
+
+    axs_res = []
+    for i in range(y_bins):
+        ax = fig.add_subplot(gs[5+i, :-1], sharex=ax_img)
+        if i != y_bins-1:
+            ax.tick_params(labelbottom=False)
+        else:
+            ax.set_xlabel("X (pixels)", fontsize="large")
+        axs_res.append(ax)
+
+    return fig, {"img": ax_img, "col": ax_col, "xma": ax_xma, "yma": ax_yma, "res": axs_res}
+
+
 def set_colorbar(axis, collection):
     axcb = inset_axes(
         axis,
@@ -79,11 +116,15 @@ def plot_image_shift(ax, image, column_shift, xpos=None, inset_pos=(0.0,1.0-0.32
     axis = []
     for i, irow in enumerate(irows):
         iy, fy, ix, fx = xpos-30, xpos+30, irow-30, irow+30
+        ix, fx = max(ix, 0), min(fx, LVM_NROWS)
+        iy, fy = max(iy, 0), min(fy, LVM_NCOLS+2*LVM_NOVER)
         image_region = image[ix:fx, iy:fy]
 
         axi = ax.inset_axes((inset_pos[0],inset_pos[1]-i/3.2, *inset_box))
-        norm = simple_norm(image_region, max_percent=80)
-        axi.imshow(image_region, extent=[iy,fy,ix,fx], origin="lower", cmap=cmap, norm=norm)
+        norm = simple_norm(image_region, max_percent=70)
+        axi.imshow(image_region, extent=[iy,fy,ix,fx], origin="lower", cmap=cmap, norm=norm, interpolation="none")
+        axi.axhline(irow+1, ls="--", lw=0.5, color="0.2")
+        axi.text(image.shape[1]//2, irow+1, f"{irow+1}", va="bottom", ha="center")
         axi.tick_params(axis="both", labelsize=10)
         if i == 0 and irows.size > 1:
             axi.tick_params(axis="both", labelbottom=False)
@@ -326,8 +367,8 @@ def plot_detrend(ori_image, det_image, axs, mbias=None, mdark=None, labels=False
     if labels:
         axs[2].set_xlabel(f"counts ({unit})")
         axs[3].set_xlabel(f"Counts ({unit})")
-        axs[0].set_ylabel("#")
-        axs[2].set_ylabel("#")
+        axs[0].set_ylabel("Frequency")
+        axs[2].set_ylabel("Frequency")
 
     return axs
 
@@ -390,7 +431,7 @@ def plot_error(frame, axs, counts_threshold=(1000, 20000), ref_value=1.0, labels
     if labels:
         axs[0].set_title(f"{n_pixels = } | {median_ratio = :.2f} | {mu = :.2f}", loc="left")
         axs[0].set_xlabel(f"Counts ({unit})")
-        axs[1].set_xlabel("#")
+        axs[1].set_xlabel("Frequency")
         axs[0].set_ylabel(r"$\sqrt{\mathrm{Counts}} / \mathrm{Error}$")
 
 
@@ -587,17 +628,17 @@ def plot_wavesol_wave(xpix, ref_waves, lines_pixels, wave_poly, wave_coeffs, ax=
         wave_sol[i] = wave_poly(wave_coeffs[i])(xpix)
         wave_lin[i] = wave_poly(wave_coeffs[i]).truncate(2)(xpix)
         wave_lin_ref = wave_poly(wave_coeffs[i]).truncate(2)(lines_pixels)
-        ax.plot(xpix, (wave_lin - wave_sol)[i], color="tab:blue", alpha=0.3, lw=1)
+        ax.plot(xpix, (wave_sol - wave_lin)[i], color="tab:blue", alpha=0.3, lw=1)
 
         ax.plot(
             lines_pixels[i],
-            wave_lin_ref[i] - ref_waves,
+            ref_waves - wave_lin_ref[i],
             ".",
             ms=4,
             color="k",
             zorder=999
         )
-    ax.plot(xpix, wave_lin.mean(0) - wave_sol.mean(0), lw=1, color="tab:blue")
+    ax.plot(xpix, wave_sol.mean(0) - wave_lin.mean(0), lw=1, color="tab:blue")
     if labels:
         ax.set_xlabel("X (pixel)")
         ax.set_ylabel("Wavelength model - linear terms (Angstrom)")
@@ -655,20 +696,20 @@ def plot_wavesol_lsf(xpix, lsf, lines_pixels, wave_poly, wave_coeffs, lsf_poly, 
         lsf_sol[i] = lsf_poly(lsf_coeffs[i])(xpix)
         lsf_lin[i] = lsf_poly(lsf_coeffs[i]).truncate(2)(xpix)
         lsf_lin_ref = lsf_poly(lsf_coeffs[i]).truncate(2)(lines_pixels)
-        ax.plot(xpix, (lsf_lin - lsf_sol)[i], color="tab:red", alpha=0.3, lw=1)
+        ax.plot(xpix, (lsf_sol - lsf_lin)[i], color="tab:red", alpha=0.3, lw=1)
 
         dwave[i] = np.abs(np.gradient(wave_sol[i]))
         dw = np.interp(lines_pixels[i], xpix, dwave[i])
 
         ax.plot(
             lines_pixels[i],
-            lsf_lin_ref[i] - dw * lsf[i],
+            dw * lsf[i] - lsf_lin_ref[i],
             ".",
             ms=4,
             color="k",
             zorder=999
         )
-    ax.plot(xpix, lsf_lin.mean(0) - lsf_sol.mean(0), lw=1, color="tab:red")
+    ax.plot(xpix, lsf_sol.mean(0) - lsf_lin.mean(0), lw=1, color="tab:red")
     if labels:
         ax.set_xlabel("X (pixel)")
         ax.set_ylabel("LSF model - linear term (Angstrom)")
@@ -827,6 +868,45 @@ def plot_flat_consistency(fflats, mflat, spec_wise=False, log_scale=False, label
         axs[0].legend(loc=1, frameon=False, fontsize="small")
 
     return axs
+
+
+def plot_exposed_std(image, snr_std, snr_all_stats, snr_std_stats, exposed_std, nsigmas, labels=False, ax=None):
+    if ax is None:
+        return
+
+    expnum = image._header["EXPOSURE"]
+    camera = image._header["CCD"]
+
+    slitmap = image._slitmap[image._slitmap["spectrographid"] == int(camera[1])]
+    spec_select = slitmap["telescope"] == "Spec"
+    ids_std = slitmap[spec_select]["orig_ifulabel"]
+    idx_std = np.arange(ids_std.size)
+
+    snr_all_mu, snr_all_sigma = snr_all_stats
+    snr_std_mu, snr_std_sigma = snr_std_stats
+    threshold = snr_std_mu + nsigmas * snr_std_sigma
+
+    ax.set_title(f"{expnum = } | {camera = }", loc="left")
+    ax.axhspan(snr_all_mu-snr_all_sigma, snr_all_mu+snr_all_sigma, lw=0, fc="0.7", alpha=0.5)
+    ax.axhline(snr_all_mu, lw=1, color="0.7")
+    ax.axhline(threshold, ls="--", lw=1, color="tab:red")
+    ax.axhline(snr_std_mu, lw=1, color="0.7")
+    ax.bar(idx_std, snr_std, hatch="///////", lw=0, ec="tab:blue", fc="none", zorder=999)
+    ax.set_xticks(idx_std)
+    ax.set_xticklabels(ids_std)
+    ax.text(-0.7, snr_all_mu, "Global mean SNR", ha="left", va="bottom")
+    ax.text(-0.7, snr_std_mu, "Stds. mean SNR", ha="left", va="bottom")
+    ax.text(-0.7, threshold, "Exposed threshold", ha="left", va="bottom", color="tab:red")
+
+    if labels:
+        ax.set_xlabel("Standard fibers")
+        ax.set_ylabel("SNR")
+
+    # highlight exposed fiber in plot
+    select_exposed = ids_std == exposed_std
+    ax.bar(idx_std[select_exposed], snr_std[select_exposed], hatch="///////", lw=0, ec="tab:red", fc="none", zorder=999)
+
+    return ax
 
 
 def ifu_view(slitmap=None, z=None, rss=None, cwave=None, dwave=None, comb_stat=None, telescope="Sci", use_world_coords=False,

@@ -1,5 +1,4 @@
 import time
-import tracemalloc
 from contextlib import ContextDecorator
 from dataclasses import dataclass, field
 from typing import Any, Callable, ClassVar, Dict, Optional
@@ -13,7 +12,7 @@ class Timer(ContextDecorator):
     Use as
         Timer t
         t.start()
-        code() 
+        code()
         t.stop()
 
         or
@@ -23,13 +22,13 @@ class Timer(ContextDecorator):
         or
         with Timer(name):
             code()
-        
+
         see https://realpython.com/python-timer/
     """
 
     timers: ClassVar[Dict[str, float]] = {}
     name: Optional[str] = None
-    text: str = "elapsed time: {:0.4f} seconds using {:.2f} MB of memory (peak)"
+    text: str = "elapsed time: {:0.4f} seconds"
     logger: Optional[Callable[[str], None]] = print
     _start_time: Optional[float] = field(default=None, init=False, repr=False)
 
@@ -43,7 +42,6 @@ class Timer(ContextDecorator):
         if self._start_time is not None:
             raise TimerError("Timer is running. Use .stop() to stop it")
 
-        tracemalloc.start()
         self._start_time = time.perf_counter()
 
     def stop(self) -> float:
@@ -55,16 +53,18 @@ class Timer(ContextDecorator):
         elapsed_time = time.perf_counter() - self._start_time
         self._start_time = None
 
-        _, peak = tracemalloc.get_traced_memory()
-        peak = peak / (1024**2) # in MB
-        tracemalloc.stop()  # Stop memory tracking
+        # NOTE: peak memory reporting via tracemalloc was removed. tracemalloc traces every
+        # memory allocation while active, and for allocation-heavy code (e.g. per-fiber/
+        # per-point Python loops calling scipy) that overhead is enormous and highly
+        # Python-version-dependent, to the point of dwarfing the timed code's own runtime.
+        # peak = 0.0
 
         # Report elapsed time
         if self.logger:
             if self.name is not None:
-                self.logger(self.name + ': ' + self.text.format(elapsed_time, peak))
+                self.logger(self.name + ': ' + self.text.format(elapsed_time))
             else:
-                self.text.format(elapsed_time, peak)
+                self.text.format(elapsed_time)
         if self.name:
             self.timers[self.name] += elapsed_time
 

@@ -91,7 +91,15 @@ drp get-calibs -m 60255
 
 This command will download the files using `sdss-access` and place them in `$LVM_MASTER_DIR`, which is defined by the
 pipeline as `$LVM_SANDBOX/calib`, mirroring the SAS.  These are defined automatically relative to your root `$SAS_BASE_DIR`.
-You would find the files at `$SAS_BASE_DIR/sdsswork/lvm/sandbox/calib/`
+You would find the files at `$SAS_BASE_DIR/sdsswork/lvm/sandbox/calib/`.
+
+You can download all calibration epochs by running
+
+```bash
+drp get-calibs
+```
+
+**NOTE:** If you want to know what calibration epoch is needed for a specific exposure, always choose the epoch that is closest and earlier than your exposure's MJD.
 
 
 ## Running the DRP
@@ -114,6 +122,14 @@ or a list of exposure numbers in a file `<expnum_file>`, by running:
 drp run -F <expnum_file>
 ```
 
+You can also skip reduction steps if you carried those steps already by running:
+
+```
+drp run -e <expnum> -2d -1d -wc -fl -sk -da
+```
+
+which would skip the 2D reduction, the 1D reduction, the wavelength calibration and fiber flat-fielding, flux calibration, the sky subtraction and drpall summary generation. See the list of reduction steps below for more details on what each of those steps do.
+
 More options are available, you can see them by running:
 
 ```bash
@@ -124,21 +140,27 @@ Running the DRP requires that you have correctly setup your environment by follo
 
 The `drp run` will reduce your target exposure. Here is a list of reduction steps carried out by the DRP:
 
-- **Preprocessing**: overscan trimming and subtraction and pixel masking
-- **Detrending**: bias and dark subtraction, Poisson error calculation, flatfielding (pixel level, when available), units conversion (e-/s)
-- **Astrometry**: adds astrometry to the primary header and RA and DEC for each fiber to the slitmap extension
-- **Stray light**: modelling and subtraction of the straylight field
-- **Extraction**: fiber fitting spectra extraction, takes into account thermal fiber shifts in the Y direction
-- **Spectrograph combination**: row-stacking of spectrograph fibers
-- **Wavelength calibration**: pixel-to-wavelength mapping and LSF function per fiber
-- **Fiberflat**: flatfielding (fiber level) using twilight fiberflats
-- **Wavelength refinement**: refines the wavelength solution by matching the sky line positions, takes into account fiber thermal shifts in the wavelength direction, only used to subtract sky from standard fibers
-- **Sky fibers interpolation**: sky fibers interpolation along fiber ID by fitting the supersampled sky spectrum, per sky telescope
-- **Wavelength resampling**: wavelength resampling to a common grid (~0.5 Angstrom)
-- **Flux calibration**: calculates sensitivity curves for each standard star exposed and flux-calibrate the science fibers using the average sensitivity
-- **Channel combination**: stitching together spectrographs' channels
-- **Sky subtraction**: final sky subtraction separating sky lines and continuum and combining into master sky in a predefined way
-- **Generate/update summary**: adds a new record to the summary file (see description below)
+- 2D reduction steps (`-2d` flag):
+  - **Preprocessing**: overscan trimming and subtraction and pixel masking
+  - **Detrending**: bias and dark subtraction, Poisson error calculation, flatfielding (pixel level, when available), units conversion (e-/s)
+  - **Astrometry**: adds astrometry to the primary header and RA and DEC for each fiber to the slitmap extension
+  - **Stray light**: modelling and subtraction of the straylight field
+- 1D reduction steps (`-1d` flag):
+  - **Extraction**: fiber fitting spectra extraction, takes into account thermal fiber shifts in the Y direction
+- Wavelength calibration and fiber flat-fielding steps (`-wc` flag):
+  - **Spectrograph combination**: row-stacking of spectrograph fibers
+  - **Wavelength calibration**: pixel-to-wavelength mapping and LSF function per fiber
+  - **Fiberflat**: flatfielding (fiber level) using twilight fiberflats
+  - **Wavelength refinement**: refines the wavelength solution by matching the sky line positions, takes into account fiber thermal shifts in the wavelength direction, only used to subtract sky from standard fibers
+  - **Sky fibers interpolation**: sky fibers interpolation along fiber ID by fitting the supersampled sky spectrum, per sky telescope
+  - **Wavelength resampling**: wavelength resampling to a common grid (~0.5 Angstrom)
+- Flux calibration steps (`-fl` flag):
+  - **Flux calibration**: calculates sensitivity curves for each standard star exposed and flux-calibrate the science fibers using the average sensitivity
+  - **Channel combination**: stitching together spectrographs' channels
+- Sky subtraction steps (`-sk` flag):
+  - **Sky subtraction**: final sky subtraction separating sky lines and continuum and combining into master sky in a predefined way
+- `drpall` summary generation steps (`-da` flag):
+  - **Generate/update summary**: adds a new record to the summary file (see description below)
 
 The main outputs will be stored in the SAS directory:
 
@@ -236,7 +258,19 @@ For those willing to contribute by coding, there are some steps to streamline th
     git push
     ```
 
-7. Finally, if you consider your feature is ready to be merged to the `master` branch, you can create a new [pull request at Github](https://github.com/sdss/lvmdrp/pulls).
+7. If you consider your feature is ready to be merged to the `master` branch, you can create a new [pull request at Github](https://github.com/sdss/lvmdrp/pulls).
+
+8. Finally, it might useful to have different versions of the DRP outputs in separated directories. To achieve this, you can set the environment variable `LVMDRP_VERSION` in your `.bashrc` (or equivalent) to a string representing the version of the DRP you are working on. For example:
+
+    ```bash
+    export LVMDRP_VERSION="my_tests"
+    ```
+
+    This will make the DRP to store the outputs in a directory named `my_tests`, under the usual SAS path:
+
+    ```bash
+    $SAS_BASE_DIR/sdsswork/lvm/spectro/redux/my_tests/<tilegrp>/<tileid>/<mjd>/
+    ```
 
 Regarding commits, I'm trying to go for an *atomic* approach, where each commit has a single purpose. So please try to avoid as much as possible pushing lots of unrelated changes in one commit.
 

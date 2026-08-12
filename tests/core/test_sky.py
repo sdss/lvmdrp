@@ -65,7 +65,7 @@ def test_sky_pars_header(make_framefits):
     sframe = make_framefits(tileid=1054755, mjd=60297, expnum=9532)
     with fits.open(sframe) as hdulist:
         hdr = hdulist['PRIMARY'].header
-    
+
     #running skymodel_pars_header on example header
     test_sky_pars = sky_pars_header(hdr)
 
@@ -95,7 +95,7 @@ def test_sky_pars_header(make_framefits):
         'HIERARCH SKYMODEL CALCDS': ('N', 'cal double scattering of Moon (Y or N)'),
         'HIERARCH SKYMODEL O2COLUMN': (1.0, 'relative ozone column density (1->258) [DU]'),
         'HIERARCH SKYMODEL MOONSCAL': (1.0, 'scaling factor for scattered moonlight'),
-        'HIERARCH SKYMODEL SCI_LON_ECL': (-199.77931, 'heliocen ecliptic longitude [deg]'), 
+        'HIERARCH SKYMODEL SCI_LON_ECL': (-199.77931, 'heliocen ecliptic longitude [deg]'),
         'HIERARCH SKYMODEL SCI_LAT_ECL': (-6.16801, 'ecliptic latitude [deg]'),
         'HIERARCH SKYMODEL SKYE_LON_ECL': (-256.73754, 'heliocen ecliptic longitude [deg]'),
         'HIERARCH SKYMODEL SKYE_LAT_ECL': (-29.26712, 'ecliptic latitude [deg]'),
@@ -107,8 +107,7 @@ def test_sky_pars_header(make_framefits):
         'HIERARCH SKYMODEL SEASON': (1, 'bimonthly period (1:Dec/Jan, 6:Oct/Nov; 0:year)'),
         'HIERARCH SKYMODEL TIME': (1, 'period of night (x/3 night, x=1,2,3; 0:night)')
     }
-    
+
     #using approx since the sh_hght calc can be slightly different depending on where lvmdrp is run
     for key, value in test_sky_pars.items():
         assert test_sky_pars[key][0] == approx(exp_sky_pars[key][0], rel=1e-3)
-    

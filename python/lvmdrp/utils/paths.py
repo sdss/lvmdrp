@@ -1,12 +1,14 @@
 import os
 import fnmatch
+from glob import glob
+from shutil import rmtree
 from itertools import groupby
 import pandas as pd
 
 from typing import List, Union
 
-from lvmdrp.core.constants import CALIBRATION_NAMES, CAMERAS, MASTERS_DIR
-from lvmdrp import path, __version__ as drpver
+from lvmdrp.core.constants import CALIBRATION_PRODUCTS, CAMERAS, MASTERS_DIR
+from lvmdrp import log, path, __version__ as drpver
 from lvmdrp.utils.convert import tileid_grp
 from lvmdrp.utils import metadata as md
 
@@ -64,35 +66,48 @@ def mjd_from_expnum(expnum: Union[int, str, list, tuple]) -> List[int]:
     return [int(mjd)]
 
 
-def get_calib_paths(mjd, version=None, cameras="*", flavors=CALIBRATION_NAMES, longterm_cals=True, from_sandbox=False, return_mjd=False):
-    """Returns a dictionary containing paths for calibration frames
+def get_calib_paths(mjd, version=None, cameras="*", flavors=CALIBRATION_PRODUCTS, epochs=None, nightly=False, from_sandbox=True, return_mjd=False, only_existing=False):
+    """Return calibration file paths for a given reduction epoch.
+
+    The helper resolves the most relevant master-calibration MJD for the input
+    MJD and builds a mapping of calibration file paths for the requested
+    cameras and flavors.
 
     Parameters
     ----------
     mjd : int
-        MJD to reduce
+        MJD of the science or calibration frame for which paths are needed.
     version : str, optional
-        Version of the pipeline to pull calibrations from, by default None
-    cameras : list[str]|str, optional
-        List of cameras or wildcard to match, by default '*'
-    flavors : list, tuple or set
-        Only get paths for this calibrations, by default all available flavors
-    longterm_cals : bool
-        Whether to use long-term calibration frames or not, defaults to True
+        Pipeline version to resolve long-term calibration paths from, by default
+        None.
+    cameras : list[str] | str, optional
+        Camera names or wildcard pattern to match, by default ``"*"``.
+    flavors : list, tuple or set, optional
+        Calibration flavors to include. By default all available flavors are
+        considered.
+    epochs : dict, optional
+        Mapping of epoch MJDs to epoch metadata. When provided, the helper uses
+        the latest epoch boundary that is less than or equal to ``mjd`` to
+        select the calibration MJD.
+    nightly : bool, optional
+        Whether to prefer nightly calibration paths over long-term ones, by
+        default False.
     from_sandbox : bool, optional
-        Fall back option to pull calibrations from sandbox, by default False
+        Whether to resolve calibrations from the sandbox/master directory,
+        by default True.
+    return_mjd : bool, optional
+        Whether to also return the selected calibration MJD, by default False.
+    only_existing : bool, optional
+        Whether to return only paths that already exist on disk, by default
+        False.
 
     Returns
     -------
-    calibs : dict[str, dict[str, str]]
-        a dictionary containing calibrations for the given cameras
+    dict[str, dict[str, str]]
+        Calibration path mapping for the requested cameras and flavors.
     """
     if version is None and not from_sandbox:
         raise ValueError(f"You must provide a version string to get calibration paths, {version = } given")
-
-    # make long-term if taking calibrations from sandbox (nightly calibrations are not stored in sandbox)
-    if from_sandbox:
-        longterm_cals = True
 
     cams = fnmatch.filter(CAMERAS, cameras)
     channels = "".join(sorted(set(map(lambda c: c.strip("123"), cams))))
@@ -100,8 +115,13 @@ def get_calib_paths(mjd, version=None, cameras="*", flavors=CALIBRATION_NAMES, l
     tileid = 11111
     tilegrp = tileid_grp(tileid)
 
-    # get long-term MJDs from sandbox using get_master_mjd, else use given MJD
-    cals_mjd = get_master_mjd(mjd) if longterm_cals else mjd
+    # define calibration MJD: take MJD from sandbox or assume
+    if epochs is None:
+        cals_mjd = get_master_mjd(mjd) if from_sandbox else mjd
+    else:
+        epoch_mjds = sorted(int(cals_mjd) for cals_mjd in epochs.keys())
+        matching_mjds = [cals_mjd for cals_mjd in epoch_mjds if cals_mjd <= int(mjd)]
+        cals_mjd = matching_mjds[-1] if matching_mjds else int(mjd)
 
     # define root path to pixel flats and masks
     # TODO: remove this once sdss-tree are updated with the corresponding species
@@ -129,9 +149,20 @@ def get_calib_paths(mjd, version=None, cameras="*", flavors=CALIBRATION_NAMES, l
         if path_species == "lvm_calib":
             prefix = ""
         else:
-            prefix = "m" if flavor in ["bias", "fiberflat_twilight"] or longterm_cals else "n"
+            prefix = "n" if nightly and flavor not in ["bias", "fiberflat_twilight"] else "m"
 
         calibs[flavor] = {c: path.full(path_species, drpver=version, tileid=tileid, mjd=cals_mjd, kind=f"{prefix}{flavor}", camera=c) for c in cam_or_chan}
+
+    if only_existing:
+        calibs = {
+            flavor: {
+                cam: path
+                for cam, path in calibs[flavor].items()
+                if os.path.exists(path)
+            }
+            for flavor in calibs
+            if any(os.path.exists(p) for p in calibs[flavor].values())
+        }
 
     if return_mjd:
         return calibs, cals_mjd
@@ -198,3 +229,64 @@ def get_frames_paths(mjds, kind, camera_or_channel, query=None, expnums=None, fi
     if filter_existing:
         paths = list(filter(lambda p: os.path.isfile(p), paths))
     return paths
+
+
+def get_dir_size(path):
+    """Calculates the total size of a directory in Gigabytes"""
+    total_size = 0
+    # walk through all directories and files in the specified path
+    for dirpath, _, filenames in os.walk(path):
+        for f in filenames:
+            fp = os.path.join(dirpath, f)
+            # skip symlinks to prevent double counting or infinite loops
+            if not os.path.islink(fp):
+                try:
+                    total_size += os.path.getsize(fp)
+                except OSError:
+                    # handle potential permissions errors or file access issues
+                    print(f"Error accessing file: {fp}")
+                    continue
+
+    # convert bytes to Gigabytes (1 GB = 1024^3 bytes, using the IEC standard)
+    bytes_in_tb = 1024**3
+    size_tb = total_size / bytes_in_tb
+    return size_tb
+
+
+def remove_ancillary_paths(version, mjd=None, dry_run=False):
+    """Remove ancillary files
+
+    Parameters:
+    ----------
+    version : str
+        DRP version to target
+    mjd : str, optional
+        MJD to clean, by default None (all MJDs)
+    dry_run : bool, optional
+        Logs useful information abaut the current setup without actually removing the paths, by default False
+    """
+
+    mjd = mjd or "*"
+    ancillary_dirs = sorted(glob(os.path.join(os.getenv("LVM_SPECTRO_REDUX"), version, "*", "*", str(mjd), "ancillary")))
+    npaths = len(ancillary_dirs)
+    if npaths == 0:
+        log.info(f"no ancillary paths found for {version = } and {mjd = }. Nothing to do")
+        return
+    log.info(f"going to remove {npaths} ancillary directories for {version = }")
+
+    df = pd.DataFrame(data=ancillary_dirs, columns=["path"])
+    df["volume"] = df.path.apply(get_dir_size)
+    df["removed"] = False
+    records = df.filter(items=("path", "volume")).to_string(index=None).split("\n")
+    for i, r in df.iterrows():
+        log.info(f"{records[i]}")
+        if dry_run:
+            continue
+        try:
+            rmtree(r.path)
+            df.loc[i, "removed"] = True
+        except Exception as e:
+            log.error(f"while trying to remove {r.p}: {e}")
+    log.info(f"total volume (GB): {df.volume.sum():g}")
+
+    return df

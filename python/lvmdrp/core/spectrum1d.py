@@ -577,7 +577,7 @@ def _fiber_cc_match(
         p0=guess,
         bounds=(bound_lower, bound_upper)
     )
-    area, best_shift_sp, sigma, bg = best_gauss.getPar()
+    _, best_shift_sp, _, _ = best_gauss.getPar()
 
     # display best match
     if ax is not None:
@@ -586,10 +586,11 @@ def _fiber_cc_match(
         ax.step(best_shifts[mask], best_gauss(best_shifts[mask]), color="tab:red", lw=2, where="mid")
         ax.axvline(best_shift, color="tab:blue", lw=1, ls="--")
         ax.axvline(best_shift_sp, color="tab:red", lw=1)
-        ax.text(best_shift, (best_cross_corr[mask]).min(), f"shift = {best_shift}", va="bottom", ha="left", color="tab:blue")
-        ax.text(best_shift_sp, (best_cross_corr[mask]).min(), f"subpix. shift = {best_shift_sp:.3f}", va="top", ha="right", color="tab:red")
+        # ax.text(best_shift, (best_cross_corr[mask]).min(), f"shift = {best_shift}", va="bottom", ha="left", color="tab:blue")
+        # ax.text(best_shift_sp, (best_cross_corr[mask]).min(), f"subpix. shift = {best_shift_sp:.3f}", va="top", ha="right", color="tab:red")
+        ax.plot(best_shifts[mask], best_gauss(best_shifts[mask]) - best_cross_corr[mask], ".", color="tab:red", alpha=0.5)
 
-    return max_correlation, best_shift_sp, best_stretch_factor
+    return max_correlation, best_shift_sp, best_stretch_factor, obs_spec_, ref_spec_, best_shifts, best_cross_corr, best_gauss
 
 
 
@@ -719,7 +720,7 @@ def convolution_matrix(kernel, normalize=True):
 
     Parameters
     ----------
-    kernel : np.ndarray[float]
+    kernel : numpy.ndarray[float]
         Matrix containing kernels for each pixel, row-wise
     normalize : bool, optional
         Normalizes over rows if the matrix, by default True
@@ -760,7 +761,65 @@ def convolution_matrix(kernel, normalize=True):
     return new_kernel
 
 
+class FiberProfileCache(object):
+    def __init__(self, fiber_radius=1.4, oversampling_factor=100, npixels=8):
+        self.sigma_min = 0.5
+        self.sigma_max = 2.5
+        assert(fiber_radius>0)
+        self.fiber_radius = fiber_radius
+        assert (oversampling_factor>0)
+        self.oversampling_factor = oversampling_factor
+        self.nprofiles = 20001
+        assert (npixels>0)
+        self.npixels = npixels
+        self.x = numpy.linspace(numpy.zeros(self.nprofiles)-npixels, numpy.zeros(self.nprofiles)+npixels, 2*npixels+1, endpoint=True)
+        self.profile_cache = self._gen_mexhat_basis(self.x, numpy.zeros(self.nprofiles), \
+                                                    numpy.linspace(self.sigma_min, self.sigma_max, self.nprofiles, endpoint=True), \
+                                                    self.fiber_radius, self.oversampling_factor)
+        self.profile_cumsum = numpy.cumsum(self.profile_cache, axis=0) / oversampling_factor
+
+    def __call__(self, centroids, sigmas):
+        lines = numpy.clip((numpy.round(self.nprofiles/(self.sigma_max - self.sigma_min)*(sigmas-self.sigma_min))).astype(int),
+                            a_min=0, a_max=self.nprofiles-1)
+        cumsums = self.profile_cumsum[:,lines]
+        # calculate the shift relative to the given fractional centroid
+        cen_fracs = centroids - numpy.trunc(centroids) + 0.5 # account for pixel boundaries [0...1]
+
+        centers = self.x_os[:,lines]+cen_fracs
+        bins = self.x[:,lines]
+        bin_starts =  numpy.clip(((bins - centers[0,:]) * self.oversampling_factor).astype(int), a_min=0, a_max=None)
+        bin_ends = numpy.clip(bin_starts + self.oversampling_factor, a_min=None, a_max=len(cumsums[:,0])-1)
+        cols = numpy.arange(bin_starts.shape[1])[None, :]  # shape (1, M), will broadcast to (N, M)
+        return cumsums[bin_ends, cols] - cumsums[bin_starts, cols]
+
+    def _gen_mexhat_basis(self, x, centroids, sigmas, fiber_radius, oversampling_factor):
+        dx = x[1, 0] - x[0, 0]
+        self.x_os = fit_profile.oversample(x, oversampling_factor)
+        self.dx_os = dx / oversampling_factor
+
+        x_kernel = numpy.arange(0, 2*fiber_radius + self.dx_os, self.dx_os)
+        kernel = fit_profile.fiber_profile(centroids=fiber_radius, radii=fiber_radius, x=x_kernel)
+        psfs = fit_profile.gaussians((numpy.ones_like(centroids), centroids, sigmas), self.x_os.T, alpha=2, collapse=False)[0].T
+
+        profiles = signal.fftconvolve(psfs, kernel.T, mode="same", axes=0)
+        profiles /= integrate.trapezoid(profiles, self.x_os, axis=0)[None, :]
+
+        return profiles
+
+    def _pixel_integrate(self, pixels, cumsum):
+        bins = self.x[:,0]
+        # bin_starts = numpy.searchsorted(xx, bins[:-1], side='left')
+        bin_starts = ((bins - pixels[0]) * self.oversampling_factor).astype(int)
+        # numpy.clip(bin_starts, min_value = 0)
+        bin_starts[0] = 0 if bin_starts[0] < 0 else bin_starts[0]
+        bin_ends   = bin_starts + self.oversampling_factor
+        # numpy.clip(bin_ends, max_value = len(cumsum)-1)
+        bin_ends[-1] = len(cumsum)-1 if bin_ends[-1] >= len(cumsum) else bin_ends[-1]
+        return cumsum[bin_ends] - cumsum[bin_starts]
+
 class Spectrum1D(Header):
+
+    fiberProfileCache = None
 
     @classmethod
     def select_poly_class(cls, poly_kind=None):
@@ -3626,6 +3685,30 @@ class Spectrum1D(Header):
 
         return model, params, errors
 
+    def fitMultiVoigt(self, centres, init_fwhm_G, init_fwhm_L):
+        select = numpy.zeros(self._dim, dtype = "bool")
+        flux_in = numpy.zeros(len(centres), dtype = numpy.float32)
+        sig_in_G = numpy.ones_like(flux_in) * init_fwhm_G / 2.354
+        sig_in_L = numpy.ones_like(flux_in) * init_fwhm_L / 2.354
+        cent = numpy.zeros(len(centres), dtype = numpy.float32)
+        if self._error is not None:
+            error = self._error
+        else:
+            error = numpy.ones_like(self._dim, dtype = numpy.float32)
+        for i in range(len(centres)):
+            init_fwhm = max(init_fwhm_G, init_fwhm_L)
+            select_line = numpy.logical_and(
+                self._wave > centres[i] - 2 * init_fwhm,
+                self._wave < centres[i] + 2 * init_fwhm,
+            )
+            flux_in[i] = numpy.sum(self._data[select_line])
+            select = numpy.logical_or(select, select_line)
+            cent[i] = centres[i]
+        par = numpy.concatenate([flux_in, cent, sig_in_G, sig_in_L])
+        voigt_multi = fit_profile.Voigts_x(par)
+        voigt_multi.fit(self._wave[select], self._data[select], sigma=error[select], maxfev = 1000000)
+        return voigt_multi, voigt_multi.getPar()
+
     def fitParFile(
         self, par, err_sim=0, ftol=1e-8, xtol=1e-8, method="leastsq", parallel="auto"
     ):
@@ -3663,6 +3746,8 @@ class Spectrum1D(Header):
         cent_range=[-2.0, 2.0],
         fwhm_range=[0, 7],
         bg_range=[0, numpy.inf],
+        fiber_radius=0.01,
+        oversampling_factor=100,
         badpix_threshold=4,
         ftol=1e-8,
         xtol=1e-8,
@@ -3704,7 +3789,7 @@ class Spectrum1D(Header):
                 guess = [flux_guess, centre, fwhm_guess / 2.354, bg_guess]
                 bound_lower = [flux_range[0], centre+cent_range[0], fwhm_range[0]/2.354, bg_range[0]]
                 bound_upper = [flux_range[1], centre+cent_range[1], fwhm_range[1]/2.354, bg_range[1]]
-                gauss = fit_profile.Gaussian_const(guess)
+                gauss = fit_profile.Gaussian_const(guess, oversampling_factor=oversampling_factor, fiber_radius=fiber_radius)
             else:
                 guess = [flux_guess, centre, fwhm_guess / 2.354]
                 gauss = fit_profile.Gaussian(guess)
@@ -3731,7 +3816,7 @@ class Spectrum1D(Header):
                 select_2 = (self._wave>=cent[i]-3.5*fwhm[i]/2.354) & (self._wave<=cent[i]+3.5*fwhm[i]/2.354)
                 x = self._wave[select_2]
                 axs[i].plot(self._wave, (select)*numpy.nan+bn.nanmin(data), "ok")
-                axs_ = gauss.plot(self._wave[select], self._data[select], mask=self._mask[select], axs={"mod": axs[i]})
+                axs_ = gauss.plot(self._wave[select], self._data[select], self._error[select], mask=self._mask[select], axs={"mod": axs[i]})
                 axs[i] = axs_["mod"]
                 axs[i].axhline(bg[i], ls="--", color="tab:blue", lw=1)
                 if len(x) != 0:
@@ -3757,28 +3842,28 @@ class Spectrum1D(Header):
 
         return flux, cent, fwhm, bg
 
-    def extract_flux(self, centroids, sigmas, fiber_radius=1.4, npixels=20, replace_error=numpy.inf, return_basis=False):
+    def extract_flux(self, centroids, sigmas, fiber_radius=1.4, npixels=15, replace_error=numpy.inf, return_basis=False):
         '''
             fiber_radius is the image of the fiber core in pixels
             sigmas is the gaussian kernel sigma
 
         '''
-        def _gen_mexhat_basis(x, centroids, sigmas, fiber_radius, oversampling_factor):
-            dx = x[1, 0] - x[0, 0]
-            x_os = fit_profile.oversample(x, oversampling_factor)
-            dx_os = dx / oversampling_factor
+        # def _gen_mexhat_basis(x, centroids, sigmas, fiber_radius, oversampling_factor):
+        #     dx = x[1, 0] - x[0, 0]
+        #     x_os = fit_profile.oversample(x, oversampling_factor)
+        #     dx_os = dx / oversampling_factor
 
-            x_kernel = numpy.arange(0, 2*fiber_radius + dx_os, dx_os)
-            kernel = fit_profile.fiber_profile(centroids=fiber_radius, radii=fiber_radius, x=x_kernel)
-            psfs = fit_profile.gaussians((numpy.ones_like(centroids), centroids, sigmas), x_os.T, alpha=2, collapse=False)[0].T
+        #     x_kernel = numpy.arange(0, 2*fiber_radius + dx_os, dx_os)
+        #     kernel = fit_profile.fiber_profile(centroids=fiber_radius, radii=fiber_radius, x=x_kernel)
+        #     psfs = fit_profile.gaussians((numpy.ones_like(centroids), centroids, sigmas), x_os.T, alpha=2, collapse=False)[0].T
 
-            profiles = signal.fftconvolve(psfs, kernel.T, mode="same", axes=0)
-            profiles /= integrate.trapezoid(profiles, x_os, axis=0)[None, :]
+        #     profiles = signal.fftconvolve(psfs, kernel.T, mode="same", axes=0)
+        #     profiles /= integrate.trapezoid(profiles, x_os, axis=0)[None, :]
 
-            # reshape model into oversampled bins: (x, oversampling_factor)
-            profiles_binned = profiles.reshape((x.shape[0], oversampling_factor, x.shape[1]))
-            profiles = integrate.trapezoid(profiles_binned, dx=dx_os, axis=1)
-            return profiles
+        #     # reshape model into oversampled bins: (x, oversampling_factor)
+        #     profiles_binned = profiles.reshape((x.shape[0], oversampling_factor, x.shape[1]))
+        #     profiles = integrate.trapezoid(profiles_binned, dx=dx_os, axis=1)
+        #     return profiles
 
         nfibers = centroids.size
         # round up fiber locations
@@ -3803,8 +3888,11 @@ class Spectrum1D(Header):
         pos_t = numpy.trunc(centroids)
         yyv = numpy.linspace(pos_t-npixels, pos_t+npixels, 2*npixels+1, endpoint=True)
 
-        v = _gen_mexhat_basis(yyv, centroids, sigmas, fiber_radius=fiber_radius, oversampling_factor=100)
-
+        if Spectrum1D.fiberProfileCache is None:
+            print("Creating FiberProfileCache ...")
+            Spectrum1D.fiberProfileCache = FiberProfileCache(fiber_radius, 100, npixels)
+        v = Spectrum1D.fiberProfileCache(centroids, sigmas)
+        # v2 = _gen_mexhat_basis(yyv, centroids, sigmas, fiber_radius=fiber_radius, oversampling_factor=100)
         yyv = yyv.T.ravel()
         v = v.T.ravel()# / self._error[yyv.astype("int")]
 
@@ -4026,7 +4114,7 @@ class Spectrum1D(Header):
 
         return Spectrum1D(wave=wave, data=fluxes, error=errors, lsf=fwhms, mask=masks, sky=skies, sky_error=sky_errors)
 
-    def fit_lines(self, cwaves, dwave=8, axs=None):
+    def fit_lines(self, cwaves, dwave=8, fiber_radius=0.01, oversampling_factor=100, axs=None):
 
         cwaves_ = numpy.atleast_1d(cwaves)
 
@@ -4043,5 +4131,7 @@ class Spectrum1D(Header):
                                                     [-2.5, 2.5],
                                                     [max(fwhm_guess - 1.5, 0), fwhm_guess + 1.5],
                                                     [0.0, numpy.inf],
+                                                    fiber_radius=fiber_radius,
+                                                    oversampling_factor=oversampling_factor,
                                                     axs=axs)
         return flux, sky_wave, fwhm, bg
