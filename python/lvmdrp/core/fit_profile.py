@@ -11,12 +11,21 @@ from mpl_toolkits.axes_grid1.axes_divider import make_axes_locatable
 import astropy.io.fits as pyfits
 from astropy.modeling.functional_models import Voigt1D, Lorentz1D, Moffat1D
 from scipy import interpolate, integrate, optimize, special
+from scipy.special import wofz
 from scipy.signal import fftconvolve
 
 from lvmdrp.core.plot import plt, create_subplots, plot_gradient_fit, plot_radial_gradient_fit
 
 
+def Voigt_x(x, x_0=0, amplitude_L=1, sigma_L=0.5, sigma_G=0.001):
+    if sigma_L < 0:
+        return x * numpy.nan
+    return amplitude_L * numpy.real(wofz((x - x_0 + 1j*sigma_L)/sigma_G /numpy.sqrt(2))) / sigma_G /numpy.sqrt(2*numpy.pi)
+
+
 fact = numpy.sqrt(2.0 * numpy.pi)
+
+amp_fwhm = 2*numpy.sqrt(2*numpy.log(2))
 skew_factor = numpy.sqrt(2 / numpy.pi)
 
 def polyfit2d(x, y, z, order=3):
@@ -42,7 +51,7 @@ def polyval2d(x, y, m):
         z += a * x ** i * y ** j
     return z
 
-def gaussians(pars, x, alpha=2.3, collapse=True):
+def gaussians(pars, x, alpha=2, collapse=True):
     """Gaussian models for multiple components"""
     y = pars[0][:, None] * numpy.exp(-0.5 * numpy.abs((x[None, :] - pars[1][:, None]) / pars[2][:, None]) ** alpha) / (pars[2][:, None] * fact)
     if not collapse:
@@ -126,7 +135,7 @@ def oversample(x, oversampling_factor):
 
 def pixelate(x, models, oversampling_factor):
     models_bins = models.reshape((models.shape[0], models.shape[1]//oversampling_factor, oversampling_factor))
-    models_pixelated = integrate.trapezoid(models_bins, dx=x[1]-x[0], axis=2)
+    models_pixelated = bn.nanmean(models_bins, axis=2)
     return models_pixelated
 
 def update_params(func):
@@ -364,7 +373,10 @@ class Profile1D:
 
     def _fwhms(self, x):
         centroids = self._pars.get("centroids", self._fixed.get("centroids"))
-        half_max = self(centroids) / 2
+        x_centroids = numpy.array(list(set(x.tolist() + centroids.tolist())))
+        x_centroids = numpy.sort(x_centroids)
+        icentroids = numpy.where(x_centroids == centroids)
+        half_max = self(x_centroids)[icentroids] / 2
         if x is None:
             fwhms = numpy.ones_like(centroids) * numpy.nan
             errors = numpy.ones_like(centroids) * numpy.nan
@@ -375,7 +387,7 @@ class Profile1D:
         models = self(x_os, collapse=False)
 
         indices = numpy.asarray([numpy.where(model >= half_max[i])[0][[0,-1]] if numpy.isfinite(model).all() else [0, 0] for i, model in enumerate(models)])
-        fwhms = numpy.diff(x_os[indices], axis=1)
+        fwhms = numpy.atleast_1d(numpy.diff(x_os[indices], axis=1).squeeze())
         errors = numpy.ones_like(fwhms) / self._oversampling_factor
         masks = (fwhms == 0) | (~numpy.isfinite(fwhms))
 
@@ -681,17 +693,17 @@ class MexHatGaussians(Profile1D):
         kernel = fiber_profile(centroids=self._fiber_radius, radii=self._fiber_radius, x=x_kernel)
         psfs = gaussians((counts, centroids, sigmas), x_os, alpha=2.0, collapse=False)
 
-        profiles = fftconvolve(psfs, kernel, mode="same", axes=1)
-        profiles /= integrate.trapezoid(profiles, x_os, axis=1)[:, None]
-        profiles *= counts[:, None]
+        models_os = fftconvolve(psfs, kernel, mode="same", axes=1)
+        models_os /= integrate.trapezoid(models_os, x_os, axis=1)[:, None]
+        models_os *= counts[:, None]
 
         # pixelate models
-        models = self._pixelate(x_os, profiles)
+        models = self._pixelate(x_os, models_os)
 
         if return_all:
             if collapse:
-                return bn.nansum(models, 0), bn.nansum(profiles, 0), x_os
-            return models, profiles, x_os
+                return bn.nansum(models, 0), bn.nansum(models_os, 0), x_os
+            return models, models_os, x_os
         if collapse:
             return bn.nansum(models, 0)
         return models
@@ -705,25 +717,31 @@ class TopHatGaussians(Profile1D):
         "sigmas"
     )
 
-    def __init__(self, pars, fixed, bounds, ignore_nans=True, oversampling_factor=50, fiber_width=1.2):
+    def __init__(self, pars, fixed, bounds, ignore_nans=True, oversampling_factor=50, fiber_radius=1.2):
         super().__init__(pars, fixed, bounds, ignore_nans=ignore_nans, oversampling_factor=oversampling_factor)
 
-        self._fiber_width = fiber_width
+        self._fiber_radius = fiber_radius
 
-    def __call__(self, x):
+    def __call__(self, x, collapse=True, return_all=False):
         counts, centroids, sigmas = self.unpack_params()
 
         x_os = self._oversample_x(x)
 
-        width = int(self._fiber_width * self._oversampling_factor)
+        width = int(2 * self._fiber_radius * self._oversampling_factor)
         gaussians_ = gaussians((counts, centroids, sigmas), x_os, collapse=False)
         tophats = numpy.ones((counts.size, width)) / width
-        gaussians_tophats = fftconvolve(gaussians_, tophats, mode="same", axes=1)
+        models_os = fftconvolve(gaussians_, tophats, mode="same", axes=1)
 
-        model = self._pixelate(x_os, gaussians_tophats)
-        model = bn.nansum(gaussians_tophats, axis=0)
+        # pixelate models
+        models = self._pixelate(x_os, models_os)
 
-        return model
+        if return_all:
+            if collapse:
+                return bn.nansum(models, 0), bn.nansum(models_os, 0), x_os
+            return models, models_os, x_os
+        if collapse:
+            return bn.nansum(models, 0)
+        return models
 
 
 class NormalGaussians(Profile1D):
@@ -739,15 +757,20 @@ class NormalGaussians(Profile1D):
 
         self._alpha = alpha
 
-    def __call__(self, x):
+    def __call__(self, x, collapse=True, return_all=False):
         pars = self.unpack_params()
 
         x_os = self._oversample_x(x)
-        models = gaussians(pars, x_os, alpha=self._alpha, collapse=False)
-        models = self._pixelate(x_os, models)
+        models_os = gaussians(pars, x_os, alpha=self._alpha, collapse=False)
+        models = self._pixelate(x_os, models_os)
 
-        model = bn.nansum(models, axis=0)
-        return model
+        if return_all:
+            if collapse:
+                return bn.nansum(models, 0), bn.nansum(models_os, 0), x_os
+            return models, models_os, x_os
+        if collapse:
+            return bn.nansum(models, 0)
+        return models
 
 
 class SkewedGaussians(Profile1D):
@@ -762,7 +785,7 @@ class SkewedGaussians(Profile1D):
     def __init__(self, pars, fixed, bounds, ignore_nans=True, oversampling_factor=50):
         super().__init__(pars, fixed, bounds, ignore_nans=ignore_nans, oversampling_factor=oversampling_factor)
 
-    def __call__(self, x):
+    def __call__(self, x, collapse=True, return_all=False):
         counts, centroids, sigmas, alphas = self.unpack_params()
         # convert to PDF parameters
         deltas = self._deltas(alphas)
@@ -775,11 +798,16 @@ class SkewedGaussians(Profile1D):
         # calculate normalization
         norms = numpy.trapz(shape, x_os, axis=1)
 
-        models = counts[:, numpy.newaxis] * shape / norms[:, numpy.newaxis]
-        models = self._pixelate(x_os, models)
+        models_os = counts[:, numpy.newaxis] * shape / norms[:, numpy.newaxis]
+        models = self._pixelate(x_os, models_os)
 
-        model = bn.nansum(models, axis=0)
-        return model
+        if return_all:
+            if collapse:
+                return bn.nansum(models, 0), bn.nansum(models_os, 0), x_os
+            return models, models_os, x_os
+        if collapse:
+            return bn.nansum(models, 0)
+        return models
 
     def _deltas(self, alphas):
         return alphas / numpy.sqrt(1 + alphas**2)
@@ -822,17 +850,22 @@ class PolyGaussians(Profile1D):
     def __init__(self, pars, fixed, bounds, ignore_nans=True, oversampling_factor=50):
         super().__init__(pars, fixed, bounds, ignore_nans, oversampling_factor=oversampling_factor)
 
-    def __call__(self, x):
+    def __call__(self, x, collapse=True, return_all=False):
         counts, centroids, sigmas, a, b, c, d = self.unpack_params()
 
         x_os = self._oversample_x(x)
         gauss = gaussians((counts, centroids, sigmas), x_os, collapse=False)
         poly = a[:,None] + b[:,None]*x_os[None,:] + c[:,None]*x_os[None,:]**2 + d[:,None]*x_os[None,:]**3
-        models = gauss + poly
-        models = self._pixelate(x_os, models)
+        models_os = gauss + poly
+        models = self._pixelate(x_os, models_os)
 
-        model = bn.nansum(models, axis=0)
-        return model
+        if return_all:
+            if collapse:
+                return bn.nansum(models, 0), bn.nansum(models_os, 0), x_os
+            return models, models_os, x_os
+        if collapse:
+            return bn.nansum(models, 0)
+        return models
 
     def _polynomial(self, x):
         counts, centroids, sigmas, a, b, c, d = self.unpack_params()
@@ -852,18 +885,23 @@ class Moffats(Profile1D):
     def __init__(self, pars, fixed, bounds, ignore_nans=True, oversampling_factor=50):
         super().__init__(pars, fixed, bounds, ignore_nans, oversampling_factor=oversampling_factor)
 
-    def __call__(self, x):
+    def __call__(self, x, collapse=True, return_all=False):
         counts, centroids, sigmas, betas = self.unpack_params()
 
         x_os = self._oversample_x(x)
         moffats_ = numpy.asarray([Moffat1D(1.0, centroid, sigma, beta)(x_os) for centroid, sigma, beta in zip(centroids, sigmas, betas)])
         norms = integrate.trapezoid(moffats_, x_os, axis=1)
 
-        models = counts[:, None] * moffats_ / norms[:, None]
-        models = self._pixelate(x_os, models)
+        models_os = counts[:, None] * moffats_ / norms[:, None]
+        models = self._pixelate(x_os, models_os)
 
-        model = bn.nansum(models, axis=0)
-        return model
+        if return_all:
+            if collapse:
+                return bn.nansum(models, 0), bn.nansum(models_os, 0), x_os
+            return models, models_os, x_os
+        if collapse:
+            return bn.nansum(models, 0)
+        return models
 
 class Lorentzs(Profile1D):
 
@@ -876,16 +914,21 @@ class Lorentzs(Profile1D):
     def __init__(self, pars, fixed, bounds, ignore_nans=True, oversampling_factor=50):
         super().__init__(pars, fixed, bounds, ignore_nans=ignore_nans, oversampling_factor=oversampling_factor)
 
-    def __call__(self, x):
+    def __call__(self, x, collapse=True, return_all=False):
         counts, centroids, sigmas = self.unpack_params()
         fwhms = sigmas * 2.354
 
         x_os = self._oversample_x(x)
-        models = [count * Lorentz1D(2/(numpy.pi*fwhm), centroid, fwhm)(x_os) for count, centroid, fwhm in zip(counts, centroids, fwhms)]
-        models = self._pixelate(x_os, models)
+        models_os = [count * Lorentz1D(2/(numpy.pi*fwhm), centroid, fwhm)(x_os) for count, centroid, fwhm in zip(counts, centroids, fwhms)]
+        models = self._pixelate(x_os, models_os)
 
-        model = bn.nansum(models, axis=0)
-        return model
+        if return_all:
+            if collapse:
+                return bn.nansum(models, 0), bn.nansum(models_os, 0), x_os
+            return models, models_os, x_os
+        if collapse:
+            return bn.nansum(models, 0)
+        return models
 
 class Voigts(Profile1D):
 
@@ -899,17 +942,22 @@ class Voigts(Profile1D):
     def __init__(self, pars, fixed, bounds, ignore_nans=True, oversampling_factor=50):
         super().__init__(pars, fixed, bounds, ignore_nans, oversampling_factor=oversampling_factor)
 
-    def __call__(self, x):
+    def __call__(self, x, collapse=True, return_all=False):
         counts, centroids, sigmas_l, sigmas_g = self.unpack_params()
         fwhms_l = sigmas_l * 2.354
         fwhms_g = sigmas_g * 2.354
 
         x_os = self._oversample_x(x)
-        models = [count * Voigt1D(centroid, 2/(numpy.pi*fwhm_l), fwhm_l, fwhm_g, method="Scipy")(x) for count, centroid, fwhm_l, fwhm_g in zip(counts, centroids, fwhms_l, fwhms_g)]
-        models = self._pixelate(x_os, models)
+        models_os = [count * Voigt1D(centroid, 2/(numpy.pi*fwhm_l), fwhm_l, fwhm_g, method="Scipy")(x) for count, centroid, fwhm_l, fwhm_g in zip(counts, centroids, fwhms_l, fwhms_g)]
+        models = self._pixelate(x_os, models_os)
 
-        model = bn.nansum(models, axis=0)
-        return model
+        if return_all:
+            if collapse:
+                return bn.nansum(models, 0), bn.nansum(models_os, 0), x_os
+            return models, models_os, x_os
+        if collapse:
+            return bn.nansum(models, 0)
+        return models
 
 
 PROFILES = {
@@ -1566,9 +1614,24 @@ class Gaussian(fit_profile1D):
 
 class Gaussian_const(fit_profile1D):
     def _profile(self, x):
-        x_os = oversample(x, oversampling_factor=100)
-        model = numpy.exp(-0.5 * ((x_os - self._par[1]) / self._par[2]) ** 2) / (fact * self._par[2])
-        model = pixelate(x_os, models=self._par[0] * model[None, :] + self._par[3], oversampling_factor=100)[0]
+
+        counts = numpy.atleast_1d(self._par[0])
+        centroids = numpy.atleast_1d(self._par[1])
+        sigmas = numpy.atleast_1d(self._par[2])
+
+        x_os = oversample(x, oversampling_factor=self._oversampling_factor)
+        dx_os = x_os[1] - x_os[0]
+
+        x_kernel = numpy.arange(0, 2*self._fiber_radius + dx_os, dx_os)
+        kernel = fiber_profile(centroids=self._fiber_radius, radii=self._fiber_radius, x=x_kernel)
+        psfs = gaussians((counts, centroids, sigmas), x_os, alpha=2.0, collapse=False)
+
+        model_os = fftconvolve(psfs, kernel, mode="same", axes=1)
+        model_os /= integrate.trapezoid(model_os, x_os, axis=1)[:, None]
+        model_os *= counts
+        model_os += self._par[3]
+
+        model = pixelate(x_os, models=model_os, oversampling_factor=self._oversampling_factor)[0]
         return model
 
     def _guess_par(self, x, y):
@@ -1583,8 +1646,11 @@ class Gaussian_const(fit_profile1D):
         self._par[3] = ymin
         self._par[0] *= dx
 
-    def __init__(self, par):
+    def __init__(self, par, oversampling_factor=100, fiber_radius=0.01):
         fit_profile1D.__init__(self, par, self._profile, self._guess_par)
+
+        self._oversampling_factor = oversampling_factor
+        self._fiber_radius = fiber_radius if fiber_radius >= (1 / oversampling_factor) else (1 / oversampling_factor)
 
 
 class Gaussian_poly(fit_profile1D):
@@ -1606,6 +1672,203 @@ class Gaussian_poly(fit_profile1D):
     def __init__(self, par):
         fit_profile1D.__init__(self, par, self._profile, self._guess_par)
 
+class Voigts_x(fit_profile1D):
+    """
+    A class to fit data with the Voigt function.
+
+    ...
+
+    Methods
+    -------
+    _profile(x):
+        Returns a list of all the parameters: centroids, amplitudes, fwhm gaussians and fwhm lorentzians
+    """
+    def _profile(self, x):
+        '''
+        Fit data with the Voigt profile
+
+        Parameters
+        ----------
+            x : float
+                the point where the fit is going to be evaluated
+
+        Returns
+        -------
+            bn.nansum(y, axis=0) : list
+                a list of the parameters for all the x points
+        '''
+        ncomp = len(self._par) // 4
+        y = numpy.zeros((ncomp, len(x)), dtype=numpy.float32)
+        for i in range(ncomp):
+            y[i] = Voigt_x(x, amplitude_L=self._par[i],x_0=self._par[i+ncomp],
+                         sigma_G=self._par[i+2*ncomp], sigma_L=self._par[i+3*ncomp])
+        return bn.nansum(y, axis=0)
+
+    def __init__(self, par):
+        '''
+        Constructs the necessary attributes for the Voigt object.
+
+        Parameters
+        ----------
+            par : list
+                list of inicial parameters for the Voigt profile
+
+        Returns
+        -------
+        None
+        '''
+        fit_profile1D.__init__(self, par, self._profile)
+
+class Lorentzs_x(fit_profile1D):
+    '''
+    A class to fit data with the Lorentz function.
+
+    ...
+
+    Methods
+    -------
+    _profile(x):
+        Returns a list of all the parameters: centroids, amplitudes and fwhm lorentzians
+    '''
+    def _profile(self, x):
+        '''
+        Fit data with the Lorentz profile
+
+        Parameters
+        ----------
+            x : float
+                the point where the fit is going to be evaluated
+
+        Returns
+        -------
+            bn.nansum(y, axis=0) : list
+                a list of the parameters for all the x points
+        '''
+        ncomp = len(self._par) // 3
+        y = numpy.zeros((ncomp, len(x)), dtype=numpy.float32)
+        for i in range(ncomp):
+            v = Lorentz1D(amplitude=self._par[i],x_0=self._par[i+ncomp], fwhm=self._par[i+2*ncomp]*amp_fwhm)
+            y[i] = v(x)
+        return bn.nansum(y, axis=0)
+
+    def __init__(self, par):
+        '''
+        Constructs the necessary attributes for the Lorentz object.
+
+        Parameters
+        ----------
+            par : list
+                list of inicial parameters for the Lorentz profile
+
+        Returns
+        -------
+        None
+        '''
+        fit_profile1D.__init__(self, par, self._profile)
+
+class Voigts_width_x(fit_profile1D):
+    '''
+    A class to fit the fwhms with the Voigt function. It keeps the centroids constant
+
+    ...
+
+    Methods
+    -------
+    _profile(x):
+        Returns a list of all the parameters: centroids, amplitudes, fwhm gaussians and fwhm lorentzians
+    '''
+    def _profile(self, x):
+        '''
+        Fit data with the Voigt profile
+
+        Parameters
+        ----------
+            x : float
+                the point where the fit is going to be evaluate
+
+        Returns
+        -------
+            bn.nansum(y, axis=0) : list
+                a list of the parameters for all the x points. The centroids still constant
+        '''
+        ncomp = len(self._par) // 4
+        y = numpy.zeros((ncomp, len(x)), dtype=numpy.float32)
+        ncomp = len(self._args)
+        for i in range(ncomp):
+            self._par[i+2*ncomp] *= amp_fwhm
+            self._par[i+3*ncomp] *= amp_fwhm
+            v = Voigt1D(amplitude_L=self._par[i], x_0=self._arg[i+ncomp], fwhm_G=self._par[i+2*ncomp], fwhm_L=self._par[i+3*ncomp])
+            y[i] = v(x)
+        return bn.nansum(y, axis=0)
+
+    def __init__(self, par, args):
+        '''
+        Constructs the necessary attributes for the Voigt object.
+
+        Parameters
+        ----------
+            par : list
+                list of inicial parameters for the Voigt profile that are going to be fitted
+            args : list
+                list of inicial parameters for the Voigt profile that keep constant
+
+        Returns
+        -------
+        None
+        '''
+        fit_profile1D.__init__(self, par, self._profile, args=args)
+
+class Voigts_flux_x(fit_profile1D):
+    '''
+    A class to fit the amplitudes with the Voigt function. It keeps the centroids and fwhms constant
+
+    ...
+
+    Methods
+    -------
+    _profile(x):
+        Returns a list of all the parameters: centroids, amplitudes, fwhm gaussians and fwhm lorentzians
+    '''
+    def _profile(self, x):
+        '''
+        Fit data with the Voigt profile
+
+        Parameters
+        ----------
+            x : float
+                the point where the fit is going to be evaluate
+
+        Returns
+        -------
+            bn.nansum(y, axis=0) : list
+                a list of the parameters for all the x points. The centroids and fwhms still constant
+        '''
+        ncomp = len(self._par) // 4
+        y = numpy.zeros((ncomp, len(x)), dtype=numpy.float32)
+        ncomp = len(self._par)
+        for i in range(ncomp):
+            self._par[i+2*ncomp] *= amp_fwhm
+            self._par[i+3*ncomp] *= amp_fwhm
+            v = Voigt1D(amplitude_L=self._par[i], x_0=self._arg[i+ncomp], fwhm_G=self._arg[i+2*ncomp], fwhm_L=self._arg[i+3*ncomp])
+            y[i] = v(x)
+        return bn.nansum(y, axis=0)
+
+    def __init__(self, par, args):
+        '''
+        Constructs the necessary attributes for the Voigt object.
+
+        Parameters
+        ----------
+            par : list
+                list of inicial parameters for the Voigt profile that are going to be fitted
+            args : list
+                list of inicial parameters for the Voigt profile that keep constant
+
+        Returns
+        -------
+        None
+        '''
+        fit_profile1D.__init__(self, par, self._profile, args=args)
 
 class Gaussians(fit_profile1D):
     def _profile(self, x):
@@ -1615,24 +1878,6 @@ class Gaussians(fit_profile1D):
     def __init__(self, par):
         fit_profile1D.__init__(self, par, self._profile)
 
-
-class Gaussians_cent(fit_profile1D):
-    def _profile(self, x):
-        pars = numpy.split(self._par, 2)
-        pars = [pars[0], pars[1], self._args]
-        return gaussians(pars, x)
-
-    def __init__(self, par, args):
-        fit_profile1D.__init__(self, par, self._profile, args=args)
-
-class Gaussians_centroids(fit_profile1D):
-    def _profile(self, x):
-        args = numpy.split(self._args, 2)
-        pars = [args[0], self._par, args[1]]
-        return gaussians(pars, x)
-
-    def __init__(self, par, args):
-        fit_profile1D.__init__(self, par, self._profile, args=args)
 
 class Gaussians_width(fit_profile1D):
     def _profile(self, x):

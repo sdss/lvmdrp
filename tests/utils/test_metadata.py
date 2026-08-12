@@ -63,6 +63,9 @@ def test_collect_header_data(make_framefits):
                'std_mean_senb': 2.0e-14, 'std_mean_senr': 2.0e-14, 'std_mean_senz': 2.0e-14,
                'sci_mean_senb': 2.0e-14, 'sci_mean_senr': 2.0e-14, 'sci_mean_senz': 2.0e-14,
                'mod_mean_senb': 2.0e-14, 'mod_mean_senr': 2.0e-14, 'mod_mean_senz': 2.0e-14,
+               'std_rms_senb': 2.0e-14, 'std_rms_senr': 2.0e-14, 'std_rms_senz': 2.0e-14,
+               'sci_rms_senb': 2.0e-14, 'sci_rms_senr': 2.0e-14, 'sci_rms_senz': 2.0e-14,
+               'mod_rms_senb': 2.0e-14, 'mod_rms_senr': 2.0e-14, 'mod_rms_senz': 2.0e-14,
                'fluxcal': "MOD"}
 
     assert hdr_data == expdata

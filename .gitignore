@@ -10,6 +10,8 @@ coverage.xml
 # Sphinx
 doc/api
 doc/_build
+docs/sphinx/doctrees/
+docs/sphinx/html/
 
 # iPython
 docs/nb/.ipynb_checkpoints

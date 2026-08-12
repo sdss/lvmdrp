@@ -255,16 +255,19 @@ def sky_pars_header(header):
 
     """
 
+    if len(header) == 0:
+        return {}
+
     # extract useful header information,
-    sci_ra = header.get("SCIRA")
-    sci_dec = header.get("SCIDEC")
-    sci_alt = header.get("SCIALT")
-    skye_ra = header.get("SKYERA")
-    skye_dec = header.get("SKYEDEC")
-    skye_alt = header.get("SKYEALT")
-    skyw_ra = header.get("SKYWRA")
-    skyw_dec = header.get("SKYWDEC")
-    skyw_alt = header.get("SKYWALT")
+    sci_ra = header.get("SCIRA", np.nan)
+    sci_dec = header.get("SCIDEC", np.nan)
+    sci_alt = header.get("SCIALT", np.nan)
+    skye_ra = header.get("SKYERA", np.nan)
+    skye_dec = header.get("SKYEDEC", np.nan)
+    skye_alt = header.get("SKYEALT", np.nan)
+    skyw_ra = header.get("SKYWRA", np.nan)
+    skyw_dec = header.get("SKYWDEC", np.nan)
+    skyw_alt = header.get("SKYWALT", np.nan)
     obstime = header["OBSTIME"]
 
 

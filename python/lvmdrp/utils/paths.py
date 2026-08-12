@@ -66,32 +66,45 @@ def mjd_from_expnum(expnum: Union[int, str, list, tuple]) -> List[int]:
     return [int(mjd)]
 
 
-def get_calib_paths(mjd, version=None, cameras="*", flavors=CALIBRATION_PRODUCTS, nightly=False, from_sandbox=True, return_mjd=False, only_existing=False):
-    """Returns a dictionary containing paths for calibration frames
+def get_calib_paths(mjd, version=None, cameras="*", flavors=CALIBRATION_PRODUCTS, epochs=None, nightly=False, from_sandbox=True, return_mjd=False, only_existing=False):
+    """Return calibration file paths for a given reduction epoch.
+
+    The helper resolves the most relevant master-calibration MJD for the input
+    MJD and builds a mapping of calibration file paths for the requested
+    cameras and flavors.
 
     Parameters
     ----------
     mjd : int
-        MJD to reduce
+        MJD of the science or calibration frame for which paths are needed.
     version : str, optional
-        Version of the pipeline to pull calibrations from, by default None
-    cameras : list[str]|str, optional
-        List of cameras or wildcard to match, by default '*'
-    flavors : list, tuple or set
-        Only get paths for this calibrations, by default all available flavors
-    nightly : bool
-        Whether get nightly calibration or long-term paths, defaults to False
+        Pipeline version to resolve long-term calibration paths from, by default
+        None.
+    cameras : list[str] | str, optional
+        Camera names or wildcard pattern to match, by default ``"*"``.
+    flavors : list, tuple or set, optional
+        Calibration flavors to include. By default all available flavors are
+        considered.
+    epochs : dict, optional
+        Mapping of epoch MJDs to epoch metadata. When provided, the helper uses
+        the latest epoch boundary that is less than or equal to ``mjd`` to
+        select the calibration MJD.
+    nightly : bool, optional
+        Whether to prefer nightly calibration paths over long-term ones, by
+        default False.
     from_sandbox : bool, optional
-        Fall back option to pull calibrations from sandbox, by default False
+        Whether to resolve calibrations from the sandbox/master directory,
+        by default True.
     return_mjd : bool, optional
-        Return MJD of the selected calibrations, by default False
+        Whether to also return the selected calibration MJD, by default False.
     only_existing : bool, optional
-        Return only existing paths in calibrations dictionary, by default False
+        Whether to return only paths that already exist on disk, by default
+        False.
 
     Returns
     -------
-    calibs : dict[str, dict[str, str]]
-        a dictionary containing calibrations for the given cameras
+    dict[str, dict[str, str]]
+        Calibration path mapping for the requested cameras and flavors.
     """
     if version is None and not from_sandbox:
         raise ValueError(f"You must provide a version string to get calibration paths, {version = } given")
@@ -102,8 +115,13 @@ def get_calib_paths(mjd, version=None, cameras="*", flavors=CALIBRATION_PRODUCTS
     tileid = 11111
     tilegrp = tileid_grp(tileid)
 
-    # get long-term MJDs from sandbox using get_master_mjd, else use given MJD
-    cals_mjd = get_master_mjd(mjd) if from_sandbox else mjd
+    # define calibration MJD: take MJD from sandbox or assume
+    if epochs is None:
+        cals_mjd = get_master_mjd(mjd) if from_sandbox else mjd
+    else:
+        epoch_mjds = sorted(int(cals_mjd) for cals_mjd in epochs.keys())
+        matching_mjds = [cals_mjd for cals_mjd in epoch_mjds if cals_mjd <= int(mjd)]
+        cals_mjd = matching_mjds[-1] if matching_mjds else int(mjd)
 
     # define root path to pixel flats and masks
     # TODO: remove this once sdss-tree are updated with the corresponding species
