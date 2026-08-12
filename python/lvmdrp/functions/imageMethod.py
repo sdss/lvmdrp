@@ -6,10 +6,12 @@ from __future__ import annotations
 import multiprocessing
 import os
 import sys
+import warnings
 from itertools import product
 from copy import deepcopy as copy
 from multiprocessing import Pool
 from matplotlib.gridspec import GridSpec
+from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 
 import numpy
 import bottleneck as bn
@@ -25,7 +27,7 @@ from typing import List, Tuple, Dict
 from lvmdrp.core import fit_profile as fp
 
 from lvmdrp import log, DRP_COMMIT, __version__ as DRPVER
-from lvmdrp.core.constants import CONFIG_PATH, SPEC_CHANNELS, ARC_LAMPS, LVM_REFERENCE_COLUMN, LVM_NFIBERS, LVM_NBLOCKS
+from lvmdrp.core.constants import CONFIG_PATH, SPEC_CHANNELS, ARC_LAMPS, LVM_REFERENCE_COLUMN, LVM_NFIBERS, LVM_NBLOCKS, LVM_BLOCKSIZE
 from lvmdrp.utils.decorators import skip_on_missing_input_path, drop_missing_input_paths
 from lvmdrp.utils.bitmask import QualityFlag
 from lvmdrp.core.fit_profile import Voigts
@@ -38,7 +40,7 @@ from lvmdrp.core.image import (
     glueImages,
     loadImage,
 )
-from lvmdrp.core.plot import plt, create_subplots, create_straylight_axes, plot_detrend, plot_error, plot_strips, plot_fiber_thermal_shift, save_fig
+from lvmdrp.core.plot import plt, create_subplots, create_straylight_axes, plot_detrend, plot_error, plot_strips, save_fig
 from lvmdrp.core.rss import RSS
 from lvmdrp.core.spectrum1d import Spectrum1D, _spec_from_lines, _cross_match, FiberProfileCache
 from lvmdrp.core.tracemask import TraceMask
@@ -337,7 +339,7 @@ def _get_wave_selection(waves, lines_list, window):
 
 def _fix_fiber_thermal_shifts(image, trace_cent, trace_width=None, trace_amp=None, fiber_model=None,
                               columns=[500, 1000, 1500, 2000, 2500, 3000],
-                              column_width=25, shift_range=[-5,5], axs=None):
+                              column_width=100, shift_range=[-5,5], per_block=False, axs=None):
     """Returns the updated fiber trace centroids after fixing the thermal shifts
 
     Parameters
@@ -355,7 +357,7 @@ def _fix_fiber_thermal_shifts(image, trace_cent, trace_width=None, trace_amp=Non
     columns : list
         list of columns to evaluate the continuum model, defaults to [500, 1000, 1500, 2000, 2500, 3000, 3500]
     column_width : int
-        number of columns to add around the given columns, defaults to 25
+        number of columns to add around the given columns, defaults to 100
     shift_range : list
         range of shifts to consider, defaults to [-5,5]
 
@@ -385,33 +387,136 @@ def _fix_fiber_thermal_shifts(image, trace_cent, trace_width=None, trace_amp=Non
     specid = int(camera[1])
 
     # calculate thermal shifts
-    column_shifts = image.measure_fiber_shifts(fiber_model, trace_cent, columns=columns, column_width=column_width, shift_range=shift_range, axs=axs[:2])
-    # shifts stats
-    median_shift = numpy.nan_to_num(bn.nanmedian(column_shifts, axis=0))
-    std_shift = numpy.nan_to_num(bn.nanstd(column_shifts, axis=0))
-    if numpy.abs(median_shift) > 0.5:
-        log.warning(f"large thermal shift measured: {','.join(map(str, column_shifts))} pixels for {mjd = }, {expnum = }, {camera = }")
-        image.add_header_comment(f"large thermal shift: {','.join(map(str, column_shifts))} pixels {camera = }")
-        log.warning(f"measured shifts median+/-stddev = {median_shift:.4f}+/-{std_shift:.4f} pixels")
-    else:
-        log.info(f"measured shifts median+/-stddev = {median_shift:.4f}+/-{std_shift:.4f} pixels for {mjd = }, {expnum = }, {camera = }")
+    centroid_blocks = [trace_cent.get_block(iblock) for iblock in range(LVM_NBLOCKS)]  if per_block else [trace_cent]
+    log.info(f"measuring fiber shifts for {mjd = } {expnum = }, {camera = }")
+    column_shifts = []
+    lags, cc, cc_model = [], [], []
+    for cent_block in centroid_blocks:
+        shifts, matches = image.measure_fiber_shifts(fiber_model, cent_block, columns=columns, column_width=column_width, shift_range=shift_range)
+
+        column_shifts.append(shifts)
+
+        lags.append(matches.get("lags"))
+        cc.append(matches.get("cc"))
+        cc_model.append(matches.get("model"))
+
+    # calculate per-fiber-block statistics
+    column_shifts = numpy.asarray(column_shifts)
+    mu = numpy.nan_to_num(bn.nanmedian(column_shifts))
+    sg = numpy.nan_to_num(bn.nanstd(column_shifts))
+    mu_blk = numpy.nan_to_num(bn.nanmedian(column_shifts, axis=1))
+    sg_blk = numpy.nan_to_num(bn.nanstd(column_shifts, axis=1))
+    mu_col = numpy.nan_to_num(bn.nanmedian(column_shifts, axis=0))
+    sg_col = numpy.nan_to_num(bn.nanstd(column_shifts, axis=0))
+
+    # report outlying shifts
+    threshold = 0.5
+    for idx in zip(*numpy.where(numpy.abs(column_shifts) > threshold)):
+        if any(idx):
+            b, c = idx[0] + 1, columns[idx[1]]
+            warnings.warn(f"large thermal shift @ (block, column) = {(b, c)}: {column_shifts[idx]:.3f}")
+            image.add_header_comment(f"large thermal shift @ (block, column) = {(b, c)}: {column_shifts[idx]:.3f}")
+
+    # report measured shifts
+    for iblock, (block_shifts, block_median, block_std) in enumerate(zip(column_shifts, mu_blk, sg_blk)):
+        log.info(
+            "  %s: median = %.3f+/-%.3f pixels, per column shifts = %s",
+            f"fiber block {iblock+1:2d}" if per_block else "all fibers",
+            block_median,
+            block_std,
+            numpy.round(block_shifts,3).tolist(),
+        )
 
     # apply average shift to the zeroth order trace coefficients
+    per_fiber_shifts = numpy.repeat(mu_blk, LVM_BLOCKSIZE if per_block else LVM_NFIBERS)
     trace_cent_fixed = copy(trace_cent)
     if trace_cent_fixed._coeffs is not None:
-        trace_cent_fixed._coeffs[:, 0] += median_shift
+        trace_cent_fixed._coeffs[:, 0] += per_fiber_shifts
         trace_cent_fixed.eval_coeffs()
     else:
-        trace_cent_fixed._data += median_shift
+        trace_cent_fixed._data += per_fiber_shifts[:, None]
     if trace_cent_fixed._slitmap is not None:
-        trace_cent_fixed._slitmap[f"ypix_{camera[0]}"] = trace_cent_fixed._slitmap[f"ypix_{camera[0]}"].astype("float32")
+        trace_cent_fixed._slitmap[f"ypix_{channel}"] = trace_cent_fixed._slitmap[f"ypix_{channel}"].astype("float32")
         select_spec = trace_cent_fixed._slitmap["spectrographid"] == specid
-        trace_cent_fixed._slitmap[f"ypix_{channel}"][select_spec] += numpy.nan_to_num(median_shift)
+        trace_cent_fixed._slitmap[f"ypix_{channel}"][select_spec] += numpy.nan_to_num(per_fiber_shifts)
 
-    # save columns measured for thermal shifts
-    plot_fiber_thermal_shift(columns, column_shifts, median_shift, std_shift, ax=axs[2])
+    # make QA plots for fiber shift measurements
+    if axs is not None:
+        blocks = numpy.arange(column_shifts.shape[0]) + 1
+        flagged = list(zip(*numpy.where(numpy.abs(column_shifts) > threshold)))
+        idx = numpy.argpartition(numpy.abs(column_shifts).ravel(), -5)[-5:][::-1]
+        worse = list(zip(*numpy.unravel_index(idx, column_shifts.shape)))
 
-    return trace_cent_fixed, column_shifts, median_shift, std_shift, fiber_model
+        ax_col = axs.get("column")
+        ax_blk = axs.get("block")
+        ax_flg = axs.get("flagged")
+        ax_ccf = axs.get("ccf")
+
+
+        if ax_col is not None:
+            for shift in column_shifts:
+                ax_col.plot(columns, shift, ".-", lw=0.5, alpha=0.5)
+            ax_col.plot(columns, mu_col, "-k")
+            ax_col.fill_between(columns, mu_col-sg_col, mu_col+sg_col, lw=0, color="0.7", alpha=0.5, zorder=-1)
+            ax_col.set_ylim((mu-3*sg).max(), (mu+3*sg).max())
+            ax_col.set_xticks(columns)
+
+        if ax_blk is not None:
+            for shift in column_shifts.T:
+                ax_blk.plot(blocks, shift, ".-", lw=0.5, alpha=0.5)
+            ax_blk.plot(blocks, mu_blk, "-k")
+            ax_blk.fill_between(blocks, mu_blk-sg_blk, mu_blk+sg_blk, lw=0, color="0.7", alpha=0.5, zorder=-1)
+            ax_blk.set_xlim(0.5, 18.5)
+            ax_blk.set_ylim((mu-3*sg).max(), (mu+3*sg).max())
+            ax_blk.set_xticks(blocks)
+
+        if ax_flg is not None:
+            for b, c in worse:
+                ax_flg.plot(b+1, c+1, "ow", mew=0, ms=15)
+            for b, c in flagged:
+                ax_flg.plot(b+1, c+1, "x", mew=2, color="tab:red", ms=10)
+            im = ax_flg.imshow(column_shifts.T, origin="lower", extent=[0.5, 18.5, 0.5, len(columns)+0.5], interpolation="none", cmap="coolwarm", vmin=-threshold, vmax=threshold, aspect="auto")
+            ax_flg.set_xticks(range(1, len(blocks)+1))
+            ax_flg.set_yticks(range(1, len(columns)+1))
+            ax_flg.set_yticklabels(columns)
+            cax = inset_axes(ax_flg,
+                             width="20%",
+                             height="5%",
+                             loc="upper right",
+                            #  bbox_transform=ax_flg.transAxes,
+                             borderpad=0.3)
+            cb = ax_flg.figure.colorbar(im, cax=cax, orientation="horizontal")
+            cb.ax.xaxis.set_ticks_position("bottom")
+            cb.ax.xaxis.set_label_position("bottom")
+            cax.tick_params(labelsize="small")
+            cb.set_label("Shift", fontsize="small")
+
+        if ax_ccf is not None:
+            for i, (b,c) in enumerate(worse):
+                fl = (b, c) in flagged
+
+                lag = lags[b][c]
+                mu_col = column_shifts[b, c]
+                mask = (mu_col-7 <= lag) & (lag <= mu_col+7)
+                mask_r = (mu_col-2.5 <= lag) & (lag <= mu_col+2.5)
+                ax_ccf[i].axhline(ls="--", color="0.7", lw=1)
+                ax_ccf[i].axvline(ls="--", color="0.7", lw=1)
+                ax_ccf[i].plot(lag[mask], cc[b][c][mask], "-", color="0.2")
+                ax_ccf[i].plot(lag[mask_r], cc_model[b][c](lag[mask_r]), "-", color="tab:red")
+                ax_ccf[i].plot(lag[mask_r], (cc_model[b][c](lag) - cc[b][c])[mask_r], ".", color="tab:red")
+                ax_ccf[i].axvline(column_shifts[b, c], ls="--", color="tab:red", lw=1)
+                ax_ccf[i].axhspan(-0.02, 0.02, color="0.7", alpha=0.5, lw=0)
+                ax_ccf[i].set_title(f"({blocks[b]}, {columns[c]}): shift = {column_shifts[b, c]:.2f}", fontsize="large")
+                ax_ccf[i].set_xlabel("Lag (pixel)")
+
+                if fl:
+                    ax_ccf[i].spines['bottom'].set_color("tab:red")
+                    ax_ccf[i].spines['top'].set_color("tab:red")
+                    ax_ccf[i].spines['right'].set_color("tab:red")
+                    ax_ccf[i].spines['left'].set_color("tab:red")
+                    ax_ccf[i].tick_params(colors="tab:red", which="both")
+
+    return trace_cent_fixed, column_shifts, mu, sg, fiber_model
 
 
 def select_lines_2d(in_images, out_mask, in_cent_traces, in_waves, lines_list=None, y_widths=3, wave_widths=0.6*5, image_shape=(4080, 4120), channels="brz", display_plots=False):
@@ -2178,7 +2283,7 @@ def extract_spectra(
     in_acorr: str = None,
     assume_thermal_shift: float = None,
     columns: List[int] = [500, 750, 1000, 1250, 1500, 1750, 2000, 2250, 2500, 2750, 3000],
-    column_width: int = 50,
+    column_width: int = 100,
     method: str = "optimal",
     aperture: int = 3,
     fwhm: float = 2.5,
@@ -2256,44 +2361,47 @@ def extract_spectra(
     else:
         fiber_model = None
 
-    shift_range = [-3,3]
-    fig = plt.figure(figsize=(15, 4*len(columns)), layout="constrained")
-    fig.suptitle(f"Thermal fiber shifts for {mjd = }, {camera = }, {expnum = }")
-    gs = GridSpec(len(columns)+1, 15, figure=fig)
-    axs_cc, axs_fb = [], []
-    for icol in range(len(columns)):
-        axs_cc.append(fig.add_subplot(gs[icol, :3], sharex=axs_cc[-1] if icol > 0 else None))
-        axs_fb.append(fig.add_subplot(gs[icol, 3:], sharex=axs_fb[-1] if icol > 0 else None, sharey=axs_fb[-1] if icol > 0 else None))
-
-        if icol != len(columns)-1:
-            axs_cc[-1].tick_params(labelbottom=False)
-            axs_fb[-1].tick_params(labelbottom=False)
-    ax_shift = fig.add_subplot(gs[-1:, :])
-    axs_cc[0].set_title("Cross-correlation")
-    axs_cc[-1].set_xlabel("Shift (pixel)")
-    axs_fb[-1].set_xlabel("Y (pixel)")
-    # axs_cc[-1].set_xlim(shift_range)
+    fig = plt.figure(figsize=(15, 4*4), layout="constrained")
+    fig.subplots_adjust(hspace=0.5)
+    fig.suptitle(f"Thermal fiber shifts for {mjd = }, {camera = }, {expnum = }", fontsize="x-large")
+    gs = GridSpec(4, 15, figure=fig)
+    # plot shifts versus colunms
+    ax_col = fig.add_subplot(gs[0, :])
+    ax_col.set_title("Concensus of fiber trace positions vs columns", loc="left")
+    ax_col.axhline(ls="--", lw=1, color="0.7")
+    ax_col.set_xlabel("Columns (pixel)")
+    ax_col.set_ylabel("Shift (pixel)")
+    # plot shifts versus fiber blocks
+    ax_blk = fig.add_subplot(gs[1, :])
+    ax_blk.set_title("Consensus of fiber trace positions vs fiber block", loc="left")
+    ax_blk.axhline(ls="--", lw=1, color="0.7")
+    ax_blk.set_xlabel("Block ID")
+    ax_blk.set_ylabel("Shift (pixel)")
+    # plot shifts map
+    ax_flg = fig.add_subplot(gs[2, :])
+    ax_flg.set_title("Flagged measurements", loc="left")
+    ax_flg.set_xlabel("Block ID")
+    ax_flg.set_ylabel("Column (pixel)")
+    ax_ccs = [fig.add_subplot(gs[3, i*3:(i+1)*3]) for i in range(5)]
+    ax_ccs[0].set_ylabel("Normalized CCF")
 
     # fix centroids for thermal shifts
     if assume_thermal_shift is not None:
         log.info(f"assuming fiber thermal shift {assume_thermal_shift:.4f}")
         median_shift = assume_thermal_shift
-        # std_shift = 0
-        # shifts = numpy.ones_like(columns) * median_shift
         trace_mask._data += median_shift
     else:
         log.info(f"measuring fiber thermal shifts @ columns: {','.join(map(str, columns))}")
         trace_mask._slitmap[f"ypix_{camera[0]}"] = trace_mask._slitmap[f"ypix_{camera[0]}"].astype("float32")
-        for iblock in range(LVM_NBLOCKS):
-            cent_block = trace_mask.get_block(iblock=iblock)
-            width_block = trace_sigma.get_block(iblock=iblock)
-            cent_block, _, median_shift, _, _ = _fix_fiber_thermal_shifts(img, cent_block, width_block,
-                                                                          fiber_model=fiber_model,
-                                                                          trace_amp=10000,
-                                                                          columns=columns,
-                                                                          column_width=column_width,
-                                                                          shift_range=shift_range, axs=[axs_cc, axs_fb, ax_shift])
-            trace_mask.set_block(iblock=iblock, from_instance=cent_block)
+
+        trace_mask, _, median_shift, _, _ = _fix_fiber_thermal_shifts(img, trace_mask, trace_sigma,
+                                                                        fiber_model=fiber_model,
+                                                                        trace_amp=10000,
+                                                                        columns=columns,
+                                                                        column_width=column_width,
+                                                                        shift_range=[-3, 3],
+                                                                        per_block=True,
+                                                                        axs={"column": ax_col, "block": ax_blk, "flagged": ax_flg, "ccf": ax_ccs})
 
         save_fig(fig, product_path=out_rss, to_display=display_plots, figure_path="qa", label="fiber_thermal_shifts")
 

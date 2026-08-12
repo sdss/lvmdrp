@@ -11,8 +11,15 @@ from astropy.time import Time
 import astropy.units as u
 from astropy.table import Table
 import matplotlib.backends.backend_pdf
-
 from lvmdrp.core.constants import LVM_ELEVATION, LVM_LAT, LVM_LON
+
+import warnings
+
+warnings.filterwarnings(
+    "ignore",
+    category=UserWarning,
+    message=".*tight.*"
+)
 
 
 # Measure line fluxes by direct integration of the spectra and add to table
