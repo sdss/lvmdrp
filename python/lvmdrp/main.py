@@ -1683,6 +1683,10 @@ def science_reduction(expnum: int,
             with Timer(name='Fiberflat '+frame_path, logger=log.info):
                 apply_fiberflat(in_rss=wsci_path, out_frame=frame_path, in_flat=mflat_path)
 
+            # correct thermal shift in wavelength direction
+            with Timer(name='Thermal Shifts '+frame_path, logger=log.info):
+                shift_wave_skylines(in_frame=frame_path, out_frame=frame_path)
+
     if skip_waveres:
             log.info("skipping wavelength resampling and spline sky extrapolation")
     else:
@@ -1692,10 +1696,6 @@ def science_reduction(expnum: int,
                                 kind='s', camera=channel, imagetype=sci_imagetyp, expnum=expnum)
             hsci_path = path.full('lvm_anc', mjd=sci_mjd, tileid=sci_tileid, drpver=drpver,
                                 kind='h', camera=channel, imagetype=sci_imagetyp, expnum=expnum)
-
-            # correct thermal shift in wavelength direction
-            with Timer(name='Thermal Shifts '+frame_path, logger=log.info):
-                shift_wave_skylines(in_frame=frame_path, out_frame=frame_path)
 
             # interpolate sky fibers
             with Timer(name='Interpolate Sky '+ssci_path, logger=log.info):
