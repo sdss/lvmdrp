@@ -496,7 +496,7 @@ def _fix_fiber_thermal_shifts(image, trace_cent, trace_width=None, trace_amp=Non
                 fl = (b, c) in flagged
 
                 lag = lags[b][c]
-                mu_col = column_shifts[b, c]
+                mu_col = numpy.nan_to_num(column_shifts[b, c])
                 mask = (mu_col-7 <= lag) & (lag <= mu_col+7)
                 mask_r = (mu_col-2.5 <= lag) & (lag <= mu_col+2.5)
                 ax_ccf[i].axhline(ls="--", color="0.7", lw=1)
