@@ -444,7 +444,7 @@ def _fix_fiber_thermal_shifts(image, trace_cent, trace_width=None, trace_amp=Non
     if axs is not None:
         blocks = numpy.arange(column_shifts.shape[0]) + 1
         flagged = list(zip(*numpy.where(numpy.abs(column_shifts) > threshold)))
-        idx = numpy.argpartition(numpy.abs(column_shifts).ravel(), -5)[-5:][::-1]
+        idx = numpy.argpartition(numpy.abs(numpy.nan_to_num(column_shifts)).ravel(), -5)[-5:][::-1]
         worse = list(zip(*numpy.unravel_index(idx, column_shifts.shape)))
 
         ax_col = axs.get("column")
@@ -493,8 +493,6 @@ def _fix_fiber_thermal_shifts(image, trace_cent, trace_width=None, trace_amp=Non
 
         if ax_ccf is not None:
             for i, (b,c) in enumerate(worse):
-                fl = (b, c) in flagged
-
                 lag = lags[b][c]
                 mu_col = numpy.nan_to_num(column_shifts[b, c])
                 mask = (mu_col-7 <= lag) & (lag <= mu_col+7)
@@ -507,9 +505,10 @@ def _fix_fiber_thermal_shifts(image, trace_cent, trace_width=None, trace_amp=Non
                 ax_ccf[i].axvline(column_shifts[b, c], ls="--", color="tab:red", lw=1)
                 ax_ccf[i].axhspan(-0.02, 0.02, color="0.7", alpha=0.5, lw=0)
                 ax_ccf[i].set_title(f"({blocks[b]}, {columns[c]}): shift = {column_shifts[b, c]:.2f}", fontsize="large")
+                ax_ccf[i].set_ylim(-0.1, 1.1)
                 ax_ccf[i].set_xlabel("Lag (pixel)")
 
-                if fl:
+                if (b, c) in flagged:
                     ax_ccf[i].spines['bottom'].set_color("tab:red")
                     ax_ccf[i].spines['top'].set_color("tab:red")
                     ax_ccf[i].spines['right'].set_color("tab:red")
