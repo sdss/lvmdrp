@@ -409,8 +409,12 @@ def _fix_fiber_thermal_shifts(image, trace_cent, trace_width=None, trace_amp=Non
     mu_col = numpy.nan_to_num(bn.nanmedian(column_shifts, axis=0))
     sg_col = numpy.nan_to_num(bn.nanstd(column_shifts, axis=0))
 
-    # report outlying shifts
+    # threshold large values
     threshold = 0.5
+    mu_blk_th = numpy.where(numpy.abs(mu_blk) <= threshold, mu_blk, mu)
+    mu_col_th = numpy.where(numpy.abs(mu_col) <= threshold, mu_col, mu)
+
+    # report thresholded shifts
     for idx in zip(*numpy.where(numpy.abs(column_shifts) > threshold)):
         if any(idx):
             b, c = idx[0] + 1, columns[idx[1]]
@@ -418,7 +422,7 @@ def _fix_fiber_thermal_shifts(image, trace_cent, trace_width=None, trace_amp=Non
             image.add_header_comment(f"large thermal shift @ (block, column) = {(b, c)}: {column_shifts[idx]:.3f}")
 
     # report measured shifts
-    for iblock, (block_shifts, block_median, block_std) in enumerate(zip(column_shifts, mu_blk, sg_blk)):
+    for iblock, (block_shifts, block_median, block_std) in enumerate(zip(column_shifts, mu_blk_th, sg_blk)):
         log.info(
             "  %s: median = %.3f+/-%.3f pixels, per column shifts = %s",
             f"fiber block {iblock+1:2d}" if per_block else "all fibers",
@@ -428,7 +432,7 @@ def _fix_fiber_thermal_shifts(image, trace_cent, trace_width=None, trace_amp=Non
         )
 
     # apply average shift to the zeroth order trace coefficients
-    per_fiber_shifts = numpy.repeat(mu_blk, LVM_BLOCKSIZE if per_block else LVM_NFIBERS)
+    per_fiber_shifts = numpy.repeat(mu_blk_th, LVM_BLOCKSIZE if per_block else LVM_NFIBERS)
     trace_cent_fixed = copy(trace_cent)
     if trace_cent_fixed._coeffs is not None:
         trace_cent_fixed._coeffs[:, 0] += per_fiber_shifts
@@ -456,16 +460,18 @@ def _fix_fiber_thermal_shifts(image, trace_cent, trace_width=None, trace_amp=Non
         if ax_col is not None:
             for shift in column_shifts:
                 ax_col.plot(columns, shift, ".-", lw=0.5, alpha=0.5)
-            ax_col.plot(columns, mu_col, "-k")
-            ax_col.fill_between(columns, mu_col-sg_col, mu_col+sg_col, lw=0, color="0.7", alpha=0.5, zorder=-1)
+            ax_col.plot(columns, mu_col, "--", color="0.7")
+            ax_col.plot(columns, mu_col_th, "-", color="0.2")
+            ax_col.fill_between(columns, mu_col_th-sg_col, mu_col_th+sg_col, lw=0, color="0.7", alpha=0.5, zorder=-1)
             ax_col.set_ylim((mu-3*sg).max(), (mu+3*sg).max())
             ax_col.set_xticks(columns)
 
         if ax_blk is not None:
             for shift in column_shifts.T:
                 ax_blk.plot(blocks, shift, ".-", lw=0.5, alpha=0.5)
-            ax_blk.plot(blocks, mu_blk, "-k")
-            ax_blk.fill_between(blocks, mu_blk-sg_blk, mu_blk+sg_blk, lw=0, color="0.7", alpha=0.5, zorder=-1)
+            ax_blk.plot(blocks, mu_blk, "--", color="0.7")
+            ax_blk.plot(blocks, mu_blk_th, "-", color="0.2")
+            ax_blk.fill_between(blocks, mu_blk_th-sg_blk, mu_blk_th+sg_blk, lw=0, color="0.7", alpha=0.5, zorder=-1)
             ax_blk.set_xlim(0.5, 18.5)
             ax_blk.set_ylim((mu-3*sg).max(), (mu+3*sg).max())
             ax_blk.set_xticks(blocks)
@@ -504,7 +510,7 @@ def _fix_fiber_thermal_shifts(image, trace_cent, trace_width=None, trace_amp=Non
                 ax_ccf[i].plot(lag[mask_r], (cc_model[b][c](lag) - cc[b][c])[mask_r], ".", color="tab:red")
                 ax_ccf[i].axvline(column_shifts[b, c], ls="--", color="tab:red", lw=1)
                 ax_ccf[i].axhspan(-0.02, 0.02, color="0.7", alpha=0.5, lw=0)
-                ax_ccf[i].set_title(f"({blocks[b]}, {columns[c]}): shift = {column_shifts[b, c]:.2f}", fontsize="large")
+                ax_ccf[i].set_title(f"shift = {column_shifts[b, c]:.2f} @ ({blocks[b]},{columns[c]})", fontsize="large")
                 ax_ccf[i].set_ylim(-0.1, 1.1)
                 ax_ccf[i].set_xlabel("Lag (pixel)")
 
