@@ -453,8 +453,11 @@ def fiberflat_corrections(mjd, mjd_list, mjd_range, channels, calibration_epochs
     calibration_epochs = load_epochs_file(epochs_kind="calibration", epochs_path=calibration_epochs_file, verbose=False)
     ffactor_epochs = load_epochs_file(epochs_kind="ffactor", epochs_path=ffactor_epochs_file, verbose=False)
 
-    for channel in channels:
-        for mjd in mjds:
+    # filter mjds for factors epoch
+    mjds = [mjd for mjd in mjds if mjd in ffactor_epochs]
+
+    for mjd in mjds:
+        for channel in channels:
             create_fiberflats_corrections(mjd=mjd, channel=channel, ffactor_epochs=ffactor_epochs, calibration_epochs=calibration_epochs,
                                           skip_done=skip_done, undo_correction=undo_correction, dry_run=dry_run)
 
