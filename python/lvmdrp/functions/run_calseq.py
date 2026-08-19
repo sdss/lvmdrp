@@ -2290,7 +2290,7 @@ def create_fiberflats_corrections(
     # determine the range of calibration epochs to be corrected
     mjds = list(ffactor_epochs.keys())
     i = mjds.index(mjd)
-    calibration_mjds = list(filter(lambda mjd: mjds[i] <= mjd < mjds[i+1], calibration_epochs.keys()))
+    calibration_mjds = list(filter(lambda m: mjds[i] <= m < mjds[i+1] if i+1 < len(mjds) else mjds[i] <= m, calibration_epochs.keys()))
     mflat_paths = {mjd_cal: get_calib_paths(mjd=mjd_cal, version=drpver, from_sandbox=False, only_existing=True).get("fiberflat_twilight", {}).get(channel) for mjd_cal in calibration_mjds}
 
     # determine exposures to be used for factors fitting
