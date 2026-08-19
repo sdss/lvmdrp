@@ -737,6 +737,9 @@ class Image(Header):
                 warnings.warn(comstr)
                 self.add_header_comment(comstr)
                 shifts[j] = numpy.nan
+                matches["lags"].append(numpy.full(10, fill_value=numpy.nan))
+                matches["cc"].append(numpy.full(10, fill_value=numpy.nan))
+                matches["model"].append(lambda x: x)
                 continue
 
             _, shifts[j], _, y_data, y_model, lag, cc, cc_model = _fiber_cc_match(s1, s2, guess_shift, shift_range, gauss_window=[-3,3], min_peak_dist=5.0, ax=axs_cc[j])
