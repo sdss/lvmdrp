@@ -18,6 +18,23 @@ PIXFLAT_EPOCHS_PATH = os.path.join(os.getenv("LVMCORE_DIR"), "etc", "pixflat-epo
 
 
 def _parse_expnums(expnums):
+    """Parse individual exposure numbers and half-open ranges.
+
+    Parameters
+    ----------
+    expnums : iterable
+        Exposure numbers as integers or comma-separated ``start,stop`` ranges.
+
+    Returns
+    -------
+    numpy.ndarray
+        Sorted exposure numbers with integer dtype.
+
+    Raises
+    ------
+    TypeError
+        If an item is neither an integer nor a comma-separated range.
+    """
     parsed_expnums = [[]]
     for idx, expnum in enumerate(expnums):
         if isinstance(expnum, int):
@@ -33,6 +50,18 @@ def _parse_expnums(expnums):
 
 
 def _parse_sequence(sequence):
+    """Copy and parse the exposure lists in a pixel-flat sequence.
+
+    Parameters
+    ----------
+    sequence : dict
+        Sequence definition containing ``expnums`` and optionally ``rejects``.
+
+    Returns
+    -------
+    dict
+        A copied sequence with parsed NumPy arrays for both exposure lists.
+    """
     parsed_sequence = copy(sequence)
     expnums = _parse_expnums(sequence.get("expnums", []) or [])
     rejects = _parse_expnums(sequence.get("rejects", []) or [])
@@ -65,7 +94,12 @@ def _expand_sequence(sequence, repeat=False):
     Returns
     -------
     dict
-        A dictionary where keys are exposure types (e.g., "flat_expnums",
+        A dictionary mapping exposure types to grouped exposure numbers.
+
+    Raises
+    ------
+    KeyError
+        If ``kind`` contains an unsupported exposure type.
     """
     typ_maps = {"f": "flat", "b": "bias", "d": "dark"}
 
@@ -98,7 +132,7 @@ def _expand_sequence(sequence, repeat=False):
     return expnums_dict
 
 def rsync_enight(mjds):
-    """rsyncs egineering nights from LCO directly
+    """Placeholder for synchronizing engineering nights from LCO.
 
     Parameters
     ----------
@@ -128,28 +162,81 @@ def get_enights_metadata(mjds):
     return pd.concat(metadata, axis="index", ignore_index=True).sort_values("expnum")
 
 
-def load_pixflat_epochs(epochs_path=None, filter_by=None):
+def load_pixflat_epochs(epochs_path=None, filter_by_mjds=None, filter_by_cameras=None, verbose=True):
+    """Load pixel-flat epoch definitions from a YAML file.
+
+    Parameters
+    ----------
+    epochs_path : str or pathlib.Path, optional
+        Path to the pixel-flat epochs file.
+    filter_by_mjds : list or tuple, optional
+        MJDs to keep from the loaded epoch mapping.
+    filter_by_cameras : list or tuple, optional
+        Camera sequences to keep within each epoch.
+    verbose : bool, optional
+        If True, log the loaded and filtered epoch information.
+    """
     epochs_path = epochs_path or PIXFLAT_EPOCHS_PATH
     with open(epochs_path) as f:
         epochs = yaml.safe_load(f)["epochs"]
 
-    log.info(f"loaded {len(epochs)} epochs:")
-    for mjd in epochs:
-        log.info(f"  {mjd}: {pformat(epochs[mjd])}")
-
-    if filter_by is not None and isinstance(filter_by, (list, tuple)):
-        log.info(f"filtering by {filter_by}")
-        epochs = {mjd: epochs[mjd] for mjd in filter_by if mjd in epochs}
-        if len(epochs) == 0:
-            log.error(f"epoch(s) {filter_by} not found in calibration epochs file: '{epochs_path}'")
-            return epochs
-        log.info(f"after filtering {len(epochs)} epoch(s):")
+    if verbose:
+        log.info(f"loaded {len(epochs)} epochs:")
         for mjd in epochs:
-            log.info(f"  {mjd}: {epochs[mjd]}")
+            log.info(f"  {mjd}: {pformat(epochs[mjd])}")
+
+    if filter_by_mjds is not None and isinstance(filter_by_mjds, (list, tuple)):
+        if verbose:
+            log.info(f"filtering by {filter_by_mjds}")
+        epochs = {mjd: epochs[mjd] for mjd in filter_by_mjds if mjd in epochs}
+        if len(epochs) == 0:
+            log.error(f"epoch(s) {filter_by_mjds} not found in calibration epochs file: '{epochs_path}'")
+            return epochs
+        if verbose:
+            log.info(f"after filtering {len(epochs)} epoch(s):")
+            for mjd in epochs:
+                log.info(f"  {mjd}: {epochs[mjd]}")
+
+    if filter_by_cameras is not None and isinstance(filter_by_cameras, (list, tuple)):
+        if verbose:
+            log.info(f"filtering by cameras {filter_by_cameras}")
+        epochs = {
+            mjd: {
+                **epoch,
+                "sequences": {
+                    camera: sequence
+                    for camera, sequence in epoch.get("sequences", {}).items()
+                    if camera in filter_by_cameras
+                },
+            }
+            for mjd, epoch in epochs.items()
+        }
     return epochs
 
 
 def detrend_pixelflats(mjds, camera, flat_expnums, bias_expnums=[], dark_expnums=[], use_pixmask=True, skip_done=True):
+    """Preprocess and detrend pixel-flat, bias, and dark exposures.
+
+    Parameters
+    ----------
+    mjds : int or array-like
+        Engineering-night MJDs containing the exposures.
+    camera : str
+        Camera identifier to process.
+    flat_expnums : array-like
+        Pixel-flat exposure numbers.
+    bias_expnums, dark_expnums : array-like, optional
+        Bias and dark exposure numbers used for detrending.
+    use_pixmask : bool, optional
+        Whether to use the current pixel mask during preprocessing.
+    skip_done : bool, optional
+        Whether to skip products that already exist.
+
+    Returns
+    -------
+    list[str]
+        Paths to the available detrended pixel-flat images.
+    """
 
     frames = get_enights_metadata(mjds=mjds).query("camera == @camera").sort_values("expnum")
 
@@ -224,6 +311,28 @@ def detrend_pixelflats(mjds, camera, flat_expnums, bias_expnums=[], dark_expnums
 
 
 def combine_pixelflats(mjds, mjd_epoch, camera, flat_expnums, comb_stat="median", skip_done=True):
+    """Combine detrended pixel flats into an epoch-level flat.
+
+    Parameters
+    ----------
+    mjds : int or array-like
+        Engineering-night MJDs containing the exposures.
+    mjd_epoch : int
+        MJD used to identify the output calibration epoch.
+    camera : str
+        Camera identifier to process.
+    flat_expnums : array-like
+        Pixel-flat exposure numbers to combine.
+    comb_stat : str, optional
+        Combination statistic passed to ``combineImages``.
+    skip_done : bool, optional
+        Whether to reuse an existing combined flat.
+
+    Returns
+    -------
+    tuple
+        Combined image object and its output path.
+    """
     frames = get_enights_metadata(mjds=mjds).query("camera == @camera").sort_values("expnum")
 
     flats = frames.query("expnum in @flat_expnums")
@@ -241,6 +350,20 @@ def combine_pixelflats(mjds, mjd_epoch, camera, flat_expnums, comb_stat="median"
 
 
 def create_pixflats_60171(median_box=(31,31), skip_done=True):
+    """Create pixel-flat products for the special MJD 60171 sequence.
+
+    Parameters
+    ----------
+    median_box : tuple, optional
+        Two-dimensional smoothing-kernel size for the master flat.
+    skip_done : bool, optional
+        Whether to skip products that already exist.
+
+    Returns
+    -------
+    dict
+        Mapping of camera identifiers to output product paths.
+    """
     mjd = 60171
     flat_expnums = np.arange(3098, 3117+1)
 
@@ -282,6 +405,24 @@ def create_pixflats_60171(median_box=(31,31), skip_done=True):
 
 
 def test_pixflats(mjd, camera, flat_expnums, target_expnum):
+    """Construct the expected detrended path for a test pixel flat.
+
+    Parameters
+    ----------
+    mjd : int
+        MJD associated with the calibration products.
+    camera : str
+        Camera identifier to test.
+    flat_expnums : array-like
+        Exposure numbers defining the master flat range.
+    target_expnum : int
+        Target exposure number.
+
+    Returns
+    -------
+    str
+        Path to the target detrended pixel-flat image.
+    """
     target_mjd = drp.mjd_from_expnum(target_expnum)[0]
     rframe_path = path.full("lvm_raw", hemi="s", mjd=target_mjd, camspec=camera, expnum=target_expnum)
     pframe_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=target_mjd, kind="p", imagetype="pixflat", expnum=target_expnum, camera=camera)
@@ -297,6 +438,17 @@ def test_pixflats(mjd, camera, flat_expnums, target_expnum):
 
 
 def compare_pixflats(mjd, camera, flat_expnums_a, flat_expnums_b):
+    """Prepare two pixel-flat products for comparison.
+
+    Parameters
+    ----------
+    mjd : int
+        MJD associated with the calibration products.
+    camera : str
+        Camera identifier to compare.
+    flat_expnums_a, flat_expnums_b : array-like
+        Exposure-number groups defining the two flats.
+    """
     dframe_a_path = test_pixflats(mjd=mjd, camera=camera, flat_expnums=flat_expnums_a)
     dframe_b_path = test_pixflats(mjd=mjd, camera=camera, flat_expnums=flat_expnums_b)
 
@@ -305,6 +457,27 @@ def compare_pixflats(mjd, camera, flat_expnums_a, flat_expnums_b):
 
 
 def filtering(image, size=31, min_flat=0.001, min_flat_masking=0.99, max_flat_masking=1.02, return_all=False):
+    """Filter a combined flat and identify invalid or deviant pixels.
+
+    Parameters
+    ----------
+    image : image object
+        Image containing data, errors, inverse variance, and mask information.
+    size : int, optional
+        Median-filter size.
+    min_flat : float, optional
+        Minimum accepted flat value.
+    min_flat_masking, max_flat_masking : float, optional
+        Lower and upper limits used when growing the bad-pixel mask.
+    return_all : bool, optional
+        If True, return both the smooth image and normalized flat image.
+
+    Returns
+    -------
+    image object or tuple
+        Smooth image, or ``(smooth_image, flat_image)`` when ``return_all`` is
+        True.
+    """
 
     data = image._data
     error = image._error
@@ -350,18 +523,68 @@ def filtering(image, size=31, min_flat=0.001, min_flat_masking=0.99, max_flat_ma
 
 
 def _desi_pixflat(cflat, size):
+    """Create a DESI-style pixel flat using quadrant-wise filtering.
+
+    Parameters
+    ----------
+    cflat : image object
+        Combined pixel-flat image.
+    size : int
+        Median-filter size.
+
+    Returns
+    -------
+    tuple
+        The input combined flat and its normalized master flat.
+    """
     filtered = cflat.apply_per_quadrant(filtering, size=size)
     mflat = cflat / filtered
     return cflat, mflat
 
 
 def _simple_pixflat(cflat, size):
+    """Create a pixel flat by dividing by a global median-filtered image.
+
+    Parameters
+    ----------
+    cflat : image object
+        Combined pixel-flat image.
+    size : int
+        Median-filter size.
+
+    Returns
+    -------
+    tuple
+        The input combined flat and its normalized master flat.
+    """
     cflat_median = fast_median_filter_2d(cflat._data, size)
     mflat = (cflat / cflat_median)
     return cflat, mflat
 
 
 def get_pixflat(cflat_path, mpixflat_path, fflat_path, size=31, flatfield_threshold=0.001, method="desi"):
+    """Generate and write master and flat-fielded pixel-flat products.
+
+    Parameters
+    ----------
+    cflat_path : str
+        Path to the combined pixel-flat image.
+    mpixflat_path : str
+        Output path for the normalized master pixel flat.
+    fflat_path : str
+        Output path for the flat-fielded combined image.
+    size : int, optional
+        Median-filter size.
+    flatfield_threshold : float, optional
+        Minimum valid master-flat value.
+    method : {"desi", "simple"}, optional
+        Pixel-flat construction method.
+
+    Returns
+    -------
+    tuple
+        Combined image, master pixel flat, and flat-fielded image.
+    """
     if method not in ["desi", "simple"]:
         raise ValueError(f"Invalid value for `method`: {method}. Expected either 'desi' or 'simple'")
 
@@ -386,7 +609,7 @@ def get_pixflat(cflat_path, mpixflat_path, fflat_path, size=31, flatfield_thresh
     return cflat, mflat, fflat
 
 
-def create_pixflats(mjds, mjd_epoch, camera, sequence, size=31, flatfield_threshold=0.01, method="desi", skip_done=True):
+def create_pixflats(mjds, mjd_epoch, camera, sequence, size=31, flatfield_threshold=0.01, method="desi", skip_done=True, dry_run=False):
     """
     Creates pixel flat-field calibration files for a given camera and set of MJDs.
 
@@ -409,6 +632,8 @@ def create_pixflats(mjds, mjd_epoch, camera, sequence, size=31, flatfield_thresh
         Method to use for flat-field correction. Default is "desi".
     skip_done : bool, optional
         If True, skip processing for already completed files. Default is True.
+    dry_run : bool, optional
+        If True, log the selected inputs and output paths without creating files.
 
     Returns
     -------
@@ -441,11 +666,23 @@ def create_pixflats(mjds, mjd_epoch, camera, sequence, size=31, flatfield_thresh
         log.error(f"No pixel flat frames found for {camera = } and {mjds = }")
         return
 
-    detrend_pixelflats(mjds=mjds, camera=camera, flat_expnums=flat_expnums, dark_expnums=dark_expnums, bias_expnums=bias_expnums, skip_done=skip_done)
-    _, cflat_path = combine_pixelflats(mjds=mjds, mjd_epoch=mjd_epoch, camera=camera, flat_expnums=flat_expnums, skip_done=skip_done)
-
+    cflat_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd_epoch, kind="cpixflat", camera=camera)
     mflat_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd_epoch, kind="mpixflat", camera=camera)
     fflat_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd_epoch, kind="fpixflat", camera=camera)
+
+    if dry_run:
+        log.info(f"dry run of '{create_pixflats.__name__}' for {camera = } and {mjd_epoch = }")
+        log.info(f"  source MJDs: {mjds}")
+        log.info(f"  flat exposures: {flat_expnums}")
+        log.info(f"  dark exposures: {dark_expnums}")
+        log.info(f"  bias exposures: {bias_expnums}")
+        log.info("  output paths:")
+        for output_path in (cflat_path, mflat_path, fflat_path):
+            log.info(f"    {output_path}")
+        return cflat_path, mflat_path, fflat_path
+
+    detrend_pixelflats(mjds=mjds, camera=camera, flat_expnums=flat_expnums, dark_expnums=dark_expnums, bias_expnums=bias_expnums, skip_done=skip_done)
+    _, cflat_path = combine_pixelflats(mjds=mjds, mjd_epoch=mjd_epoch, camera=camera, flat_expnums=flat_expnums, skip_done=skip_done)
 
     get_pixflat(cflat_path, mflat_path, fflat_path, size=size, flatfield_threshold=flatfield_threshold, method=method)
 
