@@ -461,7 +461,7 @@ def fiberflat_corrections(mjd, mjd_list, mjd_range, channels, calibration_epochs
     for mjd in _mjds:
         for channel in channels:
             create_fiberflats_corrections(mjd=mjd, channel=channel, ffactor_epochs=ffactor_epochs, calibration_epochs=calibration_epochs,
-                                          skip_done=skip_done, undo_correction=undo_correction, dry_run=dry_run)
+                                          skip_done=skip_done, undo_correction=undo_correction, display_plots=False, dry_run=dry_run)
 
 
 @cli.command('ffactors-experiment', short_help='Run a fiber flat-field factor experiment with given parameters', context_settings=dict(show_default=True))
