@@ -15,7 +15,7 @@ from cloup.constraints import mutually_exclusive, RequireExactly
 import bottleneck as bn
 from astropy.stats import biweight_location
 
-from lvmdrp.core.constants import CALIBRATION_MAPPINGS, CALIBRATION_TYPES, LVM_REFERENCE_COLUMN, SKYLINES_FIBERFLAT
+from lvmdrp.core.constants import CAMERAS, CALIBRATION_MAPPINGS, CALIBRATION_TYPES, LVM_REFERENCE_COLUMN, SKYLINES_FIBERFLAT
 from lvmdrp import __version__ as drpver
 from lvmdrp.main import run_drp, reduce_file, check_daily_mjd, parse_mjds, read_expfile, create_drpall, cache_std_xp_spectra, cache_sci_xp_spectra
 from lvmdrp.functions.skyMethod import configureSkyModel_drp
@@ -38,6 +38,11 @@ from lvmdrp.functions.run_calseq import (
     create_twilight_fiberflats,
     create_fiberflats_corrections,
     measure_fiberflat_factors)
+from lvmdrp.functions.pixelflats import (
+    load_pixflat_epochs,
+    create_pixflats
+)
+
 
 from sdss_access import Access
 
@@ -562,6 +567,49 @@ def fiberflats(mjd, mjd_list, mjd_range, epochs_file, channels, skip_sequence_se
             dry_run=dry_run)
 
 
+@cli.command('pixelflats', short_help='Run pixelflats reductions', context_settings=dict(show_default=True))
+@click.option('-m', '--mjd', type=int, help='an MJD to reduce')
+@click.option('-l', '--mjd-list', type=IntListType(), help='a list of specific MJDs to reduce')
+@click.option('-r', '--mjd-range', type=str, help='a range of MJDs to reduce')
+@click.option('--epochs-file', type=str, default=None, help="Path to a calibrations epoch file")
+@click.option('--cameras', type=StrListType(), default=",".join(CAMERAS), help="Spectrograph camera that will be analysed")
+@click.option('-s', '--skip-done', is_flag=True, default=False, help='flag to skip reduction steps that have already been done')
+@click.option("--dry-run", is_flag=True, default=False, help="Shows useful information about the current setup without actually running reductions")
+@cloup.constraint(mutually_exclusive, ['mjd', 'mjd_list', 'mjd_range'])
+@cloup.constraint(RequireExactly(1), ['mjd', 'mjd_list', 'mjd_range'])
+def pixelflats(mjd, mjd_list, mjd_range, epochs_file, cameras, skip_done, dry_run):
+
+    # parse MJDs
+    mjds = parse_mjds(mjd=mjd or mjd_list or mjd_range or None)
+    if mjds is None:
+        raise click.UsageError("One of --mjd, --mjd-list, or --mjd-range is required.")
+
+    # use these mjds to filter pixelflats epochs
+    if not isinstance(mjds, (list, tuple)):
+        mjds = [mjds]
+    mjds = [int(mjd) for mjd in mjds]
+
+    # filter pixelflats epochs
+    # throw error if filtered epochs are empty
+    pixflat_epochs = load_pixflat_epochs(epochs_path=epochs_file, filter_by_mjds=mjds, filter_by_cameras=cameras)
+    if not pixflat_epochs:
+        raise ValueError(f"Invalid values in `mjds`: {mjds}. Expected values in {list(pixflat_epochs.keys())}")
+
+    for mjd_epoch, pixflat_epoch in pixflat_epochs.items():
+        mjds = pixflat_epoch.get("sources")
+        sequences = pixflat_epoch.get("sequences")
+        for camera, sequence in sequences.items():
+            create_pixflats(
+                mjds=mjds,
+                mjd_epoch=mjd_epoch,
+                camera=camera,
+                sequence=sequence,
+                size=31,
+                flatfield_threshold=0.0,
+                skip_done=skip_done,
+                dry_run=dry_run)
+
+
 @click.command('create-tag', short_help='Create a tag for long-term calibrations', context_settings=dict(show_default=True))
 @click.option('-m', '--mjd', type=int, help='an MJD to reduce')
 @click.option('-l', '--mjd-list', type=IntListType(), help='a list of specific MJDs to reduce')
@@ -726,6 +774,7 @@ calibrations.add_command(detrend)
 calibrations.add_command(longterm)
 calibrations.add_command(nightly)
 calibrations.add_command(fiberflats)
+calibrations.add_command(pixelflats)
 calibrations.add_command(fiberflat_corrections)
 calibrations.add_command(ffactors_experiment)
 calibrations.add_command(cluster_calibs)
