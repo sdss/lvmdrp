@@ -6,7 +6,7 @@ Change Log
 
 This document records the main changes to the drp code.
 
-1.3.0dev (unreleased)
+1.3.0 (24-08-2026)
 ---------------------
 
 - Improved QA plots including fiber shift, sky parameters, and layout handling
