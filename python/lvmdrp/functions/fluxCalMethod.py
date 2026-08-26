@@ -911,7 +911,7 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
     # download or load from cache Gaia stellar parameters
     stellar_params = fluxcal.get_stellar_params(source_ids=gaia_ids)
     # load Gaia BP-RP spectrum from cache, or download from webapp
-    wave_xp, spectra_xp = fluxcal.get_xp_spectra_from_ids(source_ids=gaia_ids)
+    wave_xp, spectra_xp = fluxcal.get_xp_spectra_from_ids(source_ids=gaia_ids, cache_dir=GAIA_CACHE_DIR)
 
     # Stitch wavelength arrays in brz together
     wave_b = np.round(w[0],1)
@@ -1677,7 +1677,7 @@ def standard_sensitivity(stds, rss, GAIA_CACHE_DIR, ext, res, plot=False, width=
 
     # load Gaia BP-RP spectrum from cache, or download from webapp
     _, _, gaia_ids, _, _, _ = zip(*stds)
-    wave_xp, spectra_xp = fluxcal.get_xp_spectra_from_ids(source_ids=gaia_ids)
+    wave_xp, spectra_xp = fluxcal.get_xp_spectra_from_ids(source_ids=gaia_ids, cache_dir=GAIA_CACHE_DIR)
 
     # iterate over standard stars, derive sensitivity curve for each
     for i, s in enumerate(stds):

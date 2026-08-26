@@ -6,11 +6,33 @@ Change Log
 
 This document records the main changes to the drp code.
 
-1.2.2dev (unreleased)
+1.3.2dev (unreleased)
 ---------------------
 
 - Added optional per-exposure radial velocity correction (e.g. barycentric), applied to flux during wavelength resampling without changing the output wavelength grid (new ``apply_bary_corr`` toggle, default on)
 
+
+1.3.1 (25-08-2026)
+------------------
+
+- Fixed Gaia XP cache directory during flux calibration
+
+1.3.0 (24-08-2026) [YANKED]
+---------------------------
+
+Superseded by 1.3.1. Broken Gaia caching prevented any reduction from running.
+Do not use this version.
+
+- Improved QA plots including fiber shift, sky parameters, and layout handling
+- Implemented fiber flat factor epochs and improved factor calibration routines
+- Enhanced straylight subtraction with robust 2D P-Spline fitting
+- Improved Gaia XP integration with better caching and stellar parameter extraction
+- Implemented Voigt profile for fiber tracing with better convergence
+- Performance optimizations including memory usage cleanup
+- Added RMS sensitivities to summary file
+- Improved outlier rejection in stray light binning and saturated strip handling
+- Enhanced flux calibration with better handling of standard star selection
+- Various bug fixes and stability improvements
 
 1.2.1 (16-02-2026)
 ------------------
@@ -22,7 +44,6 @@ This document records the main changes to the drp code.
 - Added flux calibration summary to drpall
 - First stab at documentation
 - A few more bug fixes and improvements
-
 
 1.2.0 (15-11-2025)
 ------------------

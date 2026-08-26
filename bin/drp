@@ -43,7 +43,7 @@ from sdss_access import Access
 
 
 calibration_types = set(CALIBRATION_TYPES) - {"bias", "dome"}
-CALIBRATION_SCRIPTS = ["detrend", "long-term", "nightly", "ffactors-experiment", "fiberflats"]
+CALIBRATION_SCRIPTS = ["detrend", "long-term", "nightly", "ffactors-experiment", "fiberflats", "fiberflat-corrections"]
 
 
 class StrListType(click.ParamType):
@@ -142,6 +142,7 @@ def cli():
 @click.option('-2d', '--skip-2d', is_flag=True, default=False, help='Skip preprocessing and detrending')
 @click.option('-1d', '--skip-1d', is_flag=True, default=False, help='Skip astrometry, straylight subtraction and extraction')
 @click.option('-wc', '--skip-wavecal', is_flag=True, default=False, help='Skip wavelength calibration and fiber flat fielding')
+@click.option('-wr', '--skip-waveres', is_flag=True, default=False, help='Skip wavelength resampling and sky spline extrapolation')
 @click.option('-fl', '--skip-fluxcal', is_flag=True, default=False, help='Skip flux calibration')
 @click.option('-sk', '--skip-skysub', is_flag=True, default=False, help='Skip sky subtraction')
 @click.option('-da', '--skip-drpall', is_flag=True, default=False, help='Skip create/update drpall summary file')
@@ -155,7 +156,7 @@ def cli():
 @cloup.constraint(mutually_exclusive, ['expnum', 'exp_list', 'exp_range'])
 def run(mjd, mjd_list, mjd_range, with_cals, no_sci, expnum, exp_list, exp_range, exp_file, fluxcal_method,
         apply_bary_corr,
-        skip_2d, skip_1d, skip_wavecal, skip_fluxcal, skip_skysub, skip_drpall, clean_ancillary, debug_mode, force_run,
+        skip_2d, skip_1d, skip_wavecal, skip_waveres, skip_fluxcal, skip_skysub, skip_drpall, clean_ancillary, debug_mode, force_run,
         use_nightly_cals, use_untagged_cals):
     """ Run the DRP reduction for a given MJD or range of MJDs
 
@@ -181,6 +182,7 @@ def run(mjd, mjd_list, mjd_range, with_cals, no_sci, expnum, exp_list, exp_range
             skip_2d=skip_2d,
             skip_1d=skip_1d,
             skip_wavecal=skip_wavecal,
+            skip_waveres=skip_waveres,
             skip_fluxcal=skip_fluxcal,
             skip_skysub=skip_skysub,
             skip_drpall=skip_drpall,
@@ -454,10 +456,15 @@ def fiberflat_corrections(mjd, mjd_list, mjd_range, channels, calibration_epochs
     calibration_epochs = load_epochs_file(epochs_kind="calibration", epochs_path=calibration_epochs_file, verbose=False)
     ffactor_epochs = load_epochs_file(epochs_kind="ffactor", epochs_path=ffactor_epochs_file, verbose=False)
 
-    for channel in channels:
-        for mjd in mjds:
+    # filter mjds for factors epoch
+    _mjds = [mjd for mjd in mjds if mjd in ffactor_epochs]
+    if not _mjds:
+        raise ValueError(f"Invalid values in `mjds`: {mjds}. Expected values in {list(ffactor_epochs.keys())}")
+
+    for mjd in _mjds:
+        for channel in channels:
             create_fiberflats_corrections(mjd=mjd, channel=channel, ffactor_epochs=ffactor_epochs, calibration_epochs=calibration_epochs,
-                                          skip_done=skip_done, undo_correction=undo_correction, dry_run=dry_run)
+                                          skip_done=skip_done, undo_correction=undo_correction, display_plots=False, dry_run=dry_run)
 
 
 @cli.command('ffactors-experiment', short_help='Run a fiber flat-field factor experiment with given parameters', context_settings=dict(show_default=True))
@@ -683,7 +690,7 @@ def qaqual_bad_hdrfix(mjd, mjd_list, mjd_range, expnum, expnum_list, expnum_rang
 @click.option('-r', '--mjd-range', type=str, default=None, help='a range of MJDs to reduce')
 @click.option('--from-epochs', is_flag=True, default=False, help="Use fiducial or given epochs file to produce long-term calibrations")
 @click.option('--epochs-file', type=str, default=None, help="Path to a calibrations epoch file")
-@click.option('--routine', type=click.Choice(CALIBRATION_SCRIPTS), default="long-term", help="run detrend, long-term, nightly, ffactors-experiment or fiberflats calibrations only")
+@click.option('--routine', type=click.Choice(CALIBRATION_SCRIPTS), default="long-term", help="run detrend, long-term, nightly, ffactors-experiment, fiberflats or fiberflat-corrections calibrations only")
 @click.option('-n', '--nodes', type=int, default=2, help='the number of nodes to use')
 @click.option('-p', '--ppn', type=int, default=64, help='the number of CPU cores to use per node')
 @click.option('-w', '--walltime', type=str, default="24:00:00", help='the time for which the job is allowed to run')
@@ -697,7 +704,11 @@ def cluster_calibs(mjd_list, mjd_range, from_epochs, epochs_file, routine, nodes
     mjds = parse_mjds(mjd=mjd_list or mjd_range or None)
     # if no MJD, get fiducial calibration epochs
     if from_epochs or mjds is None:
-        epochs = load_epochs_file(epochs_kind="calibration", epochs_path=epochs_file, filter_by_mjds=mjds, verbose=verbose)
+        epochs = load_epochs_file(
+            epochs_kind="ffactor" if routine == "fiberflat-corrections" else "calibration",
+            epochs_path=epochs_file,
+            filter_by_mjds=mjds,
+            verbose=verbose)
         mjds = sorted(list(epochs.keys()))
 
     run_cluster_cals(mjds, from_epochs=from_epochs, nodes=nodes, ppn=ppn, walltime=walltime, alloc=alloc, submit=submit,

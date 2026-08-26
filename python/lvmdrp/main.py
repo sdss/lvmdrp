@@ -1531,6 +1531,7 @@ def science_reduction(expnum: int,
                       skip_2d: bool = False,
                       skip_1d: bool = False,
                       skip_wavecal: bool = False,
+                      skip_waveres: bool = False,
                       skip_fluxcal: bool = False,
                       skip_skysub: bool = False,
                       skip_drpall: bool = False,
@@ -1591,8 +1592,10 @@ def science_reduction(expnum: int,
     log.info(f"Reducing MJD {sci_mjd}, exposure {expnum}, tile_id {sci_tileid} ... ")
 
     # overwrite fiducial masters dir
+    # TODO: enforce use of defined calibration epochs from calibration-epochs.yaml
+    # and remove option to use nightly calibration
     calibs, cals_mjd = get_calib_paths(
-        mjd=sci_mjd,
+        mjd=get_master_mjd(sci_mjd),
         version=drpver,
         nightly=not use_longterm_cals,
         from_sandbox=from_sandbox,
@@ -1665,10 +1668,6 @@ def science_reduction(expnum: int,
             mflat_path = calibs["fiberflat_twilight"][channel]
 
             frame_path = path.full('lvm_frame', mjd=sci_mjd, tileid=sci_tileid, drpver=drpver, expnum=sci_expnum, kind=f'Frame-{channel}')
-            ssci_path = path.full('lvm_anc', mjd=sci_mjd, tileid=sci_tileid, drpver=drpver,
-                                kind='s', camera=channel, imagetype=sci_imagetyp, expnum=expnum)
-            hsci_path = path.full('lvm_anc', mjd=sci_mjd, tileid=sci_tileid, drpver=drpver,
-                                kind='h', camera=channel, imagetype=sci_imagetyp, expnum=expnum)
 
             # stack spectrographs
             with Timer(name='Stack Spectrographs '+xsci_path, logger=log.info):
@@ -1688,6 +1687,16 @@ def science_reduction(expnum: int,
             # correct thermal shift in wavelength direction
             with Timer(name='Thermal Shifts '+frame_path, logger=log.info):
                 shift_wave_skylines(in_frame=frame_path, out_frame=frame_path)
+
+    if skip_waveres:
+            log.info("skipping wavelength resampling and spline sky extrapolation")
+    else:
+        for channel in "brz":
+            frame_path = path.full('lvm_frame', mjd=sci_mjd, tileid=sci_tileid, drpver=drpver, expnum=sci_expnum, kind=f'Frame-{channel}')
+            ssci_path = path.full('lvm_anc', mjd=sci_mjd, tileid=sci_tileid, drpver=drpver,
+                                kind='s', camera=channel, imagetype=sci_imagetyp, expnum=expnum)
+            hsci_path = path.full('lvm_anc', mjd=sci_mjd, tileid=sci_tileid, drpver=drpver,
+                                kind='h', camera=channel, imagetype=sci_imagetyp, expnum=expnum)
 
             # interpolate sky fibers
             with Timer(name='Interpolate Sky '+ssci_path, logger=log.info):
@@ -1710,7 +1719,6 @@ def science_reduction(expnum: int,
 
         # #The model stellar atmosphere spectra selection
         model_selection(hsci_all_bands, GAIA_CACHE_DIR=MASTERS_DIR + '/gaia_cache')
-        #
 
         for channel in "brz":
             hsci_path = path.full('lvm_anc', mjd=sci_mjd, tileid=sci_tileid, drpver=drpver,
@@ -1785,8 +1793,8 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
             fluxcal_method: str = 'MOD',
             apply_bary_corr: bool = True,
             skip_2d: bool = False, skip_1d: bool = False, skip_wavecal: bool = False,
-            skip_fluxcal: bool = False, skip_skysub: bool = False, skip_drpall: bool = False,
-            use_nightly_cals: bool = False, use_untagged_cals: bool = False,
+            skip_waveres: bool = False, skip_fluxcal: bool = False, skip_skysub: bool = False,
+            skip_drpall: bool = False, use_nightly_cals: bool = False, use_untagged_cals: bool = False,
             clean_ancillary: bool = False, debug_mode: bool = False, force_run: bool = False):
     """ Run the quick DRP
 
@@ -1857,6 +1865,7 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
                     skip_2d=skip_2d,
                     skip_1d=skip_1d,
                     skip_wavecal=skip_wavecal,
+                    skip_waveres=skip_waveres,
                     skip_fluxcal=skip_fluxcal,
                     skip_skysub=skip_skysub,
                     skip_drpall=skip_drpall,
@@ -1964,6 +1973,7 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
                                         skip_2d=skip_2d,
                                         skip_1d=skip_1d,
                                         skip_wavecal=skip_wavecal,
+                                        skip_waveres=skip_waveres,
                                         skip_fluxcal=skip_fluxcal,
                                         skip_skysub=skip_skysub,
                                         skip_drpall=skip_drpall,

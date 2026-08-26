@@ -266,51 +266,54 @@ def measure_fiberflat_factors(mjd, drpver, channel, expnums=None, sky_cwaves=SKY
         mflat = RSS.from_file(mflat_paths[channel])
 
         fig = plt.figure(figsize=(14,3*2))
-        fig.suptitle(f"Fiber flatfield correction for {expnum = } {channel = } around sky line @ {sky_cwave:.2f} Angstroms", fontsize="xx-large")
-        gs_gra = GridSpec(2, 5, hspace=0.01, wspace=0.01, left=0.07, right=0.99, figure=fig)
-        gs_cor = GridSpec(2, 5, hspace=0.5, wspace=0.01, left=0.07, right=0.99, figure=fig)
-        axs = [fig.add_subplot(gs_gra[0, j]) for j in range(5)]
-        x, y, skyline_slit, coeffs, factor, _ = rss.measure_skyline_flatfield(
-            mflat=mflat,
-            sky_cwave=sky_cwave,
-            cont_cwave=cont_cwave,
-            dwave=dwave,
-            fiber_radius=fiber_radius,
-            oversampling_factor=oversampling_factor,
-            coadd_method=coadd_method,
-            norm_method=norm_stat,
-            quantiles=quantiles,
-            guess_coeffs=[1,0,0,0],
-            fixed_coeffs=[3] if fit_gradient else [0, 1, 2, 3],
-            groupby=groupby, axs=axs, labels=True)
+        try:
+            fig.suptitle(f"Fiber flatfield correction for {expnum = } {channel = } around sky line @ {sky_cwave:.2f} Angstroms", fontsize="xx-large")
+            gs_gra = GridSpec(2, 5, hspace=0.01, wspace=0.01, left=0.07, right=0.99, figure=fig)
+            gs_cor = GridSpec(2, 5, hspace=0.5, wspace=0.01, left=0.07, right=0.99, figure=fig)
+            axs = [fig.add_subplot(gs_gra[0, j]) for j in range(5)]
+            x, y, skyline_slit, coeffs, factor, _ = rss.measure_skyline_flatfield(
+                mflat=mflat,
+                sky_cwave=sky_cwave,
+                cont_cwave=cont_cwave,
+                dwave=dwave,
+                fiber_radius=fiber_radius,
+                oversampling_factor=oversampling_factor,
+                coadd_method=coadd_method,
+                norm_method=norm_stat,
+                quantiles=quantiles,
+                guess_coeffs=[1,0,0,0],
+                fixed_coeffs=[3] if fit_gradient else [0, 1, 2, 3],
+                groupby=groupby, axs=axs, labels=True)
 
-        log.info("applying flatfield correction")
-        fiber_groups = mflat._get_fiber_groups(by="spec")
-        flatfield_corr = IFUGradient.ifu_factors(factor, fiber_groups)
-        mflat *= flatfield_corr[:, None]
-        rss /= mflat
-        skyline_slit /= flatfield_corr
+            log.info("applying flatfield correction")
+            fiber_groups = mflat._get_fiber_groups(by="spec")
+            flatfield_corr = IFUGradient.ifu_factors(factor, fiber_groups)
+            mflat *= flatfield_corr[:, None]
+            rss /= mflat
+            skyline_slit /= flatfield_corr
 
-        ax_cor = fig.add_subplot(gs_cor[-1, :])
-        ax_cor.set_title(f"Flatfielded skyline @ {sky_cwave:.2f}+/-{dwave:.2f} Angstroms", loc="left")
-        ax_cor.set_xlabel("Fiber ID", fontsize="large")
-        ax_cor.set_ylabel("Normalized counts", fontsize="large")
-        ax_cor.set_ylim(0.92, 1.08)
-        slit(x=rss._slitmap["fiberid"].data, y=skyline_slit, data=rss._data, ax=ax_cor)
-        save_fig(fig, product_path=wframe_path, figure_path="qa", label="fiberflat_correction", to_display=display_plots)
+            ax_cor = fig.add_subplot(gs_cor[-1, :])
+            ax_cor.set_title(f"Flatfielded skyline @ {sky_cwave:.2f}+/-{dwave:.2f} Angstroms", loc="left")
+            ax_cor.set_xlabel("Fiber ID", fontsize="large")
+            ax_cor.set_ylabel("Normalized counts", fontsize="large")
+            ax_cor.set_ylim(0.92, 1.08)
+            slit(x=rss._slitmap["fiberid"].data, y=skyline_slit, data=rss._data, ax=ax_cor)
+            save_fig(fig, product_path=wframe_path, figure_path="qa", label="fiberflat_correction", to_display=display_plots)
 
-        rss.setHdrValue(f"HIERARCH {channel} FIBERFLAT CWAVE", sky_cwave, "norm. wavelength [Angstrom]")
-        rss.setHdrValue(f"HIERARCH {channel} FIBERFLAT DWAVE", dwave, "norm. window width [Angstrom]")
-        rss.setHdrValue(f"HIERARCH {channel} FIBERFLAT COADD", coadd_method, "coadding method")
-        rss.setHdrValue(f"HIERARCH {channel} FIBERFLAT SKYCORR", True, "fiberflat skyline-corrected?")
-        rss.setHdrValue(f"HIERARCH {channel} FIBERFLAT GROUPBY", groupby, "fiber grouping")
-        for i, f in enumerate(factor):
-            rss.setHdrValue(f"HIERARCH {channel} FIBERFLAT FACTOR{i+1}", np.round(f, 5), f"fiberflat factor {groupby}{i+1}")
-        for i, c in enumerate(coeffs):
-            rss.setHdrValue(f"HIERARCH {channel} FIBERFLAT GCOEFF{i+1}", np.round(c, 5), f"IFU gradient coeff #{i+1}")
+            rss.setHdrValue(f"HIERARCH {channel} FIBERFLAT CWAVE", sky_cwave, "norm. wavelength [Angstrom]")
+            rss.setHdrValue(f"HIERARCH {channel} FIBERFLAT DWAVE", dwave, "norm. window width [Angstrom]")
+            rss.setHdrValue(f"HIERARCH {channel} FIBERFLAT COADD", coadd_method, "coadding method")
+            rss.setHdrValue(f"HIERARCH {channel} FIBERFLAT SKYCORR", True, "fiberflat skyline-corrected?")
+            rss.setHdrValue(f"HIERARCH {channel} FIBERFLAT GROUPBY", groupby, "fiber grouping")
+            for i, f in enumerate(factor):
+                rss.setHdrValue(f"HIERARCH {channel} FIBERFLAT FACTOR{i+1}", np.round(f, 5), f"fiberflat factor {groupby}{i+1}")
+            for i, c in enumerate(coeffs):
+                rss.setHdrValue(f"HIERARCH {channel} FIBERFLAT GCOEFF{i+1}", np.round(c, 5), f"IFU gradient coeff #{i+1}")
 
-        # extract flat field factors and additional information
-        metadata.append(_extract_ffactors(rss._header))
+            # extract flat field factors and additional information
+            metadata.append(_extract_ffactors(rss._header))
+        finally:
+            plt.close(fig)
 
     metadata = pd.DataFrame(metadata)
     metadata.sort_values("exposure", inplace=True)
@@ -2290,20 +2293,8 @@ def create_fiberflats_corrections(
     # determine the range of calibration epochs to be corrected
     mjds = list(ffactor_epochs.keys())
     i = mjds.index(mjd)
-    calibration_mjds = list(filter(lambda mjd: mjds[i] <= mjd < mjds[i+1], calibration_epochs.keys()))
-    mflat_paths = {mjd: get_calib_paths(mjd=mjd, version=drpver, from_sandbox=False, only_existing=True).get("fiberflat_twilight", {}).get(channel)}
-
-    # undo correction
-    for mjd in calibration_mjds:
-        mflat_path = mflat_paths.get(mjd)
-        if mflat_path is None:
-            warnings.warn(f"master fiber flat for epoch {mjd = } and {channel = } not found, skipping")
-            continue
-
-        undo_ffactor_correction(in_mflat=mflat_path, write_output=True)
-
-    if undo_correction:
-        return
+    calibration_mjds = list(filter(lambda m: mjds[i] <= m < mjds[i+1] if i+1 < len(mjds) else mjds[i] <= m, calibration_epochs.keys()))
+    mflat_paths = {mjd_cal: get_calib_paths(mjd=mjd_cal, version=drpver, from_sandbox=False, only_existing=True).get("fiberflat_twilight", {}).get(channel) for mjd_cal in calibration_mjds}
 
     # determine exposures to be used for factors fitting
     source_mjds = science_mjds if use_science else twilight_mjds
@@ -2316,8 +2307,20 @@ def create_fiberflats_corrections(
 
     if dry_run:
         log.info(f"going to create fiber flat factors for channel {channel} using {'science' if use_science else 'twilight'} exposures from mjds: {source_mjds}")
-        log.info(f"selected exposures: {expnums}")
-        log.info(f"corrected calibration epochs: {calibration_mjds}")
+        log.info(f"selected {len(expnums)} exposures: {expnums}")
+        log.info(f"corrected {len(calibration_mjds)} calibration epochs: {calibration_mjds}")
+        return
+
+    # undo correction
+    for mjd in calibration_mjds:
+        mflat_path = mflat_paths.get(mjd)
+        if mflat_path is None:
+            warnings.warn(f"master fiber flat for epoch {mjd = } and {channel = } not found, skipping")
+            continue
+
+        undo_ffactor_correction(in_mflat=mflat_path, write_output=True)
+
+    if undo_correction:
         return
 
     # perform 2D, 1D reductions, down to wavelength calibrated products

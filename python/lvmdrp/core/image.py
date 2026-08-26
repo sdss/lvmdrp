@@ -30,7 +30,7 @@ from lvmdrp.core.apertures import Apertures
 from lvmdrp.core.header import Header
 from lvmdrp.core.tracemask import TraceMask
 from lvmdrp.core.fiberrows import FiberRows
-from lvmdrp.core.spectrum1d import Spectrum1D, _normalize_peaks, _fiber_cc_match, _cross_match, _spec_from_lines, _align_fiber_blocks
+from lvmdrp.core.spectrum1d import Spectrum1D, _fiber_cc_match, _cross_match, _spec_from_lines, _align_fiber_blocks
 
 from lvmdrp.external.fast_median import fast_median_filter_2d
 
@@ -702,7 +702,8 @@ class Image(Header):
             ref_data = ref_image
 
         # unpack axes
-        axs_cc, axs_fb = axs
+        axs = axs or {}
+        axs_cc, axs_fb = axs.get("cc", [None]*len(columns)), axs.get("block")
 
         # calculate shift guess along central wide column
         guess_column = 2000
@@ -710,24 +711,21 @@ class Image(Header):
         cmin, cmax = int(cents.min()), int(cents.max())
         s1 = bn.nanmedian(ref_data[cmin-10:cmax+10,guess_column-500:guess_column+500], axis=1)
         s2 = bn.nanmedian(self._data[cmin-10:cmax+10,guess_column-500:guess_column+500], axis=1)
-        # fig_guess, axs_guess = plt.subplots(nrows=2, ncols=1, layout="constrained")
-        # fig_guess.suptitle("Fiber block cross-correlation match")
         guess_shift = _align_fiber_blocks(s1, s2, axs=None)
 
-        if numpy.abs(guess_shift) >= 4:
-            log.warning(f"measuring guess fiber thermal shift too large {guess_shift = } pixels, setting guess shift to zero")
+        if numpy.abs(guess_shift) >= 3:
+            warnings.warn(f"guess fiber thermal shift too large {guess_shift = } pixels, setting guess shift to zero")
+            self.add_header_comment(f"guess fiber thermal shift too large {guess_shift = } pixels, setting guess shift to zero")
             guess_shift = 0
-        else:
-            log.info(f"measured guess fiber thermal shift {guess_shift = } pixels")
 
         shifts = numpy.zeros(len(columns))
-        # select_blocks = [9]
+        matches = {"lags": [], "cc": [], "model": []}
         for j,c in enumerate(columns):
             cents = trace_cent._data[:, c]
             cmin, cmax = int(cents.min()), int(cents.max())
             # collapse columns
-            s1 = bn.nanmedian(ref_data[cmin-10:cmax+10,c-column_width:c+column_width], axis=1)
-            s2 = bn.nanmedian(self._data[cmin-10:cmax+10,c-column_width:c+column_width], axis=1)
+            s1 = bn.nanmedian(ref_data[cmin-5:cmax+5,c-column_width:c+column_width], axis=1)
+            s2 = bn.nanmedian(self._data[cmin-5:cmax+5,c-column_width:c+column_width], axis=1)
             # clean remaining NaNs from masked rows
             s2 = numpy.nan_to_num(s2)
             snr = numpy.sqrt(s2)
@@ -736,32 +734,30 @@ class Image(Header):
             min_snr = 1.0
             if median_snr <= min_snr:
                 comstr = f"low SNR (<={min_snr}) for thermal shift at column {c}: {median_snr:.4f}, assuming = NaN"
-                log.warning(comstr)
+                warnings.warn(comstr)
                 self.add_header_comment(comstr)
                 shifts[j] = numpy.nan
+                matches["lags"].append(numpy.full(10, fill_value=numpy.nan))
+                matches["cc"].append(numpy.full(10, fill_value=numpy.nan))
+                matches["model"].append(lambda x: x)
                 continue
 
-            _, shifts[j], _ = _fiber_cc_match(s1, s2, guess_shift, shift_range, gauss_window=[-3,3], min_peak_dist=5.0, ax=axs_cc[j])
+            _, shifts[j], _, y_data, y_model, lag, cc, cc_model = _fiber_cc_match(s1, s2, guess_shift, shift_range, gauss_window=[-3,3], min_peak_dist=5.0, ax=axs_cc[j])
+            matches["lags"].append(lag)
+            matches["cc"].append(cc)
+            matches["model"].append(cc_model)
 
-            # blocks_pos = numpy.asarray(numpy.split(trace_cent._data[:, c], 18))[select_blocks]
-            blocks_bounds = [(int(bpos.min())-5, int(bpos.max())+5) for bpos in cents]
-
-            for i, (bmin, bmax) in enumerate(blocks_bounds):
-                # x = numpy.arange(bmax-bmin) + i*(bmax-bmin) + 5
-                # y_model = bn.nanmedian(ref_data[bmin:bmax, c-column_width:c+column_width], axis=1)
-                # y_data = bn.nanmedian(self._data[bmin:bmax, c-column_width:c+column_width], axis=1)
+            if axs_fb is not None:
                 x = numpy.arange(s1.size)
-                y_data, y_model, _, _, _, _ = _normalize_peaks(s2, s1, min_peak_dist=5.0)
-                # y_data, _, _ = _normalize_peaks(y_data, min_peak_dist=5.0)
-                axs_fb[j].step(x, y_data, color="0.2", lw=1.5, label="data" if i == 0 else None)
-                axs_fb[j].step(x, y_model, color="tab:blue", lw=1, label="model" if i == 0 else None)
-                # axs_fb[j].step(x+shifts[j], numpy.interp(x+shifts[j], x, y_model), color="tab:red", lw=1, label="corr. model" if i == 0 else None)
-                axs_fb[j].step(x, numpy.interp(x, x+shifts[j], y_model), color="tab:red", lw=1, label="corr. model" if i == 0 else None)
-            axs_fb[j].set_title(f"measured shift {shifts[j]:.4f} pixel @ column {c} with SNR = {median_snr:.2f}")
-            axs_fb[j].set_ylim(-0.05, 1.3)
-        axs_fb[0].legend(loc=1, frameon=False, ncols=3)
+                # y_data, y_model, _, _, _, _ = _normalize_peaks(s2, s1, min_peak_dist=5.0)
+                axs_fb[j].step(x, y_data, color="0.2", lw=1.5, label="data")
+                axs_fb[j].step(x, y_model, color="tab:blue", lw=1, label="model")
+                axs_fb[j].step(x, numpy.interp(x, x+shifts[j], y_model), color="tab:red", lw=1, label="corr. model")
+                axs_fb[j].set_title(f"measured shift {shifts[j]:.4f} pixel @ column {c} with SNR = {median_snr:.2f}")
+                axs_fb[j].set_ylim(-0.05, 1.3)
+                axs_fb[0].legend(loc=1, frameon=False, ncols=3)
 
-        return shifts
+        return shifts, matches
 
     def apply_pixelmask(self, mask=None):
         """Applies the mask to the data and error arrays, setting to nan when True and leaving the same value otherwise"""

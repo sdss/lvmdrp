@@ -577,7 +577,7 @@ def _fiber_cc_match(
         p0=guess,
         bounds=(bound_lower, bound_upper)
     )
-    area, best_shift_sp, sigma, bg = best_gauss.getPar()
+    _, best_shift_sp, _, _ = best_gauss.getPar()
 
     # display best match
     if ax is not None:
@@ -586,10 +586,11 @@ def _fiber_cc_match(
         ax.step(best_shifts[mask], best_gauss(best_shifts[mask]), color="tab:red", lw=2, where="mid")
         ax.axvline(best_shift, color="tab:blue", lw=1, ls="--")
         ax.axvline(best_shift_sp, color="tab:red", lw=1)
-        ax.text(best_shift, (best_cross_corr[mask]).min(), f"shift = {best_shift}", va="bottom", ha="left", color="tab:blue")
-        ax.text(best_shift_sp, (best_cross_corr[mask]).min(), f"subpix. shift = {best_shift_sp:.3f}", va="top", ha="right", color="tab:red")
+        # ax.text(best_shift, (best_cross_corr[mask]).min(), f"shift = {best_shift}", va="bottom", ha="left", color="tab:blue")
+        # ax.text(best_shift_sp, (best_cross_corr[mask]).min(), f"subpix. shift = {best_shift_sp:.3f}", va="top", ha="right", color="tab:red")
+        ax.plot(best_shifts[mask], best_gauss(best_shifts[mask]) - best_cross_corr[mask], ".", color="tab:red", alpha=0.5)
 
-    return max_correlation, best_shift_sp, best_stretch_factor
+    return max_correlation, best_shift_sp, best_stretch_factor, obs_spec_, ref_spec_, best_shifts, best_cross_corr, best_gauss
 
 
 
