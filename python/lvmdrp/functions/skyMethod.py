@@ -1488,13 +1488,16 @@ def combine_skies(in_rss: str, out_rss, sky_weights: Tuple[float, float] = None)
     )
 
     if sky_weights is None:
-        ad = ang_distance(ra_e, dec_e, ra_s, dec_s)
-        w_e = 1 / (ad if ad > 0 else 1)
-        ad = ang_distance(ra_w, dec_w, ra_s, dec_s)
-        w_w = 1 / (ad if ad > 0 else 1)
-        w_norm = w_e + w_w
-        w_e, w_w = w_e / w_norm, w_w / w_norm
-        log.info(f"calculated weights SkyE: {w_e:.3f}, SkyW: {w_w:.3f}")
+        # use the near sky telescope only: blending in the far telescope assumes sky
+        # brightness varies smoothly between the two vantage points, which fails badly
+        # when the far telescope sits close to the Moon (or another localized source)
+        # while the near telescope and the science field do not -- even a small
+        # nominal weight on a badly-contaminated far telescope can otherwise dominate
+        # the combined sky.
+        ad_e = ang_distance(ra_e, dec_e, ra_s, dec_s)
+        ad_w = ang_distance(ra_w, dec_w, ra_s, dec_s)
+        w_e, w_w = (1.0, 0.0) if ad_e <= ad_w else (0.0, 1.0)
+        log.info(f"using near sky telescope only -- weights SkyE: {w_e:.3f}, SkyW: {w_w:.3f}")
     elif len(sky_weights) == 2:
         w_e, w_w = sky_weights
         w_norm = w_e + w_w
