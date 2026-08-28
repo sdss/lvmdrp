@@ -52,6 +52,68 @@ TELLURIC_FREE_REGIONS = {
     'z': [[7780, 7860], [8050, 8085], [8440, 8480]],  # O2 A-band ~7600-7780, H2O ~8085-8440
 }
 
+# SCI field-star combination: a star whose net/sky flux ratio (see SCI{i}{cam}RT
+# headers, set in science_sensitivity) falls below this is dropped outright before
+# combination -- a systematic sky error is roughly a fixed absolute error, so a star
+# this close to (or below) the local sky level is at high risk of a large, possibly
+# sign-flipping error in its derived sensitivity. Above the floor, stars are weighted
+# by min(ratio, SCI_RATIO_WEIGHT_CAP)**2 (inverse-variance motivated: if sky error is a
+# fixed fraction of sky level, fractional flux error scales as 1/ratio), capped so an
+# unusually bright star doesn't single-handedly dominate the combination. Calibrated
+# against a small sample (2026-08-28); revisit if it proves too aggressive/lax.
+SCI_RATIO_FLOOR = 0.2
+SCI_RATIO_WEIGHT_CAP = 4.0
+
+
+def weighted_biweight_location(data, weights, c=6.0):
+    """Biweight location combining astropy's outlier-robustness with an external
+    per-point prior weight (e.g. from SCI_RATIO_WEIGHT_CAP-capped star/sky ratios).
+
+    A star is down-weighted either for being statistically discordant from the bulk
+    (biweight's usual job) or for being physically vulnerable to sky error (the prior),
+    whichever is larger -- the two mechanisms are multiplied together, not substituted.
+    """
+    data = np.asarray(data, dtype=float)
+    weights = np.asarray(weights, dtype=float)
+    finite = np.isfinite(data) & (weights > 0)
+    if not finite.any():
+        return np.nan
+    data = data[finite]
+    weights = weights[finite]
+    if data.size == 1:
+        return data[0]
+    M = np.median(data)
+    mad = np.median(np.abs(data - M))
+    if mad == 0:
+        return M
+    u = (data - M) / (c * mad)
+    robust_w = np.where(np.abs(u) < 1, (1 - u ** 2) ** 2, 0.0)
+    w = robust_w * weights
+    return M + np.sum(w * (data - M)) / np.sum(w) if np.sum(w) > 0 else M
+
+
+def weighted_biweight_scale(data, weights, c=9.0):
+    """Weighted counterpart to astropy's biweight_scale; see weighted_biweight_location."""
+    data = np.asarray(data, dtype=float)
+    weights = np.asarray(weights, dtype=float)
+    finite = np.isfinite(data) & (weights > 0)
+    if finite.sum() < 2:
+        return 0.0
+    data = data[finite]
+    weights = weights[finite]
+    M = np.median(data)
+    mad = np.median(np.abs(data - M))
+    if mad == 0:
+        return 0.0
+    u = (data - M) / (c * mad)
+    mask = np.abs(u) < 1
+    if not mask.any():
+        return 0.0
+    num = np.sum(weights[mask] * (data[mask] - M) ** 2 * (1 - u[mask] ** 2) ** 4)
+    den = np.sum(weights[mask] * (1 - u[mask] ** 2) * (1 - 5 * u[mask] ** 2))
+    n = np.sum(weights > 0)
+    return np.sqrt(n) * np.sqrt(num) / np.abs(den) if den != 0 else 0.0
+
 
 def apply_fluxcal(in_rss: str, out_fframe: str, method: str = 'MOD', display_plots: bool = False):
     """applies flux calibration to spectrograph-combined data
@@ -117,8 +179,19 @@ def apply_fluxcal(in_rss: str, out_fframe: str, method: str = 'MOD', display_plo
     fframe._fluxcal_mod["mean"] = biweight_location(fframe._fluxcal_mod.to_pandas().values, axis=1, ignore_nan=True) * u.Unit("erg / (ct cm2)")
     fframe._fluxcal_mod["rms"] = biweight_scale(fframe._fluxcal_mod.to_pandas().values, axis=1, ignore_nan=True) * u.Unit("erg / (ct cm2)")
 
-    fframe._fluxcal_sci["mean"] = biweight_location(fframe._fluxcal_sci.to_pandas().values, axis=1, ignore_nan=True) * u.Unit("erg / (ct cm2)")
-    fframe._fluxcal_sci["rms"] = biweight_scale(fframe._fluxcal_sci.to_pandas().values, axis=1, ignore_nan=True) * u.Unit("erg / (ct cm2)")
+    # SCI: weight each star by its net/sky flux ratio (SCI{i}{cam}RT headers, set in
+    # science_sensitivity) rather than combining unweighted -- see SCI_RATIO_FLOOR/
+    # SCI_RATIO_WEIGHT_CAP above for the rationale. STD and MOD are left unweighted.
+    sci_cols = [c for c in fframe._fluxcal_sci.colnames if c not in ("mean", "rms")]
+    sci_arr = fframe._fluxcal_sci[sci_cols].to_pandas().values
+    sci_weights = np.zeros(len(sci_cols))
+    for j, col in enumerate(sci_cols):
+        ratio = fframe._header.get(f"{col[:-3]}{channel.upper()}RT")
+        sci_weights[j] = 0.0 if (ratio is None or ratio < SCI_RATIO_FLOOR) else min(ratio, SCI_RATIO_WEIGHT_CAP) ** 2
+    sci_mean = np.array([weighted_biweight_location(sci_arr[k, :], sci_weights) for k in range(sci_arr.shape[0])])
+    sci_rms = np.array([weighted_biweight_scale(sci_arr[k, :], sci_weights) for k in range(sci_arr.shape[0])])
+    fframe._fluxcal_sci["mean"] = sci_mean * u.Unit("erg / (ct cm2)")
+    fframe._fluxcal_sci["rms"] = sci_rms * u.Unit("erg / (ct cm2)")
 
     # check for flux calibration data
     if method == "NONE":
@@ -1856,6 +1929,15 @@ def science_sensitivity(rss, res_sci, ext, GAIA_CACHE_DIR, NSCI_MAX=15, r_spaxel
 
             log.info(f"science fiberid '{scifibs['fiberid'][fib][0]}', star '{data['source_id']}', secz '{secz:.2f}'")
 
+            # net star flux relative to the local sky level: a systematic sky-model
+            # error is roughly a fixed absolute error, so it matters little for a star
+            # far above the sky but can dominate one whose true flux is comparable to
+            # or below it. Computed from the raw (pre-correction) fiber data so it's a
+            # direct measurement of how vulnerable this star's flux is to sky error.
+            sky_level = np.nanmedian(master_sky._data[fibidx[0], :])
+            net_level = np.nanmedian(fluxes[fibidx[0], :] - master_sky._data[fibidx[0], :])
+            star_sky_ratio = net_level / sky_level if sky_level else np.nan
+
             # correction for Evelyn's effect
             radius_fac = np.interp(dmin, np.array([0,4,6,8,10,12,14,16]), 10**(-0.4*np.array([0.0,0.0,0.05,0.12,0.15,0.2,0.2,0.2])))
 
@@ -1890,6 +1972,7 @@ def science_sensitivity(rss, res_sci, ext, GAIA_CACHE_DIR, NSCI_MAX=15, r_spaxel
             rss.setHdrValue(f"SCI{i+1}FIB", scifibs['fiberid'][fib][0], f"field star {i+1} fiber id")
             rss.setHdrValue(f"SCI{i+1}RA", data['ra'], f"field star {i+1} RA")
             rss.setHdrValue(f"SCI{i+1}DE", data['dec'], f"field star {i+1} DEC")
+            rss.setHdrValue(f"SCI{i+1}{cam}RT", round(float(star_sky_ratio), 3), f"field star {i+1} net/sky flux ratio in {channel}-band")
             log.info(f"AB mag in LVM_{channel}: Gaia {mAB_std:.2f}, instrumental {mAB_obs:.2f}")
 
             # calibrate and plot against the stars for debugging:
