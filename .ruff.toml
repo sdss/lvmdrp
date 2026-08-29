@@ -1,0 +1,2 @@
+line-length = 99
+extend-exclude = ["lvmcore", "docs", "examples", "tests"]
