@@ -2848,7 +2848,7 @@ def registerSDSS_drp(
         ):
             line.set_markeredgewidth(2.0)
         ax3.set_title(
-            "$\mathbf{\chi^2}$ matching for offsets", fontsize=18, fontweight="bold"
+            r"$\mathbf{\chi^2}$ matching for offsets", fontsize=18, fontweight="bold"
         )
         ax3.set_xlim(
             [offsets_xIFU[0, 0] - step[i] / 2.0, offsets_xIFU[-1, 0] + step[i] / 2.0]
