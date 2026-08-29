@@ -659,9 +659,9 @@ def matchCubeAperSpec_drp(
         ax.plot(residual._wave, residual._data, "-g")
         max_spec = numpy.max(spec_ref_resamp._data)
         ax.set_ylim([-20, max_spec + 0.05 * max_spec])
-        ax.set_xlabel("wavelength [$\AA$]", fontsize=16)
+        ax.set_xlabel(r"wavelength [$\AA$]", fontsize=16)
         ax.set_ylabel(
-            "Flux [$10^{-16}\,\mathrm{erg}\,\mathrm{s}^{-1}\,\mathrm{cm}^{-2}\,\mathrm{\AA}]$",
+            r"Flux [$10^{-16}\,\mathrm{erg}\,\mathrm{s}^{-1}\,\mathrm{cm}^{-2}\,\mathrm{\AA}]$",
             fontsize=16,
         )
         fig.text(0.8, 0.9, name_obj, fontsize=16)
