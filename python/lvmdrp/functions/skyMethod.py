@@ -1488,46 +1488,65 @@ def combine_skies(in_rss: str, out_rss, sky_weights: Tuple[float, float] = None)
     )
 
     if sky_weights is None:
-        ad = ang_distance(ra_e, dec_e, ra_s, dec_s)
-        w_e = 1 / (ad if ad > 0 else 1)
-        ad = ang_distance(ra_w, dec_w, ra_s, dec_s)
-        w_w = 1 / (ad if ad > 0 else 1)
-        w_norm = w_e + w_w
-        w_e, w_w = w_e / w_norm, w_w / w_norm
-        log.info(f"calculated weights SkyE: {w_e:.3f}, SkyW: {w_w:.3f}")
+        # default: use a per-wavelength median across the Sci-telescope's own science
+        # fibers as the master sky. Zero angular separation from the science field by
+        # construction, so it can't be thrown off by a far telescope sitting near the
+        # Moon (or any other localized source) the way blending SkyE/SkyW could -- and
+        # unlike SkyE/SkyW, which are pointed at pre-selected blank-sky positions, it
+        # captures real local diffuse/nebular emission actually present at the science
+        # pointing. With ~1800 contributing fibers the median is robust to the handful
+        # that happen to contain a real point source, so no attempt is made to exclude
+        # them in advance.
+        sci_idx = np.where(rss._slitmap["telescope"] == "Sci")[0]
+        sky_data = np.nanmedian(rss._data[sci_idx, :], axis=0)
+        n_fib = rss._data.shape[0]
+        sky_bcast = np.tile(sky_data, (n_fib, 1))
+        if rss._error is not None:
+            sky_err = np.nanmedian(rss._error[sci_idx, :], axis=0)
+            err_bcast = np.tile(sky_err, (n_fib, 1))
+        else:
+            err_bcast = None
+        sky_e = RSS(wave_trace=rss._wave_trace, lsf_trace=rss._lsf_trace,
+                    data=sky_bcast, error=err_bcast, header=rss._header)
+        sky_w = sky_e
+        w_e, w_w = 1.0, 0.0
+        sky_src = "SCIMED"
+        log.info(f"using median of {len(sci_idx)} Sci-telescope science fibers as master "
+                 f"sky (median level={np.nanmedian(sky_data):.1f})")
     elif len(sky_weights) == 2:
         w_e, w_w = sky_weights
         w_norm = w_e + w_w
         if w_norm != 1:
             w_e, w_w = w_e / w_norm, w_w / w_norm
         log.info(f"assuming user-provided weights SkyE: {w_e:.3f}, SkyW: {w_w:.3f}")
+        # evaluate sky spectra
+        _, supersky, supersky_error = rss.eval_supersky()
+        sky_e = RSS(
+            wave_trace=rss._wave_trace,
+            lsf_trace=rss._lsf_trace,
+            data=supersky["east"],
+            error=supersky_error["east"],
+            header=rss._header,
+        )
+        sky_w = RSS(
+            wave_trace=rss._wave_trace,
+            lsf_trace=rss._lsf_trace,
+            data=supersky["west"],
+            error=supersky_error["west"],
+            header=rss._header,
+        )
+        sky_src = "BLEND"
     else:
         raise ValueError(f"invalid value for 'sky_weights' parameter: '{sky_weights}'")
-
-    # evaluate sky spectra
-    _, supersky, supersky_error = rss.eval_supersky()
-    sky_e = RSS(
-        wave_trace=rss._wave_trace,
-        lsf_trace=rss._lsf_trace,
-        data=supersky["east"],
-        error=supersky_error["east"],
-        header=rss._header,
-    )
-    sky_w = RSS(
-        wave_trace=rss._wave_trace,
-        lsf_trace=rss._lsf_trace,
-        data=supersky["west"],
-        error=supersky_error["west"],
-        header=rss._header,
-    )
 
     # define master sky
     sky = sky_e * w_e + sky_w * w_w
 
     # write output sky-subtracted RSS
     log.info(f"writing output RSS file '{os.path.basename(out_rss)}'")
-    rss.setHdrValue("SKYEW", w_e, "SkyE weight for STD star sky subtraction")
-    rss.setHdrValue("SKYWW", w_w, "SkyW weight for STD star sky subtraction")
+    rss.setHdrValue("SKYSRC", sky_src, "master sky source: SCIMED=Sci-fiber median, BLEND=SkyE/SkyW")
+    rss.setHdrValue("SKYEW", w_e, "SkyE weight (only meaningful when SKYSRC=BLEND)")
+    rss.setHdrValue("SKYWW", w_w, "SkyW weight (only meaningful when SKYSRC=BLEND)")
     rss.set_sky(sky_east=sky_e._data, sky_east_error=sky_e._error,
                 sky_west=sky_w._data, sky_west_error=sky_w._error)
     rss._supersky = None
