@@ -1,0 +1,9 @@
+line-length = 99
+extend-exclude = ["lvmcore", "docs", "examples", "tests"]
+
+[lint]
+ignore = [
+    "UP", "B", "RUF", "SIM", "I001", "BLE", "C4",
+    "PLR", "PLW", "PLC", "N999", "PIE", "EXE", "TRY", "FURB",
+    "S", "PERF", "DTZ", "RET", "PYI", "D",
+]

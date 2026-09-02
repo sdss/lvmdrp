@@ -252,8 +252,8 @@ def apply_fluxcal(in_rss: str, out_fframe: str, method: str = 'MOD', display_plo
             ax.plot(fframe._wave, sens_arr[:, j], "-", lw=1, label=std_id)
         ax.plot(fframe._wave, sens_ave, "-r", lw=2, label="mean")
         ax.set_yscale("log")
-        ax.set_xlabel("wavelength [\AA]")
-        ax.set_ylabel("sensitivity [$\mathrm{(ergs/s/cm^2/\AA) / (e-/s/\AA)}$]")
+        ax.set_xlabel(r"wavelength [\AA]")
+        ax.set_ylabel(r"sensitivity [$\mathrm{(ergs/s/cm^2/\AA) / (e-/s/\AA)}$]")
         ax.legend(loc="upper right")
         fig.tight_layout()
         save_fig(fig, product_path=out_fframe, to_display=display_plots, figure_path="qa", label="fluxcal")
@@ -1302,8 +1302,8 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
         log.info(f"Mean model sensitivity in {chan} : {mean_mod_band}")
 
         if plot:
-            plt.ylabel("sensitivity [$\mathrm{(ergs/s/cm^2/\AA) / (e-/s/\AA)}$]")
-            plt.xlabel("wavelength [\AA]")
+            plt.ylabel(r"sensitivity [$\mathrm{(ergs/s/cm^2/\AA) / (e-/s/\AA)}$]")
+            plt.xlabel(r"wavelength [\AA]")
             plt.ylim(1e-14, 0.1e-11)
             plt.semilogy()
             fig1.add_axes((0.1, 0.1, 0.8, 0.2))
@@ -1315,7 +1315,7 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
             plt.plot(w[n_chan], -rms_mod / mean_mod)
             plt.ylim(-0.2, 0.2)
             plt.ylabel("relative residuals")
-            plt.xlabel("wavelength [\AA]")
+            plt.xlabel(r"wavelength [\AA]")
             save_fig(plt.gcf(), product_path=in_rss[n_chan], to_display=False, figure_path="qa", label="fluxcal_mod")
 
         # update sensitivity extension
@@ -1417,7 +1417,7 @@ def qa_model_matching(fig_path, fiber_params=None, gaia_params=None, model_param
              f'Reduced chi2 = {matching_params["chi2_bestfit"]:.4f}', size=14)
     plt.xlim(xlim)
     plt.ylim(ylim)
-    plt.xlabel("wavelength [\AA]", size=14)
+    plt.xlabel(r"wavelength [\AA]", size=14)
     plt.ylabel("Normalized Flux", size=14)
     show_wl = np.arange(3500, 10000, 500)
     plt.xticks(np.log(show_wl), labels=show_wl.astype(str), size=14)
@@ -1451,7 +1451,7 @@ def qa_model_matching(fig_path, fiber_params=None, gaia_params=None, model_param
 
     plt.xlim(xlim)
     plt.ylim(ylim)
-    plt.xlabel("wavelength [\AA]", size=14)
+    plt.xlabel(r"wavelength [\AA]", size=14)
     plt.ylabel("Chi2", size=14)
     show_wl = np.arange(3500, 10000, 500)
     plt.xticks(np.log(show_wl), labels=show_wl.astype(str), size=14)
@@ -1497,7 +1497,7 @@ def qa_model_matching(fig_path, fiber_params=None, gaia_params=None, model_param
     plt.text((xlim[1] - xlim[0]) * 0.03 + xlim[0], (ylim[1] - ylim[0]) * 0.9 + ylim[0], 'b channel', size=14)
     plt.xlim(xlim)
     plt.ylim(ylim)
-    plt.xlabel("wavelength [\AA]", size=14)
+    plt.xlabel(r"wavelength [\AA]", size=14)
     plt.ylabel("Normalized Flux", size=14)
 
     plt.subplot(614)
@@ -1539,7 +1539,7 @@ def qa_model_matching(fig_path, fiber_params=None, gaia_params=None, model_param
     plt.text((xlim[1] - xlim[0]) * 0.03 + xlim[0], (ylim[1] - ylim[0]) * 0.9 + ylim[0], 'r channel', size=14)
     plt.xlim(xlim)
     plt.ylim(ylim)
-    plt.xlabel("wavelength [\AA]", size=14)
+    plt.xlabel(r"wavelength [\AA]", size=14)
     plt.ylabel("Normalized Flux", size=14)
 
     plt.subplot(615)
@@ -1584,7 +1584,7 @@ def qa_model_matching(fig_path, fiber_params=None, gaia_params=None, model_param
     plt.text((xlim[1] - xlim[0]) * 0.03 + xlim[0], (ylim[1] - ylim[0]) * 0.9 + ylim[0], 'z channel', size=14)
     plt.xlim(xlim)
     plt.ylim(ylim)
-    plt.xlabel("wavelength [\AA]", size=14)
+    plt.xlabel(r"wavelength [\AA]", size=14)
     plt.ylabel("Normalized Flux", size=14)
     # plt.ylabel(size=14)
 
@@ -1615,8 +1615,8 @@ def qa_model_matching(fig_path, fiber_params=None, gaia_params=None, model_param
     plt.xlim(3500, 10000)
     # plt.gca().set_ylim(bottom=0)
     # plt.ylim(0.5, 1.6)
-    plt.xlabel("wavelength [\AA]", size=14)
-    plt.ylabel("Flux, $\mathrm{erg/s/cm^2/\AA}$", size=14)
+    plt.xlabel(r"wavelength [\AA]", size=14)
+    plt.ylabel(r"Flux, $\mathrm{erg/s/cm^2/\AA}$", size=14)
     plt.xticks(fontsize=14)
     plt.yticks(fontsize=14)
 
@@ -1995,8 +1995,8 @@ def fluxcal_standard_stars(in_rss, plot=True, GAIA_CACHE_DIR=None):
     log.info(f"Mean stdstar sensitivity in {channel} : {mean_std_band}")
 
     if plot:
-        plt.ylabel("sensitivity [$\mathrm{(ergs/s/cm^2/\AA) / (e-/s/\AA)}$]")
-        plt.xlabel("wavelength [\AA]")
+        plt.ylabel(r"sensitivity [$\mathrm{(ergs/s/cm^2/\AA) / (e-/s/\AA)}$]")
+        plt.xlabel(r"wavelength [\AA]")
         plt.ylim(1e-14, 0.1e-11)
         plt.semilogy()
         fig1.add_axes((0.1, 0.1, 0.8, 0.2))
@@ -2008,7 +2008,7 @@ def fluxcal_standard_stars(in_rss, plot=True, GAIA_CACHE_DIR=None):
         plt.plot(w, -rms_std / mean_std)
         plt.ylim(-0.2, 0.2)
         plt.ylabel("relative residuals")
-        plt.xlabel("wavelength [\AA]")
+        plt.xlabel(r"wavelength [\AA]")
         save_fig(plt.gcf(), product_path=in_rss, to_display=False, figure_path="qa", label="fluxcal_std")
 
     # update sensitivity extension
@@ -2071,8 +2071,8 @@ def fluxcal_sci_ifu_stars(in_rss, plot=True, GAIA_CACHE_DIR=None, NSCI_MAX=15):
     log.info(f"Mean scistar sensitivity in {channel} : {mean_sci_band}")
 
     if plot:
-        plt.ylabel("sensitivity [$\mathrm{(ergs/s/cm^2/\AA) / (e-/s/\AA)}$]")
-        plt.xlabel("wavelength [\AA]")
+        plt.ylabel(r"sensitivity [$\mathrm{(ergs/s/cm^2/\AA) / (e-/s/\AA)}$]")
+        plt.xlabel(r"wavelength [\AA]")
         plt.ylim(1e-14, 0.1e-11)
         plt.semilogy()
         fig1.add_axes((0.1, 0.1, 0.8, 0.2))
@@ -2084,7 +2084,7 @@ def fluxcal_sci_ifu_stars(in_rss, plot=True, GAIA_CACHE_DIR=None, NSCI_MAX=15):
         plt.plot(w, -rms_sci / mean_sci)
         plt.ylim(-0.2, 0.2)
         plt.ylabel("relative residuals")
-        plt.xlabel("wavelength [\AA]")
+        plt.xlabel(r"wavelength [\AA]")
         save_fig(plt.gcf(), product_path=in_rss, to_display=False, figure_path="qa", label="fluxcal_sciifu")
 
     # update sensitivity extension
