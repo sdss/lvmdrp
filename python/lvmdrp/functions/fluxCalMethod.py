@@ -255,7 +255,20 @@ def apply_fluxcal(in_rss: str, out_fframe: str, method: str = 'MOD', display_plo
         telluric_trans_skye = telluric_corrector.match_to_data(fframe._wave, lsf_median, pwv, airmass=skye_secz, lsf_in_wavelength=True)
         telluric_trans_skyw = telluric_corrector.match_to_data(fframe._wave, lsf_median, pwv, airmass=skyw_secz, lsf_in_wavelength=True)
 
-        # Divide sensitivity curve by atmospheric molecular transmission
+        # Divide sensitivity curve by atmospheric molecular transmission.
+        # MOD is the only one of the three methods (STD/SCI/MOD) that does this.
+        # model_selection() derives sens_ave by first dividing telluric absorption
+        # OUT of each standard star's own observed spectrum (using a telluric
+        # model fit to that star's own PWV/airmass) before comparing it to a
+        # telluric-free theoretical stellar atmosphere model -- so the stored
+        # FLUXCAL_MOD sensitivity is a genuinely atmosphere-free instrument
+        # response, unlike FLUXCAL_STD/FLUXCAL_SCI (see the NOTEs in
+        # standard_sensitivity/science_sensitivity). That's why it has to be put
+        # back here, but modeled for *this science exposure's own* PWV/secz
+        # rather than inheriting whatever telluric conditions applied to the
+        # standard stars. Note this re-telluric'd sens_ave_sci/skye/skyw is never
+        # written back to FLUXCAL_MOD -- it only exists in memory here, applied
+        # directly to fframe._data/_sky_east/_sky_west below.
         sens_ave_sci = sens_ave / telluric_trans_sci
         sens_ave_skye = sens_ave / telluric_trans_skye
         sens_ave_skyw = sens_ave / telluric_trans_skyw
@@ -1785,6 +1798,19 @@ def standard_sensitivity(stds, rss, GAIA_CACHE_DIR, ext, res, plot=False, width=
         # TODO: match gaia spectrum and stdflux against a set of theoretical stellar templates
         # TODO: downgrade best fit template to instrumental LSF and calculate sensitivity curve (after lifting telluric mask)
 
+        # NOTE: because of the above, `sens` (and FLUXCAL_STD) is NOT an
+        # atmosphere-free instrument response -- extinction is removed (above),
+        # but telluric absorption from *this star's own* observation is left in,
+        # uncorrected, and applied to the science data as-is in apply_fluxcal.
+        # This differs from the MOD method (model_selection), which explicitly
+        # divides out a telluric model fit to each standard star's own
+        # conditions before deriving its sensitivity, and apply_fluxcal then
+        # re-injects a fresh telluric model fit to the *science exposure's own*
+        # PWV/airmass. STD's approach implicitly assumes the standard star's
+        # telluric conditions are a good stand-in for the science exposure's --
+        # not corrected for any mismatch. SCI (science_sensitivity) has the same
+        # gap: it never removes or re-derives telluric absorption either.
+
         # divide to find sensitivity and smooth
         # Here we can choose if we want to use Gaia or model spectra to get the sensitivity curves
         # if mode == "GAIA":
@@ -1952,6 +1978,13 @@ def science_sensitivity(rss, res_sci, ext, GAIA_CACHE_DIR, NSCI_MAX=15, r_spaxel
             # correct for extinction
             obsflux *= 10 ** (0.4 * ext * secz)
             obsflux /= exptime
+
+            # NOTE: no telluric correction here either -- same gap as
+            # standard_sensitivity (see its NOTE near the "mask telluric
+            # absorption lines" TODO). This scalar broadband ratio dilutes the
+            # effect of narrow telluric bands somewhat, but the shared
+            # mean_sens[channel] curve applied below is not telluric-corrected
+            # for this exposure's own conditions -- unlike MOD, which is.
 
             # calculate the normalization of the average (known) sensitivity curve in a broad band
             lvmflux = fluxcal.spec_to_LVM_flux(channel, obswave, obsflux)
