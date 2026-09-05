@@ -1446,7 +1446,22 @@ def interpolate_sky( in_frame: str, out_rss: str = None, display_plots: bool = F
 
 
 def combine_skies(in_rss: str, out_rss, sky_weights: Tuple[float, float] = None) -> Tuple[RSS, RSS]:
-    """Combines the extrapolated sky fibers from both telescopes into a single master sky RSS
+    """Combines the extrapolated sky fibers from both telescopes into SKY_EAST/SKY_WEST,
+    and separately computes the sky used for flux calibration
+
+    This function populates two independent quantities, stored separately so that
+    neither can be aliased into the other:
+
+      - SKY_EAST/SKY_WEST (`rss._sky_east`/`rss._sky_west`): the genuine per-telescope
+        sky model (the pooled-fiber smoothing spline from `interpolate_sky`, evaluated
+        per fiber), blended by `sky_weights` or, by default, by angular distance to the
+        science field. This is what ends up in the lvmCFrame's SKY_EAST/SKY_WEST
+        extensions, unconditionally -- independent of whichever method is used below
+        for flux calibration.
+      - the flux-calibration sky (`rss._sky`/`rss._sky_error`): a per-wavelength median
+        across the Sci-telescope's own science fibers (SCIMED). This is what
+        `RSS.eval_master_sky()` returns, and what actually gets subtracted from
+        standard/field stars during flux calibration.
 
     Parameters
     ----------
@@ -1454,19 +1469,17 @@ def combine_skies(in_rss: str, out_rss, sky_weights: Tuple[float, float] = None)
         input RSS file
     out_rss : str
         output sky-subtracted RSS file
-    in_skye : str
-        input SkyE RSS file
-    in_skyw : str
-        input SkyW RSS file
     sky_weights : Tuple[float, float]
-        weights for each telescope when master_sky = 'combine', by default None
+        SkyE/SkyW weights used for SKY_EAST/SKY_WEST; by default None, which
+        auto-computes weights from angular distance to the science field. Has no
+        effect on the flux-calibration sky, which is always computed via SCIMED.
 
     Returns
     -------
     RSS : lvmdrp.core.rss.RSS
         new RSS object with telescope-combined sky and sky error
     RSS : lvmdrp.core.rss.RSS
-        combined sky RSS
+        SkyE/SkyW-combined sky RSS
     """
     # load input RSS
     log.info(f"loading input RSS file '{os.path.basename(in_rss)}'")
@@ -1487,91 +1500,99 @@ def combine_skies(in_rss: str, out_rss, sky_weights: Tuple[float, float] = None)
         f"in science telescope pointing (SCIRA, SCIDEC: {ra_s:.2f}, {dec_s:.2f})"
     )
 
+    # --- SKY_EAST/SKY_WEST: always the genuine per-telescope sky model, independent
+    # of the flux-calibration sky computed further below.
     if sky_weights is None:
-        # default: use a per-wavelength median across the Sci-telescope's own science
-        # fibers as the master sky. Zero angular separation from the science field by
-        # construction, so it can't be thrown off by a far telescope sitting near the
-        # Moon (or any other localized source) the way blending SkyE/SkyW could -- and
-        # unlike SkyE/SkyW, which are pointed at pre-selected blank-sky positions, it
-        # captures real local diffuse/nebular emission actually present at the science
-        # pointing. With ~1800 contributing fibers the median is robust to the handful
-        # that happen to contain a real point source, so no attempt is made to exclude
-        # them in advance.
-        sci_idx = np.where(rss._slitmap["telescope"] == "Sci")[0]
-        # At this pipeline stage fibers are not yet wavelength-rectified (that
-        # happens later, in resample_wavelength), so a fixed pixel column maps to a
-        # different wavelength in every fiber -- tens of Angstroms apart across the
-        # bundle. Medianing directly on rss._data[sci_idx, :] by column mixes flux
-        # from different wavelengths together, which washes out anything narrower
-        # than that spread (night-sky emission lines) while leaving the smooth
-        # continuum unaffected. Align every Sci fiber onto one reference fiber's
-        # wavelength grid before medianing, then relabel the wavelength-indexed
-        # median sky back onto each output fiber's own native grid.
-        common_wave = rss._wave[sci_idx[0]]
-        aligned_data = np.stack([
-            np.interp(common_wave, rss._wave[i], rss._data[i], left=np.nan, right=np.nan)
-            for i in sci_idx
-        ])
-        sky_common = np.nanmedian(aligned_data, axis=0)
-        n_fib = rss._data.shape[0]
-        sky_bcast = np.stack([
-            np.interp(rss._wave[i], common_wave, sky_common, left=np.nan, right=np.nan)
-            for i in range(n_fib)
-        ]).astype("float32")
-        if rss._error is not None:
-            aligned_error = np.stack([
-                np.interp(common_wave, rss._wave[i], rss._error[i], left=np.nan, right=np.nan)
-                for i in sci_idx
-            ])
-            err_common = np.nanmedian(aligned_error, axis=0)
-            err_bcast = np.stack([
-                np.interp(rss._wave[i], common_wave, err_common, left=np.nan, right=np.nan)
-                for i in range(n_fib)
-            ]).astype("float32")
-        else:
-            err_bcast = None
-        sky_e = RSS(wave_trace=rss._wave_trace, lsf_trace=rss._lsf_trace,
-                    data=sky_bcast, error=err_bcast, header=rss._header)
-        sky_w = sky_e
-        w_e, w_w = 1.0, 0.0
-        sky_src = "SCIMED"
-        log.info(f"using median of {len(sci_idx)} Sci-telescope science fibers as master "
-                 f"sky (median level={np.nanmedian(sky_common):.1f})")
+        ad_e = ang_distance(ra_e, dec_e, ra_s, dec_s)
+        ad_w = ang_distance(ra_w, dec_w, ra_s, dec_s)
+        w_e = 1 / (ad_e if ad_e > 0 else 1)
+        w_w = 1 / (ad_w if ad_w > 0 else 1)
+        w_norm = w_e + w_w
+        w_e, w_w = w_e / w_norm, w_w / w_norm
+        log.info(f"calculated weights SkyE: {w_e:.3f}, SkyW: {w_w:.3f}")
     elif len(sky_weights) == 2:
         w_e, w_w = sky_weights
         w_norm = w_e + w_w
         if w_norm != 1:
             w_e, w_w = w_e / w_norm, w_w / w_norm
         log.info(f"assuming user-provided weights SkyE: {w_e:.3f}, SkyW: {w_w:.3f}")
-        # evaluate sky spectra
-        _, supersky, supersky_error = rss.eval_supersky()
-        sky_e = RSS(
-            wave_trace=rss._wave_trace,
-            lsf_trace=rss._lsf_trace,
-            data=supersky["east"],
-            error=supersky_error["east"],
-            header=rss._header,
-        )
-        sky_w = RSS(
-            wave_trace=rss._wave_trace,
-            lsf_trace=rss._lsf_trace,
-            data=supersky["west"],
-            error=supersky_error["west"],
-            header=rss._header,
-        )
-        sky_src = "BLEND"
     else:
         raise ValueError(f"invalid value for 'sky_weights' parameter: '{sky_weights}'")
 
-    # define master sky
+    # evaluate sky spectra
+    _, supersky, supersky_error = rss.eval_supersky()
+    sky_e = RSS(
+        wave_trace=rss._wave_trace,
+        lsf_trace=rss._lsf_trace,
+        data=supersky["east"],
+        error=supersky_error["east"],
+        header=rss._header,
+    )
+    sky_w = RSS(
+        wave_trace=rss._wave_trace,
+        lsf_trace=rss._lsf_trace,
+        data=supersky["west"],
+        error=supersky_error["west"],
+        header=rss._header,
+    )
+
+    # define SkyE/SkyW-combined sky
     sky = sky_e * w_e + sky_w * w_w
+
+    rss.setHdrValue("SKYEW", w_e, "SkyE weight used for SKY_EAST/SKY_WEST combination")
+    rss.setHdrValue("SKYWW", w_w, "SkyW weight used for SKY_EAST/SKY_WEST combination")
+
+    # --- Flux-calibration sky: independent of SKY_EAST/SKY_WEST above. Default (and
+    # currently only) method is SCIMED -- a per-wavelength median across the
+    # Sci-telescope's own science fibers. Zero angular separation from the science
+    # field by construction, so it can't be thrown off by a far telescope sitting near
+    # the Moon (or any other localized source) the way blending SkyE/SkyW could -- and
+    # unlike SkyE/SkyW, which are pointed at pre-selected blank-sky positions, it
+    # captures real local diffuse/nebular emission actually present at the science
+    # pointing. With ~1800 contributing fibers the median is robust to the handful
+    # that happen to contain a real point source, so no attempt is made to exclude
+    # them in advance.
+    sci_idx = np.where(rss._slitmap["telescope"] == "Sci")[0]
+    # At this pipeline stage fibers are not yet wavelength-rectified (that happens
+    # later, in resample_wavelength), so a fixed pixel column maps to a different
+    # wavelength in every fiber -- tens of Angstroms apart across the bundle.
+    # Medianing directly by column mixes flux from different wavelengths together,
+    # which washes out anything narrower than that spread (night-sky emission lines)
+    # while leaving the smooth continuum unaffected. Align every Sci fiber onto one
+    # reference fiber's wavelength grid before medianing, then relabel the
+    # wavelength-indexed median sky back onto each output fiber's own native grid.
+    common_wave = rss._wave[sci_idx[0]]
+    aligned_data = np.stack([
+        np.interp(common_wave, rss._wave[i], rss._data[i], left=np.nan, right=np.nan)
+        for i in sci_idx
+    ])
+    sky_common = np.nanmedian(aligned_data, axis=0)
+    n_fib = rss._data.shape[0]
+    fluxcal_sky = np.stack([
+        np.interp(rss._wave[i], common_wave, sky_common, left=np.nan, right=np.nan)
+        for i in range(n_fib)
+    ]).astype("float32")
+    if rss._error is not None:
+        aligned_error = np.stack([
+            np.interp(common_wave, rss._wave[i], rss._error[i], left=np.nan, right=np.nan)
+            for i in sci_idx
+        ])
+        err_common = np.nanmedian(aligned_error, axis=0)
+        fluxcal_sky_error = np.stack([
+            np.interp(rss._wave[i], common_wave, err_common, left=np.nan, right=np.nan)
+            for i in range(n_fib)
+        ]).astype("float32")
+    else:
+        fluxcal_sky_error = None
+    log.info(f"using median of {len(sci_idx)} Sci-telescope science fibers as flux-cal "
+             f"sky (median level={np.nanmedian(sky_common):.1f})")
+
+    rss.setHdrValue("SKYSRC", "SCIMED", "flux-calibration sky source: SCIMED=Sci-fiber median")
 
     # write output sky-subtracted RSS
     log.info(f"writing output RSS file '{os.path.basename(out_rss)}'")
-    rss.setHdrValue("SKYSRC", sky_src, "master sky source: SCIMED=Sci-fiber median, BLEND=SkyE/SkyW")
-    rss.setHdrValue("SKYEW", w_e, "SkyE weight (only meaningful when SKYSRC=BLEND)")
-    rss.setHdrValue("SKYWW", w_w, "SkyW weight (only meaningful when SKYSRC=BLEND)")
-    rss.set_sky(sky_east=sky_e._data, sky_east_error=sky_e._error,
+    rss.set_sky(sky_master=fluxcal_sky, sky_master_error=fluxcal_sky_error,
+                sky_east=sky_e._data, sky_east_error=sky_e._error,
                 sky_west=sky_w._data, sky_west_error=sky_w._error)
     rss._supersky = None
     rss._supersky_error = None
@@ -1602,12 +1623,15 @@ def combine_skies(in_rss: str, out_rss, sky_weights: Tuple[float, float] = None)
             )
         }
         log.info(f"correction factors for standard star: {std_fac}")
-        # apply factors to standard star sky
+        # apply factors to standard star sky. sky_east/sky_west and sky/sky_error are
+        # independent arrays (never aliased), so each is scaled exactly once here.
         exptime_factors = np.asarray(list(std_fac.values()))[:, None]
         rss._sky_east[std_idx] *= exptime_factors
         rss._sky_east_error[std_idx] *= exptime_factors
         rss._sky_west[std_idx] *= exptime_factors
         rss._sky_west_error[std_idx] *= exptime_factors
+        rss._sky[std_idx] *= exptime_factors
+        rss._sky_error[std_idx] *= exptime_factors
 
     rss.writeFitsData(out_rss)
 
