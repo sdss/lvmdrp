@@ -1498,12 +1498,36 @@ def combine_skies(in_rss: str, out_rss, sky_weights: Tuple[float, float] = None)
         # that happen to contain a real point source, so no attempt is made to exclude
         # them in advance.
         sci_idx = np.where(rss._slitmap["telescope"] == "Sci")[0]
-        sky_data = np.nanmedian(rss._data[sci_idx, :], axis=0)
+        # At this pipeline stage fibers are not yet wavelength-rectified (that
+        # happens later, in resample_wavelength), so a fixed pixel column maps to a
+        # different wavelength in every fiber -- tens of Angstroms apart across the
+        # bundle. Medianing directly on rss._data[sci_idx, :] by column mixes flux
+        # from different wavelengths together, which washes out anything narrower
+        # than that spread (night-sky emission lines) while leaving the smooth
+        # continuum unaffected. Align every Sci fiber onto one reference fiber's
+        # wavelength grid before medianing, then relabel the wavelength-indexed
+        # median sky back onto each output fiber's own native grid.
+        common_wave = rss._wave[sci_idx[0]]
+        aligned_data = np.stack([
+            np.interp(common_wave, rss._wave[i], rss._data[i], left=np.nan, right=np.nan)
+            for i in sci_idx
+        ])
+        sky_common = np.nanmedian(aligned_data, axis=0)
         n_fib = rss._data.shape[0]
-        sky_bcast = np.tile(sky_data, (n_fib, 1))
+        sky_bcast = np.stack([
+            np.interp(rss._wave[i], common_wave, sky_common, left=np.nan, right=np.nan)
+            for i in range(n_fib)
+        ]).astype("float32")
         if rss._error is not None:
-            sky_err = np.nanmedian(rss._error[sci_idx, :], axis=0)
-            err_bcast = np.tile(sky_err, (n_fib, 1))
+            aligned_error = np.stack([
+                np.interp(common_wave, rss._wave[i], rss._error[i], left=np.nan, right=np.nan)
+                for i in sci_idx
+            ])
+            err_common = np.nanmedian(aligned_error, axis=0)
+            err_bcast = np.stack([
+                np.interp(rss._wave[i], common_wave, err_common, left=np.nan, right=np.nan)
+                for i in range(n_fib)
+            ]).astype("float32")
         else:
             err_bcast = None
         sky_e = RSS(wave_trace=rss._wave_trace, lsf_trace=rss._lsf_trace,
@@ -1512,7 +1536,7 @@ def combine_skies(in_rss: str, out_rss, sky_weights: Tuple[float, float] = None)
         w_e, w_w = 1.0, 0.0
         sky_src = "SCIMED"
         log.info(f"using median of {len(sci_idx)} Sci-telescope science fibers as master "
-                 f"sky (median level={np.nanmedian(sky_data):.1f})")
+                 f"sky (median level={np.nanmedian(sky_common):.1f})")
     elif len(sky_weights) == 2:
         w_e, w_w = sky_weights
         w_norm = w_e + w_w
