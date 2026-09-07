@@ -2,7 +2,6 @@ import os
 import yaml
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
 from copy import deepcopy as copy
 from pprint import pformat
 
@@ -562,7 +561,7 @@ def _simple_pixflat(cflat, size):
     return cflat, mflat
 
 
-def get_pixflat(cflat_path, mpixflat_path, fflat_path, size=31, flatfield_threshold=0.001, method="desi"):
+def get_pixflat(cflat_path, mpixflat_path, fflat_path, size=31, min_flatfield=0.001, method="desi"):
     """Generate and write master and flat-fielded pixel-flat products.
 
     Parameters
@@ -575,8 +574,8 @@ def get_pixflat(cflat_path, mpixflat_path, fflat_path, size=31, flatfield_thresh
         Output path for the flat-fielded combined image.
     size : int, optional
         Median-filter size.
-    flatfield_threshold : float, optional
-        Minimum valid master-flat value.
+    min_flatfield : float, optional
+        Minimum valid flat field value.
     method : {"desi", "simple"}, optional
         Pixel-flat construction method.
 
@@ -597,8 +596,8 @@ def get_pixflat(cflat_path, mpixflat_path, fflat_path, size=31, flatfield_thresh
     elif method == "simple":
         cflat, mflat = _simple_pixflat(cflat, size=size)
 
-    log.info(f"replacing invalid values and flatfield values below {flatfield_threshold} with 1.0")
-    mflat._data = np.where((mflat._data > flatfield_threshold) & np.isfinite(mflat._data), mflat._data, 1.0)
+    log.info(f"replacing invalid values and flatfield values below {min_flatfield} with 1.0")
+    mflat._data = np.where((mflat._data > min_flatfield) & np.isfinite(mflat._data), mflat._data, 1.0)
     log.info(f"writing master pixelflat to {mpixflat_path}")
     mflat.writeFitsData(mpixflat_path)
 
@@ -609,7 +608,7 @@ def get_pixflat(cflat_path, mpixflat_path, fflat_path, size=31, flatfield_thresh
     return cflat, mflat, fflat
 
 
-def create_pixflats(mjds, mjd_epoch, camera, sequence, size=31, flatfield_threshold=0.01, method="desi", skip_done=True, dry_run=False):
+def create_pixflats(mjds, mjd_epoch, camera, sequence, size=31, min_flatfield=0.01, method="desi", skip_done=True, dry_run=False):
     """
     Creates pixel flat-field calibration files for a given camera and set of MJDs.
 
@@ -626,8 +625,8 @@ def create_pixflats(mjds, mjd_epoch, camera, sequence, size=31, flatfield_thresh
         and "bias", and their corresponding exposure numbers.
     size : int, optional
         Size of the smoothing kernel for flat-field correction. Default is 31.
-    flatfield_threshold : float, optional
-        Threshold for flat-field correction. Default is 0.01.
+    min_flatfield : float, optional
+        Minimum valid flat field value. Default is 0.01.
     method : str, optional
         Method to use for flat-field correction. Default is "desi".
     skip_done : bool, optional
@@ -684,7 +683,7 @@ def create_pixflats(mjds, mjd_epoch, camera, sequence, size=31, flatfield_thresh
     detrend_pixelflats(mjds=mjds, camera=camera, flat_expnums=flat_expnums, dark_expnums=dark_expnums, bias_expnums=bias_expnums, skip_done=skip_done)
     _, cflat_path = combine_pixelflats(mjds=mjds, mjd_epoch=mjd_epoch, camera=camera, flat_expnums=flat_expnums, skip_done=skip_done)
 
-    get_pixflat(cflat_path, mflat_path, fflat_path, size=size, flatfield_threshold=flatfield_threshold, method=method)
+    get_pixflat(cflat_path, mflat_path, fflat_path, size=size, min_flatfield=min_flatfield, method=method)
 
     return cflat_path, mflat_path, fflat_path
 
