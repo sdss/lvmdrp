@@ -6,8 +6,30 @@ Change Log
 
 This document records the main changes to the drp code.
 
-1.3.0dev (unreleased)
+1.3.3dev (unreleased)
 ---------------------
+
+
+
+1.3.2 (02-09-2026)
+------------------
+
+- Fixed ancillary cleanup so QA output paths are skipped during reduction housekeeping
+- Corrected Ruff/CI configuration and lint-related defaults to match project expectations
+
+1.3.1 (25-08-2026) [YANKED]
+---------------------------
+
+Superseded by 1.3.2. Ancillary products would leave a large footprint on disk per catchup run.
+Do not use this version.
+
+- Fixed Gaia XP cache directory during flux calibration
+
+1.3.0 (24-08-2026) [YANKED]
+---------------------------
+
+Superseded by 1.3.1. Broken Gaia caching prevented any reduction from running.
+Do not use this version.
 
 - Improved QA plots including fiber shift, sky parameters, and layout handling
 - Implemented fiber flat factor epochs and improved factor calibration routines
@@ -20,7 +42,6 @@ This document records the main changes to the drp code.
 - Enhanced flux calibration with better handling of standard star selection
 - Various bug fixes and stability improvements
 
-
 1.2.1 (16-02-2026)
 ------------------
 
@@ -31,7 +52,6 @@ This document records the main changes to the drp code.
 - Added flux calibration summary to drpall
 - First stab at documentation
 - A few more bug fixes and improvements
-
 
 1.2.0 (15-11-2025)
 ------------------
