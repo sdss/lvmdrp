@@ -40,7 +40,8 @@ from lvmdrp.functions.run_calseq import (
     measure_fiberflat_factors)
 from lvmdrp.functions.pixelflats import (
     load_pixflat_epochs,
-    create_pixflats
+    create_pixflats,
+    create_super_pixflats
 )
 
 
@@ -578,27 +579,23 @@ def fiberflats(mjd, mjd_list, mjd_range, epochs_file, channels, skip_sequence_se
 @click.option('-s', '--skip-done', is_flag=True, default=False, help='flag to skip reduction steps that have already been done')
 @click.option("--dry-run", is_flag=True, default=False, help="Shows useful information about the current setup without actually running reductions")
 @cloup.constraint(mutually_exclusive, ['mjd', 'mjd_list', 'mjd_range'])
-@cloup.constraint(RequireExactly(1), ['mjd', 'mjd_list', 'mjd_range'])
 def pixelflats(mjd, mjd_list, mjd_range, epochs_file, cameras, smoothing_box, min_flatfield, skip_done, dry_run):
 
     # parse MJDs
     mjds = parse_mjds(mjd=mjd or mjd_list or mjd_range or None)
+    if mjds is not None and not isinstance(mjds, (list, tuple)):
+        mjds = [mjds]
 
     # use these mjds to filter pixelflats epochs
-    if mjds is None:
-        pixflat_epochs = load_pixflat_epochs(epochs_path=epochs_file, filter_by_cameras=cameras)
-    elif not isinstance(mjds, (list, tuple)):
-        mjds = [mjds]
-        mjds = [int(mjd) for mjd in mjds]
-        # filter pixelflats epochs
-        # throw error if filtered epochs are empty
-        pixflat_epochs = load_pixflat_epochs(epochs_path=epochs_file, filter_by_mjds=mjds, filter_by_cameras=cameras)
-        if not pixflat_epochs:
-            raise ValueError(f"Invalid values in `mjds`: {mjds}. Expected values in {list(pixflat_epochs.keys())}")
+    pixflat_epochs = load_pixflat_epochs(epochs_path=epochs_file, filter_by_mjds=mjds, filter_by_cameras=cameras)
+
+    # throw error if filtered epochs are empty
+    if not pixflat_epochs:
+        raise ValueError(f"Invalid values in `mjds`: {mjds}. Expected values in {list(pixflat_epochs.keys())}")
 
     for mjd_epoch, pixflat_epoch in pixflat_epochs.items():
         mjds = pixflat_epoch.get("sources")
-        sequences = pixflat_epoch.get("sequences")
+        sequences = pixflat_epoch.get("sequences", {})
         for camera, sequence in sequences.items():
             create_pixflats(
                 mjds=mjds,
@@ -609,6 +606,41 @@ def pixelflats(mjd, mjd_list, mjd_range, epochs_file, cameras, smoothing_box, mi
                 min_flatfield=min_flatfield,
                 skip_done=skip_done,
                 dry_run=dry_run)
+
+
+@cli.command('super-pixelflats', short_help='Run pixelflats reductions combining all epochs into a super pixel flat field', context_settings=dict(show_default=True))
+@click.option('--mjd-epoch', type=int, required=True, help='MJD of the super pixel flat fields epoch')
+@click.option('-m', '--mjd', type=int, help='an MJD to reduce')
+@click.option('-l', '--mjd-list', type=IntListType(), help='a list of specific MJDs to reduce')
+@click.option('-r', '--mjd-range', type=str, help='a range of MJDs to reduce')
+@click.option('--epochs-file', type=str, default=None, help="Path to a calibrations epoch file")
+@click.option('--cameras', type=StrListType(), default=",".join(CAMERAS), help="Spectrograph camera that will be analysed")
+@click.option('--smoothing-box', type=int, default=31, help="Size in pixels of the median-smoothing box used to remove background")
+@click.option('--min-flatfield', type=float, default=0.0, help="Minimum valid flat field value, values below will be set to 1.0")
+@click.option('-s', '--skip-done', is_flag=True, default=False, help='flag to skip reduction steps that have already been done')
+@click.option("--dry-run", is_flag=True, default=False, help="Shows useful information about the current setup without actually running reductions")
+@cloup.constraint(mutually_exclusive, ['mjd', 'mjd_list', 'mjd_range'])
+def super_pixelflats(mjd_epoch, mjd, mjd_list, mjd_range, epochs_file, cameras, smoothing_box, min_flatfield, skip_done, dry_run):
+
+    # parse MJDs
+    mjds = parse_mjds(mjd=mjd or mjd_list or mjd_range or None)
+    if mjds is not None and not isinstance(mjds, (list, tuple)):
+        mjds = [mjds]
+
+    # use these mjds to filter pixelflats epochs
+    pixflat_epochs = load_pixflat_epochs(epochs_path=epochs_file, filter_by_mjds=mjds, filter_by_cameras=cameras)
+
+    # throw error if filtered epochs are empty
+    if not pixflat_epochs:
+        raise ValueError(f"Invalid values in `mjds`: {mjds}. Expected values in {list(pixflat_epochs.keys())}")
+
+    create_super_pixflats(
+        pixflat_epochs=pixflat_epochs,
+        mjd_epoch=mjd_epoch,
+        size=smoothing_box,
+        min_flatfield=min_flatfield,
+        skip_done=skip_done,
+        dry_run=dry_run)
 
 
 @click.command('create-tag', short_help='Create a tag for long-term calibrations', context_settings=dict(show_default=True))
@@ -776,6 +808,7 @@ calibrations.add_command(longterm)
 calibrations.add_command(nightly)
 calibrations.add_command(fiberflats)
 calibrations.add_command(pixelflats)
+calibrations.add_command(super_pixelflats)
 calibrations.add_command(fiberflat_corrections)
 calibrations.add_command(ffactors_experiment)
 calibrations.add_command(cluster_calibs)

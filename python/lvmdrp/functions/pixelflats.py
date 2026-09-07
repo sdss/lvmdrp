@@ -658,13 +658,6 @@ def create_pixflats(mjds, mjd_epoch, camera, sequence, size=31, min_flatfield=0.
     if flat_expnums is None:
         raise ValueError(f"No pixel flat exposures found for {camera = } with sequence: {sequence}")
 
-    frames = get_enights_metadata(mjds=mjds)
-    frames = frames.query("expnum in @flat_expnums and camera == @camera")
-
-    if frames.empty:
-        log.error(f"No pixel flat frames found for {camera = } and {mjds = }")
-        return
-
     cflat_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd_epoch, kind="cpixflat", camera=camera)
     mflat_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd_epoch, kind="mpixflat", camera=camera)
     fflat_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd_epoch, kind="fpixflat", camera=camera)
@@ -681,9 +674,96 @@ def create_pixflats(mjds, mjd_epoch, camera, sequence, size=31, min_flatfield=0.
         return cflat_path, mflat_path, fflat_path
 
     detrend_pixelflats(mjds=mjds, camera=camera, flat_expnums=flat_expnums, dark_expnums=dark_expnums, bias_expnums=bias_expnums, skip_done=skip_done)
-    _, cflat_path = combine_pixelflats(mjds=mjds, mjd_epoch=mjd_epoch, camera=camera, flat_expnums=flat_expnums, skip_done=skip_done)
-
+    combine_pixelflats(mjds=mjds, mjd_epoch=mjd_epoch, camera=camera, flat_expnums=flat_expnums, skip_done=skip_done)
     get_pixflat(cflat_path, mflat_path, fflat_path, size=size, min_flatfield=min_flatfield, method=method)
 
     return cflat_path, mflat_path, fflat_path
 
+
+def create_super_pixflats(pixflat_epochs, mjd_epoch, size=31, min_flatfield=0.01, method="desi", skip_done=True, dry_run=False):
+    """Create super pixel-flat products for all cameras in a set of epochs.
+
+    Parameters
+    ----------
+    pixflat_epochs : dict
+        Epoch mapping returned by :func:`load_pixflat_epochs`. Camera
+        sequences are expected to have already been filtered as needed.
+    mjd_epoch : int
+        MJD used to identify the output super pixel-flat products.
+    size : int, optional
+        Size of the smoothing kernel used to create the master pixel flat.
+        Default is 31.
+    min_flatfield : float, optional
+        Minimum valid flat-field value. Values below this threshold are set to
+        1.0. Default is 0.01.
+    method : {"desi", "simple"}, optional
+        Method used to create the master pixel flat. Default is "desi".
+    skip_done : bool, optional
+        Whether to reuse existing detrended and combined products. Default is
+        True.
+    dry_run : bool, optional
+        If True, log the selected inputs and output paths without creating
+        files. Default is False.
+
+    Returns
+    -------
+    dict
+        Mapping of camera identifiers to tuples containing the paths of the
+        combined, master, and flat-fielded pixel-flat products, respectively.
+
+    Notes
+    -----
+    Each source epoch is detrended using its own camera sequence. The
+    resulting detrended flats are then combined independently for each camera,
+    allowing sequence shapes to differ between epochs.
+    """
+    camera_inputs = {}
+
+    for pixflat_epoch in pixflat_epochs.values():
+        mjds = pixflat_epoch.get("sources", [])
+        for camera, sequence in pixflat_epoch.get("sequences", {}).items():
+            expnums_dict = _expand_sequence(_parse_sequence(sequence=sequence))
+            flat_expnums = expnums_dict.get("flat")
+            dark_expnums = expnums_dict.get("dark", [])
+            bias_expnums = expnums_dict.get("bias", [])
+
+            if not dry_run:
+                detrend_pixelflats(
+                    mjds=mjds,
+                    camera=camera,
+                    flat_expnums=flat_expnums,
+                    dark_expnums=dark_expnums,
+                    bias_expnums=bias_expnums,
+                    skip_done=skip_done,
+                )
+
+            camera_input = camera_inputs.setdefault(camera, {"mjds": [], "flat_expnums": []})
+            camera_input["mjds"].extend(np.atleast_1d(mjds).tolist())
+            camera_input["flat_expnums"].extend(np.atleast_1d(flat_expnums).tolist())
+
+    output_paths = {}
+    for camera, camera_input in camera_inputs.items():
+        cflat_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd_epoch, kind="cpixflat", camera=camera)
+        mflat_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd_epoch, kind="mpixflat", camera=camera)
+        fflat_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd_epoch, kind="fpixflat", camera=camera)
+        output_paths[camera] = (cflat_path, mflat_path, fflat_path)
+
+        if dry_run:
+            log.info(f"dry run of '{create_super_pixflats.__name__}' for {camera = } and {mjd_epoch = }")
+            log.info(f"  source MJDs: {camera_input['mjds']}")
+            log.info(f"  flat exposures: {camera_input['flat_expnums']}")
+            log.info("  output paths:")
+            for output_path in output_paths[camera]:
+                log.info(f"    {output_path}")
+            continue
+
+        combine_pixelflats(
+            mjds=camera_input["mjds"],
+            mjd_epoch=mjd_epoch,
+            camera=camera,
+            flat_expnums=camera_input["flat_expnums"],
+            skip_done=skip_done,
+        )
+        get_pixflat(cflat_path, mflat_path, fflat_path, size=size, min_flatfield=min_flatfield, method=method)
+
+    return output_paths
