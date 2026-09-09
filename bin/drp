@@ -41,7 +41,8 @@ from lvmdrp.functions.run_calseq import (
 from lvmdrp.functions.pixelflats import (
     load_pixflat_epochs,
     create_pixflats,
-    create_super_pixflats
+    create_super_pixflats,
+    tag_pixelflats,
 )
 
 
@@ -653,7 +654,7 @@ def super_pixelflats(mjd_epoch, mjd, mjd_list, mjd_range, epochs_file, cameras, 
 @click.option("--dry-run", is_flag=True, default=False, help="Shows useful information about the current setup without actually running reductions")
 @cloup.constraint(mutually_exclusive, ['mjd', 'mjd_list', 'mjd_range'])
 @cloup.constraint(RequireExactly(1), ['mjd', 'mjd_list', 'mjd_range'])
-def create_tag(mjd, mjd_list, mjd_range, from_epochs, epochs_file, version, dry_run):
+def create_longterm_tag(mjd, mjd_list, mjd_range, from_epochs, epochs_file, version, dry_run):
 
     # parse calibration MJDs
     epochs = {}
@@ -669,6 +670,15 @@ def create_tag(mjd, mjd_list, mjd_range, from_epochs, epochs_file, version, dry_
         flavors = []
         [flavors.extend(CALIBRATION_MAPPINGS.get(calname, [calname])) for calname in CALIBRATION_TYPES]
         tag_longterm_calibrations(mjd=mjd, version=version, flavors=flavors, dry_run=dry_run)
+
+
+@cli.command('tag-pixelflats', short_help='Tag pixel flats for a pipeline version', context_settings=dict(show_default=True))
+@click.option('-m', '--mjd', type=int, required=True, help='Pixel-flat epoch MJD to tag')
+@click.option('--version', type=str, default=drpver, help='Version of the calibration set')
+@click.option("--dry-run", is_flag=True, default=False, help="Show source and destination paths without copying files")
+def create_pixelflats_tag(mjd, version, dry_run):
+    """Copy the single pixel-flat epoch into the sandbox calibration directory."""
+    tag_pixelflats(epoch_mjd=mjd, version=version, dry_run=dry_run)
 
 
 @cli.command('fix-pixel-shifts', short_help='Fix the electronic pixel shifts in the raw data', context_settings=dict(show_default=True))
@@ -812,7 +822,8 @@ calibrations.add_command(super_pixelflats)
 calibrations.add_command(fiberflat_corrections)
 calibrations.add_command(ffactors_experiment)
 calibrations.add_command(cluster_calibs)
-calibrations.add_command(create_tag)
+calibrations.add_command(create_pixelflats_tag)
+calibrations.add_command(create_longterm_tag)
 cli.add_command(calibrations)
 
 # -----------------------------------------------------------------------------------------------------------------------------------------

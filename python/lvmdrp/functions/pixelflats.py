@@ -1,4 +1,6 @@
 import os
+from shutil import copy2
+from datetime import datetime
 import yaml
 import numpy as np
 import pandas as pd
@@ -767,3 +769,80 @@ def create_super_pixflats(pixflat_epochs, mjd_epoch, size=31, min_flatfield=0.01
         get_pixflat(cflat_path, mflat_path, fflat_path, size=size, min_flatfield=min_flatfield, method=method)
 
     return output_paths
+
+
+def tag_pixelflats(epoch_mjd, version=drpver, dry_run=False):
+    """Copy master pixel flats for an epoch into the sandbox calibration directory.
+
+    Parameters
+    ----------
+    epoch_mjd : int
+        MJD identifying the source master pixel-flat epoch.
+    version : str, optional
+        Reduction version used to locate the source products. Default is the
+        current pipeline version.
+    dry_run : bool, optional
+        Log source and destination paths without copying files. Default is
+        False.
+
+    Returns
+    -------
+    dict
+        Mapping of camera names to source and destination paths.
+
+    Notes
+    -----
+    Existing sandbox products are replaced by the source product, matching the
+    behavior of :func:`tag_longterm_calibrations`.
+    """
+    source_paths = sorted(
+        path.expand(
+            "lvm_master",
+            drpver=version,
+            tileid=11111,
+            mjd=epoch_mjd,
+            kind="mpixflat",
+            camera="*",
+        )
+    )
+
+    copied_paths = {}
+    for source_path in source_paths:
+        camera = os.path.basename(source_path).split(".")[0].split("-")[-1]
+        destination_path = path.full("lvm_calib", mjd="pixelmasks", kind="pixflat", camera=camera)
+        copied_paths[camera] = {"source": source_path, "destination": destination_path}
+
+        destination_exists = os.path.isfile(destination_path)
+        if dry_run:
+            if not os.path.isfile(source_path):
+                log.error(f"source master pixel flat does not exist: {source_path}")
+                continue
+
+            source_mtime = datetime.fromtimestamp(os.path.getmtime(source_path))
+            destination_mtime = datetime.fromtimestamp(os.path.getmtime(destination_path)) if destination_exists else None
+            log.info(f"source/destination for pixel flat, {camera = }:")
+            log.info(f"   {source_mtime.strftime('%a %d %b %Y, %I:%M:%S%p')} {source_path}")
+            log.info(f"   {destination_mtime.strftime('%a %d %b %Y, %I:%M:%S%p') if destination_mtime else None} {destination_path}")
+            if destination_mtime is None:
+                log.info("   - source will create a new path on destination")
+            elif source_mtime > destination_mtime:
+                log.info("   > source is newer than destination")
+            elif source_mtime < destination_mtime:
+                log.warning("   < source is older than destination")
+            else:
+                log.info("   = source and destination have the same modification time")
+            continue
+
+        if not os.path.isfile(source_path):
+            log.error(f"source master pixel flat does not exist: {source_path}")
+            continue
+
+        try:
+            os.makedirs(os.path.dirname(destination_path), exist_ok=True)
+            copy2(source_path, destination_path)
+            log.info(f"copied {source_path} into {destination_path}")
+        except PermissionError as error:
+            log.error(f"error while copying {source_path}: {error}")
+
+    return copied_paths
+
