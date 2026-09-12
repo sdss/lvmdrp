@@ -42,13 +42,13 @@ def _parse_expnums(expnums):
     """
     parsed_expnums = [[]]
     for idx, expnum in enumerate(expnums):
-        if isinstance(expnum, int):
+        if isinstance(expnum, (int, np.int64)):
             parsed_expnums.append([expnum])
         elif isinstance(expnum, str) and "," in expnum:
             expnum_range = tuple(int(i) for i in expnum.split(","))
             parsed_expnums.append(np.arange(*expnum_range))
         else:
-            raise TypeError(f"Invalid type in `expnums` at {idx}: {expnum}")
+            raise TypeError(f"Invalid type in {expnums = } at {idx}: {type(expnum)}")
     parsed_expnums = np.concatenate(parsed_expnums)
     parsed_expnums.sort()
     return parsed_expnums.astype("int")
@@ -403,7 +403,7 @@ def set_shifted_rejects(rejects, epochs, mjd_epoch, camera):
     _rejects = _compress_expnums(np.union1d(existing_rejects, new_rejects).tolist())
     log.info(f"final rejects: {_rejects}")
 
-    sequence["rejects"] = _rejects
+    sequence["rejects"] = _rejects or None
     return sequence
 
 
