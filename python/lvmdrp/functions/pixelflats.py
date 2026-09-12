@@ -15,7 +15,7 @@ from lvmdrp import main as drp
 from scipy import ndimage as ndi
 
 
-PIXFLAT_EPOCHS_PATH = os.path.join(os.getenv("LVMCORE_DIR"), "etc", "pixflat-epochs.yaml")
+PIXFLAT_EPOCHS_PATH = os.path.join(os.getenv("LVMCORE_DIR"), "calibrations", "pixflat-epochs.yaml")
 
 
 def _parse_expnums(expnums):
@@ -48,28 +48,6 @@ def _parse_expnums(expnums):
     parsed_expnums = np.concatenate(parsed_expnums)
     parsed_expnums.sort()
     return parsed_expnums.astype("int")
-
-
-def _parse_sequence(sequence):
-    """Copy and parse the exposure lists in a pixel-flat sequence.
-
-    Parameters
-    ----------
-    sequence : dict
-        Sequence definition containing ``expnums`` and optionally ``rejects``.
-
-    Returns
-    -------
-    dict
-        A copied sequence with parsed NumPy arrays for both exposure lists.
-    """
-    parsed_sequence = copy(sequence)
-    expnums = _parse_expnums(sequence.get("expnums", []) or [])
-    rejects = _parse_expnums(sequence.get("rejects", []) or [])
-    parsed_sequence["expnums"] = expnums
-    parsed_sequence["rejects"] = rejects
-
-    return parsed_sequence
 
 
 def _expand_sequence(sequence, repeat=False):
@@ -131,6 +109,185 @@ def _expand_sequence(sequence, repeat=False):
             n = len(expnums_)
             expnums_dict[key] = np.repeat(expnums_, nflats//n)
     return expnums_dict
+
+
+def _parse_sequence(sequence, expand=True):
+    """Copy and parse the exposure lists in a pixel-flat sequence.
+
+    Parameters
+    ----------
+    sequence : dict
+        Sequence definition containing ``expnums`` and optionally ``rejects``.
+
+    Returns
+    -------
+    dict
+        A copied sequence with parsed NumPy arrays for both exposure lists.
+    """
+    parsed_sequence = copy(sequence)
+    expnums = _parse_expnums(sequence.get("expnums", []) or [])
+    rejects = _parse_expnums(sequence.get("rejects", []) or [])
+    parsed_sequence["expnums"] = expnums
+    parsed_sequence["rejects"] = rejects
+
+    if expand:
+        return _expand_sequence(parsed_sequence)
+    return parsed_sequence
+
+
+def get_shifted_rejects(shifted, mjd_epoch, camera, epochs=None):
+    """Return rejects needed for shifted exposures in one pixel-flat sequence.
+
+    Existing rejects are applied before grouping, matching ``_expand_sequence``.
+    This preserves intentional exposure-time substitutions while ensuring that
+    every newly rejected exposure removes a complete effective sequence group.
+    """
+    epochs = epochs or load_pixflat_epochs(verbose=False)
+    try:
+        sequence = epochs[mjd_epoch]["sequences"][camera]
+    except KeyError as error:
+        raise KeyError(f"No pixelflat sequence found for {mjd_epoch = } and {camera = }") from error
+
+    kind = sequence.get("kind", "")
+    if not kind or len(kind) % 2:
+        raise ValueError(f"Invalid sequence kind for {mjd_epoch = }, {camera = }: {kind!r}")
+
+    group_size = 0
+    for count, exposure_type in zip(kind[::2], kind[1::2]):
+        if exposure_type not in {"f", "b", "d"} or not count.isdigit() or int(count) < 1:
+            raise ValueError(f"Invalid sequence kind for {mjd_epoch = }, {camera = }: {kind!r}")
+        group_size += int(count)
+
+    expnums = _parse_expnums(sequence.get("expnums", []) or [])
+    existing_rejects = set(_parse_expnums(sequence.get("rejects", []) or []))
+    effective_expnums = np.asarray([expnum for expnum in expnums if expnum not in existing_rejects])
+    log.info(
+        f"shifted-exposure sequence: {mjd_epoch = }, {camera = }, {kind = }, "
+        f"{group_size = }, raw_count = {expnums.size}, "
+        f"raw_range = {(int(expnums[0]), int(expnums[-1])) if expnums.size else None}, "
+        f"existing_rejects = {sorted(existing_rejects)}, "
+        f"effective_count = {effective_expnums.size}"
+    )
+    if effective_expnums.size % group_size:
+        raise ValueError(
+            f"Sequence for {mjd_epoch = }, {camera = } has {effective_expnums.size} "
+            f"effective exposures, which is not divisible by {group_size}"
+        )
+
+    groups = {
+        int(expnum): effective_expnums[group_start:group_start + group_size].tolist()
+        for group_start in range(0, effective_expnums.size, group_size)
+        for expnum in effective_expnums[group_start:group_start + group_size]
+    }
+    shifted_expnums = [
+        int(expnum)
+        for epoch, expnum in shifted.get(camera, [])
+        if epoch == mjd_epoch
+    ]
+    log.info(
+        f"shifted exposures selected: {mjd_epoch = }, {camera = }, "
+        f"shifted_expnums = {sorted(set(shifted_expnums))}, "
+        f"shifted_count = {len(shifted_expnums)}"
+    )
+    missing = sorted(set(shifted_expnums).difference(groups))
+    if missing:
+        raise ValueError(
+            f"Shifted exposures are not in the effective sequence for "
+            f"{mjd_epoch = }, {camera = }: {missing}"
+        )
+
+    rejects = set(existing_rejects)
+    for expnum in shifted_expnums:
+        rejects.update(groups[expnum])
+        log.info(
+            f"rejecting sequence group: {mjd_epoch = }, {camera = }, "
+            f"shifted_expnum = {expnum}, group = {groups[expnum]}"
+        )
+    log.info(
+        f"shifted-exposure rejects: {mjd_epoch = }, {camera = }, "
+        f"new_rejects = {sorted(rejects.difference(existing_rejects))}, "
+        f"all_rejects = {sorted(rejects)}, total = {len(rejects)}"
+    )
+    return sorted(rejects)
+
+
+def set_shifted_rejects(rejects, epochs, mjd_epoch, camera):
+    try:
+        sequence = epochs[mjd_epoch]["sequences"][camera]
+    except KeyError as error:
+        raise KeyError(f"No pixelflat sequence found for {mjd_epoch = } and {camera = }") from error
+
+    _rejects = sequence.get("rejects", []) or []
+    log.info(f"existing rejects: {_rejects}")
+    log.info(f"adding new rejects: {rejects}")
+    _rejects.extend(rejects)
+    _rejects = sorted(set(_rejects))
+    log.info(f"final rejects: {_rejects}")
+
+    sequence["rejects"] = _rejects
+    return sequence
+
+
+def validate_sequence_kind(epochs, mjd_epoch, camera):
+    try:
+        mjds = epochs[mjd_epoch]["sources"]
+    except KeyError as error:
+        raise KeyError(f"No pixelflat sequence found for {mjd_epoch = }") from error
+    try:
+        sequence = epochs[mjd_epoch]["sequences"][camera]
+    except KeyError as error:
+        raise KeyError(f"No pixelflat sequence found for {mjd_epoch = } and {camera = }") from error
+
+    kind = sequence.get("kind", "")
+    if not kind or len(kind) % 2:
+        raise ValueError(f"Invalid sequence kind for {mjd_epoch = }, {camera = }: {kind!r}")
+
+    group_size = 0
+    for count, exposure_type in zip(kind[::2], kind[1::2]):
+        if exposure_type not in {"f", "b", "d"} or not count.isdigit() or int(count) < 1:
+            raise ValueError(f"Invalid sequence kind for {mjd_epoch = }, {camera = }: {kind!r}")
+        group_size += int(count)
+
+    expnums = _parse_sequence(sequence, expand=False)["expnums"]
+    existing_rejects = set(_parse_expnums(sequence.get("rejects", []) or []))
+    effective_expnums = np.asarray([expnum for expnum in expnums if expnum not in existing_rejects])
+    log.info(
+        f"shifted-exposure sequence: {mjd_epoch = }, {camera = }, {kind = }, "
+        f"{group_size = }, raw_count = {expnums.size}, "
+        f"raw_range = {(int(expnums[0]), int(expnums[-1])) if expnums.size else None}, "
+        f"existing_rejects = {sorted(existing_rejects)}, "
+        f"effective_count = {effective_expnums.size}"
+    )
+
+    sequence = _parse_sequence(sequence, expand=True)
+    flat_expnums = sequence.get("flat", [])
+    bias_expnums = sequence.get("bias", [])
+    dark_expnums = sequence.get("dark", [])
+    log.info(
+        f"{flat_expnums = }, "
+        f"{bias_expnums = }, "
+        f"{dark_expnums = }, "
+    )
+    frames = get_enights_metadata(mjds)
+    frame_types = {
+        "flat": frames.query("expnum in @flat_expnums"),
+        "bias": frames.query("expnum in @bias_expnums"),
+        "dark": frames.query("expnum in @dark_expnums"),
+    }
+    TYPE_MAPS = {
+        "bias": ["bias"],
+        "dark": ["dark"],
+        "flat": ["object", "flat"]
+    }
+
+    for _type, frame in frame_types.items():
+        valid = frame.imagetyp.isin(TYPE_MAPS.get(_type, []) or [])
+        if not valid.all():
+            invalid = frame.loc[~valid]
+            log.warning(f"\n{invalid.to_string()}")
+        else:
+            log.info(f"all valid '{_type}' exposures: {set(frame.expnum)}")
+
 
 def rsync_enight(mjds):
     """Placeholder for synchronizing engineering nights from LCO.
@@ -652,10 +809,9 @@ def create_pixflats(mjds, mjd_epoch, camera, sequence, size=31, min_flatfield=0.
     - The function performs detrending, combines pixel flats, and generates the final flat-field files.
     """
     parsed_sequence = _parse_sequence(sequence=sequence)
-    expnums_dict = _expand_sequence(parsed_sequence)
-    flat_expnums = expnums_dict.get("flat")
-    dark_expnums = expnums_dict.get("dark", [])
-    bias_expnums = expnums_dict.get("bias", [])
+    flat_expnums = parsed_sequence.get("flat")
+    dark_expnums = parsed_sequence.get("dark", [])
+    bias_expnums = parsed_sequence.get("bias", [])
 
     if flat_expnums is None:
         raise ValueError(f"No pixel flat exposures found for {camera = } with sequence: {sequence}")
@@ -724,10 +880,10 @@ def create_super_pixflats(pixflat_epochs, mjd_epoch, size=31, min_flatfield=0.01
     for pixflat_epoch in pixflat_epochs.values():
         mjds = pixflat_epoch.get("sources", [])
         for camera, sequence in pixflat_epoch.get("sequences", {}).items():
-            expnums_dict = _expand_sequence(_parse_sequence(sequence=sequence))
-            flat_expnums = expnums_dict.get("flat")
-            dark_expnums = expnums_dict.get("dark", [])
-            bias_expnums = expnums_dict.get("bias", [])
+            parsed_sequence = _parse_sequence(sequence=sequence)
+            flat_expnums = parsed_sequence.get("flat")
+            dark_expnums = parsed_sequence.get("dark", [])
+            bias_expnums = parsed_sequence.get("bias", [])
 
             if not dry_run:
                 detrend_pixelflats(
