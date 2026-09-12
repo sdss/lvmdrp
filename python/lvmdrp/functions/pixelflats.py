@@ -1,4 +1,5 @@
 import os
+import re
 from shutil import copy2
 from datetime import datetime
 import yaml
@@ -16,6 +17,9 @@ from scipy import ndimage as ndi
 
 
 PIXFLAT_EPOCHS_PATH = os.path.join(os.getenv("LVMCORE_DIR"), "calibrations", "pixflat-epochs.yaml")
+
+# LVM has three spectrographs, each with a blue ('b'), red ('r'), and NIR ('z') camera.
+CAMERAS = tuple(f"{channel}{spec}" for channel in ("b", "r", "z") for spec in (1, 2, 3))
 
 
 def _parse_expnums(expnums):
@@ -50,42 +54,133 @@ def _parse_expnums(expnums):
     return parsed_expnums.astype("int")
 
 
-def _expand_sequence(sequence, repeat=False):
-    """Expands a sequence dictionary to extract exposure numbers grouped by type.
+_KIND_PATTERN = re.compile(r"(\d+)([fbd])")
 
-    The function interprets the "kind" key in the input dictionary to determine
-    the types of exposures (e.g., flat, bias, dark) and their respective counts.
-    It then uses the "expnums" key to group the exposure numbers accordingly.
+
+def _parse_kind(kind):
+    """Parse a sequence ``kind`` string into ordered (count, type) pairs.
+
+    Unlike naive character-pair slicing (``kind[::2]``/``kind[1::2]``), this
+    correctly handles multi-digit counts, e.g. ``'10f2d'`` -> ``[(10, 'f'), (2, 'd')]``.
+
+    Parameters
+    ----------
+    kind : str
+        Sequence kind string, e.g. ``'2f1d'``.
+
+    Returns
+    -------
+    list[tuple[int, str]]
+        Ordered ``(count, type)`` pairs, where ``type`` is one of ``'f'``,
+        ``'b'``, ``'d'``.
+
+    Raises
+    ------
+    ValueError
+        If ``kind`` is empty, contains characters other than digit+type
+        pairs, or any count is less than 1.
+    """
+    if not kind:
+        raise ValueError(f"Invalid sequence kind: {kind!r}")
+    pairs = _KIND_PATTERN.findall(kind)
+    reconstructed = "".join(f"{count}{typ}" for count, typ in pairs)
+    if reconstructed != kind or any(int(count) < 1 for count, _ in pairs):
+        raise ValueError(f"Invalid sequence kind: {kind!r}")
+    return [(int(count), typ) for count, typ in pairs]
+
+
+def _compress_expnums(expnums):
+    """Compress exposure numbers into ints and half-open ``'start, end'`` strings.
+
+    This is the inverse of :func:`_parse_expnums`: consecutive runs of two or
+    more exposure numbers (step of 1) are collapsed into a single
+    ``'start, end'`` string, where ``end`` is exclusive -- i.e. one past the
+    last value in the run -- matching how :func:`_parse_expnums` expands such
+    strings via ``numpy.arange``. Isolated exposure numbers are left as plain
+    integers. This mirrors the compact range notation already used for
+    ``expnums`` entries in the pixel-flat epochs file, so that other fields
+    (e.g. ``rejects``) can follow the same convention.
+
+    Parameters
+    ----------
+    expnums : Iterable[int]
+        Exposure numbers, in any order and with possible duplicates.
+
+    Returns
+    -------
+    list[int | str]
+        Sorted mix of individual integers and half-open range strings,
+        suitable for storing directly in a pixel-flat epochs YAML file.
+
+    Examples
+    --------
+    >>> _compress_expnums([36284])
+    [36284]
+    >>> _compress_expnums([36280, 36281, 36282])
+    ['36280, 36283']
+    >>> _compress_expnums([1, 2, 5, 6, 7, 10])
+    ['1, 3', '5, 8', 10]
+    """
+    expnums = sorted({int(expnum) for expnum in expnums})
+    if not expnums:
+        return []
+
+    compressed = []
+    run_start = run_end = expnums[0]
+    for expnum in expnums[1:]:
+        if expnum == run_end + 1:
+            run_end = expnum
+            continue
+        compressed.append(run_start if run_start == run_end else f"{run_start}, {run_end + 1}")
+        run_start = run_end = expnum
+    compressed.append(run_start if run_start == run_end else f"{run_start}, {run_end + 1}")
+    return compressed
+
+
+def _expand_sequence(sequence, repeat=False):
+    """Expand a sequence dictionary to extract exposure numbers grouped by type.
+
+    The function interprets the ``"kind"`` key in the input dictionary to
+    determine the types of exposures (e.g., flat, bias, dark) and their
+    respective counts, via :func:`_parse_kind`. It then uses the
+    ``"expnums"`` key to group the exposure numbers accordingly.
 
     Parameters
     ----------
     sequence : dict
         A dictionary containing the following keys:
-        - "kind" : str
-            A string where even-indexed characters represent counts and
-            odd-indexed characters represent types ('f' for flat, 'b' for bias,
-            'd' for dark).
-        - "expnums" : list
+
+        - ``"kind"`` : str
+            A string of ``(count, type)`` pairs, e.g. ``'2f1d'`` for two
+            flats followed by one dark (``'f'`` for flat, ``'b'`` for bias,
+            ``'d'`` for dark). See :func:`_parse_kind`.
+        - ``"expnums"`` : list
             A list of exposure numbers.
+        - ``"rejects"`` : list, optional
+            Exposure numbers to exclude before grouping.
     repeat : bool, optional
-        Whether to pad bias/dark sequences shorter than flat sequence, by default False
+        Whether to pad bias/dark sequences shorter than the flat sequence,
+        by default False.
 
     Returns
     -------
     dict
-        A dictionary mapping exposure types to grouped exposure numbers.
+        A dictionary mapping exposure types (``"flat"``, ``"bias"``,
+        ``"dark"``) to their grouped exposure numbers.
 
     Raises
     ------
-    KeyError
-        If ``kind`` contains an unsupported exposure type.
+    ValueError
+        If ``sequence["kind"]`` is malformed (see :func:`_parse_kind`), or
+        if the number of effective exposures is not evenly divisible by the
+        group size implied by ``kind``.
     """
     typ_maps = {"f": "flat", "b": "bias", "d": "dark"}
 
     kind = sequence.get("kind")
-    kind_ = list(kind)
-    typs = kind_[1::2]
-    nums = {typ_maps[typ]: num for typ, num in zip(typs, map(int, kind_[::2]))}
+    pairs = _parse_kind(kind)
+    typs = [typ for _, typ in pairs]
+    nums = {typ_maps[typ]: count for count, typ in pairs}
     expnums = sequence.get("expnums")
     rejects = sequence.get("rejects", [])
 
@@ -117,12 +212,30 @@ def _parse_sequence(sequence, expand=True):
     Parameters
     ----------
     sequence : dict
-        Sequence definition containing ``expnums`` and optionally ``rejects``.
+        Sequence definition containing ``expnums`` and optionally ``rejects``,
+        plus (when ``expand`` is True) a ``kind`` string as expected by
+        :func:`_expand_sequence`.
+    expand : bool, optional
+        If True (default), group the parsed exposure numbers by type using
+        :func:`_expand_sequence`. If False, return the sequence with
+        ``expnums``/``rejects`` parsed but otherwise unexpanded.
 
     Returns
     -------
     dict
-        A copied sequence with parsed NumPy arrays for both exposure lists.
+        If ``expand`` is True, a dictionary mapping exposure types to grouped
+        exposure numbers (see :func:`_expand_sequence`). Otherwise, a copy of
+        ``sequence`` with ``expnums`` and ``rejects`` replaced by parsed
+        NumPy arrays.
+
+    Raises
+    ------
+    TypeError
+        If ``expnums`` or ``rejects`` contain an item that is neither an
+        integer nor a comma-separated range (see :func:`_parse_expnums`).
+    ValueError
+        If ``expand`` is True and ``sequence["kind"]`` is malformed (see
+        :func:`_expand_sequence`).
     """
     parsed_sequence = copy(sequence)
     expnums = _parse_expnums(sequence.get("expnums", []) or [])
@@ -141,6 +254,36 @@ def get_shifted_rejects(shifted, mjd_epoch, camera, epochs=None):
     Existing rejects are applied before grouping, matching ``_expand_sequence``.
     This preserves intentional exposure-time substitutions while ensuring that
     every newly rejected exposure removes a complete effective sequence group.
+
+    Parameters
+    ----------
+    shifted : dict[str, list[tuple[int, int]]]
+        Mapping of camera identifier to a list of ``(mjd_epoch, expnum)``
+        pairs identifying exposures whose timing was shifted and whose
+        containing sequence group should therefore be rejected.
+    mjd_epoch : int
+        MJD identifying the calibration epoch to inspect.
+    camera : str
+        Camera identifier whose sequence should be inspected.
+    epochs : dict, optional
+        Epoch mapping as returned by :func:`load_pixflat_epochs`. If not
+        given, it is loaded with ``verbose=False``.
+
+    Returns
+    -------
+    list[int]
+        Sorted union of the sequence's existing rejects and the exposure
+        numbers belonging to any group containing a shifted exposure.
+
+    Raises
+    ------
+    KeyError
+        If no sequence exists for ``mjd_epoch`` and ``camera``.
+    ValueError
+        If the sequence's ``kind`` is malformed (see :func:`_parse_kind`),
+        if the number of effective (non-rejected) exposures is not evenly
+        divisible by the group size implied by ``kind``, or if any shifted
+        exposure in ``shifted`` is not part of the effective sequence.
     """
     epochs = epochs or load_pixflat_epochs(verbose=False)
     try:
@@ -149,14 +292,11 @@ def get_shifted_rejects(shifted, mjd_epoch, camera, epochs=None):
         raise KeyError(f"No pixelflat sequence found for {mjd_epoch = } and {camera = }") from error
 
     kind = sequence.get("kind", "")
-    if not kind or len(kind) % 2:
-        raise ValueError(f"Invalid sequence kind for {mjd_epoch = }, {camera = }: {kind!r}")
-
-    group_size = 0
-    for count, exposure_type in zip(kind[::2], kind[1::2]):
-        if exposure_type not in {"f", "b", "d"} or not count.isdigit() or int(count) < 1:
-            raise ValueError(f"Invalid sequence kind for {mjd_epoch = }, {camera = }: {kind!r}")
-        group_size += int(count)
+    try:
+        kind_pairs = _parse_kind(kind)
+    except ValueError as error:
+        raise ValueError(f"Invalid sequence kind for {mjd_epoch = }, {camera = }: {kind!r}") from error
+    group_size = sum(count for count, _ in kind_pairs)
 
     expnums = _parse_expnums(sequence.get("expnums", []) or [])
     existing_rejects = set(_parse_expnums(sequence.get("rejects", []) or []))
@@ -212,16 +352,55 @@ def get_shifted_rejects(shifted, mjd_epoch, camera, epochs=None):
 
 
 def set_shifted_rejects(rejects, epochs, mjd_epoch, camera):
+    """Merge new rejects into an epoch's sequence, in place.
+
+    Both the sequence's existing ``"rejects"`` entry and ``rejects`` are
+    expanded to individual exposure numbers via :func:`_parse_expnums`
+    (so either may freely mix plain integers and half-open range strings),
+    unioned, and re-compressed with :func:`_compress_expnums` before being
+    stored back -- keeping ``"rejects"`` in the same compact-range
+    convention used for ``expnums``.
+
+    Parameters
+    ----------
+    rejects : Iterable[int or str]
+        Exposure numbers to merge into the sequence's existing rejects, e.g.
+        as returned by :func:`get_shifted_rejects`. Individual integers
+        and/or comma-separated ``"start,stop"`` range strings are accepted,
+        as for :func:`_parse_expnums`.
+    epochs : dict
+        Epoch mapping as returned by :func:`load_pixflat_epochs`. The
+        targeted sequence's ``"rejects"`` entry is updated in place.
+    mjd_epoch : int
+        MJD identifying the calibration epoch to update.
+    camera : str
+        Camera identifier whose sequence should be updated.
+
+    Returns
+    -------
+    dict
+        The updated sequence dictionary (also mutated in place within
+        ``epochs``).
+
+    Raises
+    ------
+    KeyError
+        If no sequence exists for ``mjd_epoch`` and ``camera``.
+    TypeError
+        If ``rejects`` or the sequence's existing ``"rejects"`` contain an
+        item that is neither an integer nor a comma-separated range (see
+        :func:`_parse_expnums`).
+    """
     try:
         sequence = epochs[mjd_epoch]["sequences"][camera]
     except KeyError as error:
         raise KeyError(f"No pixelflat sequence found for {mjd_epoch = } and {camera = }") from error
 
-    _rejects = sequence.get("rejects", []) or []
-    log.info(f"existing rejects: {_rejects}")
-    log.info(f"adding new rejects: {rejects}")
-    _rejects.extend(rejects)
-    _rejects = sorted(set(_rejects))
+    existing_rejects = _parse_expnums(sequence.get("rejects", []) or [])
+    new_rejects = _parse_expnums(rejects)
+    log.info(f"existing rejects: {sorted(existing_rejects.tolist())}")
+    log.info(f"adding new rejects: {sorted(new_rejects.tolist())}")
+    _rejects = _compress_expnums(np.union1d(existing_rejects, new_rejects).tolist())
     log.info(f"final rejects: {_rejects}")
 
     sequence["rejects"] = _rejects
@@ -229,6 +408,38 @@ def set_shifted_rejects(rejects, epochs, mjd_epoch, camera):
 
 
 def validate_sequence_kind(epochs, mjd_epoch, camera):
+    """Validate a sequence's ``kind`` against its exposures' metadata.
+
+    Checks that the sequence's ``kind`` string is well-formed, that the
+    effective (non-rejected) exposure count is evenly divisible by the group
+    size it implies, and logs a warning for any exposure whose ``imagetyp``
+    metadata does not match its expected role (flat, bias, or dark) in the
+    sequence.
+
+    Parameters
+    ----------
+    epochs : dict
+        Epoch mapping as returned by :func:`load_pixflat_epochs`.
+    mjd_epoch : int
+        MJD identifying the calibration epoch to validate.
+    camera : str
+        Camera identifier whose sequence should be validated.
+
+    Returns
+    -------
+    None
+        Results are reported via ``log.info``/``log.warning``; nothing is
+        returned.
+
+    Raises
+    ------
+    KeyError
+        If no sequence exists for ``mjd_epoch`` and ``camera``.
+    ValueError
+        If the sequence's ``kind`` is malformed (see :func:`_parse_kind`), or
+        if the number of effective (non-rejected) exposures is not evenly
+        divisible by the group size implied by ``kind``.
+    """
     try:
         mjds = epochs[mjd_epoch]["sources"]
     except KeyError as error:
@@ -239,14 +450,11 @@ def validate_sequence_kind(epochs, mjd_epoch, camera):
         raise KeyError(f"No pixelflat sequence found for {mjd_epoch = } and {camera = }") from error
 
     kind = sequence.get("kind", "")
-    if not kind or len(kind) % 2:
-        raise ValueError(f"Invalid sequence kind for {mjd_epoch = }, {camera = }: {kind!r}")
-
-    group_size = 0
-    for count, exposure_type in zip(kind[::2], kind[1::2]):
-        if exposure_type not in {"f", "b", "d"} or not count.isdigit() or int(count) < 1:
-            raise ValueError(f"Invalid sequence kind for {mjd_epoch = }, {camera = }: {kind!r}")
-        group_size += int(count)
+    try:
+        kind_pairs = _parse_kind(kind)
+    except ValueError as error:
+        raise ValueError(f"Invalid sequence kind for {mjd_epoch = }, {camera = }: {kind!r}") from error
+    group_size = sum(count for count, _ in kind_pairs)
 
     expnums = _parse_sequence(sequence, expand=False)["expnums"]
     existing_rejects = set(_parse_expnums(sequence.get("rejects", []) or []))
@@ -258,6 +466,11 @@ def validate_sequence_kind(epochs, mjd_epoch, camera):
         f"existing_rejects = {sorted(existing_rejects)}, "
         f"effective_count = {effective_expnums.size}"
     )
+    if effective_expnums.size % group_size:
+        raise ValueError(
+            f"Sequence for {mjd_epoch = }, {camera = } has {effective_expnums.size} "
+            f"effective exposures, which is not divisible by {group_size}"
+        )
 
     sequence = _parse_sequence(sequence, expand=True)
     flat_expnums = sequence.get("flat", [])
@@ -289,6 +502,100 @@ def validate_sequence_kind(epochs, mjd_epoch, camera):
             log.info(f"all valid '{_type}' exposures: {set(frame.expnum)}")
 
 
+def update_epochs(epochs, shifted, cameras=CAMERAS):
+    """Apply shifted-exposure rejections across every epoch and camera.
+
+    For each ``(mjd_epoch, camera)`` combination, computes the rejects
+    implied by ``shifted`` (see :func:`get_shifted_rejects`), merges and
+    stores them back into the sequence (see :func:`set_shifted_rejects`,
+    which compresses them via :func:`_compress_expnums`), and validates the
+    resulting sequence (see :func:`validate_sequence_kind`). Combinations
+    with no matching sequence are skipped with a warning rather than
+    raising.
+
+    Parameters
+    ----------
+    epochs : dict
+        Epoch mapping as returned by :func:`load_pixflat_epochs`. Mutated in
+        place: each affected sequence's ``"rejects"`` entry is updated. Pass
+        the result to :func:`write_pixflat_epochs` to persist the changes.
+    shifted : dict[str, list[tuple[int, int]]]
+        Mapping of camera identifier to a list of ``(mjd_epoch, expnum)``
+        pairs identifying shifted exposures, as expected by
+        :func:`get_shifted_rejects`.
+    cameras : Iterable[str], optional
+        Camera identifiers to check within every epoch. Default is
+        :data:`CAMERAS`.
+
+    Returns
+    -------
+    dict
+        The updated epoch mapping (the same object as ``epochs``, mutated in
+        place).
+    """
+    for mjd_epoch in epochs:
+        for camera in cameras:
+            try:
+                rejects = get_shifted_rejects(shifted, mjd_epoch=mjd_epoch, camera=camera, epochs=epochs)
+                set_shifted_rejects(rejects=rejects, epochs=epochs, mjd_epoch=mjd_epoch, camera=camera)
+                validate_sequence_kind(epochs=epochs, mjd_epoch=mjd_epoch, camera=camera)
+            except KeyError:
+                log.warning(f"No pixelflat epoch for {mjd_epoch = }, {camera = }, ignoring")
+                continue
+    return epochs
+
+
+def write_pixflat_epochs(epochs, epochs_path=None, backup=True):
+    """Write an updated pixel-flat epoch mapping back to its YAML file.
+
+    Parameters
+    ----------
+    epochs : dict
+        Epoch mapping to write, in the same format as returned by
+        :func:`load_pixflat_epochs` (typically after being mutated by
+        :func:`update_epochs`). Written back under the ``"epochs"`` key.
+    epochs_path : str or pathlib.Path, optional
+        Destination path. Defaults to :data:`PIXFLAT_EPOCHS_PATH`.
+    backup : bool, optional
+        If True (default) and ``epochs_path`` already exists, copy it to a
+        timestamped ``.bak`` file before overwriting.
+
+    Returns
+    -------
+    str
+        The path the epochs were written to.
+
+    Notes
+    -----
+    If the destination file already exists and has a top-level ``"schemas"``
+    key (as in the current pixel-flat epochs file), it is preserved
+    unchanged in the rewritten file.
+    """
+    epochs_path = epochs_path or PIXFLAT_EPOCHS_PATH
+
+    document = {}
+    if os.path.isfile(epochs_path):
+        with open(epochs_path) as f:
+            existing = yaml.safe_load(f) or {}
+        if "schemas" in existing:
+            document["schemas"] = existing["schemas"]
+
+        if backup:
+            timestamp = datetime.now().strftime("%Y%m%dT%H%M%S")
+            backup_path = f"{epochs_path}.{timestamp}.bak"
+            copy2(epochs_path, backup_path)
+            log.info(f"backed up existing epochs file to {backup_path}")
+
+    document["epochs"] = epochs
+
+    os.makedirs(os.path.dirname(epochs_path), exist_ok=True)
+    with open(epochs_path, "w") as f:
+        yaml.safe_dump(document, f, sort_keys=False, default_flow_style=False)
+
+    log.info(f"wrote {len(epochs)} epoch(s) to {epochs_path}")
+    return epochs_path
+
+
 def rsync_enight(mjds):
     """Placeholder for synchronizing engineering nights from LCO.
 
@@ -301,7 +608,7 @@ def rsync_enight(mjds):
 
 
 def get_enights_metadata(mjds):
-    """Returns metadata table for given MJDs of engineering nights
+    """Return the metadata table for the given engineering-night MJDs.
 
     Parameters
     ----------
@@ -333,6 +640,14 @@ def load_pixflat_epochs(epochs_path=None, filter_by_mjds=None, filter_by_cameras
         Camera sequences to keep within each epoch.
     verbose : bool, optional
         If True, log the loaded and filtered epoch information.
+
+    Returns
+    -------
+    dict
+        Mapping of epoch MJD to its calibration metadata (``sources``,
+        ``sequences``, ``trigger``, ``comment``), optionally filtered by
+        ``filter_by_mjds`` and/or ``filter_by_cameras``. Empty if
+        ``filter_by_mjds`` is given and none of the requested MJDs are found.
     """
     epochs_path = epochs_path or PIXFLAT_EPOCHS_PATH
     with open(epochs_path) as f:
@@ -417,10 +732,20 @@ def detrend_pixelflats(mjds, camera, flat_expnums, bias_expnums=[], dark_expnums
 
     # NOTE: repeating bias and darks if necessary
     if len(darks) < len(flats):
-        n = len(flats) / len(darks)
+        if len(darks) == 0 or len(flats) % len(darks):
+            raise ValueError(
+                f"Cannot repeat {len(darks)} dark exposure(s) to match "
+                f"{len(flats)} flat exposure(s) for {camera = }"
+            )
+        n = len(flats) // len(darks)
         darks = darks.loc[darks.index.repeat(n)].reset_index(drop=True)
     if len(biases) < len(flats):
-        n = len(flats) / len(biases)
+        if len(biases) == 0 or len(flats) % len(biases):
+            raise ValueError(
+                f"Cannot repeat {len(biases)} bias exposure(s) to match "
+                f"{len(flats)} flat exposure(s) for {camera = }"
+            )
+        n = len(flats) // len(biases)
         biases = biases.loc[biases.index.repeat(n)].reset_index(drop=True)
 
     dflat_paths = []
@@ -488,8 +813,11 @@ def combine_pixelflats(mjds, mjd_epoch, camera, flat_expnums, comb_stat="median"
 
     Returns
     -------
-    tuple
-        Combined image object and its output path.
+    cflat : image object
+        Combined pixel-flat image, either newly combined or loaded from an
+        existing product when ``skip_done`` is True.
+    cflat_path : str
+        Path to the combined pixel-flat image.
     """
     frames = get_enights_metadata(mjds=mjds).query("camera == @camera").sort_values("expnum")
 
@@ -520,7 +848,9 @@ def create_pixflats_60171(median_box=(31,31), skip_done=True):
     Returns
     -------
     dict
-        Mapping of camera identifiers to output product paths.
+        Mapping of camera identifiers to ``(cflat_path, mflat_path, fflat_path)``
+        tuples giving the paths of the combined, master, and flat-fielded
+        pixel-flat products, respectively.
     """
     mjd = 60171
     flat_expnums = np.arange(3098, 3117+1)
@@ -545,10 +875,10 @@ def create_pixflats_60171(median_box=(31,31), skip_done=True):
                 image_tasks.preproc_raw_frame(in_image=rflat_path, out_image=pflat_path, assume_imagetyp="pixflat")
                 image_tasks.detrend_frame(in_image=pflat_path, out_image=dflat_path, in_bias=calibs["bias"][flat.camera], reject_cr=False, normalize_pixelflat=False)
 
-        cflat, cflat_path = combine_pixelflats(mjds=mjd, mjd_epoch=mjd, camera=camera, flat_expnums=flat_expnums, median_box=median_box, skip_done=skip_done)
+        cflat, cflat_path = combine_pixelflats(mjds=mjd, mjd_epoch=mjd, camera=camera, flat_expnums=flat_expnums, skip_done=skip_done)
 
-        mflat_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="m", imagetype="pixflat", expnum=f"{flats.expnum.min()}_{flats.expnum.max()}", camera=camera)
-        fflat_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="f", imagetype="pixflat", expnum=f"{flats.expnum.min()}_{flats.expnum.max()}", camera=camera)
+        mflat_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, kind="mpixflat", camera=camera)
+        fflat_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, kind="fpixflat", camera=camera)
 
         cflat_median = fast_median_filter_2d(cflat._data, median_box)
         mflat = (cflat / cflat_median)
@@ -642,7 +972,7 @@ def filtering(image, size=31, min_flat=0.001, min_flat_masking=0.99, max_flat_ma
     ivar = image.get_ivar()
 
     # initial model
-    smooth_ini = fast_median_filter_2d(np.where(ivar > 0, data, np.NaN), size=(size, size))
+    smooth_ini = fast_median_filter_2d(np.where(ivar > 0, data, np.nan), size=(size, size))
 
     # initial flat by dividing by smooth image, masking only where we have no data
     flat_ini = data / smooth_ini
@@ -660,12 +990,14 @@ def filtering(image, size=31, min_flat=0.001, min_flat_masking=0.99, max_flat_ma
         if frac < 0.05:
             log.info(f"Used nsig = {nsig}, frac = {frac:4.3f}")
             break
+    else:
+        log.warning(f"Could not reach masked fraction < 0.05 even at nsig = {nsig}, frac = {frac:4.3f}")
 
     # https://github.com/desihub/desispec/blob/main/bin/desi_compute_pixel_flatfield#L619
 
     # now start iterating smoothing and filtering the flat, ignoring newly masked pixels in the smoothing
     mask = mask | (ivar==0)
-    smooth = fast_median_filter_2d(np.where(~mask, data, np.NaN), size=(size, size))
+    smooth = fast_median_filter_2d(np.where(~mask, data, np.nan), size=(size, size))
 
     # compute flat
     flat = np.where((ivar > 0) & (smooth > min_flat), data / smooth, 1.0)
@@ -692,8 +1024,10 @@ def _desi_pixflat(cflat, size):
 
     Returns
     -------
-    tuple
-        The input combined flat and its normalized master flat.
+    cflat : image object
+        The input combined flat, unchanged.
+    mflat : image object
+        The normalized master flat.
     """
     filtered = cflat.apply_per_quadrant(filtering, size=size)
     mflat = cflat / filtered
@@ -712,8 +1046,10 @@ def _simple_pixflat(cflat, size):
 
     Returns
     -------
-    tuple
-        The input combined flat and its normalized master flat.
+    cflat : image object
+        The input combined flat, unchanged.
+    mflat : image object
+        The normalized master flat.
     """
     cflat_median = fast_median_filter_2d(cflat._data, size)
     mflat = (cflat / cflat_median)
@@ -740,8 +1076,17 @@ def get_pixflat(cflat_path, mpixflat_path, fflat_path, size=31, min_flatfield=0.
 
     Returns
     -------
-    tuple
-        Combined image, master pixel flat, and flat-fielded image.
+    cflat : image object
+        Combined pixel-flat image, as loaded from ``cflat_path``.
+    mflat : image object
+        Normalized master pixel flat.
+    fflat : image object
+        Flat-fielded combined image.
+
+    Raises
+    ------
+    ValueError
+        If ``method`` is not one of ``"desi"`` or ``"simple"``.
     """
     if method not in ["desi", "simple"]:
         raise ValueError(f"Invalid value for `method`: {method}. Expected either 'desi' or 'simple'")
@@ -768,8 +1113,7 @@ def get_pixflat(cflat_path, mpixflat_path, fflat_path, size=31, min_flatfield=0.
 
 
 def create_pixflats(mjds, mjd_epoch, camera, sequence, size=31, min_flatfield=0.01, method="desi", skip_done=True, dry_run=False):
-    """
-    Creates pixel flat-field calibration files for a given camera and set of MJDs.
+    """Create pixel flat-field calibration files for a given camera and set of MJDs.
 
     Parameters
     ----------
@@ -786,20 +1130,27 @@ def create_pixflats(mjds, mjd_epoch, camera, sequence, size=31, min_flatfield=0.
         Size of the smoothing kernel for flat-field correction. Default is 31.
     min_flatfield : float, optional
         Minimum valid flat field value. Default is 0.01.
-    method : str, optional
+    method : {"desi", "simple"}, optional
         Method to use for flat-field correction. Default is "desi".
     skip_done : bool, optional
         If True, skip processing for already completed files. Default is True.
     dry_run : bool, optional
         If True, log the selected inputs and output paths without creating files.
+        Default is False.
 
     Returns
     -------
-    tuple
-        Paths to the created calibration files:
-        - cflat_path (str): Path to the combined pixel flat file.
-        - mflat_path (str): Path to the master pixel flat file.
-        - fflat_path (str): Path to the flat-fielded combined pixel flat file.
+    cflat_path : str
+        Path to the combined pixel flat file.
+    mflat_path : str
+        Path to the master pixel flat file.
+    fflat_path : str
+        Path to the flat-fielded combined pixel flat file.
+
+    Raises
+    ------
+    ValueError
+        If no flat exposures are found in ``sequence`` for ``camera``.
 
     Notes
     -----
@@ -1001,4 +1352,3 @@ def tag_pixelflats(epoch_mjd, version=drpver, dry_run=False):
             log.error(f"error while copying {source_path}: {error}")
 
     return copied_paths
-
