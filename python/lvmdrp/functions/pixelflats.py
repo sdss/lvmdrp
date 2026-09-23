@@ -8,6 +8,11 @@ import pandas as pd
 from copy import deepcopy as copy
 from pprint import pformat
 
+import matplotlib.pyplot as plt
+from astropy.visualization import simple_norm
+from mpl_toolkits.axes_grid1.inset_locator import inset_axes
+
+from lvmdrp.core.constants import CAMERAS
 from lvmdrp import log, path, __version__ as drpver
 from lvmdrp.functions import imageMethod as image_tasks
 from lvmdrp.external.fast_median import fast_median_filter_2d
@@ -17,9 +22,6 @@ from scipy import ndimage as ndi
 
 
 PIXFLAT_EPOCHS_PATH = os.path.join(os.getenv("LVMCORE_DIR"), "calibrations", "pixflat-epochs.yaml")
-
-# LVM has three spectrographs, each with a blue ('b'), red ('r'), and NIR ('z') camera.
-CAMERAS = tuple(f"{channel}{spec}" for channel in ("b", "r", "z") for spec in (1, 2, 3))
 
 
 def _parse_expnums(expnums):
@@ -892,58 +894,6 @@ def create_pixflats_60171(median_box=(31,31), skip_done=True):
     return flat_paths
 
 
-def test_pixflats(mjd, camera, flat_expnums, target_expnum):
-    """Construct the expected detrended path for a test pixel flat.
-
-    Parameters
-    ----------
-    mjd : int
-        MJD associated with the calibration products.
-    camera : str
-        Camera identifier to test.
-    flat_expnums : array-like
-        Exposure numbers defining the master flat range.
-    target_expnum : int
-        Target exposure number.
-
-    Returns
-    -------
-    str
-        Path to the target detrended pixel-flat image.
-    """
-    target_mjd = drp.mjd_from_expnum(target_expnum)[0]
-    rframe_path = path.full("lvm_raw", hemi="s", mjd=target_mjd, camspec=camera, expnum=target_expnum)
-    pframe_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=target_mjd, kind="p", imagetype="pixflat", expnum=target_expnum, camera=camera)
-    dframe_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=target_mjd, kind="d", imagetype="pixflat", expnum=target_expnum, camera=camera)
-
-    calibs = drp.get_calib_paths(mjd=mjd, from_sanbox=True)
-    mflat_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="m", imagetype="pixflat", expnum=f"{flat_expnums.min()}_{flat_expnums.max()}", camera=camera)
-
-    # TODO: detrend and extract frame
-    # TODO: display CCD artifacts on extracted frame
-
-    return dframe_path
-
-
-def compare_pixflats(mjd, camera, flat_expnums_a, flat_expnums_b):
-    """Prepare two pixel-flat products for comparison.
-
-    Parameters
-    ----------
-    mjd : int
-        MJD associated with the calibration products.
-    camera : str
-        Camera identifier to compare.
-    flat_expnums_a, flat_expnums_b : array-like
-        Exposure-number groups defining the two flats.
-    """
-    dframe_a_path = test_pixflats(mjd=mjd, camera=camera, flat_expnums=flat_expnums_a)
-    dframe_b_path = test_pixflats(mjd=mjd, camera=camera, flat_expnums=flat_expnums_b)
-
-    # TODO: do some plots
-    #   - From a selection of features in flats, compare the two
-
-
 def filtering(image, size=31, min_flat=0.001, min_flat_masking=0.99, max_flat_masking=1.02, return_all=False):
     """Filter a combined flat and identify invalid or deviant pixels.
 
@@ -1352,3 +1302,149 @@ def tag_pixelflats(epoch_mjd, version=drpver, dry_run=False):
             log.error(f"error while copying {source_path}: {error}")
 
     return copied_paths
+
+
+def test_pixflats(mjd_epoch, frame, label=None, skip_done=True):
+    rframe_path = path.full("lvm_raw", hemi="s", mjd=frame.mjd, camspec=frame.camera, expnum=frame.expnum)
+    pframe_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=frame.mjd, kind="p", imagetype=f"{frame.imagetyp}_{(label or mjd_epoch)}", expnum=frame.expnum, camera=frame.camera)
+    dframe_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=frame.mjd, kind="d", imagetype=f"{frame.imagetyp}_{(label or mjd_epoch)}", expnum=frame.expnum, camera=frame.camera)
+
+    calibs = drp.get_calib_paths(mjd=frame.mjd, from_sandbox=True)
+    mflat_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd_epoch, kind="mpixflat", camera=frame.camera)
+
+    if skip_done and os.path.isfile(pframe_path):
+        log.info(f"{pframe_path} already exists, skipping")
+    else:
+        image_tasks.preproc_raw_frame(in_image=rframe_path, out_image=pframe_path)
+    if skip_done and os.path.isfile(dframe_path):
+        log.info(f"{dframe_path} already exists, skipping")
+    else:
+        image_tasks.detrend_frame(in_image=pframe_path, out_image=dframe_path, in_bias=calibs["bias"][frame.camera], in_pixelflat=mflat_path, reject_cr=False)
+
+    return dframe_path
+
+
+def display_pixflats_comparison(mjd_tar, mjd_ref, drpver):
+    fig, axs = plt.subplots(3, 3, figsize=(13, 13), sharex=True, sharey=True, layout="tight")
+    fig.supxlabel(f"Flatfield {mjd_ref}", fontsize="x-large")
+    fig.supylabel(f"Flatfield {mjd_tar}", fontsize="x-large")
+    axs = axs.ravel()
+    for ax, camera in zip(axs, CAMERAS):
+        pflat_ref = image_tasks.loadImage(f"/Volumes/CUCHUFLI/lvm/lvmdata/sas/sdsswork/lvm/spectro/redux/{drpver}/0011XX/11111/{mjd_ref}/calib/lvm-mpixflat-{camera}.fits")
+        pflat_tar = image_tasks.loadImage(f"/Volumes/CUCHUFLI/lvm/lvmdata/sas/sdsswork/lvm/spectro/redux/{drpver}/0011XX/11111/{mjd_tar}/calib/lvm-mpixflat-{camera}.fits")
+
+        x, y = pflat_ref._data.ravel(), (pflat_tar._data).ravel()
+        slope = lambda x: x
+        l = slope(np.asarray([0, 10]))
+        lu = l * 1.01
+        ld = l * 0.99
+
+        ax.set_aspect("equal")
+        ax.set_title(f"camera = {camera}", loc="left")
+        ax.plot(x, y, ",", color="0.2", zorder=-9)
+
+        H, _, _ = np.histogram2d(x, y, bins=100, range=[(0.95, 1.05), (0.95, 1.05)], density=False)
+        H = H / H.sum() * 100
+        norm = simple_norm(H, stretch="log", vmax=1.5)
+        H[H==0] = np.nan
+        im = ax.imshow(H.T, extent=[0.95, 1.05, 0.95, 1.05], origin="lower", interpolation="none", norm=norm, cmap="Greys")
+        axins = inset_axes(ax, width="2%", height="75%", loc='lower right')
+        plt.colorbar(im, cax=axins, orientation="vertical")
+        axins.tick_params(labelsize="x-small", left=True, right=False, labelleft=True, labelright=False, pad=0.5, width=0.8)
+
+        ax.plot(l, l, "--", lw=1, color="0.2")
+        ax.plot(l, lu, ":", lw=1, color="0.2")
+        ax.plot(l, ld, ":", lw=1, color="0.2")
+
+        percent = ((y <= slope(x)*1.01) & (y >= slope(x)*0.99)).sum() / x.size * 100
+        ax.text(0.01, 0.95, f"{percent:.2f}% pixels within 1% consistency", va="top", ha="left", fontsize=11, transform=ax.transAxes)
+        ax.set_xlim(0.95, 1.05)
+        ax.set_ylim(0.95, 1.05)
+    return fig, axs
+
+
+def _detect_artifacts(flat_img, bins, threshold=0.95):
+    flat = flat_img._data
+
+    mask = flat <= threshold
+    labels, nregions = ndi.label(mask)
+    sizes = ndi.sum(mask, labels, range(nregions + 1))
+
+    labels_bins = []
+    for bi, bf in bins:
+        selection = (sizes >= bi) & (sizes < bf)
+
+        mask_bin = selection[labels]
+        labels_bin, n = ndi.label(mask_bin)
+        labels_bins.append((mask_bin, labels_bin, n))
+
+    return labels, nregions, sizes, labels_bins
+
+
+def _calculate_artifact_centroids(labels_bins, max_nregions=10):
+
+    artifacts = []
+    for mask, labels, n in labels_bins:
+        bin = []
+        for ireg in range(1, min(max_nregions+1, n+1)):
+            i, j = ndi.center_of_mass(mask, labels, index=ireg)
+            i = int(i)
+            j = int(j)
+            bin.append((i, j))
+        artifacts.append(bin)
+
+    return artifacts
+
+
+def display_artifacts(img, artifacts, bbox_size=15, max_nregions=10, vmin=None, vmax=None, norm=None):
+
+    use_norm = False
+    if vmin is None or vmax is None:
+        use_norm = True
+
+    fig, axs = plt.subplots(len(artifacts), max_nregions, figsize=(14, 6), layout="tight", sharex=False, sharey=False)
+
+    hs = bbox_size // 2
+    for ax in axs.ravel():
+        ax.set_axis_off()
+    for i, artifacts_bin in enumerate(artifacts):
+        for j, (ip, jp) in enumerate(artifacts_bin):
+            imin, imax = max(ip-hs, 0), min(ip+hs, 4080)
+            jmin, jmax = max(jp-hs, 0), min(jp+hs, 4086)
+            data = img._data[imin:imax, jmin:jmax]
+            if data.size == 0:
+                continue
+            if use_norm:
+                kwargs = dict(norm=norm or simple_norm(data, min_percent=10, max_percent=90))
+            else:
+                kwargs = dict(vmin=vmin, vmax=vmax)
+
+            axs[i, j].imshow(data, origin="lower", cmap="Greys_r", interpolation="none", **kwargs)
+            axs[i, j].text(0.1, 0.1, f"[{ip},{jp}]", va="bottom", ha="left", fontsize=11, fontweight="bold", color="greenyellow")
+    return fig, axs
+
+
+def display_ratio_hist(img, labels, artifacts, bbox_size=15, max_nregions=10, mu_stat=np.nanmean, sigma_stat=np.nanstd, **kwargs):
+    fig, axs = plt.subplots(len(artifacts), max_nregions, figsize=(14, 6), layout="tight", sharex=False, sharey=True)
+
+    hs = bbox_size // 2
+    for ax in axs.ravel():
+        ax.tick_params(labelsize="small")
+        ax.set_axis_off()
+    for i, artifacts_bin in enumerate(artifacts):
+        for j, (ip, jp) in enumerate(artifacts_bin):
+            imin, imax = max(ip-hs, 0), min(ip+hs, 4080)
+            jmin, jmax = max(jp-hs, 0), min(jp+hs, 4086)
+            data = img._data[imin:imax, jmin:jmax].ravel()
+            mask = labels[imin:imax, jmin:jmax].ravel() != 0
+            if data.size == 0:
+                continue
+
+            axs[i, j].set_axis_on()
+            mu = mu_stat(data[mask])
+            sigma = sigma_stat(data[mask])
+
+            axs[i, j].hist(data[mask], density=True, **kwargs)
+            axs[i, j].text(0.1, 0.9, rf"$\mu={mu:.3f}$", va="top", ha="left", fontsize="small", transform=axs[i, j].transAxes)
+            axs[i, j].text(0.1, 0.7, rf"$\sigma={sigma:.3f}$", va="top", ha="left", fontsize="small", transform=axs[i, j].transAxes)
+    return fig, axs
