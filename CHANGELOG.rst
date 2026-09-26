@@ -6,14 +6,23 @@ Change Log
 
 This document records the main changes to the drp code.
 
-1.3.2dev (unreleased)
+1.3.3dev (unreleased)
 ---------------------
 
 - Added optional per-exposure radial velocity correction (e.g. barycentric), applied to flux during wavelength resampling without changing the output wavelength grid (new ``apply_bary_corr`` toggle, default on)
 
 
-1.3.1 (25-08-2026)
+1.3.2 (02-09-2026)
 ------------------
+
+- Fixed ancillary cleanup so QA output paths are skipped during reduction housekeeping
+- Corrected Ruff/CI configuration and lint-related defaults to match project expectations
+
+1.3.1 (25-08-2026) [YANKED]
+---------------------------
+
+Superseded by 1.3.2. Ancillary products would leave a large footprint on disk per catchup run.
+Do not use this version.
 
 - Fixed Gaia XP cache directory during flux calibration
 
