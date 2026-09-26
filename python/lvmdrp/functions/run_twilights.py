@@ -375,7 +375,7 @@ def combine_twilight_sequence(in_twilights: list[str], in_fflats: List[str], out
         # fit factors in twilights
         log.info(f"  removing factors with parameters: {cwave = :.2f}, {dwave = :.2f} Angstrom, {coadd_method = } and fibers {groupby = }")
         x, y, z, coeffs, factors = lvmflat_r.fit_ifu_gradient(
-            guess_coeffs=[1,0,0,0], fixed_coeffs=[0,1,2,3],
+            guess_coeffs=[1,0,0,0], fixed_coeffs=[3],
             cwave=cwave, dwave=dwave, coadd_method=coadd_method, groupby=groupby)
         lvmflat_r = lvmflat_r.remove_ifu_gradient(coeffs=coeffs, factors=factors, groupby=groupby)
 
