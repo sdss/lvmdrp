@@ -1760,31 +1760,27 @@ def science_reduction(expnum: int,
     # clean ancillary folder
     if clean_ancillary:
         ancillary_dir = os.path.dirname(dsci_path)
-        qa_dir = os.path.join(ancillary_dir, "qa")
-        log.info(f"removing ancillary files at {qa_dir}")
+        log.info(f"removing ancillary files for expnum={sci_expnum} from {ancillary_dir}")
+
         if os.path.isdir(ancillary_dir):
-            ancillary_paths = [os.path.join(ancillary_dir,p) for p in os.listdir(ancillary_dir) if str(sci_expnum) in p]
-            qa_paths = [os.path.join(qa_dir,p) for p in os.listdir(qa_dir) if str(sci_expnum) in p]
+            ancillary_paths = [
+                os.path.join(ancillary_dir, p)
+                for p in os.listdir(ancillary_dir)
+                if str(sci_expnum) in p and os.path.isfile(os.path.join(ancillary_dir, p))
+            ]
             for ancillary_path in ancillary_paths:
                 try:
                     os.remove(ancillary_path)
+                    log.info(f"removed ancillary file {ancillary_path}")
                 except Exception as e:
                     log.warning(f"error while removing {ancillary_path}: {e}")
-            for qa_path in qa_paths:
-                try:
-                    os.remove(qa_path)
-                except Exception as e:
-                    log.warning(f"error while removing {qa_path}: {e}")
-            if len(os.listdir(qa_dir)) == 0:
-                try:
-                    shutil.rmtree(qa_dir)
-                except Exception as e:
-                    log.warning(f"error while removing {qa_dir}: {e}")
-            if len(os.listdir(ancillary_dir)) == 0:
-                try:
-                    shutil.rmtree(ancillary_dir)
-                except Exception as e:
-                    log.warning(f"error while removing {ancillary_dir}: {e}")
+
+        if os.path.isdir(ancillary_dir) and len(os.listdir(ancillary_dir)) == 0:
+            try:
+                shutil.rmtree(ancillary_dir)
+                log.info(f"removed empty ancillary directory {ancillary_dir}")
+            except Exception as e:
+                log.warning(f"error while removing {ancillary_dir}: {e}")
 
 
 def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,

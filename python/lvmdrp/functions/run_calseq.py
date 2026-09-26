@@ -774,10 +774,9 @@ def create_lamps_on_hdrfix(mjd, lamps_on, expnum):
         raise ValueError(f"Invalid value(s) in `lamps_on`: {lamps_on}. Expected a subset of {lamps_all}")
     lamps_status.update(dict.fromkeys(lamps_, "ON"))
 
-    frames = [md.get_calibrations_metadata(mjds=mjd, expnums=[expnum], calibration=calibration) for calibration in CALIBRATION_TYPES]
-    frames = pd.concat(frames, ignore_index=True)
+    frames = md.get_frames_metadata(mjd=mjd).query("expnum == @expnum")
     if frames.empty:
-        log.info(f"no need to apply header fixes for lamps status on MJD = {mjd}, {expnum = }")
+        log.info(f"no frames found for MJD = {mjd}, {expnum = }")
         return
     log.info(f"going to write header fixes for lamps status on MJD = {mjd}, {expnum = }: {lamps_on = }")
 
