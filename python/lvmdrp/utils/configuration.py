@@ -12,7 +12,7 @@
 import os
 
 import yaml
-from pkg_resources import parse_version
+from packaging.version import parse as parse_version
 
 from lvmdrp.core.constants import MASTER_CONFIG_PATH
 from lvmdrp.utils.namespace import DictLoader, NamespaceLoader
