@@ -6,7 +6,7 @@ Change Log
 
 This document records the main changes to the drp code.
 
-1.2.3dev (unreleased)
+1.3.3dev (unreleased)
 ---------------------
 
 - Upgraded to Python 3.12 (from 3.10) and NumPy 2.x (from <2.0)
