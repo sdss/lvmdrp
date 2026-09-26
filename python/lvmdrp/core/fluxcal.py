@@ -163,9 +163,12 @@ class GaiaXPSpectra(object):
             Converted wavelength and flux arrays.
         """
         # micron -> A
-        wave_xp *= 10
+        # gaiaxpy.calibrate() returns wave_xp as the same array object passed in as the
+        # `sampling` argument (self._wave_sampling), so an in-place *= here would permanently
+        # corrupt the instance's sampling grid for every subsequent star -- must not mutate in place.
+        wave_xp = wave_xp * 10
         # W/s/micron -> erg/s/cm^2/A
-        spectra_xp *= 1e7 * 1e-1 * 1e-4
+        spectra_xp = spectra_xp * (1e7 * 1e-1 * 1e-4)
         return wave_xp, spectra_xp
 
     def fetch_xp_coeffs(self, source_ids):
