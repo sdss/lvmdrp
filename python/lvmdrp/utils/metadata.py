@@ -1630,7 +1630,7 @@ def safe_hdf_append(df: pd.DataFrame, h5file: str, key: str = "summary",
 
 
 def update_summary_file(filename: str, tileid: int = None, mjd: int = None, expnum: int = None,
-                        master_mjd: int = None, drpver: str = None):
+                        master_mjd: int = None, drpver: str = None, output_dir: str = None):
     """ Update the DRPall summary file
 
     Update the LVM DRPall summary file with a new row of data for a given lvmSFrame file.
@@ -1649,6 +1649,9 @@ def update_summary_file(filename: str, tileid: int = None, mjd: int = None, expn
         the exposure number, by default None
     master_mjd : int, optional
         the master calibration MJD, by default None
+    output_dir : str, optional
+        write the drpall summary file to this directory instead of the standard
+        SAS redux location, by default None (use the standard location)
     """
     # get DRP version
     drpver = drpver or DRPVER
@@ -1700,6 +1703,9 @@ def update_summary_file(filename: str, tileid: int = None, mjd: int = None, expn
     # create drpall h5 filepath
     drpall = path.full('lvm_drpall', drpver=drpver)
     drpall = drpall.replace('.fits', '.h5')
+    if output_dir is not None:
+        os.makedirs(output_dir, exist_ok=True)
+        drpall = os.path.join(output_dir, os.path.basename(drpall))
     # log.info(f'Updating the drpall summary file {drpall}')
     lock = FileLock(drpall.replace('.h5', '.h5.lock'), timeout=5)
 

@@ -811,10 +811,12 @@ def cluster(mjd_list, mjd_range, expnum, exp_list, exp_range, exp_file, nodes, p
 @cli.command('summary', short_help='Creates the drpall summary file for the given version of the pipeline')
 @click.option('--drp-version', type=str, default=None, help='DRP version for which a drpall summary file will be created')
 @click.option('-o', '--overwrite', is_flag=True, default=False, help='Overwrites any existing drpall file before creating a new one')
-def summary(drp_version, overwrite):
+@click.option('--output-dir', type=str, default=None, help='Write the drpall summary file to this directory instead of the '
+                                                             'standard SAS redux location, e.g. when you lack write access there')
+def summary(drp_version, overwrite, output_dir):
     """ Creates the DRP summary file for a given version of the DRP """
 
-    create_drpall(drp_version=drp_version, overwrite=overwrite)
+    create_drpall(drp_version=drp_version, overwrite=overwrite, output_dir=output_dir)
 
 
 @cli.command(short_help='Caches Gaia XP spectra for flux calibration based on standard stars')
