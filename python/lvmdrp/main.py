@@ -1983,17 +1983,27 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
             create_status_file(tileid, mjd, status='done')
 
 
-def create_drpall(drp_version: str = None, overwrite: bool = False) -> None:
+def create_drpall(drp_version: str = None, overwrite: bool = False, output_dir: str = None) -> None:
     """Create drpall summary file for a given DRP version
 
     Parameters
     ----------
     drp_version: str, optional
         Version of the DRP, by default None (current version)
+    overwrite : bool, optional
+        Overwrite any existing drpall file before creating a new one, by default False
+    output_dir : str, optional
+        Write the drpall summary file to this directory instead of the standard
+        SAS redux location, by default None (use the standard location). Useful
+        when the caller does not have write access to the redux tree, e.g. for
+        rebuilding/testing a drpall summary from lvmSFrames already on disk.
     """
     drp_version = drp_version or drpver
 
     drpall = path.full('lvm_drpall', drpver=drp_version)
+    if output_dir is not None:
+        os.makedirs(output_dir, exist_ok=True)
+        drpall = os.path.join(output_dir, os.path.basename(drpall))
     drpall_h5 = drpall.replace('.fits', '.h5')
     if overwrite:
         if os.path.isfile(drpall_h5):
@@ -2022,7 +2032,8 @@ def create_drpall(drp_version: str = None, overwrite: bool = False) -> None:
         tileid, mjd, expnum = int(pars[-3]), int(pars[-2]), int(pars[-1].split("-")[-1])
         cals_mjd = get_master_mjd(mjd)
         try:
-            update_summary_file(sframe_path, tileid=tileid, mjd=mjd, expnum=expnum, master_mjd=cals_mjd, drpver=drp_version)
+            update_summary_file(sframe_path, tileid=tileid, mjd=mjd, expnum=expnum, master_mjd=cals_mjd,
+                                drpver=drp_version, output_dir=output_dir)
         except Exception as e:
             log.error(f"while updating drpall for {tileid = }, {mjd = }, {expnum = }: {e}")
             nfailed += 1
