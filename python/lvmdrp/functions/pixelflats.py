@@ -8,9 +8,8 @@ import pandas as pd
 from copy import deepcopy as copy
 from pprint import pformat
 
-import matplotlib.pyplot as plt
-from astropy.visualization import simple_norm
-from mpl_toolkits.axes_grid1.inset_locator import inset_axes
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 
 from lvmdrp.core.constants import CAMERAS
 from lvmdrp import log, path, __version__ as drpver
@@ -22,6 +21,10 @@ from scipy import ndimage as ndi
 
 
 PIXFLAT_EPOCHS_PATH = os.path.join(os.getenv("LVMCORE_DIR"), "calibrations", "pixflat-epochs.yaml")
+
+# Size bins (in pixels, lower-inclusive/upper-exclusive) used to group connected low-value regions
+# when looking for pixel-flat artifacts
+ARTIFACT_BINS = ((10, 20), (20, 30), (30, 40), (40, 3000))
 
 
 def _parse_expnums(expnums):
@@ -429,9 +432,11 @@ def validate_sequence_kind(epochs, mjd_epoch, camera):
 
     Returns
     -------
-    None
-        Results are reported via ``log.info``/``log.warning``; nothing is
-        returned.
+    dict[str, pandas.DataFrame]
+        Mapping of exposure type (``"flat"``, ``"bias"``, ``"dark"``) to the
+        metadata rows whose ``imagetyp`` doesn't match that role. Empty
+        frames mean every exposure of that type is valid. Mismatches are also
+        reported via ``log.warning``.
 
     Raises
     ------
@@ -495,13 +500,16 @@ def validate_sequence_kind(epochs, mjd_epoch, camera):
         "flat": ["object", "flat"]
     }
 
+    invalid_frames = {}
     for _type, frame in frame_types.items():
         valid = frame.imagetyp.isin(TYPE_MAPS.get(_type, []) or [])
+        invalid_frames[_type] = frame.loc[~valid]
         if not valid.all():
-            invalid = frame.loc[~valid]
-            log.warning(f"\n{invalid.to_string()}")
+            log.warning(f"\n{invalid_frames[_type].to_string()}")
         else:
             log.info(f"all valid '{_type}' exposures: {set(frame.expnum)}")
+
+    return invalid_frames
 
 
 def update_epochs(epochs, shifted, cameras=CAMERAS):
@@ -1304,66 +1312,115 @@ def tag_pixelflats(epoch_mjd, version=drpver, dry_run=False):
     return copied_paths
 
 
-def test_pixflats(mjd_epoch, frame, label=None, skip_done=True):
+def _test_pixflat_paths(mjd_epoch, frame, label=None):
+    """Build the raw, preprocessed, and detrended paths of a pixel-flat test frame.
+
+    Parameters
+    ----------
+    mjd_epoch : int
+        MJD identifying the pixel-flat calibration epoch to use.
+    frame : pandas.Series
+        Frame metadata containing at least ``mjd``, ``camera``, ``expnum``,
+        and ``imagetyp``.
+    label : str, optional
+        Label appended to the intermediate product image type. If omitted,
+        ``mjd_epoch`` is used.
+
+    Returns
+    -------
+    rframe_path : str
+        Path to the raw frame.
+    pframe_path : str
+        Path to the preprocessed frame.
+    dframe_path : str
+        Path to the detrended frame.
+    """
     rframe_path = path.full("lvm_raw", hemi="s", mjd=frame.mjd, camspec=frame.camera, expnum=frame.expnum)
-    pframe_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=frame.mjd, kind="p", imagetype=f"{frame.imagetyp}_{(label or mjd_epoch)}", expnum=frame.expnum, camera=frame.camera)
-    dframe_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=frame.mjd, kind="d", imagetype=f"{frame.imagetyp}_{(label or mjd_epoch)}", expnum=frame.expnum, camera=frame.camera)
+    pframe_path = path.full(
+        "lvm_anc", drpver=drpver, tileid=11111, mjd=frame.mjd, kind="p",
+        imagetype=f"{frame.imagetyp}_{(label or mjd_epoch)}",
+        expnum=frame.expnum, camera=frame.camera,
+    )
+    dframe_path = path.full(
+        "lvm_anc", drpver=drpver, tileid=11111, mjd=frame.mjd, kind="d",
+        imagetype=f"{frame.imagetyp}_{(label or mjd_epoch)}",
+        expnum=frame.expnum, camera=frame.camera,
+    )
+    return rframe_path, pframe_path, dframe_path
+
+
+def test_pixflats(mjd_epoch, frame, label=None, skip_done=True):
+    """Reduce a frame using the epoch pixel flat and return the detrended path.
+
+    Parameters
+    ----------
+    mjd_epoch : int
+        MJD identifying the pixel-flat calibration epoch to use.
+    frame : pandas.Series
+        Frame metadata containing at least ``mjd``, ``camera``, ``expnum``,
+        and ``imagetyp``.
+    label : str, optional
+        Label appended to the intermediate product image type. If omitted,
+        ``mjd_epoch`` is used.
+    skip_done : bool, optional
+        If True, reuse existing preprocessed and detrended products.
+
+    Returns
+    -------
+    str
+        Path to the detrended frame.
+    """
+    rframe_path, pframe_path, dframe_path = _test_pixflat_paths(mjd_epoch, frame, label=label)
 
     calibs = drp.get_calib_paths(mjd=frame.mjd, from_sandbox=True)
-    mflat_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd_epoch, kind="mpixflat", camera=frame.camera)
+    mflat_path = path.full(
+        "lvm_master", drpver=drpver, tileid=11111, mjd=mjd_epoch,
+        kind="mpixflat", camera=frame.camera,
+    )
 
     if skip_done and os.path.isfile(pframe_path):
         log.info(f"{pframe_path} already exists, skipping")
     else:
         image_tasks.preproc_raw_frame(in_image=rframe_path, out_image=pframe_path)
+
     if skip_done and os.path.isfile(dframe_path):
         log.info(f"{dframe_path} already exists, skipping")
     else:
-        image_tasks.detrend_frame(in_image=pframe_path, out_image=dframe_path, in_bias=calibs["bias"][frame.camera], in_pixelflat=mflat_path, reject_cr=False)
+        image_tasks.detrend_frame(
+            in_image=pframe_path,
+            out_image=dframe_path,
+            in_bias=calibs["bias"][frame.camera],
+            in_pixelflat=mflat_path,
+            reject_cr=False,
+        )
 
     return dframe_path
 
 
-def display_pixflats_comparison(mjd_tar, mjd_ref, drpver):
-    fig, axs = plt.subplots(3, 3, figsize=(13, 13), sharex=True, sharey=True, layout="tight")
-    fig.supxlabel(f"Flatfield {mjd_ref}", fontsize="x-large")
-    fig.supylabel(f"Flatfield {mjd_tar}", fontsize="x-large")
-    axs = axs.ravel()
-    for ax, camera in zip(axs, CAMERAS):
-        pflat_ref = image_tasks.loadImage(f"/Volumes/CUCHUFLI/lvm/lvmdata/sas/sdsswork/lvm/spectro/redux/{drpver}/0011XX/11111/{mjd_ref}/calib/lvm-mpixflat-{camera}.fits")
-        pflat_tar = image_tasks.loadImage(f"/Volumes/CUCHUFLI/lvm/lvmdata/sas/sdsswork/lvm/spectro/redux/{drpver}/0011XX/11111/{mjd_tar}/calib/lvm-mpixflat-{camera}.fits")
-
-        x, y = pflat_ref._data.ravel(), (pflat_tar._data).ravel()
-        slope = lambda x: x
-        l = slope(np.asarray([0, 10]))
-        lu = l * 1.01
-        ld = l * 0.99
-
-        ax.set_aspect("equal")
-        ax.set_title(f"camera = {camera}", loc="left")
-        ax.plot(x, y, ",", color="0.2", zorder=-9)
-
-        H, _, _ = np.histogram2d(x, y, bins=100, range=[(0.95, 1.05), (0.95, 1.05)], density=False)
-        H = H / H.sum() * 100
-        norm = simple_norm(H, stretch="log", vmax=1.5)
-        H[H==0] = np.nan
-        im = ax.imshow(H.T, extent=[0.95, 1.05, 0.95, 1.05], origin="lower", interpolation="none", norm=norm, cmap="Greys")
-        axins = inset_axes(ax, width="2%", height="75%", loc='lower right')
-        plt.colorbar(im, cax=axins, orientation="vertical")
-        axins.tick_params(labelsize="x-small", left=True, right=False, labelleft=True, labelright=False, pad=0.5, width=0.8)
-
-        ax.plot(l, l, "--", lw=1, color="0.2")
-        ax.plot(l, lu, ":", lw=1, color="0.2")
-        ax.plot(l, ld, ":", lw=1, color="0.2")
-
-        percent = ((y <= slope(x)*1.01) & (y >= slope(x)*0.99)).sum() / x.size * 100
-        ax.text(0.01, 0.95, f"{percent:.2f}% pixels within 1% consistency", va="top", ha="left", fontsize=11, transform=ax.transAxes)
-        ax.set_xlim(0.95, 1.05)
-        ax.set_ylim(0.95, 1.05)
-    return fig, axs
-
-
 def _detect_artifacts(flat_img, bins, threshold=0.95):
+    """Detect connected low-value regions in a pixel-flat image.
+
+    Parameters
+    ----------
+    flat_img : image object
+        Pixel-flat image whose ``_data`` array is searched for artifacts.
+    bins : iterable[tuple[int, int]]
+        Inclusive/exclusive region-size intervals ``(lower, upper)`` used to
+        group detected connected components.
+    threshold : float, optional
+        Maximum flat value considered part of an artifact.
+
+    Returns
+    -------
+    labels : numpy.ndarray
+        Connected-component labels for all pixels below ``threshold``.
+    nregions : int
+        Number of connected regions.
+    sizes : numpy.ndarray
+        Number of pixels in each connected region.
+    labels_bins : list[tuple[numpy.ndarray, numpy.ndarray, int]]
+        Per-size-bin masks, labels, and region counts.
+    """
     flat = flat_img._data
 
     mask = flat <= threshold
@@ -1382,11 +1439,26 @@ def _detect_artifacts(flat_img, bins, threshold=0.95):
 
 
 def _calculate_artifact_centroids(labels_bins, max_nregions=10):
+    """Calculate centroids of the largest artifact regions in each size bin.
 
+    Parameters
+    ----------
+    labels_bins : iterable[tuple[numpy.ndarray, numpy.ndarray, int]]
+        Per-bin masks, connected-component labels, and region counts returned
+        by :func:`_detect_artifacts`.
+    max_nregions : int, optional
+        Maximum number of regions to report per bin.
+
+    Returns
+    -------
+    list[list[tuple[int, int]]]
+        Integer ``(row, column)`` centroids for up to ``max_nregions`` regions
+        in each bin.
+    """
     artifacts = []
     for mask, labels, n in labels_bins:
         bin = []
-        for ireg in range(1, min(max_nregions+1, n+1)):
+        for ireg in range(1, min(max_nregions + 1, n + 1)):
             i, j = ndi.center_of_mass(mask, labels, index=ireg)
             i = int(i)
             j = int(j)
@@ -1396,55 +1468,780 @@ def _calculate_artifact_centroids(labels_bins, max_nregions=10):
     return artifacts
 
 
-def display_artifacts(img, artifacts, bbox_size=15, max_nregions=10, vmin=None, vmax=None, norm=None):
+def _display_artifacts(img, artifacts, bbox_size=15, max_nregions=10, vmin=None, vmax=None, norm=None):
+    """Display image cutouts around detected pixel-flat artifacts.
 
-    use_norm = False
-    if vmin is None or vmax is None:
-        use_norm = True
+    Parameters
+    ----------
+    img : image object
+        Image containing the artifact regions.
+    artifacts : list[list[tuple[int, int]]]
+        Artifact centroids grouped by size bin.
+    bbox_size : int, optional
+        Width of each square cutout in pixels.
+    max_nregions : int, optional
+        Maximum number of artifact cutouts shown per bin.
+    vmin, vmax : float, optional
+        Fixed lower and upper limits for the image intensity scale. If either
+        is omitted, each cutout is normalized independently, matching the
+        previous ``simple_norm`` behavior.
+    norm : object, optional
+        Astropy normalization object. Used when ``vmin`` or ``vmax`` is omitted
+        and it provides an explicit normalization for the cutouts.
 
-    fig, axs = plt.subplots(len(artifacts), max_nregions, figsize=(14, 6), layout="tight", sharex=False, sharey=False)
+    Returns
+    -------
+    plotly.graph_objects.Figure
+        Plotly figure containing the artifact cutouts.
+    numpy.ndarray
+        Array of Plotly trace references arranged as a ``(nbins, max_nregions)``
+        object array.
+    """
+    use_norm = vmin is None or vmax is None
+    nrows = len(artifacts)
+    ncols = max_nregions
+
+    fig = make_subplots(
+        rows=nrows,
+        cols=ncols,
+        horizontal_spacing=0.01,
+        vertical_spacing=0.04,
+    )
+    traces = np.empty((nrows, ncols), dtype=object)
 
     hs = bbox_size // 2
-    for ax in axs.ravel():
-        ax.set_axis_off()
-    for i, artifacts_bin in enumerate(artifacts):
-        for j, (ip, jp) in enumerate(artifacts_bin):
-            imin, imax = max(ip-hs, 0), min(ip+hs, 4080)
-            jmin, jmax = max(jp-hs, 0), min(jp+hs, 4086)
+    for i in range(nrows):
+        for j in range(ncols):
+            fig.update_xaxes(visible=False, row=i + 1, col=j + 1)
+            fig.update_yaxes(visible=False, row=i + 1, col=j + 1)
+            if j >= len(artifacts[i]):
+                continue
+
+            ip, jp = artifacts[i][j]
+            imin, imax = max(ip - hs, 0), min(ip + hs, 4080)
+            jmin, jmax = max(jp - hs, 0), min(jp + hs, 4086)
             data = img._data[imin:imax, jmin:jmax]
             if data.size == 0:
                 continue
+
             if use_norm:
-                kwargs = dict(norm=norm or simple_norm(data, min_percent=10, max_percent=90))
+                if norm is not None:
+                    # Astropy Normalize-like objects can be used to derive the
+                    # equivalent Plotly range from the cutout.
+                    z = np.asarray(norm(data), dtype=float)
+                    finite = np.isfinite(z)
+                    if finite.any():
+                        zlo, zhi = np.nanmin(data[finite]), np.nanmax(data[finite])
+                    else:
+                        zlo, zhi = np.nanmin(data), np.nanmax(data)
+                else:
+                    finite = data[np.isfinite(data)]
+                    if finite.size:
+                        zlo, zhi = np.nanpercentile(finite, [10, 90])
+                    else:
+                        zlo, zhi = None, None
             else:
-                kwargs = dict(vmin=vmin, vmax=vmax)
+                zlo, zhi = vmin, vmax
 
-            axs[i, j].imshow(data, origin="lower", cmap="Greys_r", interpolation="none", **kwargs)
-            axs[i, j].text(0.1, 0.1, f"[{ip},{jp}]", va="bottom", ha="left", fontsize=11, fontweight="bold", color="greenyellow")
-    return fig, axs
+            heatmap = go.Heatmap(
+                z=data,
+                zmin=zlo,
+                zmax=zhi,
+                colorscale="Greys",
+                zsmooth=False,
+                showscale=False,
+                hovertemplate="row=%{y}<br>column=%{x}<br>value=%{z}<extra></extra>",
+            )
+            fig.add_trace(heatmap, row=i + 1, col=j + 1)
+            traces[i, j] = len(fig.data) - 1
+
+            fig.add_annotation(
+                x=0.1,
+                y=0.1,
+                text=f"[{ip},{jp}]",
+                showarrow=False,
+                xanchor="left",
+                yanchor="bottom",
+                font=dict(size=11, color="greenyellow"),
+                row=i + 1,
+                col=j + 1,
+            )
+
+    fig.update_layout(
+        width=1600,
+        height=max(350, 150 * max(nrows, 1)),
+        margin=dict(l=20, r=20, t=20, b=20),
+    )
+    return fig
 
 
-def display_ratio_hist(img, labels, artifacts, bbox_size=15, max_nregions=10, mu_stat=np.nanmean, sigma_stat=np.nanstd, **kwargs):
-    fig, axs = plt.subplots(len(artifacts), max_nregions, figsize=(14, 6), layout="tight", sharex=False, sharey=True)
+def _display_ratio_hist(
+    img,
+    labels,
+    artifacts,
+    bbox_size=15,
+    max_nregions=10,
+    mu_stat=np.nanmean,
+    sigma_stat=np.nanstd,
+    bins=10,
+    range=(0.95, 1.05)
+):
+    """Display histograms of artifact-region pixel values.
+
+    Parameters
+    ----------
+    img : image object
+        Image containing the artifact regions.
+    labels : numpy.ndarray
+        Connected-component labels identifying artifact pixels.
+    artifacts : list[list[tuple[int, int]]]
+        Artifact centroids grouped by size bin.
+    bbox_size : int, optional
+        Width of each square cutout in pixels.
+    max_nregions : int, optional
+        Maximum number of artifact histograms shown per bin.
+    mu_stat : callable, optional
+        Function used to calculate the location statistic printed on each
+        histogram.
+    sigma_stat : callable, optional
+        Function used to calculate the scale statistic printed on each
+        histogram.
+    bins : int, optional
+        Number of bins in histogram.
+    range : tuple, optional
+        Range of the histogram.
+
+    Returns
+    -------
+    plotly.graph_objects.Figure
+        Plotly figure containing one histogram panel per artifact region.
+    """
+    nrows = len(artifacts)
+    ncols = max_nregions
+    fig = make_subplots(
+        rows=nrows,
+        cols=ncols,
+        shared_yaxes=True,
+        horizontal_spacing=0.02,
+        vertical_spacing=0.04,
+    )
 
     hs = bbox_size // 2
-    for ax in axs.ravel():
-        ax.tick_params(labelsize="small")
-        ax.set_axis_off()
     for i, artifacts_bin in enumerate(artifacts):
         for j, (ip, jp) in enumerate(artifacts_bin):
-            imin, imax = max(ip-hs, 0), min(ip+hs, 4080)
-            jmin, jmax = max(jp-hs, 0), min(jp+hs, 4086)
+            imin, imax = max(ip - hs, 0), min(ip + hs, 4080)
+            jmin, jmax = max(jp - hs, 0), min(jp + hs, 4086)
             data = img._data[imin:imax, jmin:jmax].ravel()
             mask = labels[imin:imax, jmin:jmax].ravel() != 0
             if data.size == 0:
                 continue
 
-            axs[i, j].set_axis_on()
-            mu = mu_stat(data[mask])
-            sigma = sigma_stat(data[mask])
+            selected = data[mask]
+            if selected.size == 0:
+                continue
 
-            axs[i, j].hist(data[mask], density=True, **kwargs)
-            axs[i, j].text(0.1, 0.9, rf"$\mu={mu:.3f}$", va="top", ha="left", fontsize="small", transform=axs[i, j].transAxes)
-            axs[i, j].text(0.1, 0.7, rf"$\sigma={sigma:.3f}$", va="top", ha="left", fontsize="small", transform=axs[i, j].transAxes)
-    return fig, axs
+            mu = mu_stat(selected)
+            sigma = sigma_stat(selected)
+
+            fig.add_trace(
+                go.Histogram(
+                    x=selected,
+                    histnorm="probability density",
+                    xbins={"start": range[0], "end": range[1]},
+                    nbinsx=bins,
+                ),
+                row=i + 1,
+                col=j + 1,
+            )
+            fig.add_annotation(
+                x=range[0],
+                y=0.9,
+                text=f"μ={mu:.3f}<br>σ={sigma:.3f}",
+                showarrow=False,
+                xanchor="left",
+                yanchor="top",
+                font=dict(size=10),
+                row=i + 1,
+                col=j + 1,
+            )
+
+    fig.update_xaxes(range=range)
+    fig.update_layout(
+        width=1600,
+        height=max(350, 150 * max(nrows, 1)),
+        margin=dict(l=20, r=20, t=20, b=20),
+        showlegend=False,
+        barmode="overlay",
+    )
+    return fig
+
+
+def _master_pixflat_path(mjd, camera, drpver=drpver, kind="mpixflat"):
+    """Build the path of a pixel-flat product for an epoch and camera.
+
+    Parameters
+    ----------
+    mjd : int
+        MJD identifying the pixel-flat epoch.
+    camera : str
+        Camera identifier, e.g. ``"b1"``.
+    drpver : str, optional
+        Data-reduction version. Default is the current pipeline version.
+    kind : {"mpixflat", "cpixflat", "fpixflat"}, optional
+        Product kind. Default is ``"mpixflat"`` (master pixel flat).
+
+    Returns
+    -------
+    str
+        Path to the product.
+    """
+    return path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, kind=kind, camera=camera)
+
+
+def _pct_within(x, y, tol=0.01):
+    """Return the percentage of pixels where ``y`` is within ``tol`` of ``x``.
+
+    Parameters
+    ----------
+    x : numpy.ndarray
+        Reference values.
+    y : numpy.ndarray
+        Target values, same shape as ``x``.
+    tol : float, optional
+        Fractional tolerance. Default is 0.01 (1%).
+
+    Returns
+    -------
+    float
+        Percentage of pixels with ``x * (1 - tol) <= y <= x * (1 + tol)``.
+    """
+    return float(((y <= x * (1 + tol)) & (y >= x * (1 - tol))).sum() / x.size * 100)
+
+
+def display_pixflats_comparison(mjd_tar, mjd_ref, drpver, cameras=CAMERAS):
+    """Compare target and reference master pixel flats for LVM cameras.
+
+    Each camera is shown as a density heatmap of target versus reference pixel
+    values, together with the one-to-one relation and ±1% bounds. Panels keep
+    their position in the 3x3 grid even when only a subset of cameras is
+    requested, and cameras whose master pixel flat is missing for either epoch
+    are left empty (with a warning).
+
+    Parameters
+    ----------
+    mjd_tar : int
+        MJD of the target pixel-flat epoch.
+    mjd_ref : int
+        MJD of the reference pixel-flat epoch.
+    drpver : str
+        Data-reduction version used to locate the pixel-flat products.
+    cameras : iterable[str], optional
+        Cameras to show. Default is all of :data:`CAMERAS`.
+
+    Returns
+    -------
+    plotly.graph_objects.Figure
+        Plotly figure containing one comparison panel per camera.
+    """
+    fig = make_subplots(
+        rows=3,
+        cols=3,
+        shared_xaxes=True,
+        shared_yaxes=True,
+        horizontal_spacing=0.04,
+        vertical_spacing=0.04,
+    )
+
+    for idx, camera in enumerate(CAMERAS):
+        if camera not in cameras:
+            continue
+        row, col = divmod(idx, 3)
+        path_ref = _master_pixflat_path(mjd_ref, camera, drpver=drpver)
+        path_tar = _master_pixflat_path(mjd_tar, camera, drpver=drpver)
+        if not (os.path.isfile(path_ref) and os.path.isfile(path_tar)):
+            log.warning(f"missing master pixel flat for {camera = } ({path_ref} or {path_tar}), leaving panel empty")
+            continue
+        pflat_ref = image_tasks.loadImage(path_ref)
+        pflat_tar = image_tasks.loadImage(path_tar)
+
+        x = pflat_ref._data.ravel()
+        y = pflat_tar._data.ravel()
+
+        # Match the original 100x100 density estimate over [0.95, 1.05].
+        H, xe, ye = np.histogram2d(
+            x, y,
+            bins=100,
+            range=[(0.95, 1.05), (0.95, 1.05)],
+            density=False,
+        )
+        H = H / H.sum() * 100
+        H[H == 0] = np.nan
+
+        # The original matplotlib plot used a logarithmic normalization with
+        # max_cut=1.5. Transform the positive values to log10 so that the
+        # Plotly colorscale has the same logarithmic intensity mapping.
+        positive = H[np.isfinite(H) & (H > 0)]
+        if positive.size:
+            log_h = np.full_like(H, np.nan, dtype=float)
+            log_h[H > 0] = np.log10(H[H > 0])
+            zmin = float(np.nanmin(log_h))
+            zmax = float(np.log10(1.5))
+            colorbar = dict(
+                title="%",
+                len=0.75,
+                thickness=12,
+                x=1.0,
+                xanchor="left",
+                tickvals=np.log10([0.01, 0.1, 1.0, 1.5]).tolist(),
+                ticktext=["0.01", "0.1", "1.0", "1.5"],
+            )
+        else:
+            log_h = H
+            zmin = zmax = None
+            colorbar = dict(title="%", len=0.75, thickness=12, x=1.0, xanchor="left")
+
+        fig.add_trace(
+            go.Heatmap(
+                x=(xe[:-1] + xe[1:]) / 2,
+                y=(ye[:-1] + ye[1:]) / 2,
+                z=log_h.T,
+                colorscale="Greys",
+                zmin=zmin,
+                zmax=zmax,
+                zsmooth=False,
+                colorbar=colorbar,
+                customdata=H.T,
+                hovertemplate="Reference: %{x:.5f}<br>Target: %{y:.5f}<br>Fraction: %{customdata:.3g}%<extra></extra>",
+                showscale=True,
+            ),
+            row=row + 1,
+            col=col + 1,
+        )
+
+        line = np.asarray([0, 10])
+        fig.add_trace(
+            go.Scatter(
+                x=line,
+                y=line,
+                mode="lines",
+                line=dict(color="rgb(51,51,51)", dash="dash", width=1),
+                showlegend=False,
+                hoverinfo="skip",
+            ),
+            row=row + 1,
+            col=col + 1,
+        )
+        fig.add_trace(
+            go.Scatter(
+                x=line,
+                y=line * 1.01,
+                mode="lines",
+                line=dict(color="rgb(51,51,51)", dash="dot", width=1),
+                showlegend=False,
+                hoverinfo="skip",
+            ),
+            row=row + 1,
+            col=col + 1,
+        )
+        fig.add_trace(
+            go.Scatter(
+                x=line,
+                y=line * 0.99,
+                mode="lines",
+                line=dict(color="rgb(51,51,51)", dash="dot", width=1),
+                showlegend=False,
+                hoverinfo="skip",
+            ),
+            row=row + 1,
+            col=col + 1,
+        )
+
+        percent = _pct_within(x, y)
+        fig.add_annotation(
+            x=0.01,
+            y=0.95,
+            # xref=f"x{idx + 1} domain",
+            # yref=f"y{idx + 1} domain",
+            text=f"{percent:.2f}% pixels within 1% consistency",
+            showarrow=False,
+            xanchor="left",
+            yanchor="top",
+            font=dict(size=11),
+            row=row + 1,
+            col=col + 1,
+        )
+
+    fig.update_xaxes(range=[0.95, 1.05], constrain="domain")
+    fig.update_yaxes(range=[0.95, 1.05], scaleanchor="x", scaleratio=1)
+    fig.update_layout(
+        width=1400,
+        height=1400,
+        template="plotly_white",
+        margin=dict(l=80, r=80, t=70, b=80),
+        title=dict(
+            text=f"Pixel-flat comparison: target {mjd_tar} vs reference {mjd_ref}",
+            x=0.5,
+        ),
+    )
+
+    # Preserve the original figure's semantic axis labels: reference on x,
+    # target on y.
+    fig.update_xaxes(title_text=f"Flatfield {mjd_ref}")
+    fig.update_yaxes(title_text=f"Flatfield {mjd_tar}")
+    return fig
+
+
+def display_artifacts_comparison(mjd_tar, mjd_ref, drpver, camera, bins=ARTIFACT_BINS, bbox_size=30, max_regions=10):
+    """Compare target and reference master pixel flats around detected artifacts.
+
+    Artifacts are connected low-value regions (see :func:`_detect_artifacts`)
+    found in the target master pixel flat. Cutouts around the largest regions
+    of each size bin are shown for both epochs, for their ratio, and as a
+    histogram of the ratio within the artifact pixels.
+
+    Parameters
+    ----------
+    mjd_tar : int
+        MJD of the target pixel-flat epoch.
+    mjd_ref : int
+        MJD of the reference pixel-flat epoch.
+    drpver : str
+        Data-reduction version used to locate the pixel-flat products.
+    camera : str
+        Camera identifier, e.g. ``"b1"``.
+    bins : iterable[tuple[int, int]], optional
+        Region-size bins used to group artifacts. Default is :data:`ARTIFACT_BINS`.
+    bbox_size : int, optional
+        Width of each square cutout in pixels. Default is 30.
+    max_regions : int, optional
+        Maximum number of regions shown per size bin. Default is 10.
+
+    Returns
+    -------
+    dict[str, plotly.graph_objects.Figure]
+        Figures keyed by ``"flat_ref"``, ``"flat_tar"``, ``"flat_rat"``
+        (reference / target), and ``"hist_rat"``.
+    """
+    pflat_ref = image_tasks.loadImage(_master_pixflat_path(mjd_ref, camera, drpver=drpver))
+    pflat_tar = image_tasks.loadImage(_master_pixflat_path(mjd_tar, camera, drpver=drpver))
+
+    labels, _, _, labels_bins = _detect_artifacts(pflat_tar, bins=bins, threshold=0.95)
+    artifacts = _calculate_artifact_centroids(labels_bins, max_nregions=max_regions)
+
+    return {
+        "flat_ref": _display_artifacts(pflat_ref, artifacts, bbox_size=bbox_size, max_nregions=max_regions, vmin=0.95, vmax=1.05),
+        "flat_tar": _display_artifacts(pflat_tar, artifacts, bbox_size=bbox_size, max_nregions=max_regions, vmin=0.95, vmax=1.05),
+        "flat_rat": _display_artifacts(pflat_ref/pflat_tar, artifacts, bbox_size=bbox_size, max_nregions=max_regions, vmin=0.99, vmax=1.01),
+        "hist_rat": _display_ratio_hist(pflat_ref/pflat_tar, labels, artifacts, bbox_size=bbox_size, max_nregions=max_regions),
+    }
+
+
+def display_flatfielded_comparison(mjd_tar, mjd_ref, drpver, camera, test_flat_paths, bins=ARTIFACT_BINS, bbox_size=30, max_regions=10):
+    """Compare a test frame flat-fielded with the target and reference pixel flats.
+
+    The regions shown are the artifacts detected in the target master pixel
+    flat, the same ones displayed by :func:`display_artifacts_comparison`.
+
+    Parameters
+    ----------
+    mjd_tar : int
+        MJD of the target pixel-flat epoch.
+    mjd_ref : int
+        MJD of the reference pixel-flat epoch.
+    drpver : str
+        Data-reduction version used to locate the pixel-flat products.
+    camera : str
+        Camera identifier, e.g. ``"b1"``.
+    test_flat_paths : dict[int, dict[str, str]]
+        Detrended test-frame paths, indexed as ``test_flat_paths[mjd_epoch][camera]``
+        (see :func:`test_pixflats`).
+    bins : iterable[tuple[int, int]], optional
+        Region-size bins used to group artifacts. Default is :data:`ARTIFACT_BINS`.
+    bbox_size : int, optional
+        Width of each square cutout in pixels. Default is 30.
+    max_regions : int, optional
+        Maximum number of regions shown per size bin. Default is 10.
+
+    Returns
+    -------
+    dict[str, plotly.graph_objects.Figure]
+        Figures keyed by ``"flat_ref"``, ``"flat_tar"``, ``"flat_rat"``
+        (reference / target), and ``"hist_rat"``.
+    """
+    pflat_tar = image_tasks.loadImage(_master_pixflat_path(mjd_tar, camera, drpver=drpver))
+    labels, _, _, labels_bins = _detect_artifacts(pflat_tar, bins=bins, threshold=0.95)
+    artifacts = _calculate_artifact_centroids(labels_bins, max_nregions=max_regions)
+
+    fflat_ref = image_tasks.loadImage(test_flat_paths[mjd_ref][camera])
+    fflat_tar = image_tasks.loadImage(test_flat_paths[mjd_tar][camera])
+
+    return {
+        "flat_ref": _display_artifacts(fflat_ref, artifacts, bbox_size=bbox_size, max_nregions=max_regions),
+        "flat_tar": _display_artifacts(fflat_tar, artifacts, bbox_size=bbox_size, max_nregions=max_regions),
+        "flat_rat": _display_artifacts(fflat_ref/fflat_tar, artifacts, bbox_size=bbox_size, max_nregions=max_regions, vmin=0.99, vmax=1.01),
+        "hist_rat": _display_ratio_hist(fflat_ref/fflat_tar, labels, artifacts, bbox_size=bbox_size, max_nregions=max_regions),
+    }
+
+
+_QA_FIGURE_LABELS = {
+    "flat_ref": "reference",
+    "flat_tar": "target",
+    "flat_rat": "ratio (reference / target)",
+    "hist_rat": "ratio histogram (artifact pixels)",
+    "artifacts": "master pixel flat, artifact cutouts",
+    "flatfielded": "flat-fielded test frame, artifact cutouts",
+}
+
+
+def _default_qa_dir(mjd_tar, mjd_ref):
+    """Return the default output directory of the pixel-flat QA products.
+
+    The directory sits in the ancillary directory of the target epoch, next to
+    the intermediate products written by :func:`test_pixflats`.
+
+    Parameters
+    ----------
+    mjd_tar : int
+        MJD of the target pixel-flat epoch.
+    mjd_ref : int
+        MJD of the reference pixel-flat epoch.
+
+    Returns
+    -------
+    str
+        Path to the QA directory.
+    """
+    anc_path = path.full(
+        "lvm_anc", drpver=drpver, tileid=11111, mjd=mjd_tar, kind="p",
+        imagetype="pixflat_qa", expnum=0, camera=CAMERAS[0],
+    )
+    return os.path.join(os.path.dirname(anc_path), "pixflat_qa", f"{mjd_tar}_vs_{mjd_ref}")
+
+
+def _write_qa_report(report_path, title, summary, figures):
+    """Write the pixel-flat QA results as one self-contained HTML report.
+
+    Parameters
+    ----------
+    report_path : str
+        Path of the HTML file to write.
+    title : str
+        Report title.
+    summary : pandas.DataFrame
+        Per-camera summary table.
+    figures : dict
+        Figures as built by :func:`qa_pixelflats`: a ``"master_comparison"``
+        figure (or None) and a ``"cameras"`` mapping of camera to groups of
+        named figures.
+    """
+    embed_plotlyjs = True
+
+    def _html(fig):
+        """Render a figure as an HTML fragment, embedding plotly.js only the first time.
+
+        Parameters
+        ----------
+        fig : plotly.graph_objects.Figure
+            Figure to render.
+
+        Returns
+        -------
+        str
+            HTML fragment of the figure.
+        """
+        nonlocal embed_plotlyjs
+        html = fig.to_html(full_html=False, include_plotlyjs=embed_plotlyjs)
+        embed_plotlyjs = False
+        return html
+
+    parts = [
+        f"<html><head><meta charset='utf-8'><title>{title}</title></head><body>",
+        f"<h1>{title}</h1>",
+        "<h2>Summary</h2>",
+        summary.to_html(float_format=lambda value: f"{value:.2f}", na_rep="-"),
+    ]
+    if figures.get("master_comparison") is not None:
+        parts += ["<h2>Master pixel-flat comparison</h2>", _html(figures["master_comparison"])]
+    for camera, camera_figures in figures["cameras"].items():
+        if not camera_figures:
+            continue
+        parts.append(f"<h2>{camera}</h2>")
+        for group, group_figures in camera_figures.items():
+            parts.append(f"<h3>{_QA_FIGURE_LABELS.get(group, group)}</h3>")
+            for name, fig in group_figures.items():
+                parts += [f"<h4>{_QA_FIGURE_LABELS.get(name, name)}</h4>", _html(fig)]
+    parts.append("</body></html>")
+
+    with open(report_path, "w") as f:
+        f.write("\n".join(parts))
+
+
+def qa_pixelflats(mjd_tar, mjd_ref, skip_done=True, dry_run=False, cameras=CAMERAS,
+                  test_frames=None, epochs=None, output_dir=None,
+                  bins=ARTIFACT_BINS, bbox_size=30, max_regions=10):
+    """Run the post-mortem QA of a target pixel-flat epoch against a reference epoch.
+
+    Consolidates the validation and plotting routines of this module into one
+    pass:
+
+    1. Validate the target epoch's sequences (:func:`validate_sequence_kind`).
+    2. Check that both epochs have a master pixel flat for each camera.
+    3. Compare the master pixel flats of both epochs
+       (:func:`display_pixflats_comparison`), and record the percentage of
+       pixels consistent within 1%.
+    4. Compare both epochs around the artifacts detected in the target master
+       pixel flat (:func:`display_artifacts_comparison`).
+    5. If ``test_frames`` are given, reduce them with both epochs' pixel flats
+       (:func:`test_pixflats`) and compare the flat-fielded results
+       (:func:`display_flatfielded_comparison`).
+
+    Everything is written to a single HTML report. A failure in one camera is
+    logged and recorded in the summary, and doesn't stop the remaining cameras.
+
+    Parameters
+    ----------
+    mjd_tar : int
+        MJD of the target pixel-flat epoch, the one being checked.
+    mjd_ref : int
+        MJD of the reference pixel-flat epoch, the one to compare against.
+    skip_done : bool, optional
+        If True, reuse existing test-frame reductions (see :func:`test_pixflats`).
+        Figures and the report are always regenerated. Default is True.
+    dry_run : bool, optional
+        If True, log the cameras, test-frame paths, and report path without
+        running any check or writing files. Default is False.
+    cameras : iterable[str], optional
+        Cameras to check. Default is all of :data:`CAMERAS`.
+    test_frames : pandas.DataFrame, optional
+        Frames used for the flat-fielded comparison, with at least the columns
+        ``mjd``, ``camera``, ``expnum``, and ``imagetyp``. The first row of
+        each camera is used, and cameras without a row are skipped. If omitted,
+        the flat-fielded comparison is skipped.
+    epochs : dict, optional
+        Epoch mapping as returned by :func:`load_pixflat_epochs`. If omitted, it
+        is loaded from the default epochs file.
+    output_dir : str, optional
+        Directory of the HTML report. Default is a ``pixflat_qa`` directory in
+        the target epoch's ancillary directory (see :func:`_default_qa_dir`).
+    bins : iterable[tuple[int, int]], optional
+        Region-size bins used to group artifacts. Default is :data:`ARTIFACT_BINS`.
+    bbox_size : int, optional
+        Width of each artifact cutout in pixels. Default is 30.
+    max_regions : int, optional
+        Maximum number of artifact regions shown per size bin. Default is 10.
+
+    Returns
+    -------
+    dict
+        - ``"summary"`` : pandas.DataFrame, one row per camera, with the sequence
+          validation result, whether both master pixel flats exist, the
+          percentage of pixels consistent within 1% with the reference, the
+          number of artifacts detected, whether the flat-fielded comparison ran,
+          and any error. None in a dry run.
+        - ``"figures"`` : dict, the Plotly figures (``"master_comparison"`` and
+          per-camera groups under ``"cameras"``). Empty in a dry run.
+        - ``"test_flat_paths"`` : dict, detrended test-frame paths indexed as
+          ``[mjd_epoch][camera]``. In a dry run, the paths that would be used.
+        - ``"report_path"`` : str, path to the HTML report.
+    """
+    cameras = [camera for camera in CAMERAS if camera in cameras]
+    output_dir = output_dir or _default_qa_dir(mjd_tar, mjd_ref)
+    report_path = os.path.join(output_dir, f"pixflat-qa_{mjd_tar}_vs_{mjd_ref}.html")
+
+    products = {camera: {mjd: _master_pixflat_path(mjd, camera) for mjd in (mjd_tar, mjd_ref)} for camera in cameras}
+    available = [camera for camera in cameras if all(os.path.isfile(product) for product in products[camera].values())]
+    for camera in cameras:
+        if camera not in available:
+            log.warning(f"master pixel flat missing for {camera = } in {mjd_tar = } or {mjd_ref = }, skipping")
+
+    frames = {}
+    if test_frames is None:
+        log.info("no test frames given, skipping the flat-fielded comparison")
+    else:
+        for camera in available:
+            selected = test_frames.query("camera == @camera")
+            if selected.empty:
+                log.warning(f"no test frame given for {camera = }, skipping its flat-fielded comparison")
+                continue
+            frames[camera] = selected.iloc[0]
+
+    test_flat_paths = {mjd_tar: {}, mjd_ref: {}}
+    for camera, frame in frames.items():
+        for mjd_epoch in (mjd_tar, mjd_ref):
+            test_flat_paths[mjd_epoch][camera] = _test_pixflat_paths(mjd_epoch, frame)[-1]
+
+    if dry_run:
+        log.info(f"dry run of '{qa_pixelflats.__name__}' for {mjd_tar = } against {mjd_ref = }")
+        log.info(f"  sequences to validate, cameras: {cameras}")
+        log.info(f"  cameras with both master pixel flats: {available}")
+        for mjd_epoch, epoch_paths in test_flat_paths.items():
+            for camera, dframe_path in epoch_paths.items():
+                status = "exists" if os.path.isfile(dframe_path) else "would be created"
+                log.info(f"  test frame, {mjd_epoch = }, {camera = }: {dframe_path} [{status}]")
+        log.info(f"  report: {report_path}")
+        return {"summary": None, "figures": {}, "test_flat_paths": test_flat_paths, "report_path": report_path}
+
+    epochs = epochs if epochs is not None else load_pixflat_epochs(verbose=False)
+    validation = {}
+    for camera in cameras:
+        try:
+            invalid = validate_sequence_kind(epochs, mjd_epoch=mjd_tar, camera=camera)
+        except KeyError:
+            validation[camera] = "no sequence"
+        except ValueError as error:
+            validation[camera] = f"invalid sequence: {error}"
+        else:
+            mismatches = {_type: len(frame) for _type, frame in invalid.items() if len(frame)}
+            validation[camera] = "ok" if not mismatches else "imagetyp mismatch: " + ", ".join(f"{n} {_type}" for _type, n in mismatches.items())
+
+    figures = {"master_comparison": None, "cameras": {}}
+    loaded = []
+    records = []
+    for camera in cameras:
+        record = {
+            "camera": camera, "sequence": validation[camera], "products": camera in available,
+            "pct_within_1pct": np.nan, "n_artifacts": np.nan, "flatfielded": False, "error": "",
+        }
+        records.append(record)
+        if camera not in available:
+            continue
+
+        camera_figures = {}
+        try:
+            pflat_ref = image_tasks.loadImage(products[camera][mjd_ref])
+            pflat_tar = image_tasks.loadImage(products[camera][mjd_tar])
+            record["pct_within_1pct"] = _pct_within(pflat_ref._data.ravel(), pflat_tar._data.ravel())
+            _, _, _, labels_bins = _detect_artifacts(pflat_tar, bins=bins, threshold=0.95)
+            record["n_artifacts"] = int(sum(n for _, _, n in labels_bins))
+            loaded.append(camera)
+
+            camera_figures["artifacts"] = display_artifacts_comparison(
+                mjd_tar, mjd_ref, drpver=drpver, camera=camera, bins=bins, bbox_size=bbox_size, max_regions=max_regions,
+            )
+            if camera in frames:
+                for mjd_epoch in (mjd_tar, mjd_ref):
+                    test_pixflats(mjd_epoch, frames[camera], skip_done=skip_done)
+                camera_figures["flatfielded"] = display_flatfielded_comparison(
+                    mjd_tar, mjd_ref, drpver=drpver, camera=camera, test_flat_paths=test_flat_paths,
+                    bins=bins, bbox_size=bbox_size, max_regions=max_regions,
+                )
+                record["flatfielded"] = True
+        except Exception as error:
+            log.error(f"QA failed for {camera = }: {type(error).__name__}: {error}")
+            record["error"] = f"{type(error).__name__}: {error}"
+        figures["cameras"][camera] = camera_figures
+
+    if loaded:
+        try:
+            figures["master_comparison"] = display_pixflats_comparison(mjd_tar, mjd_ref, drpver=drpver, cameras=loaded)
+        except Exception as error:
+            log.error(f"master pixel-flat comparison failed: {type(error).__name__}: {error}")
+
+    summary = pd.DataFrame(records).set_index("camera")
+    log.info(f"pixel-flat QA summary, {mjd_tar = } against {mjd_ref = }:\n{summary.to_string()}")
+
+    os.makedirs(output_dir, exist_ok=True)
+    _write_qa_report(report_path, f"Pixel-flat QA: target {mjd_tar} vs reference {mjd_ref}", summary, figures)
+    log.info(f"wrote QA report to {report_path}")
+
+    return {"summary": summary, "figures": figures, "test_flat_paths": test_flat_paths, "report_path": report_path}
