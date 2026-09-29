@@ -43,6 +43,8 @@ from lvmdrp.functions.pixelflats import (
     create_pixflats,
     create_super_pixflats,
     tag_pixelflats,
+    qa_pixelflats,
+    ARTIFACT_BINS,
 )
 
 
@@ -681,6 +683,43 @@ def create_pixelflats_tag(mjd, version, dry_run):
     tag_pixelflats(epoch_mjd=mjd, version=version, dry_run=dry_run)
 
 
+def _parse_artifact_bins(ctx, param, value):
+    try:
+        return tuple(tuple(int(edge) for edge in pair.split('-')) for pair in value.split(','))
+    except ValueError:
+        raise click.BadParameter(f"expected comma-separated 'min-max' pairs, got {value!r}")
+
+
+@cloup.command('qa-pixelflats', short_help='Run the QA of a pixel-flat epoch against a reference epoch', show_constraints=True, context_settings=dict(show_default=True))
+@click.option('-t', '--mjd-tar', type=int, required=True, help='MJD of the target pixel-flat epoch, the one being checked')
+@click.option('-r', '--mjd-ref', type=int, required=True, help='MJD of the reference pixel-flat epoch, the one to compare against')
+@click.option('--cameras', type=StrListType(), default=",".join(CAMERAS), help="Spectrograph cameras to check")
+@click.option('--test-mjd', type=int, default=None, help='MJD of the exposure used for the flat-fielded comparison')
+@click.option('--test-expnum', type=int, default=None, help='Exposure number used for the flat-fielded comparison. If omitted, the comparison is skipped')
+@click.option('--epochs-file', type=str, default=None, help="Path to a pixel-flat epochs file")
+@click.option('-o', '--output-dir', type=str, default=None, help="Directory of the HTML report. Defaults to a pixflat_qa directory in the target epoch's ancillary directory")
+@click.option('--bins', type=str, default=",".join(f"{lo}-{hi}" for lo, hi in ARTIFACT_BINS), callback=_parse_artifact_bins, help="Region-size bins used to group artifacts, as comma-separated 'min-max' pairs")
+@click.option('--bbox-size', type=int, default=30, help="Width of each artifact cutout in pixels")
+@click.option('--max-regions', type=int, default=10, help="Maximum number of artifact regions shown per size bin")
+@click.option('-s', '--skip-done', is_flag=True, default=False, help='flag to reuse existing test-frame reductions')
+@click.option("--dry-run", is_flag=True, default=False, help="Show the cameras, test-frame paths and report path without running any check")
+@cloup.constraint(cloup.constraints.all_or_none, ['test_mjd', 'test_expnum'])
+def qa_pixelflats_cli(mjd_tar, mjd_ref, cameras, test_mjd, test_expnum, epochs_file, output_dir,
+                      bins, bbox_size, max_regions, skip_done, dry_run):
+    """Compare a target pixel-flat epoch against a reference epoch and write an HTML QA report."""
+    test_frames = None
+    if test_expnum is not None:
+        test_frames = get_frames_metadata(mjd=test_mjd, suffix="fits.gz", overwrite=False).query("expnum == @test_expnum")
+        if test_frames.empty:
+            raise click.BadParameter(f"exposure {test_expnum} not found in MJD {test_mjd}", param_hint="--test-expnum")
+
+    epochs = load_pixflat_epochs(epochs_path=epochs_file, verbose=False) if epochs_file else None
+
+    qa_pixelflats(mjd_tar=mjd_tar, mjd_ref=mjd_ref, skip_done=skip_done, dry_run=dry_run, cameras=cameras,
+                  test_frames=test_frames, epochs=epochs, output_dir=output_dir,
+                  bins=bins, bbox_size=bbox_size, max_regions=max_regions)
+
+
 @cli.command('fix-pixel-shifts', short_help='Fix the electronic pixel shifts in the raw data', context_settings=dict(show_default=True))
 @click.option('-m', '--mjd', type=int, help='the MJD to reduce')
 @click.option('-e', '--expnums', type=IntListType(), help='a list of exposure numbers to reduce')
@@ -819,6 +858,7 @@ calibrations.add_command(nightly)
 calibrations.add_command(fiberflats)
 calibrations.add_command(pixelflats)
 calibrations.add_command(super_pixelflats)
+calibrations.add_command(qa_pixelflats_cli)
 calibrations.add_command(fiberflat_corrections)
 calibrations.add_command(ffactors_experiment)
 calibrations.add_command(cluster_calibs)
