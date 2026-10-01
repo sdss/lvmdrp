@@ -10,6 +10,7 @@ from pprint import pformat
 
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+from plotly.colors import qualitative
 
 from lvmdrp.core.constants import CAMERAS
 from lvmdrp import log, path, __version__ as drpver
@@ -1983,6 +1984,367 @@ def display_flatfielded_comparison(mjd_tar, mjd_ref, drpver, camera, test_flat_p
     }
 
 
+def _raw_quadrant_sections(img):
+    """Return the science (TRIMSEC) sections of the quadrants of a raw frame.
+
+    Parameters
+    ----------
+    img : image object
+        Raw frame.
+
+    Returns
+    -------
+    list[str]
+        One ``[x1:x2, y1:y2]`` section per quadrant, in amplifier order. Falls
+        back to the default sections if the header has no ``TRIMSEC`` keywords.
+    """
+    sections = img._header["TRIMSEC?"]
+    if not sections:
+        log.warning(f"TRIMSEC not found in header, assuming {image_tasks.DEFAULT_TRIMSEC}")
+        return image_tasks.DEFAULT_TRIMSEC
+    return list(sections.values())
+
+
+def _measure_contrast(pixels, cut, center, n, window, stat=np.nanmedian):
+    """Measure the contrast along a cut, from the end nearest the CCD center to the outer edge.
+
+    ``n`` windows of ``window`` pixels are evenly spaced along the cut, the
+    first one touching the end of the cut nearest to ``center`` and the last one
+    touching the opposite (outer) end. The contrast of each window is its level
+    relative to the level of the innermost window.
+
+    Parameters
+    ----------
+    pixels : numpy.ndarray
+        Pixel coordinates of the cut.
+    cut : numpy.ndarray
+        Count levels of the cut, same shape as ``pixels``.
+    center : float
+        Coordinate of the CCD center along the cut, in the same units as ``pixels``.
+    n : int
+        Number of contrast measurements.
+    window : int
+        Width in pixels of each window.
+    stat : callable, optional
+        Statistic used to measure the level of each window. Default is
+        ``numpy.nanmedian``.
+
+    Returns
+    -------
+    positions : numpy.ndarray
+        Pixel coordinate of the center of each window, from inner to outer.
+    levels : numpy.ndarray
+        Level of each window.
+    contrasts : numpy.ndarray
+        Level of each window relative to the innermost one.
+    """
+    if abs(pixels[-1] - center) < abs(pixels[0] - center):
+        pixels, cut = pixels[::-1], cut[::-1]
+
+    hw = min(window, pixels.size) // 2
+    idxs = np.linspace(hw, pixels.size - 1 - hw, n).round().astype(int)
+    positions = pixels[idxs]
+    levels = np.asarray([stat(cut[max(idx - hw, 0):idx + hw + 1]) for idx in idxs])
+    return positions, levels, levels / levels[0]
+
+
+def _average_raw_frames(raw_paths):
+    """Average raw frames pixel by pixel.
+
+    Frames are accumulated one at a time, so only one frame and the running
+    sum are held in memory.
+
+    Parameters
+    ----------
+    raw_paths : list[str]
+        Paths of the raw frames, all from the same camera.
+
+    Returns
+    -------
+    img : image object
+        Image with the header of the first frame and the NaN-aware mean of all
+        the frames as data.
+    expnums : list
+        Exposure numbers of the frames, from the ``EXPOSURE`` header keyword.
+
+    Raises
+    ------
+    ValueError
+        If the frames come from different cameras or have different shapes.
+    """
+    img, total, count, expnums = None, None, None, []
+    for raw_path in raw_paths:
+        frame = image_tasks.loadImage(raw_path)
+        data = frame._data.astype(float)
+        if img is None:
+            img, total, count = frame, np.zeros_like(data), np.zeros(data.shape, dtype=int)
+        elif frame._header.get("CCD") != img._header.get("CCD") or data.shape != total.shape:
+            raise ValueError(
+                f"cannot average {os.path.basename(raw_path)} ({frame._header.get('CCD')}, {data.shape}) with "
+                f"{os.path.basename(raw_paths[0])} ({img._header.get('CCD')}, {total.shape})"
+            )
+        valid = np.isfinite(data)
+        total[valid] += data[valid]
+        count += valid
+        expnums.append(frame._header.get("EXPOSURE", os.path.basename(raw_path)))
+
+    with np.errstate(invalid="ignore", divide="ignore"):
+        img._data = np.where(count > 0, total / count, np.nan)
+    return img, expnums
+
+
+def display_raw_cuts(raw_frames, rows=(1020, 3060), columns=(1021, 3098), cut_width=21, normalize=False,
+                     stat=np.nanmedian, n_contrast=5, contrast_window=51, split_amps=True, image_binning=8,
+                     combined_flat=False):
+    """Plot cuts of count levels along X and Y of a raw flat frame, or of the average of several.
+
+    Each cut collapses a band of ``cut_width`` rows (cuts along X) or columns
+    (cuts along Y) centered on the given row or column, and is split into the
+    quadrants it crosses. For each quadrant, only the science region given by
+    the ``TRIMSEC`` header keywords is used, so the overscan regions are left out.
+
+    Parameters
+    ----------
+    raw_frames : str, list[str], pandas.Series or pandas.DataFrame
+        Raw frame path(s), or frame metadata with at least ``mjd``, ``camera``,
+        and ``expnum``, from which the raw paths are built. Unless
+        ``combined_flat`` is True, only the first frame is used.
+    rows : iterable[int], optional
+        1-based rows of the cuts along X. Default is (1020, 3060), the centers
+        of the lower and upper quadrants.
+    columns : iterable[int], optional
+        1-based columns of the cuts along Y. Default is (1021, 3098), the
+        centers of the left and right quadrants.
+    cut_width : int, optional
+        Width in pixels of the band collapsed into each cut. Default is 21.
+    normalize : bool, optional
+        If True, divide the cuts and the raw image by the median of the science
+        regions of the whole image. Default is False.
+    stat : callable, optional
+        Statistic used to collapse the band and to measure the level of each
+        contrast window. Default is ``numpy.nanmedian``.
+    n_contrast : int, optional
+        Number of contrast measurements per cut and quadrant, evenly spaced from
+        the end of the cut nearest the CCD center to the outer edge of the CCD
+        (see :func:`_measure_contrast`). The contrast is the level of each
+        window relative to the innermost one. Set to 0 to skip. Default is 5.
+    contrast_window : int, optional
+        Width in pixels of each contrast window. Default is 51.
+    split_amps : bool, optional
+        If True, show one column of panels per quadrant. If False, show all the
+        cuts along X in one axis and all the cuts along Y in another, next to
+        the raw image with the cuts and quadrants overlaid. Default is True.
+    image_binning : int, optional
+        Binning factor of the raw image shown when ``split_amps`` is False,
+        to keep the figure size manageable. Default is 8.
+    combined_flat : bool, optional
+        If True, average all the given frames pixel by pixel (see
+        :func:`_average_raw_frames`) and use the average in place of a single
+        frame. Default is False.
+
+    Returns
+    -------
+    fig : plotly.graph_objects.Figure
+        Figure with the cuts along X in the top row and the cuts along Y in the
+        bottom row, one color per cut, either split in one column per quadrant
+        or in single axes next to the raw image (see ``split_amps``). Pixel
+        coordinates are 1-based, in the frame of the raw image. Contrast
+        windows are marked on the cuts and labeled with their contrast.
+    contrasts : pandas.DataFrame
+        One row per cut, quadrant, and window, with the columns ``amp``,
+        ``axis`` (``"x"`` or ``"y"``), ``cut`` (the row or column of the cut),
+        ``window`` (0 is the innermost), ``position``, ``level``, and
+        ``contrast``. Empty if ``n_contrast`` is 0.
+    """
+    if isinstance(raw_frames, pd.Series):
+        raw_frames = raw_frames.to_frame().T
+    if isinstance(raw_frames, pd.DataFrame):
+        raw_paths = [
+            path.full("lvm_raw", hemi="s", mjd=frame.mjd, camspec=frame.camera, expnum=frame.expnum)
+            for _, frame in raw_frames.iterrows()
+        ]
+    elif isinstance(raw_frames, str):
+        raw_paths = [raw_frames]
+    else:
+        raw_paths = list(raw_frames)
+    if not raw_paths:
+        raise ValueError("no raw frame given")
+
+    if combined_flat and len(raw_paths) > 1:
+        img, expnums = _average_raw_frames(raw_paths)
+        label = f"{img._header.get('CCD', '')}, average of {len(expnums)} frames ({expnums[0]}-{expnums[-1]})"
+    else:
+        img = image_tasks.loadImage(raw_paths[0])
+        label = f"{img._header.get('CCD', '')}-{img._header.get('EXPOSURE', os.path.basename(raw_paths[0]))}"
+    quad_sections = _raw_quadrant_sections(img)
+    quad_bounds = [image_tasks._parse_ccd_section(section) for section in quad_sections]
+    nquads = len(quad_sections)
+    ny, nx = img._data.shape
+    # 1-based coordinates of the CCD center
+    center_y, center_x = ny / 2 + 0.5, nx / 2 + 0.5
+    science = np.concatenate([img._data[y0:y1, x0:x1].ravel() for (x0, x1), (y0, y1) in quad_bounds]).astype(float)
+    norm = np.nanmedian(science) if normalize else 1.0
+
+    # collapse each cut, one segment per quadrant it crosses
+    cuts = []
+    hw = cut_width // 2
+    for axis, cut_at in [("x", row) for row in rows] + [("y", column) for column in columns]:
+        name = f"{'row' if axis == 'x' else 'column'} {cut_at}"
+        segments = []
+        for i, ((x0, x1), (y0, y1)) in enumerate(quad_bounds):
+            lo, hi = (y0, y1) if axis == "x" else (x0, x1)
+            if not lo < cut_at <= hi:
+                continue
+            quad = img._data[y0:y1, x0:x1].astype(float)
+            band = slice(max(cut_at - 1 - hw, lo) - lo, min(cut_at + hw, hi) - lo)
+            if axis == "x":
+                segments.append((i, np.arange(x0, x1) + 1, stat(quad[band, :], axis=0)))
+            else:
+                segments.append((i, np.arange(y0, y1) + 1, stat(quad[:, band], axis=1)))
+        if not segments:
+            log.warning(f"{name} doesn't cross the science region of any quadrant, skipping")
+            continue
+        segments = [(i, pixels, cut / norm) for i, pixels, cut in segments]
+        cuts.append((axis, cut_at, name, segments))
+
+    if split_amps:
+        fig = make_subplots(
+            rows=2,
+            cols=nquads,
+            shared_yaxes=True,
+            horizontal_spacing=0.02,
+            vertical_spacing=0.12,
+            subplot_titles=[f"AMP{i+1} {sec}" for i, sec in enumerate(quad_sections)] + [""] * nquads,
+        )
+        cuts_col = 1
+    else:
+        fig = make_subplots(
+            rows=2,
+            cols=2,
+            specs=[[{"rowspan": 2}, {}], [None, {}]],
+            column_widths=[0.4, 0.6],
+            horizontal_spacing=0.08,
+            vertical_spacing=0.12,
+            subplot_titles=["average raw image" if combined_flat and len(raw_paths) > 1 else "raw image", "cuts along X", "cuts along Y"],
+        )
+        cuts_col = 2
+
+        # raw image, binned, with a color range set by the science regions
+        binned = img._data[:ny - ny % image_binning, :nx - nx % image_binning].astype(float) / norm
+        binned = binned.reshape(ny // image_binning, image_binning, nx // image_binning, image_binning).mean(axis=(1, 3))
+        zmin, zmax = np.nanpercentile(science / norm, [1, 99])
+        fig.add_trace(
+            go.Heatmap(
+                z=binned,
+                x=np.arange(binned.shape[1]) * image_binning + (image_binning + 1) / 2,
+                y=np.arange(binned.shape[0]) * image_binning + (image_binning + 1) / 2,
+                zmin=zmin,
+                zmax=zmax,
+                colorscale="gray",
+                colorbar=dict(title="normalized" if normalize else "ADU", orientation="h", x=0.2, xanchor="center", y=-0.12, len=0.35, thickness=12),
+                hovertemplate="x=%{x:.0f}, y=%{y:.0f}: %{z:.4g}<extra></extra>",
+                showlegend=False,
+            ),
+            row=1,
+            col=1,
+        )
+        for i, ((x0, x1), (y0, y1)) in enumerate(quad_bounds):
+            fig.add_shape(
+                type="rect", x0=x0 + 0.5, x1=x1 + 0.5, y0=y0 + 0.5, y1=y1 + 0.5,
+                line=dict(color="white", width=1, dash="dot"), row=1, col=1,
+            )
+            fig.add_annotation(
+                text=f"AMP{i+1}", x=x0 + 40, y=y1 - 40, xanchor="left", yanchor="top", showarrow=False,
+                font=dict(color="white", size=11), row=1, col=1,
+            )
+        fig.update_xaxes(title_text="X (pixel)", range=[0.5, nx + 0.5], constrain="domain", row=1, col=1)
+        fig.update_yaxes(title_text="Y (pixel)", range=[0.5, ny + 0.5], scaleanchor="x", constrain="domain", row=1, col=1)
+
+    colors = qualitative.Plotly
+    records = []
+    # number of cuts drawn per panel and quadrant span, used to alternate the
+    # contrast labels above and below the markers
+    ncuts_panel = {}
+    for k, (axis, cut_at, name, segments) in enumerate(cuts):
+        color = colors[k % len(colors)]
+        row = 1 if axis == "x" else 2
+
+        if not split_amps:
+            if axis == "x":
+                line = dict(x=[0.5, nx + 0.5], y=[cut_at, cut_at])
+            else:
+                line = dict(x=[cut_at, cut_at], y=[0.5, ny + 0.5])
+            fig.add_trace(
+                go.Scatter(**line, mode="lines", line=dict(color=color, width=1.5), name=name, legendgroup=name,
+                           showlegend=False, hoverinfo="skip"),
+                row=1,
+                col=1,
+            )
+
+        for n, (i, pixels, cut) in enumerate(segments):
+            col = i + 1 if split_amps else cuts_col
+            (x0, x1), (y0, y1) = quad_bounds[i]
+            panel = (row, col, (x0, x1) if axis == "x" else (y0, y1))
+            npanel = ncuts_panel.get(panel, 0)
+            ncuts_panel[panel] = npanel + 1
+            fig.add_trace(
+                go.Scattergl(
+                    x=pixels,
+                    y=cut,
+                    mode="lines",
+                    line=dict(color=color, width=1),
+                    name=name,
+                    legendgroup=name,
+                    showlegend=n == 0,
+                ),
+                row=row,
+                col=col,
+            )
+            if n_contrast <= 0:
+                continue
+
+            positions, levels, contrasts = _measure_contrast(
+                pixels, cut, center_x if axis == "x" else center_y, n=n_contrast, window=contrast_window, stat=stat,
+            )
+            fig.add_trace(
+                go.Scatter(
+                    x=positions,
+                    y=levels,
+                    mode="markers+text",
+                    marker=dict(color=color, size=7, symbol="circle-open", line=dict(width=2)),
+                    text=[f"{contrast:.2f}" for contrast in contrasts],
+                    textposition="top center" if npanel % 2 == 0 else "bottom center",
+                    textfont=dict(color=color, size=10),
+                    customdata=contrasts,
+                    hovertemplate="%{x}: level=%{y:.4g}, contrast=%{customdata:.3f}",
+                    name=name,
+                    legendgroup=name,
+                    showlegend=False,
+                ),
+                row=row,
+                col=col,
+            )
+            records.extend(
+                dict(amp=i + 1, axis=axis, cut=cut_at, window=j, position=position, level=level, contrast=contrast)
+                for j, (position, level, contrast) in enumerate(zip(positions, levels, contrasts))
+            )
+
+    contrasts = pd.DataFrame(records, columns=["amp", "axis", "cut", "window", "position", "level", "contrast"])
+
+    ylabel = "normalized counts" if normalize else "counts (ADU)"
+    fig.update_xaxes(title_text="X (pixel)", row=1, col=None if split_amps else cuts_col)
+    fig.update_xaxes(title_text="Y (pixel)", row=2, col=None if split_amps else cuts_col)
+    fig.update_yaxes(title_text=f"{ylabel}, cut along X", row=1, col=cuts_col)
+    fig.update_yaxes(title_text=f"{ylabel}, cut along Y", row=2, col=cuts_col)
+    fig.update_layout(
+        title=dict(text=label, x=0.5),
+        width=1600,
+        height=700 if split_amps else 800,
+        margin=dict(l=20, r=20, t=80, b=20 if split_amps else 90),
+    )
+    return fig, contrasts
+
+
 _QA_FIGURE_LABELS = {
     "flat_ref": "reference",
     "flat_tar": "target",
@@ -1990,7 +2352,93 @@ _QA_FIGURE_LABELS = {
     "hist_rat": "ratio histogram (artifact pixels)",
     "artifacts": "master pixel flat, artifact cutouts",
     "flatfielded": "flat-fielded test frame, artifact cutouts",
+    "raw": "raw flat, cuts along X and Y (contrast relative to the CCD center)",
+    "raw_tar": "target",
+    "raw_ref": "reference",
 }
+
+
+def _raw_flat_paths(epoch, camera, nframes=None):
+    """Return the raw paths of the pixel flats in an epoch's sequence.
+
+    The raw paths are built from the epoch's source MJDs, without using the
+    frames metadata, so they can be found even if nothing has been reduced.
+
+    Parameters
+    ----------
+    epoch : dict
+        Epoch definition as returned by :func:`load_pixflat_epochs`, with the
+        ``sources`` MJDs and the per-camera ``sequences``.
+    camera : str
+        Camera identifier, e.g. ``"b1"``.
+    nframes : int, optional
+        Maximum number of paths to return. Default is all of them.
+
+    Returns
+    -------
+    list[str]
+        Paths of the raw flats of the sequence found on disk, in sequence order.
+
+    Raises
+    ------
+    KeyError
+        If the epoch has no sequence for ``camera``.
+    """
+    sequence = _parse_sequence(epoch["sequences"][camera])
+    raw_paths = []
+    for expnum in np.ravel(sequence.get("flat", [])):
+        for mjd in np.atleast_1d(epoch["sources"]):
+            raw_path = path.full("lvm_raw", hemi="s", mjd=mjd, camspec=camera, expnum=expnum)
+            if os.path.isfile(raw_path):
+                raw_paths.append(raw_path)
+                break
+        if nframes is not None and len(raw_paths) == nframes:
+            break
+    return raw_paths
+
+
+def _raw_flat_path(epoch, camera):
+    """Return the raw path of the first pixel flat in an epoch's sequence.
+
+    Parameters
+    ----------
+    epoch : dict
+        Epoch definition as returned by :func:`load_pixflat_epochs`.
+    camera : str
+        Camera identifier, e.g. ``"b1"``.
+
+    Returns
+    -------
+    str or None
+        Path of the first raw flat of the sequence found on disk (see
+        :func:`_raw_flat_paths`), or None if none is found.
+
+    Raises
+    ------
+    KeyError
+        If the epoch has no sequence for ``camera``.
+    """
+    raw_paths = _raw_flat_paths(epoch, camera, nframes=1)
+    return raw_paths[0] if raw_paths else None
+
+
+def _edge_contrast(contrasts):
+    """Return the lowest contrast at the CCD edge.
+
+    Parameters
+    ----------
+    contrasts : pandas.DataFrame
+        Contrast measurements as returned by :func:`display_raw_cuts`.
+
+    Returns
+    -------
+    float
+        Minimum over quadrants and cuts of the outermost-window contrast. NaN
+        if there are no measurements.
+    """
+    if contrasts.empty:
+        return np.nan
+    return float(contrasts[contrasts.window == contrasts.window.max()].contrast.min())
 
 
 def _default_qa_dir(mjd_tar, mjd_ref):
@@ -2076,27 +2524,191 @@ def _write_qa_report(report_path, title, summary, figures):
         f.write("\n".join(parts))
 
 
-def qa_pixelflats(mjd_tar, mjd_ref, skip_done=True, dry_run=False, cameras=CAMERAS,
+# Parts of the pixel-flat QA, in the order they run (see qa_pixelflats)
+QA_PARTS = ("raw", "comparison", "artifacts", "flatfielded")
+
+# Summary columns filled by each part of the QA, with their values when the part doesn't run
+_QA_PART_COLUMNS = {
+    "raw": {"raw_tar": None, "edge_contrast_tar": np.nan, "raw_ref": None, "edge_contrast_ref": np.nan},
+    "comparison": {"pct_within_1pct": np.nan},
+    "artifacts": {"n_artifacts": np.nan},
+    "flatfielded": {"flatfielded": False},
+}
+
+
+def _qa_raw(camera, record, errors, mjd_tar, mjd_ref, raw_flat_paths, **kwargs):
+    """Run the raw-frames part of the pixel-flat QA for one camera.
+
+    Parameters
+    ----------
+    camera : str
+        Camera identifier, e.g. ``"b1"``.
+    record : dict
+        Summary record of the camera, updated with the raw flat used and the
+        edge contrast (see :func:`_edge_contrast`) of each epoch.
+    errors : list[str]
+        Errors of the camera, appended with the epochs whose raw QA failed. A
+        failure in one epoch doesn't stop the other.
+    mjd_tar, mjd_ref : int
+        MJDs of the target and reference pixel-flat epochs.
+    raw_flat_paths : dict
+        Raw-flat paths indexed as ``[mjd_epoch][camera]``.
+    **kwargs
+        Passed to :func:`display_raw_cuts`.
+
+    Returns
+    -------
+    dict
+        Figures named ``"raw_tar"`` and ``"raw_ref"``, for the epochs whose raw
+        QA ran.
+    """
+    figures = {}
+    for mjd_epoch, suffix in ((mjd_tar, "tar"), (mjd_ref, "ref")):
+        if camera not in raw_flat_paths[mjd_epoch]:
+            continue
+        raw_paths = raw_flat_paths[mjd_epoch][camera]
+        if not raw_paths:
+            log.warning(f"no raw flat found on disk for {camera = } in epoch {mjd_epoch}, skipping its raw QA")
+            continue
+        try:
+            fig, contrasts = display_raw_cuts(raw_paths, **kwargs)
+        except Exception as error:
+            log.error(f"raw QA failed for {camera = } in epoch {mjd_epoch}: {type(error).__name__}: {error}")
+            errors.append(f"raw {mjd_epoch}: {type(error).__name__}: {error}")
+            continue
+        # the figure title is the frame label, e.g. "b1-35921"
+        # or "b1, average of 18 frames (35921-35949)"
+        record[f"raw_{suffix}"] = fig.layout.title.text
+        fig.update_layout(title_text=f"{fig.layout.title.text}, epoch {mjd_epoch}")
+        figures[f"raw_{suffix}"] = fig
+        record[f"edge_contrast_{suffix}"] = _edge_contrast(contrasts)
+    return figures
+
+
+def _qa_comparison(camera, record, products, mjd_tar, mjd_ref):
+    """Run the 1:1 master pixel-flat comparison part of the QA for one camera.
+
+    Only the percentage of consistent pixels is computed here; the figure,
+    which shows all the cameras together, is made by :func:`qa_pixelflats`.
+
+    Parameters
+    ----------
+    camera : str
+        Camera identifier, e.g. ``"b1"``.
+    record : dict
+        Summary record of the camera, updated with the percentage of pixels
+        of the target master pixel flat within 1% of the reference.
+    products : dict
+        Master pixel-flat paths indexed as ``[camera][mjd_epoch]``.
+    mjd_tar, mjd_ref : int
+        MJDs of the target and reference pixel-flat epochs.
+
+    Returns
+    -------
+    dict
+        Empty, the figure is made for all cameras at once.
+    """
+    pflat_ref = image_tasks.loadImage(products[camera][mjd_ref])
+    pflat_tar = image_tasks.loadImage(products[camera][mjd_tar])
+    record["pct_within_1pct"] = _pct_within(pflat_ref._data.ravel(), pflat_tar._data.ravel())
+    return {}
+
+
+def _qa_artifacts(camera, record, products, mjd_tar, mjd_ref, bins, bbox_size, max_regions):
+    """Run the master pixel-flat artifacts part of the QA for one camera.
+
+    Parameters
+    ----------
+    camera : str
+        Camera identifier, e.g. ``"b1"``.
+    record : dict
+        Summary record of the camera, updated with the number of artifacts
+        detected in the target master pixel flat.
+    products : dict
+        Master pixel-flat paths indexed as ``[camera][mjd_epoch]``.
+    mjd_tar, mjd_ref : int
+        MJDs of the target and reference pixel-flat epochs.
+    bins, bbox_size, max_regions
+        Passed to :func:`display_artifacts_comparison`.
+
+    Returns
+    -------
+    dict
+        Figures as returned by :func:`display_artifacts_comparison`.
+    """
+    pflat_tar = image_tasks.loadImage(products[camera][mjd_tar])
+    _, _, _, labels_bins = _detect_artifacts(pflat_tar, bins=bins, threshold=0.95)
+    record["n_artifacts"] = int(sum(n for _, _, n in labels_bins))
+    return display_artifacts_comparison(
+        mjd_tar, mjd_ref, drpver=drpver, camera=camera, bins=bins, bbox_size=bbox_size, max_regions=max_regions,
+    )
+
+
+def _qa_flatfielded(camera, record, frame, test_flat_paths, mjd_tar, mjd_ref, bins, bbox_size, max_regions, skip_done):
+    """Run the flat-fielded test exposure part of the QA for one camera.
+
+    Parameters
+    ----------
+    camera : str
+        Camera identifier, e.g. ``"b1"``.
+    record : dict
+        Summary record of the camera, updated with whether the comparison ran.
+    frame : pandas.Series
+        Test frame metadata (see :func:`test_pixflats`).
+    test_flat_paths : dict
+        Detrended test-frame paths indexed as ``[mjd_epoch][camera]``.
+    mjd_tar, mjd_ref : int
+        MJDs of the target and reference pixel-flat epochs.
+    bins, bbox_size, max_regions
+        Passed to :func:`display_flatfielded_comparison`.
+    skip_done : bool
+        Passed to :func:`test_pixflats`.
+
+    Returns
+    -------
+    dict
+        Figures as returned by :func:`display_flatfielded_comparison`.
+    """
+    for mjd_epoch in (mjd_tar, mjd_ref):
+        test_pixflats(mjd_epoch, frame, skip_done=skip_done)
+    figures = display_flatfielded_comparison(
+        mjd_tar, mjd_ref, drpver=drpver, camera=camera, test_flat_paths=test_flat_paths,
+        bins=bins, bbox_size=bbox_size, max_regions=max_regions,
+    )
+    record["flatfielded"] = True
+    return figures
+
+
+def qa_pixelflats(mjd_tar, mjd_ref, cameras=CAMERAS, parts=QA_PARTS,
                   test_frames=None, epochs=None, output_dir=None,
-                  bins=ARTIFACT_BINS, bbox_size=30, max_regions=10):
+                  bins=ARTIFACT_BINS, bbox_size=30, max_regions=10,
+                  raw_rows=(1020, 3060), raw_columns=(1021, 3098), raw_combined=False, raw_cut_width=21,
+                  raw_normalize=True, raw_split_amps=False, raw_image_binning=8, n_contrast=5, contrast_window=51,
+                  skip_done=True, dry_run=False):
     """Run the post-mortem QA of a target pixel-flat epoch against a reference epoch.
 
-    Consolidates the validation and plotting routines of this module into one
-    pass:
+    The target epoch's sequences are always validated
+    (:func:`validate_sequence_kind`). Then, for each camera, the selected
+    ``parts`` of the QA run in this order:
 
-    1. Validate the target epoch's sequences (:func:`validate_sequence_kind`).
-    2. Check that both epochs have a master pixel flat for each camera.
-    3. Compare the master pixel flats of both epochs
-       (:func:`display_pixflats_comparison`), and record the percentage of
-       pixels consistent within 1%.
-    4. Compare both epochs around the artifacts detected in the target master
-       pixel flat (:func:`display_artifacts_comparison`).
-    5. If ``test_frames`` are given, reduce them with both epochs' pixel flats
-       (:func:`test_pixflats`) and compare the flat-fielded results
-       (:func:`display_flatfielded_comparison`).
+    - ``"raw"``: plot cuts along X and Y of the first raw flat (or of the
+      average of all the raw flats, see ``raw_combined``) of both epochs'
+      sequences, with contrast measurements from the CCD center towards the
+      edge (:func:`display_raw_cuts`). This part only needs the raw frames, so
+      it runs even if the pixel flats haven't been produced.
+    - ``"comparison"``: compare the master pixel flats of both epochs 1:1
+      (:func:`display_pixflats_comparison`), and record the percentage of
+      pixels consistent within 1%.
+    - ``"artifacts"``: compare both epochs around the artifacts detected in the
+      target master pixel flat (:func:`display_artifacts_comparison`).
+    - ``"flatfielded"``: reduce the ``test_frames`` with both epochs' pixel
+      flats (:func:`test_pixflats`) and compare the flat-fielded results
+      around the artifacts (:func:`display_flatfielded_comparison`).
 
-    Everything is written to a single HTML report. A failure in one camera is
-    logged and recorded in the summary, and doesn't stop the remaining cameras.
+    The last three parts need the master pixel flats of both epochs, and are
+    skipped for cameras without them. Everything is written to a single HTML
+    report. A failure in one part is logged and recorded in the summary, and
+    doesn't stop the remaining parts or cameras.
 
     Parameters
     ----------
@@ -2104,19 +2716,15 @@ def qa_pixelflats(mjd_tar, mjd_ref, skip_done=True, dry_run=False, cameras=CAMER
         MJD of the target pixel-flat epoch, the one being checked.
     mjd_ref : int
         MJD of the reference pixel-flat epoch, the one to compare against.
-    skip_done : bool, optional
-        If True, reuse existing test-frame reductions (see :func:`test_pixflats`).
-        Figures and the report are always regenerated. Default is True.
-    dry_run : bool, optional
-        If True, log the cameras, test-frame paths, and report path without
-        running any check or writing files. Default is False.
     cameras : iterable[str], optional
         Cameras to check. Default is all of :data:`CAMERAS`.
+    parts : iterable[str], optional
+        Parts of the QA to run, any of :data:`QA_PARTS`. Default is all of them.
     test_frames : pandas.DataFrame, optional
-        Frames used for the flat-fielded comparison, with at least the columns
+        Frames used in the ``"flatfielded"`` part, with at least the columns
         ``mjd``, ``camera``, ``expnum``, and ``imagetyp``. The first row of
         each camera is used, and cameras without a row are skipped. If omitted,
-        the flat-fielded comparison is skipped.
+        the ``"flatfielded"`` part is skipped.
     epochs : dict, optional
         Epoch mapping as returned by :func:`load_pixflat_epochs`. If omitted, it
         is loaded from the default epochs file.
@@ -2129,33 +2737,78 @@ def qa_pixelflats(mjd_tar, mjd_ref, skip_done=True, dry_run=False, cameras=CAMER
         Width of each artifact cutout in pixels. Default is 30.
     max_regions : int, optional
         Maximum number of artifact regions shown per size bin. Default is 10.
+    raw_rows : iterable[int], optional
+        1-based rows of the cuts along X in the raw QA. Default is
+        (1020, 3060).
+    raw_columns : iterable[int], optional
+        1-based columns of the cuts along Y in the raw QA. Default is
+        (1021, 3098).
+    raw_combined : bool, optional
+        If True, the raw QA uses the average of all the raw flats of each
+        sequence found on disk, instead of the first one. Default is False.
+    raw_cut_width : int, optional
+        Width in pixels of the band collapsed into each cut in the raw QA.
+        Default is 21.
+    raw_normalize : bool, optional
+        If True, normalize the raw cuts and image by the median of the science
+        regions of the image. Default is True.
+    raw_split_amps : bool, optional
+        If True, show the raw cuts in one column of panels per quadrant. If
+        False, show them in single axes next to the raw image. Default is False.
+    raw_image_binning : int, optional
+        Binning factor of the raw image shown when ``raw_split_amps`` is False.
+        Default is 8.
+    n_contrast : int, optional
+        Number of contrast measurements per cut in the raw QA. Default is 5.
+    contrast_window : int, optional
+        Width in pixels of each contrast window in the raw QA. Default is 51.
+    skip_done : bool, optional
+        If True, reuse existing test-frame reductions (see :func:`test_pixflats`).
+        Figures and the report are always regenerated. Default is True.
+    dry_run : bool, optional
+        If True, log the cameras, raw-flat and test-frame paths, and report
+        path without running any check or writing files. Default is False.
 
     Returns
     -------
     dict
         - ``"summary"`` : pandas.DataFrame, one row per camera, with the sequence
-          validation result, whether both master pixel flats exist, the
-          percentage of pixels consistent within 1% with the reference, the
-          number of artifacts detected, whether the flat-fielded comparison ran,
-          and any error. None in a dry run.
+          validation result, any error, and the columns of the parts that ran:
+          the raw flat (or average) used and the lowest edge contrast (see
+          :func:`_edge_contrast`) of each epoch (``"raw"``), whether both master
+          pixel flats exist (any of the other parts), the percentage of pixels
+          consistent within 1% with the reference (``"comparison"``), the
+          number of artifacts detected (``"artifacts"``), and whether the
+          flat-fielded comparison ran (``"flatfielded"``). None in a dry run.
         - ``"figures"`` : dict, the Plotly figures (``"master_comparison"`` and
           per-camera groups under ``"cameras"``). Empty in a dry run.
         - ``"test_flat_paths"`` : dict, detrended test-frame paths indexed as
           ``[mjd_epoch][camera]``. In a dry run, the paths that would be used.
+        - ``"raw_flat_paths"`` : dict, raw-flat paths used in the raw QA,
+          indexed as ``[mjd_epoch][camera]``, empty if none was found on disk.
         - ``"report_path"`` : str, path to the HTML report.
     """
+    unknown = set(parts).difference(QA_PARTS)
+    if unknown:
+        raise ValueError(f"unknown QA parts {sorted(unknown)}, expected any of {QA_PARTS}")
+    parts = [part for part in QA_PARTS if part in parts]
+    product_parts = [part for part in parts if part != "raw"]
+
     cameras = [camera for camera in CAMERAS if camera in cameras]
     output_dir = output_dir or _default_qa_dir(mjd_tar, mjd_ref)
     report_path = os.path.join(output_dir, f"pixflat-qa_{mjd_tar}_vs_{mjd_ref}.html")
 
     products = {camera: {mjd: _master_pixflat_path(mjd, camera) for mjd in (mjd_tar, mjd_ref)} for camera in cameras}
     available = [camera for camera in cameras if all(os.path.isfile(product) for product in products[camera].values())]
-    for camera in cameras:
-        if camera not in available:
-            log.warning(f"master pixel flat missing for {camera = } in {mjd_tar = } or {mjd_ref = }, skipping")
+    if product_parts:
+        for camera in cameras:
+            if camera not in available:
+                log.warning(f"master pixel flat missing for {camera = } in {mjd_tar = } or {mjd_ref = }, skipping its {product_parts} QA")
 
     frames = {}
-    if test_frames is None:
+    if "flatfielded" not in parts:
+        pass
+    elif test_frames is None:
         log.info("no test frames given, skipping the flat-fielded comparison")
     else:
         for camera in available:
@@ -2170,18 +2823,40 @@ def qa_pixelflats(mjd_tar, mjd_ref, skip_done=True, dry_run=False, cameras=CAMER
         for mjd_epoch in (mjd_tar, mjd_ref):
             test_flat_paths[mjd_epoch][camera] = _test_pixflat_paths(mjd_epoch, frame)[-1]
 
+    epochs = epochs if epochs is not None else load_pixflat_epochs(verbose=False)
+    raw_flat_paths = {mjd_tar: {}, mjd_ref: {}}
+    for mjd_epoch in (mjd_tar, mjd_ref) if "raw" in parts else ():
+        if mjd_epoch not in epochs:
+            log.warning(f"epoch {mjd_epoch} not found in the epochs file, skipping its raw QA")
+            continue
+        for camera in cameras:
+            try:
+                raw_flat_paths[mjd_epoch][camera] = _raw_flat_paths(
+                    epochs[mjd_epoch], camera, nframes=None if raw_combined else 1,
+                )
+            except KeyError:
+                log.warning(f"no sequence for {camera = } in epoch {mjd_epoch}, skipping its raw QA")
+            except ValueError as error:
+                log.warning(f"invalid sequence for {camera = } in epoch {mjd_epoch}, skipping its raw QA: {error}")
+
     if dry_run:
         log.info(f"dry run of '{qa_pixelflats.__name__}' for {mjd_tar = } against {mjd_ref = }")
+        log.info(f"  parts: {parts}")
         log.info(f"  sequences to validate, cameras: {cameras}")
-        log.info(f"  cameras with both master pixel flats: {available}")
+        for mjd_epoch, epoch_paths in raw_flat_paths.items():
+            for camera, raw_paths in epoch_paths.items():
+                found = f"{len(raw_paths)} found, first: {raw_paths[0]}" if raw_paths else "not found"
+                log.info(f"  raw flats, {mjd_epoch = }, {camera = }: {found}")
+        if product_parts:
+            log.info(f"  cameras with both master pixel flats: {available}")
         for mjd_epoch, epoch_paths in test_flat_paths.items():
             for camera, dframe_path in epoch_paths.items():
                 status = "exists" if os.path.isfile(dframe_path) else "would be created"
                 log.info(f"  test frame, {mjd_epoch = }, {camera = }: {dframe_path} [{status}]")
         log.info(f"  report: {report_path}")
-        return {"summary": None, "figures": {}, "test_flat_paths": test_flat_paths, "report_path": report_path}
+        return {"summary": None, "figures": {}, "test_flat_paths": test_flat_paths,
+                "raw_flat_paths": raw_flat_paths, "report_path": report_path}
 
-    epochs = epochs if epochs is not None else load_pixflat_epochs(verbose=False)
     validation = {}
     for camera in cameras:
         try:
@@ -2194,46 +2869,60 @@ def qa_pixelflats(mjd_tar, mjd_ref, skip_done=True, dry_run=False, cameras=CAMER
             mismatches = {_type: len(frame) for _type, frame in invalid.items() if len(frame)}
             validation[camera] = "ok" if not mismatches else "imagetyp mismatch: " + ", ".join(f"{n} {_type}" for _type, n in mismatches.items())
 
+    # each part runs for one camera, updating its record and returning its figures
+    runners = {
+        "raw": lambda camera, record, errors: _qa_raw(
+            camera, record, errors, mjd_tar, mjd_ref, raw_flat_paths,
+            rows=raw_rows, columns=raw_columns, combined_flat=raw_combined, cut_width=raw_cut_width,
+            normalize=raw_normalize, split_amps=raw_split_amps, image_binning=raw_image_binning,
+            n_contrast=n_contrast, contrast_window=contrast_window,
+        ),
+        "comparison": lambda camera, record, errors: _qa_comparison(camera, record, products, mjd_tar, mjd_ref),
+        "artifacts": lambda camera, record, errors: _qa_artifacts(
+            camera, record, products, mjd_tar, mjd_ref, bins=bins, bbox_size=bbox_size, max_regions=max_regions,
+        ),
+        "flatfielded": lambda camera, record, errors: _qa_flatfielded(
+            camera, record, frames[camera], test_flat_paths, mjd_tar, mjd_ref,
+            bins=bins, bbox_size=bbox_size, max_regions=max_regions, skip_done=skip_done,
+        ),
+    }
+
     figures = {"master_comparison": None, "cameras": {}}
-    loaded = []
+    compared = []
     records = []
     for camera in cameras:
-        record = {
-            "camera": camera, "sequence": validation[camera], "products": camera in available,
-            "pct_within_1pct": np.nan, "n_artifacts": np.nan, "flatfielded": False, "error": "",
-        }
+        record = {"camera": camera, "sequence": validation[camera]}
+        if "raw" in parts:
+            record.update(_QA_PART_COLUMNS["raw"])
+        if product_parts:
+            record["products"] = camera in available
+        for part in product_parts:
+            record.update(_QA_PART_COLUMNS[part])
+        record["error"] = ""
         records.append(record)
-        if camera not in available:
-            continue
+        camera_figures = figures["cameras"][camera] = {}
 
-        camera_figures = {}
+        errors = []
+        for part in parts:
+            if part != "raw" and camera not in available:
+                continue
+            if part == "flatfielded" and camera not in frames:
+                continue
+            try:
+                part_figures = runners[part](camera, record, errors)
+            except Exception as error:
+                log.error(f"{part} QA failed for {camera = }: {type(error).__name__}: {error}")
+                errors.append(f"{part}: {type(error).__name__}: {error}")
+                continue
+            if part == "comparison":
+                compared.append(camera)
+            if part_figures:
+                camera_figures[part] = part_figures
+        record["error"] = "; ".join(errors)
+
+    if compared:
         try:
-            pflat_ref = image_tasks.loadImage(products[camera][mjd_ref])
-            pflat_tar = image_tasks.loadImage(products[camera][mjd_tar])
-            record["pct_within_1pct"] = _pct_within(pflat_ref._data.ravel(), pflat_tar._data.ravel())
-            _, _, _, labels_bins = _detect_artifacts(pflat_tar, bins=bins, threshold=0.95)
-            record["n_artifacts"] = int(sum(n for _, _, n in labels_bins))
-            loaded.append(camera)
-
-            camera_figures["artifacts"] = display_artifacts_comparison(
-                mjd_tar, mjd_ref, drpver=drpver, camera=camera, bins=bins, bbox_size=bbox_size, max_regions=max_regions,
-            )
-            if camera in frames:
-                for mjd_epoch in (mjd_tar, mjd_ref):
-                    test_pixflats(mjd_epoch, frames[camera], skip_done=skip_done)
-                camera_figures["flatfielded"] = display_flatfielded_comparison(
-                    mjd_tar, mjd_ref, drpver=drpver, camera=camera, test_flat_paths=test_flat_paths,
-                    bins=bins, bbox_size=bbox_size, max_regions=max_regions,
-                )
-                record["flatfielded"] = True
-        except Exception as error:
-            log.error(f"QA failed for {camera = }: {type(error).__name__}: {error}")
-            record["error"] = f"{type(error).__name__}: {error}"
-        figures["cameras"][camera] = camera_figures
-
-    if loaded:
-        try:
-            figures["master_comparison"] = display_pixflats_comparison(mjd_tar, mjd_ref, drpver=drpver, cameras=loaded)
+            figures["master_comparison"] = display_pixflats_comparison(mjd_tar, mjd_ref, drpver=drpver, cameras=compared)
         except Exception as error:
             log.error(f"master pixel-flat comparison failed: {type(error).__name__}: {error}")
 
@@ -2244,4 +2933,5 @@ def qa_pixelflats(mjd_tar, mjd_ref, skip_done=True, dry_run=False, cameras=CAMER
     _write_qa_report(report_path, f"Pixel-flat QA: target {mjd_tar} vs reference {mjd_ref}", summary, figures)
     log.info(f"wrote QA report to {report_path}")
 
-    return {"summary": summary, "figures": figures, "test_flat_paths": test_flat_paths, "report_path": report_path}
+    return {"summary": summary, "figures": figures, "test_flat_paths": test_flat_paths,
+            "raw_flat_paths": raw_flat_paths, "report_path": report_path}

@@ -44,6 +44,7 @@ from lvmdrp.functions.pixelflats import (
     create_super_pixflats,
     tag_pixelflats,
     qa_pixelflats,
+    QA_PARTS,
     ARTIFACT_BINS,
 )
 
@@ -694,6 +695,7 @@ def _parse_artifact_bins(ctx, param, value):
 @click.option('-t', '--mjd-tar', type=int, required=True, help='MJD of the target pixel-flat epoch, the one being checked')
 @click.option('-r', '--mjd-ref', type=int, required=True, help='MJD of the reference pixel-flat epoch, the one to compare against')
 @click.option('--cameras', type=StrListType(), default=",".join(CAMERAS), help="Spectrograph cameras to check")
+@click.option('--parts', type=StrListType(), default=",".join(QA_PARTS), help=f"Parts of the QA to run, any of {','.join(QA_PARTS)}")
 @click.option('--test-mjd', type=int, default=None, help='MJD of the exposure used for the flat-fielded comparison')
 @click.option('--test-expnum', type=int, default=None, help='Exposure number used for the flat-fielded comparison. If omitted, the comparison is skipped')
 @click.option('--epochs-file', type=str, default=None, help="Path to a pixel-flat epochs file")
@@ -701,12 +703,25 @@ def _parse_artifact_bins(ctx, param, value):
 @click.option('--bins', type=str, default=",".join(f"{lo}-{hi}" for lo, hi in ARTIFACT_BINS), callback=_parse_artifact_bins, help="Region-size bins used to group artifacts, as comma-separated 'min-max' pairs")
 @click.option('--bbox-size', type=int, default=30, help="Width of each artifact cutout in pixels")
 @click.option('--max-regions', type=int, default=10, help="Maximum number of artifact regions shown per size bin")
+@click.option('--raw-rows', type=IntListType(), default="1020,3060", help="Rows of the cuts along X in the raw QA")
+@click.option('--raw-columns', type=IntListType(), default="1021,3098", help="Columns of the cuts along Y in the raw QA")
+@click.option('--raw-combined', is_flag=True, default=False, help="Use the average of all the raw flats of each sequence in the raw QA, instead of the first one")
+@click.option('--raw-cut-width', type=int, default=21, help="Width in pixels of the band collapsed into each cut in the raw QA")
+@click.option('--raw-normalize/--no-raw-normalize', default=True, help="Normalize the raw cuts and image by the median of the image science regions")
+@click.option('--raw-split-amps/--no-raw-split-amps', default=False, help="Show the raw cuts in one panel per quadrant, instead of single axes next to the raw image")
+@click.option('--raw-image-binning', type=int, default=8, help="Binning factor of the raw image shown next to the cuts")
+@click.option('--n-contrast', type=int, default=5, help="Number of contrast measurements per cut in the raw QA, from the CCD center towards the edge")
+@click.option('--contrast-window', type=int, default=51, help="Width in pixels of each contrast window in the raw QA")
 @click.option('-s', '--skip-done', is_flag=True, default=False, help='flag to reuse existing test-frame reductions')
-@click.option("--dry-run", is_flag=True, default=False, help="Show the cameras, test-frame paths and report path without running any check")
+@click.option("--dry-run", is_flag=True, default=False, help="Show the cameras, raw-flat and test-frame paths and report path without running any check")
 @cloup.constraint(cloup.constraints.all_or_none, ['test_mjd', 'test_expnum'])
-def qa_pixelflats_cli(mjd_tar, mjd_ref, cameras, test_mjd, test_expnum, epochs_file, output_dir,
-                      bins, bbox_size, max_regions, skip_done, dry_run):
+def qa_pixelflats_cli(mjd_tar, mjd_ref, cameras, parts, test_mjd, test_expnum, epochs_file, output_dir,
+                      bins, bbox_size, max_regions, raw_rows, raw_columns, raw_combined,
+                      raw_cut_width, raw_normalize, raw_split_amps, raw_image_binning, n_contrast, contrast_window, skip_done, dry_run):
     """Compare a target pixel-flat epoch against a reference epoch and write an HTML QA report."""
+    unknown = set(parts).difference(QA_PARTS)
+    if unknown:
+        raise click.BadParameter(f"unknown parts {sorted(unknown)}, expected any of {', '.join(QA_PARTS)}", param_hint="--parts")
     test_frames = None
     if test_expnum is not None:
         test_frames = get_frames_metadata(mjd=test_mjd, suffix="fits.gz", overwrite=False).query("expnum == @test_expnum")
@@ -715,9 +730,12 @@ def qa_pixelflats_cli(mjd_tar, mjd_ref, cameras, test_mjd, test_expnum, epochs_f
 
     epochs = load_pixflat_epochs(epochs_path=epochs_file, verbose=False) if epochs_file else None
 
-    qa_pixelflats(mjd_tar=mjd_tar, mjd_ref=mjd_ref, skip_done=skip_done, dry_run=dry_run, cameras=cameras,
+    qa_pixelflats(mjd_tar=mjd_tar, mjd_ref=mjd_ref, skip_done=skip_done, dry_run=dry_run, cameras=cameras, parts=parts,
                   test_frames=test_frames, epochs=epochs, output_dir=output_dir,
-                  bins=bins, bbox_size=bbox_size, max_regions=max_regions)
+                  bins=bins, bbox_size=bbox_size, max_regions=max_regions,
+                  raw_rows=raw_rows, raw_columns=raw_columns, raw_combined=raw_combined, raw_cut_width=raw_cut_width,
+                  raw_normalize=raw_normalize, raw_split_amps=raw_split_amps, raw_image_binning=raw_image_binning,
+                  n_contrast=n_contrast, contrast_window=contrast_window)
 
 
 @cli.command('fix-pixel-shifts', short_help='Fix the electronic pixel shifts in the raw data', context_settings=dict(show_default=True))
