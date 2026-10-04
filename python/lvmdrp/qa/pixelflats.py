@@ -15,8 +15,6 @@ QA report (:mod:`lvmdrp.qa.flatfield`):
 """
 
 import os
-import re
-import json
 from datetime import datetime, timezone
 from html import escape
 from multiprocessing import Pool
@@ -24,9 +22,7 @@ from multiprocessing import Pool
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
-import plotly.io as pio
 from astropy.io import fits
-from plotly.offline import get_plotlyjs_version
 from plotly.subplots import make_subplots
 from tqdm import tqdm
 
@@ -34,9 +30,9 @@ from lvmdrp import log, path, __version__ as drpver
 from lvmdrp.core.constants import CAMERAS
 from lvmdrp.functions import imageMethod as image_tasks
 from lvmdrp.functions import pixelflats as pf
-from lvmdrp.qa.flatfield import (
-    DARK_COLORS, MONO_FONT, PLOT_FONT, SEQUENTIAL_DARK, SERIES, THEME,
-    _base_layout, _html_table, _style_axes,
+from lvmdrp.qa.report import (
+    MONO_FONT, SERIES, STATUS_COLORS, THEME,
+    badge, base_layout, html_table, issues_html, picker, restyle, style_axes, write_dashboard,
 )
 
 
@@ -52,10 +48,7 @@ EXPECTED_IMAGETYP = {"flat": ("object", "flat"), "dark": ("dark",), "bias": ("bi
 LAMPS = ("LDLS", "QUARTZ", "NEON", "HGNE", "ARGON", "XENON", "KRYPTON")
 ONLAMP = ("ON", True, "T", 1)
 NQUADS = 4
-
-# status colors, light theme; DARK_MAP swaps them in the browser for the dark theme
-STATUS_COLORS = {"ok": "#1baf7a", "warn": "#eb6834", "bad": "#c8372d"}
-DARK_MAP = {**DARK_COLORS, "#c8372d": "#e5534b"}
+# line dash of each spectrograph in the charts
 SPEC_DASHES = {"1": "solid", "2": "dash", "3": "dot"}
 
 
@@ -66,58 +59,6 @@ def _camera_color(camera):
 
 def _plural(count, role):
     return f"{count} {role if count == 1 else ROLE_PLURALS.get(role, role + 's')}"
-
-
-def _restyle(fig, height=None):
-    """Apply the dashboard theme to a figure made elsewhere, keeping its traces.
-
-    Parameters
-    ----------
-    fig : plotly.graph_objects.Figure
-        Figure to restyle, in place unless it has WebGL traces.
-    height : int, optional
-        New height in pixels. The width always follows the page.
-
-    Returns
-    -------
-    plotly.graph_objects.Figure
-        The restyled figure, with WebGL traces replaced by SVG ones.
-    """
-    # WebGL traces don't draw without a GPU context (e.g., some remote desktops and headless browsers)
-    if any(trace.type == "scattergl" for trace in fig.data):
-        fig = go.Figure(data=[go.Scatter(**{key: value for key, value in trace.to_plotly_json().items() if key != "type"})
-                              if trace.type == "scattergl" else trace for trace in fig.data], layout=fig.layout)
-    fig.update_layout(
-        template="none", width=None, paper_bgcolor=THEME["surface"], plot_bgcolor=THEME["surface"],
-        font=dict(family=PLOT_FONT, size=12, color=THEME["ink2"]),
-        hoverlabel=dict(bgcolor=THEME["surface"], bordercolor=THEME["axis"], font=dict(family=PLOT_FONT, color=THEME["ink"])),
-        legend=dict(font=dict(color=THEME["ink2"]), bgcolor="rgba(0,0,0,0)"),
-        title=dict(font=dict(color=THEME["ink"], size=15)),
-    )
-    if height is not None:
-        fig.update_layout(height=height)
-    # recolor the annotations without an explicit color (e.g., subplot titles)
-    for annotation in fig.layout.annotations:
-        if annotation.font is None or annotation.font.color is None:
-            annotation.update(font=dict(color=THEME["ink2"]))
-    return _style_axes(fig)
-
-
-def _figures_json(figures):
-    """Serialize figures for the page, ASCII-safe and safe inside a script tag."""
-    text = "{" + ",".join(f"{json.dumps(key)}: {pio.to_json(fig, validate=False)}" for key, fig in figures.items()) + "}"
-    text = text.replace("</", "<\\/")
-    return re.sub(r"[^\x00-\x7f]", lambda match: f"\\u{ord(match.group()):04x}", text)
-
-
-def _tiles_html(tiles):
-    return "".join(f'<div class="tile"><div class="tile-label">{escape(label)}</div>'
-                   f'<div class="tile-value">{escape(value)}</div><div class="tile-note">{escape(note)}</div></div>'
-                   for label, value, note in tiles)
-
-
-def _meta_html(meta):
-    return "".join(f"<div><dt>{escape(str(key))}</dt><dd>{escape(str(value))}</dd></div>" for key, value in meta)
 
 
 def _format_expnums(items):
@@ -132,95 +73,12 @@ def _format_expnums(items):
     return ", ".join(parts) or "–"
 
 
-def _badge(status):
-    return f'<span class="badge {status}">{status}</span>'
-
-
-def _issues_html(issues):
-    if not issues:
-        return '<span class="range">none</span>'
-    return '<ul class="issues">' + "".join(f"<li>{escape(issue)}</li>" for issue in issues) + "</ul>"
-
-
 def _num(value, fmt=".2f", missing="–"):
     try:
         value = float(value)
     except (TypeError, ValueError):
         return missing
     return format(value, fmt) if np.isfinite(value) else missing
-
-
-def _picker(chart_id, prefix, dimensions, height):
-    """HTML of a chart whose figure is chosen with one select per dimension.
-
-    Parameters
-    ----------
-    chart_id : str
-        Id of the chart element.
-    prefix : str
-        Prefix of the figure keys, which are ``prefix|value1|value2...``.
-    dimensions : list[tuple[str, list[tuple[str, str]]]]
-        Label of each select and its (value, text) options; the first option
-        is shown initially.
-    height : int
-        Minimum height of the chart in pixels, to keep the page from jumping.
-
-    Returns
-    -------
-    str
-        HTML of the selects and the chart.
-    """
-    selects = "".join(
-        f'<label>{escape(label)} <select>' + "".join(f'<option value="{escape(value)}">{escape(text)}</option>' for value, text in options) + "</select></label>"
-        for label, options in dimensions
-    )
-    first = "|".join([prefix] + [options[0][0] for _, options in dimensions])
-    return (f'<div class="picker" data-chart="{chart_id}" data-prefix="{prefix}">{selects}</div>'
-            f'<div class="chart" id="{chart_id}" data-fig="{escape(first)}" style="min-height: {height}px"></div>')
-
-
-def _write_dashboard(out_html, title, eyebrow, intro, meta, tiles, body, figures, generator):
-    """Write a dashboard page.
-
-    Parameters
-    ----------
-    out_html : str
-        Path of the HTML file to write.
-    title, eyebrow : str
-        Page title and the small line above it.
-    intro : str
-        HTML of the introduction paragraphs.
-    meta : list[tuple[str, str]]
-        Run metadata shown under the introduction.
-    tiles : list[tuple[str, str, str]]
-        Summary tiles as (label, value, note).
-    body : str
-        HTML of the sections. Charts are ``<div class="chart" data-fig="key">``
-        elements, drawn from ``figures[key]``.
-    figures : dict[str, plotly.graph_objects.Figure]
-        Figures of the page.
-    generator : str
-        Name of the function that made the page, shown at the bottom.
-
-    Returns
-    -------
-    str
-        Path of the written file.
-    """
-    html = PAGE_TEMPLATE
-    for token, value in {
-        "TITLE": escape(title), "EYEBROW": escape(eyebrow), "INTRO": intro, "META": _meta_html(meta),
-        "TILES": _tiles_html(tiles), "BODY": body, "GENERATOR": escape(generator),
-        "PLOTLY_VERSION": get_plotlyjs_version(), "DARK_MAP": json.dumps(DARK_MAP), "SEQ_DARK": json.dumps(SEQUENTIAL_DARK),
-        "FIGURES": _figures_json(figures),
-    }.items():
-        html = html.replace(f"@@{token}@@", value)
-    # keep the page pure ASCII so it renders correctly however the file is served
-    html = html.encode("ascii", "xmlcharrefreplace").decode("ascii")
-    os.makedirs(os.path.dirname(os.path.abspath(out_html)), exist_ok=True)
-    with open(out_html, "w", encoding="utf-8") as f:
-        f.write(html)
-    return out_html
 
 
 def _qa_dir(mjd_epoch, name):
@@ -580,8 +438,8 @@ def figure_sequence_strip(descriptions, frames, outliers):
             hovertemplate="<b>%{y}</b> %{x}<br>flat level off the median<extra></extra>"))
 
     cameras = list(descriptions)
-    fig.update_layout(_base_layout(110 + 36 * max(len(cameras), 1), xaxis_title="Exposure number", margin=dict(l=56, r=16, t=40, b=52)))
-    _style_axes(fig)
+    fig.update_layout(base_layout(110 + 36 * max(len(cameras), 1), xaxis_title="Exposure number", margin=dict(l=56, r=16, t=40, b=52)))
+    style_axes(fig)
     fig.update_xaxes(tickformat="d")
     fig.update_yaxes(type="category", categoryorder="array", categoryarray=cameras[::-1],
                      tickfont=dict(family=MONO_FONT, color=THEME["ink2"]))
@@ -626,8 +484,8 @@ def figure_photons(stats, target_precision):
     fig.add_hline(y=needed, line=dict(color=THEME["muted"], width=1.5, dash="dash"),
                   annotation=dict(text=f"{100 * target_precision:g}% precision", font=dict(color=THEME["muted"], size=12)),
                   annotation_position="top left")
-    fig.update_layout(_base_layout(400, yaxis_title="Accumulated signal (e-/pixel)", yaxis_type="log"))
-    _style_axes(fig)
+    fig.update_layout(base_layout(400, yaxis_title="Accumulated signal (e-/pixel)", yaxis_type="log"))
+    style_axes(fig)
     fig.update_xaxes(tickmode="array", tickvals=list(range(len(cameras))), ticktext=cameras, showgrid=False, zeroline=False,
                      range=[-0.5, len(cameras) - 0.5], tickfont=dict(family=MONO_FONT, color=THEME["ink2"]))
     fig.update_yaxes(tickvals=[m * 10 ** e for e in range(3, 9) for m in (1, 2, 5)], tickformat="~s")
@@ -663,8 +521,8 @@ def figure_stability(frames, max_level_deviation):
             customdata=np.stack([flats.expnum, _fmt_col(flats.signal, ",.0f")], axis=-1),
             hovertemplate=f"<b>{camera}</b> flat %{{x}} (exposure %{{customdata[0]}})<br>%{{y:+.2f}}% from the median"
                           "<br>%{customdata[1]} e-/pixel<extra></extra>"))
-    fig.update_layout(_base_layout(380, xaxis_title="Flat in sequence", yaxis_title="Level from median (%)"))
-    _style_axes(fig)
+    fig.update_layout(base_layout(380, xaxis_title="Flat in sequence", yaxis_title="Level from median (%)"))
+    style_axes(fig)
     fig.update_xaxes(tickformat="d")
     return fig
 
@@ -695,8 +553,8 @@ def figure_darks(frames):
                 customdata=np.stack([selected.expnum, selected.exptime, selected.lamps], axis=-1),
                 hovertemplate=f"<b>{camera}</b> {role} %{{x}} (exposure %{{customdata[0]}})<br>%{{y:.1f}} e-/pixel"
                               "<br>%{customdata[1]} s, lamps %{customdata[2]}<extra></extra>"))
-    fig.update_layout(_base_layout(340, xaxis_title="Exposure of its type in sequence", yaxis_title="Signal over overscan (e-/pixel)"))
-    _style_axes(fig)
+    fig.update_layout(base_layout(340, xaxis_title="Exposure of its type in sequence", yaxis_title="Signal over overscan (e-/pixel)"))
+    style_axes(fig)
     fig.update_xaxes(tickformat="d")
     return fig
 
@@ -895,7 +753,7 @@ def qa_raw_pixelflats(mjd_epoch, cameras=CAMERAS, epochs=None, output_dir=None, 
         stats[camera]["cut_frame"] = fig.layout.title.text
         stats[camera]["edge_contrast"] = pf._edge_contrast(contrast)
         contrasts[camera] = contrast
-        fig = _restyle(fig, height=860)
+        fig = restyle(fig, height=860)
         fig.update_layout(margin=dict(l=72, r=16, t=80, b=90))
         figures[f"cut|{camera}"] = fig
 
@@ -983,11 +841,11 @@ def _write_raw_dashboard(report_path, mjd_epoch, epoch, cameras, descriptions, p
     sequence_rows = []
     for camera in cameras:
         if camera in problems:
-            sequence_rows.append([f'<span class="mono">{camera}</span>', _badge("bad")] + ["–"] * 8 + [_issues_html([problems[camera]])])
+            sequence_rows.append([f'<span class="mono">{camera}</span>', badge("bad")] + ["–"] * 8 + [issues_html([problems[camera]])])
             continue
         description, stat = descriptions[camera], stats[camera]
         sequence_rows.append([
-            f'<span class="mono">{camera}</span>', _badge(stat["status"]),
+            f'<span class="mono">{camera}</span>', badge(stat["status"]),
             f'<span class="mono">{escape(description["kind"])}</span> <span class="range">{escape(description["kind_text"])}</span>',
             f'<span class="mono">{escape(_format_expnums(description["expnums"]))}</span>',
             f'<span class="mono">{escape(_format_expnums(description["rejects"]))}</span>',
@@ -995,9 +853,9 @@ def _write_raw_dashboard(report_path, mjd_epoch, epoch, cameras, descriptions, p
             f'{stat["nflat_found"]} / {stat["nflat_expected"]}', f'{stat["ndark_found"]} / {stat["ndark_expected"]}',
             f'{stat["nbias_found"]} / {stat["nbias_expected"]}',
             escape(", ".join(f"{t:g}" for t in stat.get("exptimes", [])) or "–") + " · " + escape(", ".join(stat.get("lamps", [])) or "–"),
-            _issues_html(stat["issues"]),
+            issues_html(stat["issues"]),
         ])
-    sequence_table = _html_table(
+    sequence_table = html_table(
         [("Camera", ""), ("Status", "ok: no issues; warn: issues listed; bad: no flats measured or no valid sequence"),
          ("Kind", "exposure pattern repeated along the sequence"), ("Exposures", "ranges in the epochs file, inclusive"),
          ("Rejects", "excluded in the epochs file"), ("Groups", "complete groups (+ exposures of an incomplete last group)"),
@@ -1016,7 +874,7 @@ def _write_raw_dashboard(report_path, mjd_epoch, epoch, cameras, descriptions, p
                 _num(stat["total_q"][q], ",.0f"), _num(stat["total_dim_q"][q], ",.0f"),
                 _num(100 * stat["precision_q"][q], ".3f"), _num(100 * stat["precision_dim_q"][q], ".3f"), _num(stat["rdnoise_q"][q], ".2f"),
             ])
-    photon_table = _html_table(
+    photon_table = html_table(
         [("Camera", ""), ("Amp", ""), ("Gain (e-/ADU)", "median of the GAIN header values"), ("Flats", "measured"),
          ("Per flat (e-)", "median over the flats of the signal per pixel"), ("Per flat, dim (e-)", "5th percentile of the pixels"),
          ("Accumulated (e-)", "summed over the flats"), ("Accumulated, dim (e-)", "5th percentile, summed over the flats"),
@@ -1032,7 +890,7 @@ def _write_raw_dashboard(report_path, mjd_epoch, epoch, cameras, descriptions, p
                                _num(100 * stat["level_max_deviation"], ".2f"), _num(100 * stat["saturated_max"], ".4f"),
                                _num(stat["dark_signal"], ".1f"), _num(stat["bias_signal"], ".1f"),
                                f'<span class="mono">{escape(_format_expnums(pf._compress_expnums(stat["level_outliers"])))}</span>'])
-    stability_table = _html_table(
+    stability_table = html_table(
         [("Camera", ""), ("Flats", ""), ("Scatter (%)", "robust flat-to-flat scatter of the level"),
          ("Max deviation (%)", "largest deviation from the median level"), ("Max saturated (%)", "largest fraction of a quadrant"),
          ("Dark (e-)", "median signal of the darks"), ("Bias (e-)", "median signal of the biases"), ("Flats off level", "")],
@@ -1043,7 +901,7 @@ def _write_raw_dashboard(report_path, mjd_epoch, epoch, cameras, descriptions, p
                    _num(100 * max(getattr(r, f"saturated_{q}") for q in range(1, NQUADS + 1)), ".4f"),
                    f'<span class="mono">{escape(os.path.basename(r.path))}</span>']
                   for r in measured.sort_values(["camera", "expnum"]).itertuples()] if len(measured) else []
-    frame_table = _html_table(
+    frame_table = html_table(
         [("Camera", ""), ("Exposure", ""), ("Role", "in the sequence"), ("IMAGETYP", "header"), ("Exptime (s)", ""), ("Lamps", "on"),
          ("Signal (e-)", "median per pixel, mean of the quadrants"), ("Level (%)", "flats: from the sequence median"),
          ("Saturated (%)", "largest fraction of a quadrant"), ("File", "")],
@@ -1055,7 +913,7 @@ def _write_raw_dashboard(report_path, mjd_epoch, epoch, cameras, descriptions, p
         contrast_rows.append([f'<span class="mono">{camera}</span>', escape(stats[camera].get("cut_frame", "")),
                               _num(edge_rows[edge_rows.axis == "x"].contrast.min(), ".3f"),
                               _num(edge_rows[edge_rows.axis == "y"].contrast.min(), ".3f"), _num(stats[camera]["edge_contrast"], ".3f")])
-    contrast_table = _html_table(
+    contrast_table = html_table(
         [("Camera", ""), ("Frame", ""), ("Edge, cuts along X", "lowest outermost-window contrast"),
          ("Edge, cuts along Y", "lowest outermost-window contrast"), ("Edge, lowest", "")],
         contrast_rows, numeric=[False, False, True, True, True])
@@ -1078,7 +936,7 @@ def _write_raw_dashboard(report_path, mjd_epoch, epoch, cameras, descriptions, p
 
     picker = ""
     if contrasts:
-        picker = _picker("fig-cuts", "cut", [("Camera", [(camera, camera) for camera in contrasts])], 860)
+        picker = picker("fig-cuts", "cut", [("Camera", [(camera, camera) for camera in contrasts])], 860)
     sections = [
         f"""<section>
     <h2>Sequences</h2>
@@ -1133,7 +991,7 @@ def _write_raw_dashboard(report_path, mjd_epoch, epoch, cameras, descriptions, p
   </section>""")
     sections.append(RAW_DEFINITIONS)
 
-    _write_dashboard(report_path, f"Raw pixel flats, epoch {mjd_epoch}", f"LVM DRP · pixel flats · raw sequences · {drpver}",
+    write_dashboard(report_path, f"Raw pixel flats, epoch {mjd_epoch}", f"LVM DRP · pixel flats · raw sequences · {drpver}",
                      intro, meta, tiles, "\n\n  ".join(sections), figures, "lvmdrp.qa.pixelflats.qa_raw_pixelflats")
 
 
@@ -1312,8 +1170,8 @@ def figure_consistency(summary):
     fig.add_trace(go.Bar(x=selected.index, y=100 * selected.ratio_scatter, marker_color=colors, showlegend=False,
                          hovertemplate="<b>%{x}</b><br>robust scatter %{y:.3f}%<extra></extra>"), row=1, col=2)
     low = float(np.nanmin(selected.pct_within_1pct)) if len(selected) else 99.0
-    fig.update_layout(_base_layout(340, bargap=0.35))
-    _style_axes(fig)
+    fig.update_layout(base_layout(340, bargap=0.35))
+    style_axes(fig)
     fig.update_yaxes(title_text="Pixels (%)", range=[min(low - 0.5, 99.0), 100], row=1, col=1)
     fig.update_yaxes(title_text="Scatter (%)", rangemode="tozero", row=1, col=2)
     fig.update_xaxes(showgrid=False, tickfont=dict(family=MONO_FONT, color=THEME["ink2"]))
@@ -1341,8 +1199,8 @@ def figure_artifact_counts(summary, bins):
         breakdown = ["<br>".join(f"{lo}–{hi} px: {n}" for (lo, hi), n in zip(bins, counts)) for counts in selected[column]]
         fig.add_trace(go.Bar(x=selected.index, y=[sum(counts) for counts in selected[column]], name=label, marker_color=color,
                              customdata=breakdown, hovertemplate=f"<b>%{{x}}</b> {label.lower()}<br>%{{y}} artifacts<br>%{{customdata}}<extra></extra>"))
-    fig.update_layout(_base_layout(320, barmode="group", bargap=0.3, yaxis_title="Artifacts (regions ≤ 0.95)"))
-    _style_axes(fig)
+    fig.update_layout(base_layout(320, barmode="group", bargap=0.3, yaxis_title="Artifacts (regions ≤ 0.95)"))
+    style_axes(fig)
     fig.update_xaxes(showgrid=False, tickfont=dict(family=MONO_FONT, color=THEME["ink2"]))
     return fig
 
@@ -1533,7 +1391,7 @@ def qa_pixelflats(mjd_tar, mjd_ref, cameras=CAMERAS, parts=QA_PARTS,
     figures = {}
     if compared:
         try:
-            figures["fig-master"] = _restyle(pf.display_pixflats_comparison(mjd_tar, mjd_ref, drpver=drpver, cameras=compared), height=1000)
+            figures["fig-master"] = restyle(pf.display_pixflats_comparison(mjd_tar, mjd_ref, drpver=drpver, cameras=compared), height=1000)
         except Exception as error:
             log.error(f"master pixel-flat comparison failed: {type(error).__name__}: {error}")
         figures["fig-consistency"] = figure_consistency(summary)
@@ -1542,7 +1400,7 @@ def qa_pixelflats(mjd_tar, mjd_ref, cameras=CAMERAS, parts=QA_PARTS,
     for camera, groups in camera_figures.items():
         for part, part_figures in groups.items():
             for name, fig in part_figures.items():
-                figures[f"{part}|{camera}|{name}"] = _restyle(fig)
+                figures[f"{part}|{camera}|{name}"] = restyle(fig)
 
     _write_products_dashboard(report_path, mjd_tar, mjd_ref, cameras, parts, summary, figures, camera_figures,
                               bins, min_consistency, epochs)
@@ -1578,12 +1436,12 @@ def _write_products_dashboard(report_path, mjd_tar, mjd_ref, cameras, parts, sum
     for camera in cameras:
         r = summary.loc[camera]
         rows.append([
-            f'<span class="mono">{camera}</span>', _badge(r.status), escape(str(r.sequence)), "yes" if r.products else "no",
+            f'<span class="mono">{camera}</span>', badge(r.status), escape(str(r.sequence)), "yes" if r.products else "no",
             _num(r.pct_within_1pct, ".3f"), _num(r.ratio_median, ".5f"), _num(100 * r.ratio_scatter, ".3f"),
             _num(r.n_artifacts_tar, ".0f"), _num(r.n_artifacts_ref, ".0f"), escape(str(r.test_frame or "–")),
-            _issues_html([e for e in str(r.error).split("; ") if e]),
+            issues_html([e for e in str(r.error).split("; ") if e]),
         ])
-    summary_table = _html_table(
+    summary_table = html_table(
         [("Camera", ""), ("Status", f"bad: missing products or errors; warn: < {min_consistency:g}% consistent or sequence issues"),
          ("Sequence", "validation of the target sequence"), ("Products", "both master pixel flats exist"),
          ("Within 1% (%)", "pixels of the target within 1% of the reference"), ("Ratio median", "target / reference"),
@@ -1621,7 +1479,7 @@ def _write_products_dashboard(report_path, mjd_tar, mjd_ref, cameras, parts, sum
         with_part = [camera for camera in cameras if part in camera_figures.get(camera, {})]
         if not with_part:
             continue
-        chart = _picker(f"fig-{part}", part, [("Camera", [(camera, camera) for camera in with_part]),
+        chart = picker(f"fig-{part}", part, [("Camera", [(camera, camera) for camera in with_part]),
                                                ("View", [(name, label) for name, label in views])], 360)
         extra = ('<div class="chart" data-fig="fig-artifact-counts" role="img" aria-label="Number of artifacts per camera"></div>'
                  if part == "artifacts" and "fig-artifact-counts" in figures else "")
@@ -1640,7 +1498,7 @@ def _write_products_dashboard(report_path, mjd_tar, mjd_ref, cameras, parts, sum
              "they agree pixel by pixel, which artifacts they contain, and whether flat-fielding a test exposure with "
              "them removes the artifacts. The equations are listed under "
              '<a href="#definitions">How the quantities are computed</a>.</p>')
-    _write_dashboard(report_path, f"Pixel flats {mjd_tar} vs {mjd_ref}", f"LVM DRP · pixel flats · products · {drpver}",
+    write_dashboard(report_path, f"Pixel flats {mjd_tar} vs {mjd_ref}", f"LVM DRP · pixel flats · products · {drpver}",
                      intro, meta, tiles, "\n\n  ".join(sections), figures, "lvmdrp.qa.pixelflats.qa_pixelflats")
 
 
@@ -1667,169 +1525,3 @@ PRODUCT_DEFINITIONS = r"""<section id="definitions">
   </section>"""
 
 
-PAGE_TEMPLATE = """<meta charset="utf-8">
-<title>@@TITLE@@</title>
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
-<style>
-:root {
-  --plane: #f9f9f7; --surface: #fcfcfb; --ink: #0b0b0b; --ink-2: #52514e; --muted: #898781;
-  --grid: #e1e0d9; --axis: #c3c2b7; --border: rgba(11,11,11,0.10); --accent: #2a78d6;
-  --ok: #1baf7a; --warn: #eb6834; --bad: #c8372d;
-  --sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
-  --mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
-}
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    color-scheme: dark;
-    --plane: #0d0d0d; --surface: #1a1a19; --ink: #ffffff; --ink-2: #c3c2b7; --muted: #898781;
-    --grid: #2c2c2a; --axis: #383835; --border: rgba(255,255,255,0.10); --accent: #3987e5;
-    --ok: #199e70; --warn: #d95926; --bad: #e5534b;
-  }
-}
-:root[data-theme="dark"] {
-  color-scheme: dark;
-  --plane: #0d0d0d; --surface: #1a1a19; --ink: #ffffff; --ink-2: #c3c2b7; --muted: #898781;
-  --grid: #2c2c2a; --axis: #383835; --border: rgba(255,255,255,0.10); --accent: #3987e5;
-  --ok: #199e70; --warn: #d95926; --bad: #e5534b;
-}
-* { box-sizing: border-box; }
-body { margin: 0; background: var(--plane); color: var(--ink); font: 15px/1.55 var(--sans); }
-.page { max-width: 1120px; margin: 0 auto; padding-inline: 16px; padding-block: 32px 64px; display: grid; gap: 40px; }
-header { display: grid; gap: 16px; }
-.eyebrow { font: 500 12px/1 var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
-h1 { margin: 0; font-size: clamp(28px, 4vw, 38px); line-height: 1.15; font-weight: 600; text-wrap: balance; }
-h2 { margin: 0; font-size: 20px; font-weight: 600; text-wrap: balance; }
-p { margin: 0; max-width: 68ch; color: var(--ink-2); }
-a { color: var(--accent); }
-dl.meta { margin: 0; display: flex; flex-wrap: wrap; gap: 8px 28px; font-size: 13px; }
-dl.meta div { display: grid; gap: 2px; }
-dl.meta dt { color: var(--muted); }
-dl.meta dd { margin: 0; font-family: var(--mono); color: var(--ink); }
-.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
-.tile { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; display: grid; gap: 4px; align-content: start; }
-.tile-label { font-size: 13px; color: var(--ink-2); }
-.tile-value { font-size: 28px; font-weight: 600; line-height: 1.2; font-variant-numeric: tabular-nums; }
-.tile-note { font-size: 12px; color: var(--muted); }
-section { display: grid; gap: 14px; min-width: 0; }
-.chart { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 8px 4px 4px; min-height: 120px; min-width: 0; }
-details { font-size: 14px; display: grid; gap: 8px; }
-summary { cursor: pointer; color: var(--ink-2); padding-block: 4px; }
-summary:focus-visible, a:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
-details[open] summary { margin-bottom: 8px; }
-.table-wrap { overflow-x: auto; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; max-height: 560px; }
-table { border-collapse: collapse; width: 100%; font-size: 13px; }
-th, td { padding: 7px 12px; text-align: left; border-bottom: 1px solid var(--grid); white-space: nowrap; vertical-align: top; }
-th { position: sticky; top: 0; background: var(--surface); color: var(--ink-2); font-weight: 500; z-index: 1; }
-td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-family: var(--mono); }
-tbody tr:last-child td { border-bottom: 0; }
-.mono { font-family: var(--mono); }
-.range { color: var(--muted); }
-.note { font-size: 13px; color: var(--muted); }
-.badge { display: inline-block; padding: 0 8px; border-radius: 999px; font: 500 12px/1.7 var(--mono); border: 1px solid currentColor; }
-.badge.ok { color: var(--ok); }
-.badge.warn { color: var(--warn); }
-.badge.bad { color: var(--bad); }
-ul.issues { margin: 0; padding-left: 16px; color: var(--ink-2); white-space: normal; min-width: 260px; max-width: 460px; }
-.picker { display: flex; flex-wrap: wrap; gap: 8px 20px; align-items: center; font-size: 13px; color: var(--ink-2); }
-.picker label { display: inline-flex; gap: 8px; align-items: center; }
-.picker select { font: 13px var(--sans); color: var(--ink); background: var(--surface); border: 1px solid var(--axis); border-radius: 6px; padding: 4px 8px; }
-#definitions { scroll-margin-top: 16px; }
-.defs { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 460px), 1fr)); gap: 12px; }
-.def { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; display: grid; gap: 8px; align-content: start; min-width: 0; }
-.def:last-child:nth-child(odd) { grid-column: 1 / -1; }
-.def h3 { margin: 0; font-size: 15px; font-weight: 600; }
-.def p { font-size: 14px; }
-.eq { overflow-x: auto; overflow-y: hidden; padding-block: 2px; color: var(--ink); }
-mjx-container { color: inherit; }
-mjx-container[display="true"] { margin: 4px 0 !important; }
-.plotly-missing { padding: 16px; color: var(--ink-2); font-size: 14px; }
-</style>
-
-<div class="page">
-  <header>
-    <div class="eyebrow">@@EYEBROW@@</div>
-    <h1>@@TITLE@@</h1>
-    @@INTRO@@
-    <dl class="meta">@@META@@</dl>
-  </header>
-
-  <div class="tiles">@@TILES@@</div>
-
-  @@BODY@@
-
-  <p class="note">Generated by @@GENERATOR@@. Charts use plotly.js @@PLOTLY_VERSION@@.</p>
-</div>
-
-<script>
-window.MathJax = { tex: { inlineMath: [["\\\\(", "\\\\)"]], displayMath: [["\\\\[", "\\\\]"]] }, svg: { fontCache: "global" } };
-</script>
-<script src="https://cdn.jsdelivr.net/npm/mathjax@3.2.2/es5/tex-svg.js" async></script>
-<script src="https://cdn.jsdelivr.net/npm/plotly.js-dist-min@@@PLOTLY_VERSION@@/plotly.min.js"></script>
-<script>
-(function () {
-  const FIGURES = @@FIGURES@@;
-  const DARK = @@DARK_MAP@@;
-  const SEQ_DARK = @@SEQ_DARK@@;
-  const pattern = new RegExp(Object.keys(DARK).join("|"), "gi");
-  const media = window.matchMedia("(prefers-color-scheme: dark)");
-  const config = { responsive: true, displaylogo: false, modeBarButtonsToRemove: ["lasso2d", "select2d"] };
-
-  function isDark() {
-    const theme = document.documentElement.getAttribute("data-theme");
-    return theme ? theme === "dark" : media.matches;
-  }
-
-  function draw(el) {
-    const figure = FIGURES[el.dataset.fig];
-    if (!figure) {
-      if (window.Plotly) Plotly.purge(el);
-      el.innerHTML = '<div class="plotly-missing">Not available for this selection.</div>';
-      return;
-    }
-    const missing = el.querySelector(".plotly-missing");
-    if (missing) missing.remove();
-    const dark = isDark();
-    let text = JSON.stringify(figure);
-    if (dark) text = text.replace(pattern, (m) => DARK[m.toLowerCase()]);
-    const fig = JSON.parse(text);
-    if (dark) fig.data.forEach((trace) => { if (trace.meta === "seq") trace.colorscale = SEQ_DARK; });
-    Plotly.react(el, fig.data, fig.layout, config);
-  }
-
-  function charts() { return document.querySelectorAll(".chart[data-fig]"); }
-
-  function render() {
-    if (!window.Plotly) {
-      charts().forEach((el) => {
-        el.innerHTML = '<div class="plotly-missing">This chart needs plotly.js from cdn.jsdelivr.net, which did not load. The tables hold the same numbers.</div>';
-      });
-      return;
-    }
-    // charts inside closed <details> are drawn when opened, so they get the right width
-    charts().forEach((el) => { if (!el.closest("details:not([open])")) draw(el); });
-  }
-
-  document.querySelectorAll("details").forEach((details) => {
-    details.addEventListener("toggle", () => {
-      if (details.open && window.Plotly) details.querySelectorAll(".chart[data-fig]").forEach(draw);
-    });
-  });
-
-  document.querySelectorAll(".picker").forEach((picker) => {
-    const chart = document.getElementById(picker.dataset.chart);
-    const selects = Array.from(picker.querySelectorAll("select"));
-    selects.forEach((select) => select.addEventListener("change", () => {
-      chart.dataset.fig = [picker.dataset.prefix, ...selects.map((s) => s.value)].join("|");
-      if (window.Plotly) draw(chart);
-    }));
-  });
-
-  render();
-  media.addEventListener("change", render);
-  new MutationObserver(render).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
-})();
-</script>
-"""
