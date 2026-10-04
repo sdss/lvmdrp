@@ -934,9 +934,9 @@ def _write_raw_dashboard(report_path, mjd_epoch, epoch, cameras, descriptions, p
         + (f"<p><strong>Epoch comment:</strong> {escape(str(comment))}</p>" if comment else "")
     )
 
-    picker = ""
+    cuts_chart = ""
     if contrasts:
-        picker = picker("fig-cuts", "cut", [("Camera", [(camera, camera) for camera in contrasts])], 860)
+        cuts_chart = picker("fig-cuts", "cut", [("Camera", [(camera, camera) for camera in contrasts])], 860)
     sections = [
         f"""<section>
     <h2>Sequences</h2>
@@ -979,14 +979,14 @@ def _write_raw_dashboard(report_path, mjd_epoch, epoch, cameras, descriptions, p
     level points to a light leak, a lamp left on, or a change in the bias structure.</p>
     <div class="chart" data-fig="fig-darks" role="img" aria-label="Signal of the darks and biases"></div>
   </section>""")
-    if picker:
+    if cuts_chart:
         sections.append(f"""<section>
     <h2>Illumination pattern</h2>
     <p>Cuts along rows and columns of the {'average of the flats' if combined else 'first flat'} of each camera,
     normalized by the median of the image, next to the raw image with the cuts drawn on it. The numbers are the
     contrast: the level of each window relative to the window nearest the CCD center. Low contrast at the edges means
     few photons there and a noisier pixel flat.</p>
-    {picker}
+    {cuts_chart}
     <details><summary>Table view: edge contrast per camera</summary>{contrast_table}</details>
   </section>""")
     sections.append(RAW_DEFINITIONS)
