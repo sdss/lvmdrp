@@ -272,6 +272,49 @@ def _get_reference_lines(lamps, camera):
     return ref_fiber, pixel, ref_lines, use_line
 
 
+def _select_lamps_lines(pixel, ref_lines, use_line, lamps, camera, atol=0.1):
+    """Selects the given reference lines that belong to the given lamps
+
+    Lines are assigned to lamps by matching their wavelengths to the
+    pixel-wavelength maps of each arc lamp. Lines not found in any of the maps
+    are kept. If any of the given lamps has no map, all lines are kept.
+
+    Parameters
+    ----------
+    pixel, ref_lines, use_line : numpy.ndarray
+        Pixel positions, reference wavelengths and selection of the given lines
+    lamps : set[str]
+        Arc lamps (lower case) that were on
+    camera : str
+        Camera name (e.g., z1)
+    atol : float, optional
+        Tolerance (in Angstrom) for matching wavelengths, by default 0.1
+
+    Returns
+    -------
+    pixel, ref_lines, use_line : numpy.ndarray
+        Selected lines
+    """
+    in_lamps = numpy.zeros(ref_lines.size, dtype=bool)
+    in_any = numpy.zeros(ref_lines.size, dtype=bool)
+    for lamp in ARC_LAMPS:
+        lamp = lamp.lower()
+        _, lamp_fiber, _, lamp_lines, _ = _read_pixwav_map(lamp, camera)
+        if lamp_fiber is None:
+            if lamp in lamps:
+                log.warning(f"no pixel-to-wavelength map for {lamp = } in {camera = }, using all given lines")
+                return pixel, ref_lines, use_line
+            continue
+        match = numpy.isclose(ref_lines[:, None], lamp_lines[None], atol=atol).any(axis=1)
+        in_any |= match
+        if lamp in lamps:
+            in_lamps |= match
+
+    select = in_lamps | ~in_any
+    log.info(f"selected {select.sum()} out of {select.size} given lines for {lamps = } in {camera = }")
+    return pixel[select], ref_lines[select], use_line[select]
+
+
 def _prepare_arc(arc, cont_niter, cont_thresh, cont_box_range):
     """Subtracts continuum, masks non-exposed standard fibers and invalid pixels in an extracted arc"""
     camera = arc._header["CCD"]
@@ -507,7 +550,8 @@ def determine_wavelength_solution(in_arcs: List[str]|str, out_wave: str, out_lsf
         arcs_refs = [_get_reference_lines(alamps, camera) for alamps in arcs_lamps]
     else:
         log.info(f"using given reference lines: {ref_lines}")
-        arcs_refs = [(ref_fiber, numpy.asarray(pixel), numpy.asarray(ref_lines), numpy.asarray(use_line, dtype=bool))] * len(parcs)
+        pixel, ref_lines, use_line = numpy.asarray(pixel), numpy.asarray(ref_lines), numpy.asarray(use_line, dtype=bool)
+        arcs_refs = [(ref_fiber, *_select_lamps_lines(pixel, ref_lines, use_line, alamps, camera)) for alamps in arcs_lamps]
 
     # remove bad lines and sort them by pixel position
     for i, (ref_fiber_, apixel, aref_lines, ause_line) in enumerate(arcs_refs):

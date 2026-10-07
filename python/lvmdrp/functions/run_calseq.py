@@ -1207,38 +1207,24 @@ def _create_wavelengths_60177(use_longterm_cals=True, skip_done=True, dry_run=Fa
     reduce_2d(mjd, calibrations=calibs, expnums=expnums, assume_imagetyp="arc", reject_cr=False,
               add_astro=False, sub_straylight=False, skip_done=skip_done)
 
+    # extract individual arcs, accounting for fiber thermal shifts in each exposure
     lamps = [lamp.lower() for lamp in ARC_LAMPS]
-    xarc_paths = {"b1": [], "b2": [], "b3": [], "r1": [], "r2": [], "r3": [], "z1": [], "z2": [], "z3": []}
-    for lamp in lamps:
-        arc_analogs = frames.loc[frames[lamp]].groupby(["camera",])
-        for camera in arc_analogs.groups:
-            arcs = arc_analogs.get_group((camera,))
-            expnum_str = f"{arcs.expnum.min():>08}_{arcs.expnum.max():>08}"
-
-            # define master frame path
-            carc_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="c", imagetype=f"arc_{lamp}", camera=camera, expnum=expnum_str)
-            xarc_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="x", imagetype=f"arc_{lamp}", camera=camera, expnum=expnum_str)
-            os.makedirs(os.path.dirname(carc_path), exist_ok=True)
-            darc_paths = [path.full("lvm_anc", drpver=drpver, kind="d", imagetype="arc", **arc) for arc in arcs.to_dict("records")]
-            xarc_paths[camera].append(xarc_path)
-
-            # create master arc (2D image)
-            if skip_done and os.path.exists(carc_path):
-                log.info(f"skipping {carc_path}, file already exists")
-            else:
-                image_tasks.create_master_frame(in_images=darc_paths, out_image=carc_path)
-
-            # extract combined (master) arc
-            if skip_done and os.path.exists(xarc_path):
-                log.info(f"skipping {xarc_path}, file already exists")
-            else:
-                image_tasks.extract_spectra(in_image=carc_path, out_rss=xarc_path,
-                                            in_trace=calibs["centroids"][camera],
-                                            in_sigma=calibs["sigmas"][camera],
-                                            in_model=calibs["model"][camera])
+    frames = frames.loc[frames[lamps].any(axis=1)]
+    xarc_paths = {camera: [] for camera in np.sort(frames.camera.unique())}
+    for arc in frames.to_dict("records"):
+        camera = arc["camera"]
+        darc_path = path.full("lvm_anc", drpver=drpver, kind="d", imagetype="arc", **arc)
+        xarc_paths[camera].append(path.full("lvm_anc", drpver=drpver, kind="x", imagetype="arc", **arc))
+        if skip_done and os.path.isfile(xarc_paths[camera][-1]):
+            log.info(f"skipping extracted arc {xarc_paths[camera][-1]}, file already exists")
+            continue
+        image_tasks.extract_spectra(in_image=darc_path, out_rss=xarc_paths[camera][-1],
+                                    in_trace=calibs["centroids"][camera],
+                                    in_sigma=calibs["sigmas"][camera],
+                                    in_model=calibs["model"][camera])
 
     expnum_str = f"{frames.expnum.min():>08}_{frames.expnum.max():>08}"
-    for camera in np.sort(frames.camera.unique()):
+    for camera in xarc_paths:
         xarc_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="x", imagetype="arc", camera=camera, expnum=expnum_str)
 
         # coadd arcs
@@ -1255,8 +1241,8 @@ def _create_wavelengths_60177(use_longterm_cals=True, skip_done=True, dry_run=Fa
         use_lines = pixwav[camera][:, 2].astype(bool) if camera in pixwav else []
         ref_lines, _, cent_wave, _, rss, wave_trace, fwhm_trace = rss_tasks.determine_wavelength_solution(in_arcs=xarc_paths[camera], out_wave=mwave_path, out_lsf=mlsf_path,
                                                                                                           pixel=pixels, ref_lines=waves, use_line=use_lines,
-                                                                                                          arcs_combination="pixels",
-                                                                                                          flux_range=[800, np.inf], cent_range=[-1.5, 1.5], fwhm_range=[2.0, 4.5])
+                                                                                                          flux_range=[800, np.inf], cent_range=[-1.5, 1.5], fwhm_range=[2.0, 4.5],
+                                                                                                          arcs_combination="measurements")
 
         lvmarc = lvmArc(data=rss._data, error=rss._error, mask=rss._mask, header=rss._header,
                         ref_wave=ref_lines, cent_line=cent_wave,
@@ -2473,7 +2459,8 @@ def create_wavelengths(mjd, epochs=None, use_longterm_cals=True, kind="longterm"
         ref_lines, _, cent_wave, _, rss, wave_trace, fwhm_trace = rss_tasks.determine_wavelength_solution(
             in_arcs=xarc_paths,
             out_wave=mwave_path,
-            out_lsf=mlsf_path)
+            out_lsf=mlsf_path,
+            arcs_combination="measurements")
 
         lvmarc = lvmArc(data=rss._data, error=rss._error, mask=rss._mask, header=rss._header,
                         ref_wave=ref_lines, cent_line=cent_wave,
