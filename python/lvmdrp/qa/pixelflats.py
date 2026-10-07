@@ -124,8 +124,12 @@ def describe_sequence(epoch, camera):
     Every exposure gets the role implied by its position in the sequence
     ``kind`` (e.g. ``'2f1d'``: two flats then one dark, repeated), after
     removing the rejects. Exposures of an incomplete last group are kept as
-    ``"unassigned"``, and the rejects as ``"rejected"``. The raw file of each
-    exposure is searched for in the epoch's source MJDs.
+    ``"unassigned"``, and the rejects as ``"rejected"``. For ``kind: auto``,
+    roles come from the ``imagetyp`` metadata as in the reduction (see
+    :func:`~lvmdrp.functions.pixelflats._classify_sequence`), and exposures
+    with no flat, dark or bias ``imagetyp``, or missing from the metadata,
+    are kept as ``"unclassified"``. The raw file of each exposure is searched
+    for in the epoch's source MJDs.
 
     Parameters
     ----------
@@ -142,7 +146,9 @@ def describe_sequence(epoch, camera):
         (exposures in an incomplete last group), the ``expnums`` and
         ``rejects`` as written in the file, and ``exposures``, a DataFrame with
         one row per exposure: ``expnum``, ``role`` and ``path`` (None if the
-        raw file is missing).
+        raw file is missing). For ``kind: auto``, ``kind_text`` gives the
+        counts per type, ``group_size`` is None, ``ngroups`` is the number of
+        runs of consecutive flats, and ``nleftover`` is 0.
 
     Raises
     ------
@@ -153,23 +159,37 @@ def describe_sequence(epoch, camera):
     """
     sequence = epoch["sequences"][camera]
     kind = sequence.get("kind", "")
-    pairs = pf._parse_kind(kind)
-    pattern = [ROLE_TYPES[typ] for count, typ in pairs for _ in range(count)]
     expnums = pf._parse_expnums(sequence.get("expnums") or [])
     rejects = set(int(expnum) for expnum in pf._parse_expnums(sequence.get("rejects") or []))
     effective = [int(expnum) for expnum in expnums if expnum not in rejects]
-    ngroups, nleftover = divmod(len(effective), len(pattern))
 
-    exposures = [
-        {"expnum": expnum, "role": pattern[i % len(pattern)] if i < ngroups * len(pattern) else "unassigned"}
-        for i, expnum in enumerate(effective)
-    ] + [{"expnum": expnum, "role": "rejected"} for expnum in sorted(rejects)]
+    if kind == pf.AUTO_KIND:
+        groups, _ = pf._classify_sequence(pf._parse_sequence(sequence, expand=False), mjds=epoch["sources"], camera=camera)
+        roles = {int(expnum): role for role, role_expnums in groups.items() for expnum in role_expnums}
+        exposures = [{"expnum": expnum, "role": roles.get(expnum, "unclassified")} for expnum in effective]
+        kind_text = " + ".join(_plural(len(role_expnums), role) for role, role_expnums in groups.items() if len(role_expnums)) + ", by IMAGETYP"
+        # without a pattern, a group is a run of consecutive flats with the exposures that follow it
+        flags = [exposure["role"] == "flat" for exposure in exposures]
+        ngroups = sum(flag and (i == 0 or not flags[i - 1]) for i, flag in enumerate(flags))
+        group_size, nleftover = None, 0
+    else:
+        pairs = pf._parse_kind(kind)
+        pattern = [ROLE_TYPES[typ] for count, typ in pairs for _ in range(count)]
+        ngroups, nleftover = divmod(len(effective), len(pattern))
+        exposures = [
+            {"expnum": expnum, "role": pattern[i % len(pattern)] if i < ngroups * len(pattern) else "unassigned"}
+            for i, expnum in enumerate(effective)
+        ]
+        kind_text = " + ".join(_plural(count, ROLE_TYPES[typ]) for count, typ in pairs)
+        group_size = len(pattern)
+
+    exposures += [{"expnum": expnum, "role": "rejected"} for expnum in sorted(rejects)]
     for exposure in exposures:
         exposure["path"] = _find_raw(epoch["sources"], camera, exposure["expnum"])
 
     return {
-        "camera": camera, "kind": kind, "kind_text": " + ".join(_plural(count, ROLE_TYPES[typ]) for count, typ in pairs),
-        "group_size": len(pattern), "ngroups": ngroups, "nleftover": nleftover,
+        "camera": camera, "kind": kind, "kind_text": kind_text,
+        "group_size": group_size, "ngroups": ngroups, "nleftover": nleftover,
         "expnums": sequence.get("expnums") or [], "rejects": sequence.get("rejects") or [],
         "exposures": pd.DataFrame(exposures, columns=["expnum", "role", "path"]).sort_values("expnum", ignore_index=True),
     }
@@ -258,7 +278,7 @@ class _SerialPool:
     def __enter__(self):
         return self
 
-    def __exit__(self, *args):
+    def __exit__(self, *_):
         return False
 
     def imap_unordered(self, func, iterable):
@@ -311,6 +331,9 @@ def _raw_camera_stats(description, frames, target_precision, max_level_deviation
         issues.append(f"{len(missing)} raw file(s) missing: {pf._compress_expnums(missing.expnum)}")
     if description["nleftover"]:
         issues.append(f"incomplete last group: {description['nleftover']} of {description['group_size']} exposures")
+    unclassified = exposures[exposures.role == "unclassified"]
+    if len(unclassified):
+        issues.append(f"{len(unclassified)} exposure(s) not used, unexpected IMAGETYP or missing from metadata: {pf._compress_expnums(unclassified.expnum)}")
 
     measured = frames[frames.error.fillna("") == ""] if "error" in frames else frames.iloc[0:0]
     failed = frames[frames.error.fillna("") != ""] if "error" in frames else frames.iloc[0:0]
@@ -401,7 +424,8 @@ def figure_sequence_strip(descriptions, frames, outliers):
     """
     styles = {
         "flat": ("Flat", SERIES[0], "circle"), "dark": ("Dark", SERIES[1], "square"), "bias": ("Bias", SERIES[2], "diamond"),
-        "unassigned": ("Incomplete group", THEME["muted"], "triangle-up"), "rejected": ("Rejected", THEME["muted"], "x-thin-open"),
+        "unassigned": ("Incomplete group", THEME["muted"], "triangle-up"), "unclassified": ("Unclassified IMAGETYP", THEME["muted"], "triangle-down"),
+        "rejected": ("Rejected", THEME["muted"], "x-thin-open"),
     }
     rows = []
     for camera, description in descriptions.items():
@@ -819,13 +843,13 @@ def _write_raw_dashboard(report_path, mjd_epoch, epoch, cameras, descriptions, p
     ]
     if with_flats:
         per_flat = {camera: stats[camera]["signal_per_flat"] for camera in with_flats}
-        lo, hi = min(per_flat, key=per_flat.get), max(per_flat, key=per_flat.get)
+        lo, hi = min(per_flat, key=per_flat.__getitem__), max(per_flat, key=per_flat.__getitem__)
         tiles.append(("Signal per flat", f"{np.median(list(per_flat.values())):,.0f} e-",
                       f"median per pixel; {lo} {per_flat[lo]:,.0f} to {hi} {per_flat[hi]:,.0f}"))
         worst = max(with_flats, key=lambda camera: stats[camera]["precision"])
         tiles.append(("Worst Poisson precision", f"{100 * stats[worst]['precision']:.3f}%",
-                      f"{worst} AMP{stats[worst]['worst_quad']}, {stats[worst]['total_min']:,.0f} e- accumulated; "
-                      f"target {100 * target_precision:g}%"))
+                      (f"{worst} AMP{stats[worst]['worst_quad']}, {stats[worst]['total_min']:,.0f} e- accumulated; "
+                       f"target {100 * target_precision:g}%")))
         dim = max(with_flats, key=lambda camera: stats[camera]["precision_dim"])
         tiles.append(("Precision in dim regions", f"{100 * stats[dim]['precision_dim']:.3f}%", f"{dim}, dimmest 5% of pixels"))
         unstable = max(with_flats, key=lambda camera: stats[camera]["level_scatter"])
@@ -834,7 +858,7 @@ def _write_raw_dashboard(report_path, mjd_epoch, epoch, cameras, descriptions, p
                       f"largest flat-to-flat scatter ({unstable}); {noutliers} flats off by > {100 * max_level_deviation:g}%"))
     edge = {camera: stats[camera]["edge_contrast"] for camera in descriptions if np.isfinite(stats[camera].get("edge_contrast", np.nan))}
     if edge:
-        low = min(edge, key=edge.get)
+        low = min(edge, key=edge.__getitem__)
         tiles.append(("Lowest edge contrast", f"{edge[low]:.2f}", f"{low}, CCD edge relative to center"))
 
     # sequence table
@@ -857,8 +881,8 @@ def _write_raw_dashboard(report_path, mjd_epoch, epoch, cameras, descriptions, p
         ])
     sequence_table = html_table(
         [("Camera", ""), ("Status", "ok: no issues; warn: issues listed; bad: no flats measured or no valid sequence"),
-         ("Kind", "exposure pattern repeated along the sequence"), ("Exposures", "ranges in the epochs file, inclusive"),
-         ("Rejects", "excluded in the epochs file"), ("Groups", "complete groups (+ exposures of an incomplete last group)"),
+         ("Kind", "exposure pattern repeated along the sequence, or auto for types taken from IMAGETYP"), ("Exposures", "ranges in the epochs file, end excluded"),
+         ("Rejects", "excluded in the epochs file"), ("Groups", "complete groups (+ exposures of an incomplete last group); for auto, runs of consecutive flats"),
          ("Flats", "raw files found / expected"), ("Darks", "raw files found / expected"), ("Biases", "raw files found / expected"),
          ("Flats: exptime (s) · lamps", "exposure times and lamps on in the flats"), ("Issues", "")],
         sequence_rows, numeric=[False, False, False, False, False, True, True, True, True, False, False])
@@ -942,7 +966,9 @@ def _write_raw_dashboard(report_path, mjd_epoch, epoch, cameras, descriptions, p
     <h2>Sequences</h2>
     <p>Each camera's sequence as defined in the epochs file. The <em>kind</em> gives the exposure pattern that repeats
     along the sequence, e.g. <span class="mono">2f1d</span> is two flats followed by one dark. Rejected exposures are
-    excluded before assigning the pattern; exposures left over at the end form an incomplete group.</p>
+    excluded before assigning the pattern; exposures left over at the end form an incomplete group. Sequences with
+    kind <span class="mono">auto</span> don't follow a pattern: each exposure's type comes from its IMAGETYP, as in the
+    reduction, and each flat is detrended with the first bias taken after it, or the last one before it.</p>
     {sequence_table}
   </section>""",
         f"""<section>
@@ -1468,13 +1494,13 @@ def _write_products_dashboard(report_path, mjd_tar, mjd_ref, cameras, parts, sum
     views = [(name, label) for name, label in PRODUCT_VIEWS]
     for part, heading, text in (
         ("artifacts", "Artifacts in the master pixel flats",
-         "Artifacts are connected regions of the target master pixel flat at or below 0.95, such as dust shadows, grouped by "
-         "size. The cutouts show the largest ones of each size bin in the target, the reference, and their ratio; "
-         "a ratio close to 1 means the artifact was already there."),
+         ("Artifacts are connected regions of the target master pixel flat at or below 0.95, such as dust shadows, grouped by "
+          "size. The cutouts show the largest ones of each size bin in the target, the reference, and their ratio; "
+          "a ratio close to 1 means the artifact was already there.")),
         ("flatfielded", "Artifacts in a flat-fielded test exposure",
-         "The test exposure reduced with each epoch's pixel flat, around the target artifacts. An artifact that the pixel "
-         "flat corrects disappears in the flat-fielded frame; the histograms show the ratio of both reductions inside "
-         "the artifacts."),
+         ("The test exposure reduced with each epoch's pixel flat, around the target artifacts. An artifact that the pixel "
+          "flat corrects disappears in the flat-fielded frame; the histograms show the ratio of both reductions inside "
+          "the artifacts.")),
     ):
         with_part = [camera for camera in cameras if part in camera_figures.get(camera, {})]
         if not with_part:

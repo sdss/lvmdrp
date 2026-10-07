@@ -21,11 +21,22 @@ from lvmdrp import main as drp
 from scipy import ndimage as ndi
 
 
-PIXFLAT_EPOCHS_PATH = os.path.join(os.getenv("LVMCORE_DIR"), "calibrations", "pixflat-epochs.yaml")
+PIXFLAT_EPOCHS_PATH = os.path.join(os.environ["LVMCORE_DIR"], "calibrations", "pixflat-epochs.yaml")
 
 # Size bins (in pixels, lower-inclusive/upper-exclusive) used to group connected low-value regions
 # when looking for pixel-flat artifacts
 ARTIFACT_BINS = ((10, 20), (20, 30), (30, 40), (40, 3000))
+
+# Sequence kind for which exposure types are taken from the ``imagetyp`` metadata instead of
+# a repeating pattern, for sequences that don't follow one
+AUTO_KIND = "auto"
+
+# Valid ``imagetyp`` values of each exposure type in a pixel-flat sequence
+SEQUENCE_IMAGETYPS = {
+    "flat": ["object", "flat"],
+    "bias": ["bias"],
+    "dark": ["dark"],
+}
 
 
 def _parse_expnums(expnums):
@@ -212,7 +223,53 @@ def _expand_sequence(sequence, repeat=False):
     return expnums_dict
 
 
-def _parse_sequence(sequence, expand=True):
+def _classify_sequence(sequence, mjds, camera):
+    """Group the exposures of a sequence by type using their ``imagetyp`` metadata.
+
+    Used for sequences with ``kind: auto``, whose exposures don't follow a
+    repeating pattern (e.g., runs of flats of varying length between darks).
+
+    Parameters
+    ----------
+    sequence : dict
+        Sequence with ``expnums`` and ``rejects`` already parsed into arrays
+        (see :func:`_parse_sequence` with ``expand=False``).
+    mjds : int or array-like
+        Engineering-night MJDs containing the exposures.
+    camera : str
+        Camera identifier whose metadata is used.
+
+    Returns
+    -------
+    expnums_dict : dict
+        Mapping of exposure type to sorted exposure numbers. ``"flat"`` is
+        always present; ``"bias"`` and ``"dark"`` only if any were found.
+    unclassified : pandas.DataFrame
+        Metadata rows whose ``imagetyp`` doesn't match any type in
+        :data:`SEQUENCE_IMAGETYPS`. These exposures are left out.
+    """
+    expnums = np.setdiff1d(sequence["expnums"], sequence["rejects"])
+    frames = get_enights_metadata(mjds=mjds).query("camera == @camera and expnum in @expnums")
+
+    missing = np.setdiff1d(expnums, frames.expnum)
+    if missing.size:
+        log.warning(f"{missing.size} exposure(s) of the sequence for {camera = } not found in metadata: {_compress_expnums(missing.tolist())}")
+
+    expnums_dict = {}
+    for _type, imagetyps in SEQUENCE_IMAGETYPS.items():
+        type_expnums = np.sort(frames.query("imagetyp in @imagetyps").expnum.unique()).astype("int")
+        if _type == "flat" or type_expnums.size:
+            expnums_dict[_type] = type_expnums
+
+    known = [imagetyp for imagetyps in SEQUENCE_IMAGETYPS.values() for imagetyp in imagetyps]
+    unclassified = frames.loc[~frames.imagetyp.isin(known)]
+    if len(unclassified):
+        log.warning(f"ignoring {len(unclassified)} exposure(s) with unexpected imagetyp for {camera = }:\n{unclassified.to_string()}")
+
+    return expnums_dict, unclassified
+
+
+def _parse_sequence(sequence, expand=True, mjds=None, camera=None):
     """Copy and parse the exposure lists in a pixel-flat sequence.
 
     Parameters
@@ -220,11 +277,18 @@ def _parse_sequence(sequence, expand=True):
     sequence : dict
         Sequence definition containing ``expnums`` and optionally ``rejects``,
         plus (when ``expand`` is True) a ``kind`` string as expected by
-        :func:`_expand_sequence`.
+        :func:`_expand_sequence`, or ``"auto"`` to group the exposures by
+        their ``imagetyp`` metadata (see :func:`_classify_sequence`).
     expand : bool, optional
         If True (default), group the parsed exposure numbers by type using
         :func:`_expand_sequence`. If False, return the sequence with
         ``expnums``/``rejects`` parsed but otherwise unexpanded.
+    mjds : int or array-like, optional
+        Engineering-night MJDs containing the exposures. Required when
+        ``expand`` is True and ``kind`` is ``"auto"``.
+    camera : str, optional
+        Camera identifier. Required when ``expand`` is True and ``kind`` is
+        ``"auto"``.
 
     Returns
     -------
@@ -241,7 +305,8 @@ def _parse_sequence(sequence, expand=True):
         integer nor a comma-separated range (see :func:`_parse_expnums`).
     ValueError
         If ``expand`` is True and ``sequence["kind"]`` is malformed (see
-        :func:`_expand_sequence`).
+        :func:`_expand_sequence`), or if ``kind`` is ``"auto"`` and ``mjds``
+        or ``camera`` is missing.
     """
     parsed_sequence = copy(sequence)
     expnums = _parse_expnums(sequence.get("expnums", []) or [])
@@ -250,6 +315,10 @@ def _parse_sequence(sequence, expand=True):
     parsed_sequence["rejects"] = rejects
 
     if expand:
+        if parsed_sequence.get("kind") == AUTO_KIND:
+            if mjds is None or camera is None:
+                raise ValueError(f"Sequence kind {AUTO_KIND!r} requires `mjds` and `camera` to classify exposures by imagetyp")
+            return _classify_sequence(parsed_sequence, mjds=mjds, camera=camera)[0]
         return _expand_sequence(parsed_sequence)
     return parsed_sequence
 
@@ -298,11 +367,15 @@ def get_shifted_rejects(shifted, mjd_epoch, camera, epochs=None):
         raise KeyError(f"No pixelflat sequence found for {mjd_epoch = } and {camera = }") from error
 
     kind = sequence.get("kind", "")
-    try:
-        kind_pairs = _parse_kind(kind)
-    except ValueError as error:
-        raise ValueError(f"Invalid sequence kind for {mjd_epoch = }, {camera = }: {kind!r}") from error
-    group_size = sum(count for count, _ in kind_pairs)
+    if kind == AUTO_KIND:
+        # no repeating pattern to preserve, reject shifted exposures individually
+        group_size = 1
+    else:
+        try:
+            kind_pairs = _parse_kind(kind)
+        except ValueError as error:
+            raise ValueError(f"Invalid sequence kind for {mjd_epoch = }, {camera = }: {kind!r}") from error
+        group_size = sum(count for count, _ in kind_pairs)
 
     expnums = _parse_expnums(sequence.get("expnums", []) or [])
     existing_rejects = set(_parse_expnums(sequence.get("rejects", []) or []))
@@ -437,7 +510,9 @@ def validate_sequence_kind(epochs, mjd_epoch, camera):
         Mapping of exposure type (``"flat"``, ``"bias"``, ``"dark"``) to the
         metadata rows whose ``imagetyp`` doesn't match that role. Empty
         frames mean every exposure of that type is valid. Mismatches are also
-        reported via ``log.warning``.
+        reported via ``log.warning``. For ``kind: auto`` sequences, the only
+        key is ``"unclassified"``, holding the rows whose ``imagetyp`` matches
+        no exposure type (see :func:`_classify_sequence`).
 
     Raises
     ------
@@ -446,7 +521,8 @@ def validate_sequence_kind(epochs, mjd_epoch, camera):
     ValueError
         If the sequence's ``kind`` is malformed (see :func:`_parse_kind`), or
         if the number of effective (non-rejected) exposures is not evenly
-        divisible by the group size implied by ``kind``.
+        divisible by the group size implied by ``kind``, or if a ``kind: auto``
+        sequence has no flat exposures.
     """
     try:
         mjds = epochs[mjd_epoch]["sources"]
@@ -458,6 +534,14 @@ def validate_sequence_kind(epochs, mjd_epoch, camera):
         raise KeyError(f"No pixelflat sequence found for {mjd_epoch = } and {camera = }") from error
 
     kind = sequence.get("kind", "")
+    if kind == AUTO_KIND:
+        # exposure types come from the metadata, so only exposures of unexpected imagetyp are invalid
+        expnums_dict, unclassified = _classify_sequence(_parse_sequence(sequence, expand=False), mjds=mjds, camera=camera)
+        if not expnums_dict["flat"].size:
+            raise ValueError(f"Sequence for {mjd_epoch = }, {camera = } has no flat exposures")
+        log.info(f"{kind = } sequence for {mjd_epoch = }, {camera = }: " + ", ".join(f"{len(e)} {_type}" for _type, e in expnums_dict.items()))
+        return {"unclassified": unclassified}
+
     try:
         kind_pairs = _parse_kind(kind)
     except ValueError as error:
@@ -495,15 +579,9 @@ def validate_sequence_kind(epochs, mjd_epoch, camera):
         "bias": frames.query("expnum in @bias_expnums"),
         "dark": frames.query("expnum in @dark_expnums"),
     }
-    TYPE_MAPS = {
-        "bias": ["bias"],
-        "dark": ["dark"],
-        "flat": ["object", "flat"]
-    }
-
     invalid_frames = {}
     for _type, frame in frame_types.items():
-        valid = frame.imagetyp.isin(TYPE_MAPS.get(_type, []) or [])
+        valid = frame.imagetyp.isin(SEQUENCE_IMAGETYPS.get(_type, []) or [])
         invalid_frames[_type] = frame.loc[~valid]
         if not valid.all():
             log.warning(f"\n{invalid_frames[_type].to_string()}")
@@ -698,7 +776,63 @@ def load_pixflat_epochs(epochs_path=None, filter_by_mjds=None, filter_by_cameras
     return epochs
 
 
-def detrend_pixelflats(mjds, camera, flat_expnums, bias_expnums=[], dark_expnums=[], use_pixmask=True, skip_done=True):
+def _pair_following(flats, frames):
+    """Pair each flat with the first frame taken after it, or the last one before it if none follows.
+
+    Parameters
+    ----------
+    flats : pandas.DataFrame
+        Flat metadata rows, sorted by ``expnum``.
+    frames : pandas.DataFrame
+        Non-empty bias or dark metadata rows.
+
+    Returns
+    -------
+    pandas.DataFrame
+        One row of ``frames`` per row of ``flats``, in the same order.
+    """
+    frames = frames.sort_values("expnum")
+    idx = np.searchsorted(frames.expnum.to_numpy(), flats.expnum.to_numpy())
+    idx = np.minimum(idx, len(frames) - 1)
+    return frames.iloc[idx].reset_index(drop=True)
+
+
+def _pair_position(flats, frames, label, camera):
+    """Repeat each frame to match the flats by position, as in a regular sequence pattern.
+
+    Parameters
+    ----------
+    flats : pandas.DataFrame
+        Flat metadata rows.
+    frames : pandas.DataFrame
+        Bias or dark metadata rows.
+    label : str
+        Frame type used in the error message.
+    camera : str
+        Camera identifier used in the error message.
+
+    Returns
+    -------
+    pandas.DataFrame
+        ``frames`` with each row repeated ``len(flats) // len(frames)`` times.
+
+    Raises
+    ------
+    ValueError
+        If the number of flats is not a multiple of the number of frames.
+    """
+    if len(frames) >= len(flats):
+        return frames
+    if len(frames) == 0 or len(flats) % len(frames):
+        raise ValueError(
+            f"Cannot repeat {len(frames)} {label} exposure(s) to match "
+            f"{len(flats)} flat exposure(s) for {camera = }"
+        )
+    n = len(flats) // len(frames)
+    return frames.loc[frames.index.repeat(n)].reset_index(drop=True)
+
+
+def detrend_pixelflats(mjds, camera, flat_expnums, bias_expnums=[], dark_expnums=[], use_pixmask=True, skip_done=True, pairing="following"):
     """Preprocess and detrend pixel-flat, bias, and dark exposures.
 
     Parameters
@@ -715,12 +849,29 @@ def detrend_pixelflats(mjds, camera, flat_expnums, bias_expnums=[], dark_expnums
         Whether to use the current pixel mask during preprocessing.
     skip_done : bool, optional
         Whether to skip products that already exist.
+    pairing : {"following", "position"}, optional
+        How each flat is matched to a bias and a dark. ``"following"``
+        (default) uses the first one taken after the flat, or the last one
+        before it if none follows (see :func:`_pair_following`), which works
+        for irregular sequences and matches sequences where flats come before
+        darks or biases (e.g. ``3f1d``). ``"position"`` repeats biases and
+        darks to match the flats by position (see :func:`_pair_position`),
+        which requires the number of flats to be a multiple of theirs.
 
     Returns
     -------
     list[str]
         Paths to the available detrended pixel-flat images.
+
+    Raises
+    ------
+    ValueError
+        If bias or dark exposures are given but none is found in the
+        metadata, if ``pairing`` is ``"position"`` and the exposure counts
+        don't match, or if ``pairing`` is invalid.
     """
+    if pairing not in ("following", "position"):
+        raise ValueError(f"Invalid {pairing = }, expected 'following' or 'position'")
 
     frames = get_enights_metadata(mjds=mjds).query("camera == @camera").sort_values("expnum")
 
@@ -741,23 +892,21 @@ def detrend_pixelflats(mjds, camera, flat_expnums, bias_expnums=[], dark_expnums
     log.info(f"{len(dark_expnums)} dark exposures: {dark_expnums}")
     log.info(f"{len(bias_expnums)} bias exposures: {bias_expnums}")
 
-    # NOTE: repeating bias and darks if necessary
-    if len(darks) < len(flats):
-        if len(darks) == 0 or len(flats) % len(darks):
-            raise ValueError(
-                f"Cannot repeat {len(darks)} dark exposure(s) to match "
-                f"{len(flats)} flat exposure(s) for {camera = }"
-            )
-        n = len(flats) // len(darks)
-        darks = darks.loc[darks.index.repeat(n)].reset_index(drop=True)
-    if len(biases) < len(flats):
-        if len(biases) == 0 or len(flats) % len(biases):
-            raise ValueError(
-                f"Cannot repeat {len(biases)} bias exposure(s) to match "
-                f"{len(flats)} flat exposure(s) for {camera = }"
-            )
-        n = len(flats) // len(biases)
-        biases = biases.loc[biases.index.repeat(n)].reset_index(drop=True)
+    # NOTE: matching a bias and a dark to each flat
+    for label, expnums_, selected in (("bias", bias_expnums, biases), ("dark", dark_expnums, darks)):
+        if len(expnums_) == 0:
+            continue
+        if len(selected) == 0:
+            raise ValueError(f"None of the {len(expnums_)} {label} exposure(s) found in metadata for {camera = }")
+        if pairing == "following":
+            paired = _pair_following(flats, selected)
+            log.info(f"{label} exposure used for each flat: {dict(zip(flats.expnum.tolist(), paired.expnum.tolist()))}")
+        else:
+            paired = _pair_position(flats, selected, label=label, camera=camera)
+        if label == "bias":
+            biases = paired
+        else:
+            darks = paired
 
     dflat_paths = []
     for (_, bias), (_, dark), (_, flat) in zip(biases.iterrows(), darks.iterrows(), flats.iterrows()):
@@ -868,7 +1017,7 @@ def create_pixflats_60171(median_box=(31,31), skip_done=True):
 
     flats = md.get_frames_metadata(mjd=mjd, suffix="fits.gz", overwrite=False).query("expnum in @flat_expnums")
 
-    calibs = drp.get_calib_paths(mjd=60171, version=drpver, longterm_cals=False)
+    calibs = drp.get_calib_paths(mjd=60171, version=drpver, nightly=True, from_sandbox=False)
 
     cameras = flats.camera.unique()
     flat_paths = dict.fromkeys(cameras)
@@ -1083,8 +1232,9 @@ def create_pixflats(mjds, mjd_epoch, camera, sequence, size=31, min_flatfield=0.
     camera : str
         Identifier for the camera (e.g., 'r1', 'b2').
     sequence : dict
-        Dictionary containing exposure sequences with keys such as "flat", "dark",
-        and "bias", and their corresponding exposure numbers.
+        Sequence definition with ``kind``, ``expnums`` and optionally ``rejects``
+        (see :func:`_parse_sequence`). Use ``kind: auto`` for sequences without
+        a repeating pattern, to take exposure types from the ``imagetyp`` metadata.
     size : int, optional
         Size of the smoothing kernel for flat-field correction. Default is 31.
     min_flatfield : float, optional
@@ -1118,12 +1268,12 @@ def create_pixflats(mjds, mjd_epoch, camera, sequence, size=31, min_flatfield=0.
     - If no matching frames are found, the function logs an error and exits.
     - The function performs detrending, combines pixel flats, and generates the final flat-field files.
     """
-    parsed_sequence = _parse_sequence(sequence=sequence)
+    parsed_sequence = _parse_sequence(sequence=sequence, mjds=mjds, camera=camera)
     flat_expnums = parsed_sequence.get("flat")
     dark_expnums = parsed_sequence.get("dark", [])
     bias_expnums = parsed_sequence.get("bias", [])
 
-    if flat_expnums is None:
+    if flat_expnums is None or len(flat_expnums) == 0:
         raise ValueError(f"No pixel flat exposures found for {camera = } with sequence: {sequence}")
 
     cflat_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd_epoch, kind="cpixflat", camera=camera)
@@ -1190,7 +1340,7 @@ def create_super_pixflats(pixflat_epochs, mjd_epoch, size=31, min_flatfield=0.01
     for pixflat_epoch in pixflat_epochs.values():
         mjds = pixflat_epoch.get("sources", [])
         for camera, sequence in pixflat_epoch.get("sequences", {}).items():
-            parsed_sequence = _parse_sequence(sequence=sequence)
+            parsed_sequence = _parse_sequence(sequence=sequence, mjds=mjds, camera=camera)
             flat_expnums = parsed_sequence.get("flat")
             dark_expnums = parsed_sequence.get("dark", [])
             bias_expnums = parsed_sequence.get("bias", [])
@@ -2070,15 +2220,19 @@ def _average_raw_frames(raw_paths):
     Raises
     ------
     ValueError
-        If the frames come from different cameras or have different shapes.
+        If no frames are given, or the frames come from different cameras or have different shapes.
     """
-    img, total, count, expnums = None, None, None, []
-    for raw_path in raw_paths:
-        frame = image_tasks.loadImage(raw_path)
+    if len(raw_paths) == 0:
+        raise ValueError("no raw frames to average")
+
+    img = image_tasks.loadImage(raw_paths[0])
+    total = np.zeros_like(img._data, dtype=float)
+    count = np.zeros(img._data.shape, dtype=int)
+    expnums = []
+    for i, raw_path in enumerate(raw_paths):
+        frame = img if i == 0 else image_tasks.loadImage(raw_path)
         data = frame._data.astype(float)
-        if img is None:
-            img, total, count = frame, np.zeros_like(data), np.zeros(data.shape, dtype=int)
-        elif frame._header.get("CCD") != img._header.get("CCD") or data.shape != total.shape:
+        if frame._header.get("CCD") != img._header.get("CCD") or data.shape != total.shape:
             raise ValueError(
                 f"cannot average {os.path.basename(raw_path)} ({frame._header.get('CCD')}, {data.shape}) with "
                 f"{os.path.basename(raw_paths[0])} ({img._header.get('CCD')}, {total.shape})"
@@ -2371,7 +2525,7 @@ def _raw_flat_paths(epoch, camera, nframes=None):
     KeyError
         If the epoch has no sequence for ``camera``.
     """
-    sequence = _parse_sequence(epoch["sequences"][camera])
+    sequence = _parse_sequence(epoch["sequences"][camera], mjds=epoch["sources"], camera=camera)
     raw_paths = []
     for expnum in np.ravel(sequence.get("flat", [])):
         for mjd in np.atleast_1d(epoch["sources"]):
