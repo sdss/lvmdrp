@@ -18,6 +18,7 @@ from lvmdrp import log
 from lvmdrp.core.constants import LVM_ELEVATION, LVM_LAT, LVM_LON, CONFIG_PATH, CON_LAMPS, ARC_LAMPS
 from lvmdrp.core.apertures import Aperture
 from lvmdrp.core.cube import Cube
+from lvmdrp.core.image import _percentile_normalize
 from lvmdrp.core.fiberrows import FiberRows
 from lvmdrp.core.tracemask import TraceMask
 from lvmdrp.core.header import Header
@@ -1393,7 +1394,22 @@ class RSS(FiberRows):
 
         return self
 
-    def combineRSS(self, rsss, method="mean", quantile=50):
+    def combineRSS(self, rsss, method="mean", quantile=50, normalize=False, normalize_percentile=75):
+        """Combines a list of RSS objects into this RSS using the given statistic
+
+        Parameters
+        ----------
+        rsss : list[RSS]
+            RSS objects to combine
+        method : str, optional
+            Statistic used to combine, by default "mean"
+        quantile : float, optional
+            Quantile used when `method='quantile'`, by default 50
+        normalize : bool, optional
+            Scale each RSS to a common level before combining, by default False
+        normalize_percentile : float, optional
+            Percentile of each RSS used to compute the normalization factor, by default 75
+        """
         dim = rsss[0]._data.shape
         data = numpy.zeros((len(rsss), dim[0], dim[1]), dtype=numpy.float32)
         if rsss[0]._mask is not None:
@@ -1419,6 +1435,14 @@ class RSS(FiberRows):
                 error[i, :, :] = rss._error
             if sky is not None:
                 sky[i, :, :] = rss._sky
+
+        if normalize:
+            data, norm = _percentile_normalize(data, normalize_percentile)
+            log.info(f"normalizing RSSs at {normalize_percentile = } with factors: {numpy.round(norm, 4).tolist()}")
+            if error is not None:
+                error = norm[:, None, None] * error
+            if sky is not None:
+                sky = norm[:, None, None] * sky
 
         weights = numpy.ones_like(data)
         if error is not None:

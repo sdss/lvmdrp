@@ -1255,6 +1255,7 @@ def _create_wavelengths_60177(use_longterm_cals=True, skip_done=True, dry_run=Fa
         use_lines = pixwav[camera][:, 2].astype(bool) if camera in pixwav else []
         ref_lines, _, cent_wave, _, rss, wave_trace, fwhm_trace = rss_tasks.determine_wavelength_solution(in_arcs=xarc_paths[camera], out_wave=mwave_path, out_lsf=mlsf_path,
                                                                                                           pixel=pixels, ref_lines=waves, use_line=use_lines,
+                                                                                                          arcs_combination="pixels",
                                                                                                           flux_range=[800, np.inf], cent_range=[-1.5, 1.5], fwhm_range=[2.0, 4.5])
 
         lvmarc = lvmArc(data=rss._data, error=rss._error, mask=rss._mask, header=rss._header,
@@ -2439,7 +2440,6 @@ def create_wavelengths(mjd, epochs=None, use_longterm_cals=True, kind="longterm"
         arcs = arc_analogs.get_group((camera,))
 
         # define product paths
-        carc_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="c", imagetype="arc", camera=camera, expnum=expnum_str)
         xarc_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="x", imagetype="arc", camera=camera, expnum=expnum_str)
         if kind == "longterm":
             mwave_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, camera=camera, kind="mwave")
@@ -2447,29 +2447,31 @@ def create_wavelengths(mjd, epochs=None, use_longterm_cals=True, kind="longterm"
         else:
             mwave_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, camera=camera, kind="nwave")
             mlsf_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, camera=camera, kind="nlsf")
-        os.makedirs(os.path.dirname(carc_path), exist_ok=True)
 
-        # combine individual arcs into master arc
-        if skip_done and os.path.isfile(carc_path):
-            log.info(f"skipping combined arc {carc_path}, file already exists")
-        else:
-            darc_paths = [path.full("lvm_anc", drpver=drpver, kind="d", imagetype="arc", **arc) for arc in arcs.to_dict("records")]
-            image_tasks.create_master_frame(in_images=darc_paths, out_image=carc_path, batch_size=48)
-
-        # TODO: maybe subtract stray light?
-
-        # extract arc
-        if skip_done and os.path.isfile(xarc_path):
-            log.info(f"skipping extracted arc {xarc_path}, file already exists")
-        else:
-            image_tasks.extract_spectra(in_image=carc_path, out_rss=xarc_path,
+        # extract individual arcs, accounting for fiber thermal shifts in each exposure
+        xarc_paths = []
+        for arc in arcs.to_dict("records"):
+            darc_path = path.full("lvm_anc", drpver=drpver, kind="d", imagetype="arc", **arc)
+            xarc_paths.append(path.full("lvm_anc", drpver=drpver, kind="x", imagetype="arc", **arc))
+            if skip_done and os.path.isfile(xarc_paths[-1]):
+                log.info(f"skipping extracted arc {xarc_paths[-1]}, file already exists")
+                continue
+            image_tasks.extract_spectra(in_image=darc_path, out_rss=xarc_paths[-1],
                                         in_trace=calibs["centroids"][camera],
                                         in_sigma=calibs["sigmas"][camera],
                                         in_model=calibs["model"][camera])
 
-        # fit wavelength solution
+        # combine extracted arcs into master arc
+        if skip_done and os.path.isfile(xarc_path):
+            log.info(f"skipping combined arc {xarc_path}, file already exists")
+        else:
+            rss_tasks.combine_rsss(in_rsss=xarc_paths, out_rss=xarc_path, method="median", normalize=True, normalize_percentile=99)
+
+        # TODO: maybe subtract stray light?
+
+        # fit wavelength solution measuring lines in each arc individually
         ref_lines, _, cent_wave, _, rss, wave_trace, fwhm_trace = rss_tasks.determine_wavelength_solution(
-            in_arcs=xarc_path,
+            in_arcs=xarc_paths,
             out_wave=mwave_path,
             out_lsf=mlsf_path)
 

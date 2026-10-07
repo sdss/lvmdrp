@@ -225,6 +225,121 @@ def mergeRSS_drp(files_in, file_out, mergeHdr="1"):
     rss.writeFitsData(file_out)
 
 
+def _get_reference_lines(lamps, camera):
+    """Returns reference arc lines for the given set of lamps and camera
+
+    Reads the pixel-wavelength map for the combination of lamps. If no such map
+    exists, the maps for the individual lamps are read and concatenated.
+
+    Parameters
+    ----------
+    lamps : set[str]
+        Arc lamps (lower case) that were on
+    camera : str
+        Camera name (e.g., b1)
+
+    Returns
+    -------
+    ref_fiber : int
+        Reference fiber of the pixel-wavelength map
+    pixel : numpy.ndarray
+        Pixel positions of the reference lines
+    ref_lines : numpy.ndarray
+        Reference wavelengths of the lines
+    use_line : numpy.ndarray
+        Boolean selection of lines to use
+    """
+    ilamps = [lamp.lower() for lamp in ARC_LAMPS]
+    lamps_label = "_".join(sorted(lamps, key=lambda x: ilamps.index(x)))
+    _, ref_fiber, pixel, ref_lines, use_line = _read_pixwav_map(lamps_label, camera)
+    # if no reference file for combined lamps exist, read individual files
+    if ref_fiber is None:
+        pixel_list, ref_lines_list, use_line_list = [], [], []
+        for lamp in lamps:
+            log.info(f"loading reference lines for {lamp = } in {camera = }")
+            _, ref_fiber, pixel, ref_lines, use_line = _read_pixwav_map(lamp, camera)
+
+            # remove masked lines
+            pixel_list.append(pixel[use_line])
+            ref_lines_list.append(ref_lines[use_line])
+            use_line_list.append(use_line[use_line])
+
+        # combine all reference lines into a long array
+        pixel = numpy.concatenate(pixel_list)
+        ref_lines = numpy.concatenate(ref_lines_list)
+        use_line = numpy.concatenate(use_line_list)
+
+    return ref_fiber, pixel, ref_lines, use_line
+
+
+def _prepare_arc(arc, cont_niter, cont_thresh, cont_box_range):
+    """Subtracts continuum, masks non-exposed standard fibers and invalid pixels in an extracted arc"""
+    camera = arc._header["CCD"]
+
+    # subtract continuum
+    if cont_niter > 0:
+        log.info(f"fitting and subtracting continuum with parameters: {cont_niter = }, {cont_thresh = }, {cont_box_range = }")
+        arc, _, _ = arc.subtract_continuum(niter=cont_niter, thresh=cont_thresh, median_box_range=cont_box_range)
+
+    # mask std fibers since they are not regularly illuminated during arc exposures
+    fibermap = arc._slitmap[arc._slitmap["spectrographid"] == int(camera[1])].as_array()
+    log.info("determining exposed standard fiber")
+    exposed, nonexposed = _get_exposed_std_rss(arc, return_nonexposed=True)
+    arc._mask[nonexposed] = True
+    log.info(f"found {len(exposed)} exposed standard fibers: {fibermap['orig_ifulabel'][exposed]}")
+
+    # replace NaNs
+    mask = arc._mask | numpy.isnan(arc._data) | numpy.isnan(arc._error)
+    mask |= (arc._data < 0.0) | (arc._error <= 0.0)
+    arc._data[mask] = 0.0
+    arc._error[mask] = numpy.inf
+
+    return arc
+
+
+def _combine_arc_lines(flux, cent, fwhm, masked):
+    """Combines arc line measurements from several exposures
+
+    Line centroids of each exposure are first aligned per fiber to the median
+    centroids across exposures, to remove relative shifts along the dispersion
+    axis (e.g., thermal). The combined centroids are then shifted back by the
+    mean offset of the exposures, so that the wavelength zero point corresponds
+    to the average of the exposures.
+
+    Parameters
+    ----------
+    {flux, cent, fwhm} : numpy.ndarray
+        Line fluxes, centroids and FWHMs with shape (narcs, nfibers, nlines)
+    masked : numpy.ndarray
+        Boolean mask of lines with shape (narcs, nfibers, nlines)
+
+    Returns
+    -------
+    {flux, cent, fwhm} : numpy.ndarray
+        Combined line fluxes, centroids and FWHMs with shape (nfibers, nlines)
+    masked : numpy.ndarray
+        Combined mask with shape (nfibers, nlines)
+    offsets : numpy.ndarray
+        Centroid offsets (in pixels) of each exposure and fiber with shape (narcs, nfibers)
+    """
+    flux = numpy.where(masked, numpy.nan, flux)
+    cent = numpy.where(masked, numpy.nan, cent)
+    fwhm = numpy.where(masked, numpy.nan, fwhm)
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", category=RuntimeWarning)
+        ref_cent = bn.nanmedian(cent, axis=0)
+        offsets = bn.nanmedian(cent - ref_cent[None], axis=2)
+        offsets = numpy.nan_to_num(offsets, nan=0.0)
+
+        cent = bn.nanmedian(cent - offsets[:, :, None], axis=0) + bn.nanmean(offsets, axis=0)[:, None]
+        fwhm = bn.nanmedian(fwhm, axis=0)
+        flux = bn.nanmedian(flux, axis=0)
+
+    masked = numpy.isnan(flux) | numpy.isnan(cent) | numpy.isnan(fwhm)
+    return flux, cent, fwhm, masked, offsets
+
+
 # TODO:
 # * define ancillary product lvm-lxpeak for ref_line_file
 # * define ancillary product lvm-arc (rss arc) for replace arc_rss
@@ -248,6 +363,7 @@ def determine_wavelength_solution(in_arcs: List[str]|str, out_wave: str, out_lsf
                                   poly_disp: int = 6, poly_fwhm: int = 4,
                                   poly_cros: int = 0, poly_kinds: list = ['poly', 'poly', 'poly'],
                                   negative: bool = False,
+                                  arcs_combination: str = "measurements",
                                   plot_fibers: List[int] = [],
                                   display_plots: bool = False):
     """
@@ -308,6 +424,10 @@ def determine_wavelength_solution(in_arcs: List[str]|str, out_wave: str, out_lsf
         Polynomial degree for cross-dispersion smoothing of FWHM(pixel) ( = 0 no smoothing), by default 2
     negative : bool, optional
         Assume absorption spectra, by default False
+    arcs_combination : str, optional
+        How to combine multiple arcs: 'measurements' fits the lines in each arc
+        individually and combines the line centroids and widths, 'pixels' sums
+        the arcs before fitting the lines, by default 'measurements'
     plot_fibers : list[int], optional
         When debug_mode == True, this will show additional plots on the fitting of the listed fibers
     display_plots : bool, optional
@@ -342,7 +462,7 @@ def determine_wavelength_solution(in_arcs: List[str]|str, out_wave: str, out_lsf
         raise ValueError(f"wrong type for {in_arcs = }, it can be either a string or a list or tuple of")
 
     iarcs = []
-    ilamps = []
+    arcs_lamps = []
     for in_arc in in_arcs:
         # initialize the extracted arc line frame
         log.info(f"reading arc from '{in_arc}'")
@@ -356,106 +476,58 @@ def determine_wavelength_solution(in_arcs: List[str]|str, out_wave: str, out_lsf
             continue
 
         # update current lamps
-        ilamps.extend(lamps)
+        arcs_lamps.append(set(lamps))
         # append arc
         iarcs.append(arc)
 
-    # combine RSS objects
+    if arcs_combination not in {"measurements", "pixels"}:
+        raise ValueError(f"invalid value for {arcs_combination = }, expected either 'measurements' or 'pixels'")
+
+    # prepare individual arcs for line measurements
+    if arcs_combination == "measurements" and len(iarcs) > 1:
+        log.info(f"measuring arc lines in {len(iarcs)} individual arcs")
+        parcs = [_prepare_arc(copy(iarc), cont_niter, cont_thresh, cont_box_range) for iarc in iarcs]
+    else:
+        parcs = None
+
+    # combine RSS objects in pixel space
     arc = RSS()
     arc.combineRSS(iarcs, method="sum")
+    arc = _prepare_arc(arc, cont_niter, cont_thresh, cont_box_range)
     unit = arc._header["BUNIT"]
     # update lamps status
-    lamps = set(ilamps)
+    lamps = set.union(*arcs_lamps)
+    if parcs is None:
+        log.info(f"measuring arc lines in {len(iarcs)} arcs combined in pixel space")
+        parcs = [arc]
+        arcs_lamps = [lamps]
 
-    # subtract continuum
-    if cont_niter > 0:
-        log.info(f"fitting and subtracting continuum with parameters: {cont_niter = }, {cont_thresh = }, {cont_box_range = }")
-        arc, _, _ = arc.subtract_continuum(niter=cont_niter, thresh=cont_thresh, median_box_range=cont_box_range)
-
-    # mask std fibers since they are not regularly illuminated during arc exposures
-    fibermap = arc._slitmap[arc._slitmap["spectrographid"] == int(camera[1])].as_array()
-    # select = fibermap["telescope"] == "Spec"
-    log.info("determining exposed standard fiber")
-    exposed, nonexposed = _get_exposed_std_rss(arc, return_nonexposed=True)
-    arc._mask[nonexposed] = True
-    log.info(f"found {len(exposed)} exposed standard fibers: {fibermap['orig_ifulabel'][exposed]}")
-
-    # replace NaNs
-    mask = arc._mask | numpy.isnan(arc._data) | numpy.isnan(arc._error)
-    mask |= (arc._data < 0.0) | (arc._error <= 0.0)
-    arc._data[mask] = 0.0
-    arc._error[mask] = numpy.inf
-
-    # read reference lines
+    # read reference lines for each arc
     if len(pixel) == 0 or len(ref_lines) == 0 or len(use_line) == 0:
-        ilamps = [lamp.lower() for lamp in ARC_LAMPS]
-        lamps_label = "_".join(sorted(lamps, key=lambda x: ilamps.index(x)))
-        _, ref_fiber_, pixel, ref_lines, use_line = _read_pixwav_map(lamps_label, camera)
-        # if no reference file for combined lamps exist, read individual files
-        if ref_fiber is None:
-            pixel_list, ref_lines_list, use_line_list = [], [], []
-            for lamp in lamps:
-                log.info(f"loading reference lines for {lamp = } in {camera = }")
-                _, ref_fiber_, pixel, ref_lines, use_line = _read_pixwav_map(lamp, camera)
-
-                # remove masked lines
-                pixel = pixel[use_line]
-                ref_lines = ref_lines[use_line]
-                use_line = use_line[use_line]
-
-                pixel_list.append(pixel)
-                ref_lines_list.append(ref_lines)
-                use_line_list.append(use_line)
-
-            # combine all reference lines into a long array
-            pixel = numpy.concatenate(pixel_list)
-            ref_lines = numpy.concatenate(ref_lines_list)
-            use_line = numpy.concatenate(use_line_list)
+        arcs_refs = [_get_reference_lines(alamps, camera) for alamps in arcs_lamps]
     else:
         log.info(f"using given reference lines: {ref_lines}")
+        arcs_refs = [(ref_fiber, numpy.asarray(pixel), numpy.asarray(ref_lines), numpy.asarray(use_line, dtype=bool))] * len(parcs)
 
-    # sort lines by pixel position
+    # remove bad lines and sort them by pixel position
+    for i, (ref_fiber_, apixel, aref_lines, ause_line) in enumerate(arcs_refs):
+        sort = numpy.argsort(apixel[ause_line])
+        arcs_refs[i] = (ref_fiber_, apixel[ause_line][sort], aref_lines[ause_line][sort])
+
+    # define union of reference lines across arcs, sorted by pixel position
+    ref_lines, iunique = numpy.unique(numpy.concatenate([aref_lines for _, _, aref_lines in arcs_refs]), return_index=True)
+    pixel = numpy.concatenate([apixel for _, apixel, _ in arcs_refs])[iunique]
     sort = numpy.argsort(pixel)
-    pixel = pixel[sort]
-    ref_lines = ref_lines[sort]
-    use_line = use_line[sort]
-
-    # apply cc correction to lines if needed
-    if cc_correction or ref_fiber != ref_fiber_:
-        log.info(f"running cross matching on all {pixel.size} identified lines")
-        # determine maximum correlation shift
-        pix_spec = _spec_from_lines(pixel, sigma=2.5/2.354, wavelength=arc._pixels)
-
-        # fix cc_max_shift
-        # cross-match spectrum and pixwav map
-        stretch_min, stretch_max, stretch_steps = 0.95, 1.05, 10000
-        cc, bhat, mhat = _cross_match_float(
-            ref_spec=pix_spec,
-            obs_spec=arc._data[ref_fiber],
-            stretch_factors=numpy.linspace(stretch_min, stretch_max, stretch_steps),
-            shift_range=[-cc_max_shift, cc_max_shift],
-            normalize_spectra=False,
-        )
-        if mhat == stretch_min or mhat == stretch_max:
-            log.warning(f"boundary of stretch factors: {mhat = } ({stretch_min, stretch_max = })")
-        log.info(f"max CC = {cc:.2f} for strech = {mhat:.8f} and shift = {bhat:.8f}")
-    else:
-        mhat, bhat = 1.0, 0.0
-
-    # remove bad lines
-    pixel = pixel[use_line]
-    ref_lines = ref_lines[use_line]
-    use_line = use_line[use_line]
-    nlines = len(pixel)
-
-    # correct initial pixel map by shifting
-    pixel = mhat * pixel + bhat
-
-    if negative:
-        log.info("flipping arc along flux direction")
-        arc = -1 * arc + bn.nanmedian(arc._data)
+    pixel, ref_lines = pixel[sort], ref_lines[sort]
+    line_index = {wave: j for j, wave in enumerate(ref_lines)}
+    nlines = len(ref_lines)
 
     # setup storage array
+    narcs = len(parcs)
+    flux = numpy.full((narcs, arc._fibers, nlines), numpy.nan, dtype=numpy.float32)
+    cent_wave = numpy.full((narcs, arc._fibers, nlines), numpy.nan, dtype=numpy.float32)
+    fwhm = numpy.full((narcs, arc._fibers, nlines), numpy.nan, dtype=numpy.float32)
+    masked = numpy.ones((narcs, arc._fibers, nlines), dtype=bool)
     wave_coeffs = numpy.zeros((arc._fibers, numpy.abs(poly_disp) + 1))
     lsf_coeffs = numpy.zeros((arc._fibers, numpy.abs(poly_fwhm) + 1))
     wave_sol = numpy.zeros((arc._fibers, arc._data.shape[1]), dtype=numpy.float32)
@@ -463,39 +535,85 @@ def determine_wavelength_solution(in_arcs: List[str]|str, out_wave: str, out_lsf
     lsf_sol = numpy.zeros((arc._fibers, arc._data.shape[1]), dtype=numpy.float32)
     lsf_rms = numpy.zeros(arc._fibers, dtype=numpy.float32)
 
-    # measure the ARC lines with individual Gaussian across the CCD
+    # measure the ARC lines with individual Gaussian across the CCD in each arc
     log.info(f"fitting arc lines for each fiber for {ref_fiber = } with parameter ranges:")
     log.info(f"   {flux_range = } {unit}")
     log.info(f"   {cent_range = } pixel")
     log.info(f"   {fwhm_range = } pixel")
     log.info(f"   {bg_range   = } {unit}")
+    mhats, bhats = numpy.ones(narcs), numpy.zeros(narcs)
+    for iarc, (parc, (ref_fiber_, apixel, aref_lines)) in enumerate(zip(parcs, arcs_refs)):
+        # apply cc correction to lines if needed
+        if cc_correction or ref_fiber != ref_fiber_:
+            log.info(f"running cross matching on all {apixel.size} identified lines in arc {iarc}")
+            pix_spec = _spec_from_lines(apixel, sigma=2.5/2.354, wavelength=parc._pixels)
 
-    # initialize plots for arc lines fitting
-    axs_fibers = {}
-    axs_fibers[ref_fiber] = _make_arcline_axes(display_plots, pixel=pixel, ref_lines=ref_lines, ifiber=ref_fiber)
-    if plot_fibers:
-        for ifiber in plot_fibers:
-            axs_fibers[ifiber] = _make_arcline_axes(display_plots, pixel=pixel, ref_lines=ref_lines, ifiber=ifiber)
-    fibers, flux, cent_wave, fwhm, masked = arc.measureArcLines(
-        ref_fiber,
-        pixel,
-        aperture=aperture,
-        fwhm_guess=fwhm_guess,
-        bg_guess=bg_guess,
-        flux_range=flux_range,
-        cent_range=cent_range,
-        fwhm_range=fwhm_range,
-        bg_range=bg_range,
-        axs=axs_fibers,
-    )
-    for ifiber, (fig, axs) in axs_fibers.items():
-        save_fig(
-            fig,
-            product_path=out_wave,
-            to_display=display_plots,
-            figure_path="qa",
-            label=f"lines_fitting_{ifiber:04d}",
+            # cross-match spectrum and pixwav map
+            stretch_min, stretch_max, stretch_steps = 0.95, 1.05, 10000
+            cc, bhats[iarc], mhats[iarc] = _cross_match_float(
+                ref_spec=pix_spec,
+                obs_spec=parc._data[ref_fiber],
+                stretch_factors=numpy.linspace(stretch_min, stretch_max, stretch_steps),
+                shift_range=[-cc_max_shift, cc_max_shift],
+                normalize_spectra=False,
+            )
+            if mhats[iarc] == stretch_min or mhats[iarc] == stretch_max:
+                log.warning(f"boundary of stretch factors: {mhats[iarc] = } ({stretch_min, stretch_max = })")
+            log.info(f"max CC = {cc:.2f} for strech = {mhats[iarc]:.8f} and shift = {bhats[iarc]:.8f}")
+
+        # correct initial pixel map by shifting
+        apixel = mhats[iarc] * apixel + bhats[iarc]
+
+        if negative:
+            log.info("flipping arc along flux direction")
+            parc = -1 * parc + bn.nanmedian(parc._data)
+
+        # initialize plots for arc lines fitting
+        axs_fibers = {}
+        for ifiber in [ref_fiber] + list(plot_fibers):
+            axs_fibers[ifiber] = _make_arcline_axes(display_plots, pixel=apixel, ref_lines=aref_lines, ifiber=ifiber)
+        _, aflux, acent_wave, afwhm, amasked = parc.measureArcLines(
+            ref_fiber,
+            apixel,
+            aperture=aperture,
+            fwhm_guess=fwhm_guess,
+            bg_guess=bg_guess,
+            flux_range=flux_range,
+            cent_range=cent_range,
+            fwhm_range=fwhm_range,
+            bg_range=bg_range,
+            axs=axs_fibers,
         )
+        for ifiber, (fig, axs) in axs_fibers.items():
+            save_fig(
+                fig,
+                product_path=out_wave,
+                to_display=display_plots,
+                figure_path="qa",
+                label=f"lines_fitting_{ifiber:04d}" + (f"_arc{iarc:02d}" if narcs > 1 else ""),
+            )
+
+        # store measurements in the union of reference lines
+        icols = [line_index[wave] for wave in aref_lines]
+        flux[iarc][:, icols] = aflux
+        cent_wave[iarc][:, icols] = acent_wave
+        fwhm[iarc][:, icols] = afwhm
+        masked[iarc][:, icols] = amasked
+
+    # combine line measurements from all arcs
+    flux, cent_wave, fwhm, masked, offsets = _combine_arc_lines(flux, cent_wave, fwhm, masked)
+    fibers = numpy.arange(arc._fibers)
+    if narcs > 1:
+        for iarc in range(narcs):
+            log.info(f"arc {iarc} line centroid offsets: median = {bn.nanmedian(offsets[iarc]):.4f} pixel, "
+                     f"range = [{bn.nanmin(offsets[iarc]):.4f}, {bn.nanmax(offsets[iarc]):.4f}] pixel")
+    arc.setHdrValue("HIERARCH PIPE ARC NCOMB", narcs, "Number of arcs with lines measured individually")
+
+    # define reference arc line positions and correction for plotting
+    pixel = mhats[0] * pixel + bhats[0]
+    mhat, bhat = mhats[0], bhats[0]
+    if negative:
+        arc = -1 * arc + bn.nanmedian(arc._data)
 
     # numpy.savetxt("./pixels.txt", cent_wave)
     # numpy.savetxt("./flux.txt", flux)
@@ -1720,7 +1838,7 @@ def apply_fiberflat(in_rss: str, out_frame: str, in_flat: str,
     return rss, lvmframe
 
 
-def combine_rsss(in_rsss, out_rss, method="mean"):
+def combine_rsss(in_rsss, out_rss, method="mean", normalize=False, normalize_percentile=75):
     """combines the given RSS list to a single RSS using a statistic
 
     Parameters
@@ -1731,6 +1849,10 @@ def combine_rsss(in_rsss, out_rss, method="mean"):
         output RSS file path
     method : str, optional
         statistic to use for combining the RSS objects, by default "mean"
+    normalize : bool, optional
+        scale each RSS to a common level before combining, by default False
+    normalize_percentile : float, optional
+        percentile of each RSS used to compute the normalization factor, by default 75
     """
     rss_list = []
     for i in in_rsss:
@@ -1739,7 +1861,7 @@ def combine_rsss(in_rsss, out_rss, method="mean"):
         rss_list.append(rss)
     # combined_header = combineHdr(rss_list)
     combined_rss = RSS()
-    combined_rss.combineRSS(rss_list, method=method)
+    combined_rss.combineRSS(rss_list, method=method, normalize=normalize, normalize_percentile=normalize_percentile)
     # combined_rss.setHeader(header=combined_header._header)
     # write out FITS file
     combined_rss.writeFitsData(out_rss)
