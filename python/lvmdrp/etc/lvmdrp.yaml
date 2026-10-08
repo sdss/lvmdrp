@@ -54,4 +54,7 @@ reduction_steps:
       sky_model_version: drp1.3.2-v1
       sky_data_dir: null
       sky_options:
-        decompose_science: true
+        decompose_science: true   # decomp_*: also decompose the science spectrum
+        sky_lsf: sci              # mlsky: LSF for the sky telescopes, sci (as in training) or own
+        arm_correction: true      # mlsky: sky-arm residual correction (blue solar lines)
+        line_scaling: true        # mlsky: refit sky-line scales on the science spectrum

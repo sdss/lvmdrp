@@ -1644,12 +1644,15 @@ def combine_skies(in_rss: str, out_rss, sky_weights: Tuple[float, float] = None)
 # sky telescopes:
 #   separation 'find_continuum' -- the original median-filter separation
 #              'decomposition'  -- lvmsky's sky decomposition (core/xsky.py)
+#              'prediction'     -- no separation: the science sky is predicted by
+#                                  the trained lvmsky model (core/xsky.py)
 #   combine    a ``create_skysub_spectrum`` method: 'farlines_nearcont' or 'nearest'
 SKY_METHODS = {
     'farlines_nearcont': dict(separation='find_continuum', combine='farlines_nearcont'),
     'nearest': dict(separation='find_continuum', combine='nearest'),
     'decomp_farlines_nearcont': dict(separation='decomposition', combine='farlines_nearcont'),
     'decomp_nearest': dict(separation='decomposition', combine='nearest'),
+    'mlsky': dict(separation='prediction', combine=None),
 }
 FALLBACK_SKY_METHOD = 'farlines_nearcont'
 
@@ -1670,7 +1673,9 @@ def quick_sky_subtraction(in_cframe, out_sframe, skymethod: str = 'farlines_near
     sky_options : dict, optional
         per-method settings; for the 'decomposition' methods,
         ``decompose_science`` (default True) also decomposes the science
-        spectrum instead of separating it with ``find_continuum``
+        spectrum instead of separating it with ``find_continuum``; for
+        'mlsky', ``sky_lsf`` ("sci" or "own"), ``arm_correction`` and
+        ``line_scaling`` (see ``core.xsky.predict_sky``)
     sky_model_version : str, optional
         sky-data version, i.e. ``$LVM_MASTER_DIR/sky_models/<version>``,
         needed by the 'decomposition' methods
@@ -1680,8 +1685,9 @@ def quick_sky_subtraction(in_cframe, out_sframe, skymethod: str = 'farlines_near
         path for the ancillary sky table, by default the reduction tree's
         ``lvm_anc`` sky table
 
-    A 'decomposition' method falls back to "farlines_nearcont" for an exposure
-    it cannot handle (FLUXCAL other than MOD, missing sky data, failed fit);
+    A 'decomposition' or 'prediction' method falls back to "farlines_nearcont"
+    for an exposure it cannot handle (FLUXCAL other than MOD, missing sky data
+    or model, no PyTorch, failed fit);
     the SFrame header records the requested method (SKYMREQ), the method used
     (SKYMETH) and the reason for any fallback (SKYFALLB).
     """
@@ -1701,12 +1707,41 @@ def quick_sky_subtraction(in_cframe, out_sframe, skymethod: str = 'farlines_near
     # create spectrum for sky subtraction
     method_used, fallback, hdr_extra = skymethod, None, {}
     spec = SKY_METHODS[skymethod]
-    if spec['separation'] == 'decomposition':
+    if spec['separation'] in ('decomposition', 'prediction'):
         from lvmdrp.core import xsky
         try:
             model_dir = xsky.sky_data_dir(sky_model_version, sky_data_dir)
+            # mode B uses the SKY_EAST/SKY_WEST extensions combined over the science
+            # fibers (SKYE_SUPER/SKYW_SUPER), the inputs the model was trained on
+            sky_ext = ('SKYE_SUPER', 'SKYW_SUPER') if spec['separation'] == 'prediction' else ('SKYE', 'SKYW')
             spectra = {tel: Table(sky_hdu[ext].data)['FLUX'].data
-                       for tel, ext in (('Sci', 'SCI'), ('SkyE', 'SKYE'), ('SkyW', 'SKYW'))}
+                       for tel, ext in (('Sci', 'SCI'), ('SkyE', sky_ext[0]), ('SkyW', sky_ext[1]))}
+        except Exception as e:
+            fallback = f"{type(e).__name__}: {e}"
+    if spec['separation'] == 'prediction' and fallback is None:
+        try:
+            pred = xsky.predict_sky(in_cframe, cframe._header, Table(sky_hdu['SCI'].data)['WAVE'].data,
+                                    spectra, model_dir, options=sky_options)
+            # the sky does not depend on the fiber type, so it is computed once
+            scisky, scisky_error = pred['sky'], pred['sky_error']
+            skyesky, skyesky_error = scisky, scisky_error
+            skywsky, skywsky_error = scisky, scisky_error
+            hdr_extra = {
+                'LVMSKYCO': (xsky.lvmsky_source().get('commit', '')[:8], 'lvmsky commit used'),
+                'SKYMVER': (model_dir.name, 'sky-data directory used'),
+                'SKYMCONF': (round(pred['confidence'], 4), 'sky-model ensemble confidence (0-1]'),
+                'SKYMRELI': (pred['reliability'], 'sky-model reliability bitmask'),
+                'SKYMLSF': (pred['info']['sky_lsf'], 'LSF used for the sky telescopes'),
+                'SKYDSTAT': (','.join(f"{k}={v}" for k, v in pred['info']['statuses'].items()),
+                             'decomposition fit status'),
+            }
+            if pred['line_scales']:
+                hdr_extra['SKYLSCAL'] = (','.join(f"{k}={v:.3f}" for k, v in pred['line_scales'].items())[:68],
+                                         'sky-line scale factors')
+        except Exception as e:
+            fallback = f"{type(e).__name__}: {e}"
+    if spec['separation'] == 'decomposition' and fallback is None:
+        try:
             separation = xsky.separate(in_cframe, cframe._header, Table(sky_hdu['SCI'].data)['WAVE'].data,
                                        spectra, model_dir,
                                        decompose_science=sky_options.get('decompose_science', True))
@@ -1724,8 +1759,9 @@ def quick_sky_subtraction(in_cframe, out_sframe, skymethod: str = 'farlines_near
             }
         except Exception as e:
             fallback = f"{type(e).__name__}: {e}"
-            log.warning(f"sky method {skymethod} failed ({fallback}); falling back to {FALLBACK_SKY_METHOD}")
-            method_used, spec = FALLBACK_SKY_METHOD, SKY_METHODS[FALLBACK_SKY_METHOD]
+    if fallback is not None:
+        log.warning(f"sky method {skymethod} failed ({fallback}); falling back to {FALLBACK_SKY_METHOD}")
+        method_used, spec = FALLBACK_SKY_METHOD, SKY_METHODS[FALLBACK_SKY_METHOD]
     if spec['separation'] == 'find_continuum':
         scisky, scisky_error = create_skysub_spectrum(sky_hdu, tel='sci', method=spec['combine'])
         skyesky, skyesky_error = create_skysub_spectrum(sky_hdu, tel="skye", method=spec['combine'])
