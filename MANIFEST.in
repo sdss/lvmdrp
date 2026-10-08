@@ -1,4 +1,5 @@
 recursive-include python/lvmdrp/etc *
+recursive-include python/lvmdrp/external/lvmsky *.py SOURCE
 
 include requirements.txt
 include requirements_third.txt
