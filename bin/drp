@@ -18,7 +18,8 @@ from astropy.stats import biweight_location
 from lvmdrp.core.constants import CALIBRATION_MAPPINGS, CALIBRATION_TYPES, LVM_REFERENCE_COLUMN, SKYLINES_FIBERFLAT
 from lvmdrp import __version__ as drpver
 from lvmdrp.main import run_drp, reduce_file, check_daily_mjd, parse_mjds, read_expfile, create_drpall, cache_std_xp_spectra, cache_sci_xp_spectra
-from lvmdrp.functions.skyMethod import configureSkyModel_drp
+from lvmdrp.main import get_config_options
+from lvmdrp.functions.skyMethod import configureSkyModel_drp, quick_sky_subtraction, SKY_METHODS
 from lvmdrp.utils.metadata import get_frames_metadata, get_master_metadata
 from lvmdrp.utils.cluster import run_cluster, run_cluster_cals
 
@@ -150,12 +151,14 @@ def cli():
 @click.option('--force-run', is_flag=True, default=False, help='force reduction even if the exposure was flagged as BAD by the QC pipeline')
 @click.option('--use-nightly-cals', is_flag=True, default=False, help='Use nightly calibrations from same MJD as science frame(s). This option implies --use-untagged-cals')
 @click.option('--use-untagged-cals', is_flag=True, default=False, help='Use calibrations from the untagged (not sandbox) directory')
+@click.option('--sky-method', type=click.Choice(list(SKY_METHODS)), default=None,
+              help='Sky-subtraction method, overriding the config (default: config, normally farlines_nearcont)')
 @cloup.constraint(mutually_exclusive, ['mjd', 'mjd_list', 'mjd_range'])
 # @cloup.constraint(RequireExactly(1), ['mjd', 'mjd_list', 'mjd_range'])
 @cloup.constraint(mutually_exclusive, ['expnum', 'exp_list', 'exp_range'])
 def run(mjd, mjd_list, mjd_range, with_cals, no_sci, expnum, exp_list, exp_range, exp_file, fluxcal_method,
         skip_2d, skip_1d, skip_wavecal, skip_waveres, skip_fluxcal, skip_skysub, skip_drpall, clean_ancillary, debug_mode, force_run,
-        use_nightly_cals, use_untagged_cals):
+        use_nightly_cals, use_untagged_cals, sky_method):
     """ Run the DRP reduction for a given MJD or range of MJDs
 
     Run the DRP for an MJD or range of MJDs.  Various flags and options are available
@@ -187,7 +190,8 @@ def run(mjd, mjd_list, mjd_range, with_cals, no_sci, expnum, exp_list, exp_range
             use_nightly_cals=use_nightly_cals,
             use_untagged_cals=use_untagged_cals,
             debug_mode=debug_mode,
-            force_run=force_run)
+            force_run=force_run,
+            sky_method=sky_method)
 
 
 # register full DRP command
@@ -227,6 +231,41 @@ def skycli():
 def sky_configure(library, multiscat):
     """ Run the sky module configuration """
     configureSkyModel_drp(run_libary=library, run_multiscat=multiscat)
+
+
+@skycli.command('subtract', short_help='Sky-subtract one lvmCFrame file')
+@click.argument('cframe', type=click.Path(exists=True, dir_okay=False))
+@click.option('-o', '--out', type=str, default=None,
+              help='output SFrame (default: ./lvmSFrame-<expnum>.<method>.fits)')
+@click.option('-m', '--sky-method', type=click.Choice(list(SKY_METHODS)), default=None,
+              help='sky-subtraction method (default: the config, normally farlines_nearcont)')
+@click.option('--sky-model-version', type=str, default=None,
+              help='sky data in $LVM_MASTER_DIR/sky_models/<version> (default: the config)')
+@click.option('--sky-data-dir', type=click.Path(file_okay=False), default=None,
+              help='explicit sky-data directory, overriding --sky-model-version')
+def sky_subtract(cframe, out, sky_method, sky_model_version, sky_data_dir):
+    """ Sky-subtract one lvmCFrame with a chosen method
+
+    Runs the DRP's sky-subtraction step (quick_sky_subtraction) on CFRAME,
+    wherever it is, and writes the lvmSFrame, the ancillary sky table
+    (<out>.skytable.fits) and sky QA plots (qa/ beside the output).  Options
+    not given come from the reduction_steps.science_reduction config.  The
+    default output name includes the method, so a production lvmSFrame is
+    never overwritten.
+    """
+    from astropy.io import fits
+    opts = dict(get_config_options('reduction_steps.science_reduction'))
+    method = sky_method or opts.get('skymethod', 'farlines_nearcont')
+    if out is None:
+        expnum = fits.getheader(cframe)['EXPOSURE']
+        out = os.path.join(os.getcwd(), f'lvmSFrame-{expnum:08d}.{method}.fits')
+    out = os.path.abspath(out)
+    quick_sky_subtraction(in_cframe=cframe, out_sframe=out, skymethod=method,
+                          sky_options=opts.get('sky_options'),
+                          sky_model_version=sky_model_version or opts.get('sky_model_version'),
+                          sky_data_dir=sky_data_dir or opts.get('sky_data_dir'),
+                          skytable=os.path.splitext(out)[0] + '.skytable.fits')
+    click.echo(f'wrote {out}')
 
 
 cli.add_command(skycli)

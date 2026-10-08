@@ -1638,7 +1638,25 @@ def combine_skies(in_rss: str, out_rss, sky_weights: Tuple[float, float] = None)
     return rss, sky
 
 
-def quick_sky_subtraction(in_cframe, out_sframe, skymethod: str = 'farlines_nearcont'):
+# Sky-subtraction methods selectable with ``skymethod`` (``drp run --sky-method``,
+# ``drp sky subtract --sky-method`` or the ``reduction_steps.science_reduction``
+# config).  Each pairs a continuum/line separation with a way of combining the
+# sky telescopes:
+#   separation 'find_continuum' -- the original median-filter separation
+#              'decomposition'  -- lvmsky's sky decomposition (core/xsky.py)
+#   combine    a ``create_skysub_spectrum`` method: 'farlines_nearcont' or 'nearest'
+SKY_METHODS = {
+    'farlines_nearcont': dict(separation='find_continuum', combine='farlines_nearcont'),
+    'nearest': dict(separation='find_continuum', combine='nearest'),
+    'decomp_farlines_nearcont': dict(separation='decomposition', combine='farlines_nearcont'),
+    'decomp_nearest': dict(separation='decomposition', combine='nearest'),
+}
+FALLBACK_SKY_METHOD = 'farlines_nearcont'
+
+
+def quick_sky_subtraction(in_cframe, out_sframe, skymethod: str = 'farlines_nearcont',
+                          sky_options: dict = None, sky_model_version: str = None,
+                          sky_data_dir: str = None, skytable: str = None):
     """ main sky subtraction routine using Simple Sky method
 
     Parameters
@@ -1648,14 +1666,32 @@ def quick_sky_subtraction(in_cframe, out_sframe, skymethod: str = 'farlines_near
     out_sframe : str
         output SFrame file
     skymethod : str, optional
-        method of computing sky continuum, by default "farlines_nearcont"
-        note, not currently being passed from science_reduction in main.py
+        one of ``SKY_METHODS``, by default "farlines_nearcont"
+    sky_options : dict, optional
+        per-method settings; for the 'decomposition' methods,
+        ``decompose_science`` (default True) also decomposes the science
+        spectrum instead of separating it with ``find_continuum``
+    sky_model_version : str, optional
+        sky-data version, i.e. ``$LVM_MASTER_DIR/sky_models/<version>``,
+        needed by the 'decomposition' methods
+    sky_data_dir : str, optional
+        explicit sky-data directory, overriding ``sky_model_version``
+    skytable : str, optional
+        path for the ancillary sky table, by default the reduction tree's
+        ``lvm_anc`` sky table
 
+    A 'decomposition' method falls back to "farlines_nearcont" for an exposure
+    it cannot handle (FLUXCAL other than MOD, missing sky data, failed fit);
+    the SFrame header records the requested method (SKYMREQ), the method used
+    (SKYMETH) and the reason for any fallback (SKYFALLB).
     """
     # print('************************************')
     # print('********* SUBTRACTING SKY **********')
     # print('************************************')
-    log.info(f"loading {in_cframe} for sky subtraction")
+    if skymethod not in SKY_METHODS:
+        raise ValueError(f"unknown sky method {skymethod!r}; choose from {list(SKY_METHODS)}")
+    sky_options = dict(sky_options or {})
+    log.info(f"loading {in_cframe} for sky subtraction (method {skymethod})")
 
     cframe = lvmCFrame.from_file(in_cframe)
 
@@ -1663,9 +1699,44 @@ def quick_sky_subtraction(in_cframe, out_sframe, skymethod: str = 'farlines_near
     sky_hdu = prep_input_simplesky_mean(in_cframe)
 
     # create spectrum for sky subtraction
-    scisky, scisky_error = create_skysub_spectrum(sky_hdu, tel='sci', method=skymethod)
-    skyesky, skyesky_error = create_skysub_spectrum(sky_hdu, tel="skye", method=skymethod)
-    skywsky, skywsky_error = create_skysub_spectrum(sky_hdu, tel="skyw", method=skymethod)
+    method_used, fallback, hdr_extra = skymethod, None, {}
+    spec = SKY_METHODS[skymethod]
+    if spec['separation'] == 'decomposition':
+        from lvmdrp.core import xsky
+        try:
+            model_dir = xsky.sky_data_dir(sky_model_version, sky_data_dir)
+            spectra = {tel: Table(sky_hdu[ext].data)['FLUX'].data
+                       for tel, ext in (('Sci', 'SCI'), ('SkyE', 'SKYE'), ('SkyW', 'SKYW'))}
+            separation = xsky.separate(in_cframe, cframe._header, Table(sky_hdu['SCI'].data)['WAVE'].data,
+                                       spectra, model_dir,
+                                       decompose_science=sky_options.get('decompose_science', True))
+            # the sky does not depend on the fiber type, so it is computed once
+            scisky, scisky_error = create_skysub_spectrum(sky_hdu, tel='sci', method=spec['combine'],
+                                                          separation=separation)
+            skyesky, skyesky_error = scisky, scisky_error
+            skywsky, skywsky_error = scisky, scisky_error
+            hdr_extra = {
+                'LVMSKYCO': (xsky.lvmsky_source().get('commit', '')[:8], 'lvmsky commit used'),
+                'SKYMVER': (model_dir.name, 'sky-data directory used'),
+                'SKYDSCI': (bool(sky_options.get('decompose_science', True)), 'science spectrum decomposed'),
+                'SKYDSTAT': (','.join(f"{k}={v}" for k, v in separation['info']['statuses'].items()),
+                             'decomposition fit status'),
+            }
+        except Exception as e:
+            fallback = f"{type(e).__name__}: {e}"
+            log.warning(f"sky method {skymethod} failed ({fallback}); falling back to {FALLBACK_SKY_METHOD}")
+            method_used, spec = FALLBACK_SKY_METHOD, SKY_METHODS[FALLBACK_SKY_METHOD]
+    if spec['separation'] == 'find_continuum':
+        scisky, scisky_error = create_skysub_spectrum(sky_hdu, tel='sci', method=spec['combine'])
+        skyesky, skyesky_error = create_skysub_spectrum(sky_hdu, tel="skye", method=spec['combine'])
+        skywsky, skywsky_error = create_skysub_spectrum(sky_hdu, tel="skyw", method=spec['combine'])
+
+    cframe._header['SKYMREQ'] = (skymethod, 'sky-subtraction method requested')
+    cframe._header['SKYMETH'] = (method_used, 'sky-subtraction method used')
+    if fallback:
+        cframe._header['SKYFALLB'] = (fallback[:68], 'reason the requested sky method fell back')
+    for key, value in hdr_extra.items():
+        cframe._header[key] = value
 
     # select correct fibers
     data = cframe._data
@@ -1698,8 +1769,9 @@ def quick_sky_subtraction(in_cframe, out_sframe, skymethod: str = 'farlines_near
     mjd = cframe._header['SMJD']  # use SMJD to account for exposures taken before the nightly MJD switch
     expnum = cframe._header['EXPOSURE']
     tileid = cframe._header['TILE_ID']
-    skytable = path.full('lvm_anc', mjd=mjd, tileid=tileid, drpver=drpver,
-                         kind='sky', camera='brz', imagetype='table', expnum=expnum)
+    if skytable is None:
+        skytable = path.full('lvm_anc', mjd=mjd, tileid=tileid, drpver=drpver,
+                             kind='sky', camera='brz', imagetype='table', expnum=expnum)
 
     sky_hdu.writeto(skytable, overwrite=True)
 
@@ -1715,6 +1787,7 @@ def quick_sky_subtraction(in_cframe, out_sframe, skymethod: str = 'farlines_near
 
     #creating skyQA plots
     QA_path = os.path.join(os.path.dirname(out_sframe), "qa")
+    os.makedirs(QA_path, exist_ok=True)
     outfile = QA_path +f'/skyQA_{expnum}'
     run_qa(out_sframe, outfile)
 
@@ -1933,7 +2006,8 @@ def polynomial_fit_with_outliers(spectrum_table, degree=3, sigma_lower=3, sigma_
 
 
 def create_skysub_spectrum(hdu: fits.HDUList, tel: str,
-                           wmin: int = 7000, wmax: int = 9000, method: str = 'farlines_nearcont') -> np.array:
+                           wmin: int = 7000, wmax: int = 9000, method: str = 'farlines_nearcont',
+                           separation: dict = None) -> np.array:
     """ Create spectrum for sky subtraction
 
     Parameters
@@ -1948,6 +2022,11 @@ def create_skysub_spectrum(hdu: fits.HDUList, tel: str,
         the wavelength maximum bound, by default 6450
     method : str, optional
         the method of constructing the sky continuum, by default "nearest"
+    separation : dict, optional
+        a precomputed continuum/line separation from ``core.xsky.separate``;
+        its continua replace those of ``find_continuum`` for the spectra it
+        holds (all three, or SkyE and SkyW only).  By default None, the
+        original ``find_continuum`` separation.
 
     Returns
     -------
@@ -2003,6 +2082,22 @@ def create_skysub_spectrum(hdu: fits.HDUList, tel: str,
     # lsci_error = np.sqrt(specsci_error._data**2+csci_error**2)
     lskye_error = np.sqrt(specskye_error._data**2+cskye_error**2)
     lskyw_error = np.sqrt(specskyw_error._data**2+cskyw_error**2)
+
+    # replace the separation with a precomputed one (lvmsky decomposition, core/xsky.py)
+    # for the spectra it holds; its model continuum is treated as noiseless, so the
+    # line error is the spectrum's own error
+    if separation is not None:
+        if separation.get('sci') is not None:
+            csci = separation['sci']['continuum']
+            lsci = specsci._data - csci
+        cskye = separation['skye']['continuum']
+        cskyw = separation['skyw']['continuum']
+        lskye = specskye._data - cskye
+        lskyw = specskyw._data - cskyw
+        cskye_error = np.zeros_like(cskye)
+        cskyw_error = np.zeros_like(cskyw)
+        lskye_error = np.array(specskye_error._data, dtype=float)
+        lskyw_error = np.array(specskyw_error._data, dtype=float)
 
     # calculate separation of sky and science fields
     cordsci = SkyCoord(hdusci.header["RA"], hdusci.header["DEC"], unit="deg")

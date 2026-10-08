@@ -10,6 +10,7 @@ This document records the main changes to the drp code.
 ---------------------
 
 - Added an unmodified copy of the lvmsky sky-model code (``python/lvmdrp/external/lvmsky``) and ``bin/sync_lvmsky`` to refresh it from a lvmsky commit
+- Added selectable sky-subtraction methods (``SKY_METHODS`` in ``functions/skyMethod.py``): ``decomp_farlines_nearcont`` and ``decomp_nearest`` separate continuum and lines with the lvmsky decomposition (``core/xsky.py``) instead of ``find_continuum``, falling back to ``farlines_nearcont`` for non-MOD exposures or on failure; chosen by the new ``reduction_steps.science_reduction`` config, ``drp run --sky-method``, or the new ``drp sky subtract`` command; the SFrame header records the method (``SKYMREQ``, ``SKYMETH``, ``SKYFALLB``, ``LVMSKYCO``, ``SKYMVER``, ``SKYDSCI``, ``SKYDSTAT``)
 
 
 1.3.2 (02-09-2026)

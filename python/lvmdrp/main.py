@@ -1535,8 +1535,16 @@ def science_reduction(expnum: int,
                       skip_skysub: bool = False,
                       skip_drpall: bool = False,
                       debug_mode: bool = False,
-                      force_run: bool = False) -> None:
+                      force_run: bool = False,
+                      skymethod: str = 'farlines_nearcont',
+                      sky_options: dict = None,
+                      sky_model_version: str = None,
+                      sky_data_dir: str = None) -> None:
     """ Run the science reduction for a given exposure number.
+
+    ``skymethod``, ``sky_options``, ``sky_model_version`` and ``sky_data_dir``
+    are passed to ``quick_sky_subtraction``; they normally come from the
+    ``reduction_steps.science_reduction`` section of the DRP config.
     """
 
     if debug_mode:
@@ -1747,7 +1755,9 @@ def science_reduction(expnum: int,
     else:
         # sky subtraction
         with Timer(name='QSky '+sframe_path, logger=log.info):
-            quick_sky_subtraction(in_cframe=cframe_path, out_sframe=sframe_path)
+            quick_sky_subtraction(in_cframe=cframe_path, out_sframe=sframe_path,
+                                  skymethod=skymethod, sky_options=sky_options,
+                                  sky_model_version=sky_model_version, sky_data_dir=sky_data_dir)
 
     if skip_drpall:
         log.info("skipping create/update drpall summary file")
@@ -1789,7 +1799,8 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
             skip_2d: bool = False, skip_1d: bool = False, skip_wavecal: bool = False,
             skip_waveres: bool = False, skip_fluxcal: bool = False, skip_skysub: bool = False,
             skip_drpall: bool = False, use_nightly_cals: bool = False, use_untagged_cals: bool = False,
-            clean_ancillary: bool = False, debug_mode: bool = False, force_run: bool = False):
+            clean_ancillary: bool = False, debug_mode: bool = False, force_run: bool = False,
+            sky_method: str = None):
     """ Run the quick DRP
 
     Run the quick DRP for an MJD, or a range of MJDs. Reduces
@@ -1832,6 +1843,8 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
         Flag to run in debug mode, by default False
     force_run : bool, optional
         Flag to force reductions even if the data was flagged as BAD by the QC pipeline, by default False
+    sky_method : str, optional
+        Sky-subtraction method overriding the config's ``skymethod``, by default None
     """
     # # write the drp parameter configuration
     # write_config_file()
@@ -1952,7 +1965,9 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
 
         # reduce the science data
         if sci_cond:
-            kwargs = get_config_options('reduction_steps.science_reduction')
+            kwargs = dict(get_config_options('reduction_steps.science_reduction'))
+            if sky_method is not None:
+                kwargs['skymethod'] = sky_method
             for expnum in sci['expnum'].unique():
                 with Timer(name=f'Reduction EXPNUM {expnum}', logger=log.info):
                     try:
