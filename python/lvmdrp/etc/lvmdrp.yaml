@@ -46,9 +46,12 @@ reduction_steps:
     default:
       # sky subtraction: one of functions/skyMethod.SKY_METHODS (overridden by
       # `drp run --sky-method`); the decomp_* methods need a sky-data directory,
-      # $LVM_MASTER_DIR/sky_models/<sky_model_version>, or sky_data_dir if given
+      # $LVM_MASTER_DIR/sky_models/<sky_model_version>, or sky_data_dir if given.
+      # sky_model_version is the default sky data for this lvmdrp release: version
+      # directories are never modified, so a new data set or model is a new
+      # version (drp<DRP version of the training data>-v<N>) and a change here.
       skymethod: farlines_nearcont
-      sky_model_version: null
+      sky_model_version: drp1.3.2-v1
       sky_data_dir: null
       sky_options:
         decompose_science: true
