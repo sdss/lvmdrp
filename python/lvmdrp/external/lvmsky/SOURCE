@@ -1,0 +1,11 @@
+Unmodified copy of part of the lvmsky repository -- DO NOT EDIT these files in lvmdrp.
+Change lvmsky instead and run bin/sync_lvmsky again.
+
+repository:  git@github.com:sdss/lvmsky.git
+ref:         xsky
+commit:      194e3b0ca3f2b48ffa701552143b1e3b03647f60
+commit date: 2026-10-08 16:01:30 -0500
+subject:     Add LVMSKY_DATA_ROOT to locate the data bundle outside the code tree
+copied:      2026-10-08
+files:       skysub/decompose_parallel.py, skysub/sky_decomp, skysub/mlp_predictor
+excluded:    skysub/sky_decomp/data, skysub/sky_decomp/tests

@@ -67,3 +67,8 @@ de421.bsp
 *checkpoint*
 
 gaia_cache/
+# Vendored lvmsky code (bin/sync_lvmsky): track every source file, overriding
+# the broad "_*" and "data*" patterns above, but not compiled files.
+!python/lvmdrp/external/lvmsky/**
+python/lvmdrp/external/lvmsky/**/__pycache__/
+python/lvmdrp/external/lvmsky/**/*.py[co]

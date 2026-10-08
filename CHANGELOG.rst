@@ -9,6 +9,7 @@ This document records the main changes to the drp code.
 1.3.3dev (unreleased)
 ---------------------
 
+- Added an unmodified copy of the lvmsky sky-model code (``python/lvmdrp/external/lvmsky``) and ``bin/sync_lvmsky`` to refresh it from a lvmsky commit
 
 
 1.3.2 (02-09-2026)

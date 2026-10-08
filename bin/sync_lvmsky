@@ -1,0 +1,113 @@
+#!/usr/bin/env python
+# encoding: utf-8
+#
+"""Copy the lvmsky sky-model code into lvmdrp.
+
+lvmdrp carries an unmodified copy of the parts of the lvmsky repository
+(https://github.com/sdss/lvmsky) that the lvmsky-based sky subtraction needs:
+
+    skysub/decompose_parallel.py
+    skysub/sky_decomp/      (without its data/ and tests/ directories)
+    skysub/mlp_predictor/
+
+The copy lives in python/lvmdrp/external/lvmsky/ and must never be edited in
+lvmdrp: fixes go into lvmsky and are brought over by running this script
+again.  The files are taken from a lvmsky git commit with `git archive`, so
+uncommitted changes in the lvmsky checkout are never copied.  The commit used
+is recorded in python/lvmdrp/external/lvmsky/SOURCE.
+
+The data the code needs (PALACE tables, solar spectrum, moon/zodiacal-light
+assets, sensitivity curves) and the trained model are not copied; they live in
+the calibration directory.
+
+Usage:
+
+    bin/sync_lvmsky /path/to/lvmsky            # copy the checked-out commit (HEAD)
+    bin/sync_lvmsky /path/to/lvmsky -r xsky    # copy a given branch, tag or commit
+"""
+
+import argparse
+import datetime
+import io
+import pathlib
+import shutil
+import subprocess
+import sys
+import tarfile
+import tempfile
+
+
+# what is copied, relative to the lvmsky repository root
+MEMBERS = ["skysub/decompose_parallel.py", "skysub/sky_decomp", "skysub/mlp_predictor"]
+# what is left out of the copied directories
+EXCLUDE_DIRS = {"skysub/sky_decomp/data", "skysub/sky_decomp/tests"}
+EXCLUDE_NAMES = {"__pycache__", ".DS_Store"}
+
+DEST = pathlib.Path(__file__).resolve().parent.parent / "python" / "lvmdrp" / "external" / "lvmsky"
+
+
+def git(repo, *args):
+    """Run a git command in repo and return its stdout as text."""
+    return subprocess.check_output(["git", "-C", str(repo), *args], text=True).strip()
+
+
+def excluded(name):
+    """True if an archive member is left out of the copy."""
+    parts = pathlib.PurePosixPath(name).parts
+    if any(p in EXCLUDE_NAMES for p in parts):
+        return True
+    return any(name == d or name.startswith(d + "/") for d in EXCLUDE_DIRS)
+
+
+def sync(repo, ref, dest=DEST):
+    """Replace dest with the lvmsky files at ref; return the commit hash copied."""
+    repo = pathlib.Path(repo).expanduser().resolve()
+    commit = git(repo, "rev-parse", "--verify", f"{ref}^{{commit}}")
+    archive = subprocess.check_output(["git", "-C", str(repo), "archive", "--format=tar", commit, *MEMBERS])
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = pathlib.Path(tmp)
+        with tarfile.open(fileobj=io.BytesIO(archive)) as tar:
+            members = [m for m in tar.getmembers() if not excluded(m.name)]
+            tar.extractall(tmp, members=members)
+        n_files = sum(1 for m in members if m.isfile())
+
+        if dest.exists():
+            shutil.rmtree(dest)
+        dest.mkdir(parents=True)
+        shutil.move(str(tmp / "skysub"), str(dest / "skysub"))
+
+    try:
+        remote = git(repo, "remote", "get-url", "origin")
+    except subprocess.CalledProcessError:
+        remote = "(no origin remote)"
+    (dest / "SOURCE").write_text(
+        "Unmodified copy of part of the lvmsky repository -- DO NOT EDIT these files in lvmdrp.\n"
+        "Change lvmsky instead and run bin/sync_lvmsky again.\n"
+        "\n"
+        f"repository:  {remote}\n"
+        f"ref:         {ref}\n"
+        f"commit:      {commit}\n"
+        f"commit date: {git(repo, 'show', '-s', '--format=%ci', commit)}\n"
+        f"subject:     {git(repo, 'show', '-s', '--format=%s', commit)}\n"
+        f"copied:      {datetime.date.today().isoformat()}\n"
+        f"files:       {', '.join(MEMBERS)}\n"
+        f"excluded:    {', '.join(sorted(EXCLUDE_DIRS))}\n"
+    )
+    print(f"copied {n_files} files from lvmsky {commit[:8]} ({ref}) to {dest}")
+    return commit
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Copy the lvmsky sky-model code into lvmdrp.")
+    parser.add_argument("lvmsky", help="path to a lvmsky git checkout")
+    parser.add_argument("-r", "--ref", default="HEAD", help="lvmsky branch, tag or commit to copy (default: HEAD)")
+    args = parser.parse_args()
+    try:
+        sync(args.lvmsky, args.ref)
+    except subprocess.CalledProcessError as e:
+        sys.exit(f"git failed: {e}")
+
+
+if __name__ == "__main__":
+    main()
