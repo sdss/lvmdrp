@@ -403,6 +403,45 @@ def test_qa_fiberflat_epochs(tmp_path, monkeypatch):
     assert os.path.isfile(result["report"].replace(".html", ".csv"))
 
 
+def test_qa_fiberflat_epochs_default_output(tmp_path, monkeypatch):
+    epochs = {60255: {"trigger": "Survey start"}}
+    # sandbox flats: the dashboard goes next to them, in the master calibrations directory
+    monkeypatch.setenv("LVM_MASTER_DIR", str(tmp_path / "sandbox"))
+    for channel in "br":
+        path = ff.fiberflat_path(60255, channel)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        open(path, "w").close()
+    result = ff.qa_fiberflat_epochs(channels="br", epochs=epochs, dry_run=True)
+    assert result["output_dir"] == str(tmp_path / "sandbox" / "qa" / "fiberflat" / "twilight_vs_60255")
+
+    # flats of a pipeline version: in the ancillary directory of the reference epoch
+    for channel in "br":
+        path = ff.fiberflat_path(60255, channel, drpver="1.2.3", redux_dir=str(tmp_path / "redux"))
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        open(path, "w").close()
+    result = ff.qa_fiberflat_epochs(channels="br", epochs=epochs, drpver="1.2.3", redux_dir=str(tmp_path / "redux"), dry_run=True)
+    assert result["output_dir"] == str(tmp_path / "redux" / "1.2.3" / "0011XX" / "11111" / "60255" / "ancillary" / "fiberflat_qa" / "twilight_vs_60255")
+
+
+@pytest.mark.parametrize("selection, name", [
+    ({}, "all"),
+    ({"mjds": [61313]}, "mjd_61313"),
+    ({"mjds": [61330, 61300, 61313]}, "mjd_61300-61330"),
+    ({"mjd_range": (61330, 60300)}, "mjd_60300-61330"),
+    ({"mjds": [61313], "tileids": [1028325, 1027988]}, "mjd_61313_tiles_1027988-1028325"),
+    ({"mjd_range": (60300, 61330), "tileids": list(range(5))}, "mjd_60300-61330_5tiles"),
+    ({"frames_file": "/some/where/twilight_frames.txt", "mjds": [61313]}, "frames_twilight_frames"),
+])
+def test_flatfield_qa_name(selection, name):
+    assert ff.flatfield_qa_name(**selection) == name
+
+
+def test_default_flatfield_qa_dir(tmp_path, monkeypatch):
+    assert ff.default_flatfield_qa_dir("1.2.3", "mjd_61313", redux_dir="/redux") == "/redux/1.2.3/qa/flatfield/mjd_61313"
+    monkeypatch.setenv("LVM_SPECTRO_REDUX", str(tmp_path))
+    assert ff.default_flatfield_qa_dir("1.2.3", "all") == str(tmp_path / "1.2.3" / "qa" / "flatfield" / "all")
+
+
 def test_reference_epoch_without_flats(tmp_path):
     with pytest.raises(FileNotFoundError):
         ff.qa_fiberflat_epochs(mjd_ref=60255, channels="b", epochs={60255: {}}, flats_dir=str(tmp_path), dry_run=True)

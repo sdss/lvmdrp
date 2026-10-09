@@ -54,6 +54,7 @@ from lvmdrp.core.rss import RSS, lvmFrame
 from lvmdrp.qa.report import (
     THEME, SERIES, DARK_COLORS, SEQUENTIAL, SEQUENTIAL_DARK, MONO_FONT,
     base_layout, style_axes, html_table, tiles_html, meta_html, figures_json, page_head, picker, write_dashboard,
+    epoch_qa_dir, version_qa_dir, sandbox_qa_dir,
 )
 from lvmdrp.utils.convert import tileid_grp
 
@@ -1094,6 +1095,49 @@ FRAME_METADATA = [
 
 # marker color, symbol and legend label of each feature kind in the report
 KIND_STYLE = {"line": (SERIES[0], "circle", "Sky lines"), "cont": (SERIES[1], "square", "Continuum")}
+
+
+def flatfield_qa_name(mjds: List[int] = None, mjd_range: Tuple[int, int] = None, tileids: List[int] = None,
+                      frames_file: str = None) -> str:
+    """Name of the science frames flat field QA directory after the frames selection
+
+    Parameters
+    ----------
+    mjds : list[int], optional
+        MJDs of the frames
+    mjd_range : tuple[int, int], optional
+        inclusive (min, max) MJD range of the frames
+    tileids : list[int], optional
+        tile IDs of the frames
+    frames_file : str, optional
+        text file listing the frames, instead of an MJD selection
+
+    Returns
+    -------
+    str
+        e.g. 'mjd_61313', 'mjd_60300-61330', 'mjd_61313_tiles_1028325' or
+        'frames_<file name>'; 'all' when nothing is selected
+    """
+    if frames_file:
+        return f"frames_{os.path.splitext(os.path.basename(frames_file))[0]}"
+    if mjd_range is not None:
+        name = f"mjd_{min(mjd_range)}-{max(mjd_range)}"
+    elif mjds:
+        name = f"mjd_{min(mjds)}" if len(set(mjds)) == 1 else f"mjd_{min(mjds)}-{max(mjds)}"
+    else:
+        name = "all"
+    if tileids:
+        name += "_tiles_" + "-".join(str(tileid) for tileid in sorted(tileids)) if len(tileids) <= 3 else f"_{len(tileids)}tiles"
+    return name
+
+
+def default_flatfield_qa_dir(drpver: str, name: str, redux_dir: str = None) -> str:
+    """Default directory of the science frames flat field QA: version-wide, in the reductions of `drpver`
+
+    ``{redux_dir}/{drpver}/qa/flatfield/{name}``, see :func:`lvmdrp.qa.report.version_qa_dir`
+    and :func:`flatfield_qa_name`.
+    """
+    return version_qa_dir(drpver, "flatfield", name, redux_dir=redux_dir)
 
 
 def find_frames(drpver: str, channels: str = "brz", mjds: List[int] = None, mjd_range: Tuple[int, int] = None,
@@ -2675,7 +2719,11 @@ def qa_fiberflat_epochs(mjd_ref: int = None, channels: str = "brz", kind: str = 
         Reductions root directory for ``drpver``. Default is ``$LVM_SPECTRO_REDUX``.
     output_dir : str, optional
         Directory of the dashboard and summary table. Default is
-        ``fiberflat_qa/{kind}_vs_{mjd_ref}`` in the current directory.
+        ``qa/fiberflat/{kind}_vs_{mjd_ref}`` in the master calibrations
+        directory (see :func:`lvmdrp.qa.report.sandbox_qa_dir`) or, when
+        comparing the flats of ``drpver``, ``fiberflat_qa/{kind}_vs_{mjd_ref}``
+        in the ancillary directory of the reference epoch in its reductions (see
+        :func:`lvmdrp.qa.report.epoch_qa_dir`).
     bin_width : float, optional
         Width of the wavelength bins in Angstroms. Default is 50.
     telescopes : tuple[str], optional
@@ -2700,6 +2748,7 @@ def qa_fiberflat_epochs(mjd_ref: int = None, channels: str = "brz", kind: str = 
           (``hdr_factor*``). None in a dry run.
         - ``"figures"`` : dict, the Plotly figures of the dashboard.
         - ``"report"`` : str, path of the dashboard, None in a dry run.
+        - ``"output_dir"`` : str, directory of the dashboard and summary table.
     """
     epochs = epochs if epochs is not None else load_calibration_epochs(epochs_path)
     paths = {mjd: {channel: fiberflat_path(mjd, channel, kind=kind, flats_dir=flats_dir, drpver=drpver, redux_dir=redux_dir)
@@ -2717,7 +2766,10 @@ def qa_fiberflat_epochs(mjd_ref: int = None, channels: str = "brz", kind: str = 
         raise FileNotFoundError(f"reference epoch {mjd_ref} is missing {kind} fiber flats: "
                                 f"{[paths[mjd_ref][c] for c in channels if not exists[mjd_ref][c]]}")
 
-    output_dir = output_dir or os.path.join(os.getcwd(), "fiberflat_qa", f"{kind}_vs_{mjd_ref}")
+    if output_dir is None:
+        name = f"{kind}_vs_{mjd_ref}"
+        output_dir = (epoch_qa_dir(drpver, mjd_ref, "fiberflat", name, redux_dir=redux_dir) if drpver is not None
+                      else sandbox_qa_dir("fiberflat", name, master_dir=flats_dir))
     report_path = os.path.join(output_dir, f"fiberflat-epochs-qa_{kind}_vs_{mjd_ref}.html")
     table_path = os.path.join(output_dir, f"fiberflat-epochs-qa_{kind}_vs_{mjd_ref}.csv")
     missing = {channel: [mjd for mjd in paths if not exists[mjd][channel]] for channel in channels}
@@ -2726,7 +2778,7 @@ def qa_fiberflat_epochs(mjd_ref: int = None, channels: str = "brz", kind: str = 
         log.info(f"  {channel}: {len(epochs) - len(missing[channel])} flats, missing for epochs {missing[channel]}")
     if dry_run:
         log.info(f"dry run: dashboard would be written to {report_path}")
-        return {"summary": None, "figures": {}, "report": None}
+        return {"summary": None, "figures": {}, "report": None, "output_dir": output_dir}
 
     rows, ifu_values, geometry = [], {}, None
     for channel in channels:
@@ -2794,7 +2846,7 @@ def qa_fiberflat_epochs(mjd_ref: int = None, channels: str = "brz", kind: str = 
     _write_fiberflat_dashboard(report_path, summary, figures, epochs, geometry, ifu_values, mjd_ref, channels, kind,
                                missing, bin_width, telescopes, max_deviation, flats_dir, drpver)
     log.info(f"written fiber flat epochs dashboard to {report_path}")
-    return {"summary": summary, "figures": figures, "report": report_path}
+    return {"summary": summary, "figures": figures, "report": report_path, "output_dir": output_dir}
 
 
 def _ifu_payload(epochs, geometry, ifu_values, mjd_ref, channels, kind):

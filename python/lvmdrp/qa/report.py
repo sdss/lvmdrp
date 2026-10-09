@@ -16,6 +16,84 @@ import plotly.graph_objects as go
 import plotly.io as pio
 from plotly.offline import get_plotlyjs_version
 
+from lvmdrp.utils.convert import tileid_grp
+
+
+# calibration tile of the reductions, whose ancillary directories hold the per-epoch QA reports
+CALIB_TILEID = 11111
+
+
+def epoch_qa_dir(drpver: str, mjd: int, kind: str, name: str, redux_dir: str = None) -> str:
+    """Directory of a QA report about a calibration epoch, in the reductions of a pipeline version
+
+    The report sits in the ancillary directory of the epoch, under the calibration tile:
+    ``{redux_dir}/{drpver}/0011XX/11111/{mjd}/ancillary/{kind}_qa/{name}``.
+
+    Parameters
+    ----------
+    drpver : str
+        pipeline version of the reductions
+    mjd : int
+        MJD of the calibration epoch
+    kind : str
+        kind of QA, e.g. 'pixflat' or 'fiberflat'
+    name : str
+        name of the report directory, e.g. '60741_raw'
+    redux_dir : str, optional
+        reductions root directory, by default $LVM_SPECTRO_REDUX
+
+    Returns
+    -------
+    str
+        path of the directory
+    """
+    redux_dir = redux_dir or os.getenv("LVM_SPECTRO_REDUX", ".")
+    return os.path.join(redux_dir, drpver, tileid_grp(CALIB_TILEID), str(CALIB_TILEID), str(mjd), "ancillary", f"{kind}_qa", name)
+
+
+def version_qa_dir(drpver: str, kind: str, name: str, redux_dir: str = None) -> str:
+    """Directory of a QA report about a whole pipeline version: ``{redux_dir}/{drpver}/qa/{kind}/{name}``
+
+    Parameters
+    ----------
+    drpver : str
+        pipeline version of the reductions
+    kind : str
+        kind of QA, e.g. 'flatfield'
+    name : str
+        name of the report directory, e.g. 'mjd_60300-61330'
+    redux_dir : str, optional
+        reductions root directory, by default $LVM_SPECTRO_REDUX
+
+    Returns
+    -------
+    str
+        path of the directory
+    """
+    redux_dir = redux_dir or os.getenv("LVM_SPECTRO_REDUX", ".")
+    return os.path.join(redux_dir, drpver, "qa", kind, name)
+
+
+def sandbox_qa_dir(kind: str, name: str, master_dir: str = None) -> str:
+    """Directory of a QA report about the master calibrations sandbox: ``{master_dir}/qa/{kind}/{name}``
+
+    Parameters
+    ----------
+    kind : str
+        kind of QA, e.g. 'fiberflat'
+    name : str
+        name of the report directory, e.g. 'twilight_vs_61193'
+    master_dir : str, optional
+        master calibrations directory, by default $LVM_MASTER_DIR
+
+    Returns
+    -------
+    str
+        path of the directory
+    """
+    master_dir = master_dir or os.getenv("LVM_MASTER_DIR", ".")
+    return os.path.join(master_dir, "qa", kind, name)
+
 
 # report colors (light theme); the report swaps them for DARK_COLORS in the
 # browser when the viewer uses a dark theme

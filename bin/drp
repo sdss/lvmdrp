@@ -48,7 +48,7 @@ from lvmdrp.functions.pixelflats import (
 from lvmdrp.qa.pixelflats import qa_pixelflats, qa_raw_pixelflats, QA_PARTS
 from lvmdrp.qa.fiberflats import (
     find_frames, run_flatfield_qa_batch, report_flatfield_qa, qa_fiberflat_epochs, load_calibration_epochs,
-    TELESCOPES as QA_TELESCOPES,
+    flatfield_qa_name, default_flatfield_qa_dir, TELESCOPES as QA_TELESCOPES,
 )
 
 
@@ -781,7 +781,7 @@ def _parse_mjd_range(value):
 @click.option('-t', '--tileid-list', type=IntListType(), default=None, help='a list of tile IDs to check')
 @click.option('-F', '--frames-file', type=click.Path(exists=True, dir_okay=False), default=None, help='a text file with one lvmFrame path per line, instead of searching the reductions')
 @click.option('-c', '--channels', type=str, default="brz", help='Channels to check')
-@click.option('-o', '--output-dir', type=str, default=None, help='Directory of the report and summary table. Defaults to flatfield_qa_{drpver} in the current directory')
+@click.option('-o', '--output-dir', type=str, default=None, help='Directory of the report and summary table. Defaults to qa/flatfield/{selection} in the reductions of --drpver, e.g. qa/flatfield/mjd_60300-61330')
 @click.option('--label', type=str, default="flatfield_qa", help='Name of the summary table and report')
 @click.option('--title', type=str, default="LVM Flat-Field QA", help='Title of the HTML report')
 @click.option('-n', '--nprocs', type=int, default=1, help='Number of processes measuring frames')
@@ -809,7 +809,11 @@ def qa_flatfield_cli(drpver, redux_dir, mjd, mjd_list, mjd_range, tileid_list, f
 
     Runs can be resumed: frames already in the summary table are skipped unless --overwrite is given.
     """
-    output_dir = output_dir or os.path.join(os.getcwd(), f"flatfield_qa_{drpver}")
+    mjds = [mjd] if mjd is not None else (mjd_list or None)
+    mjd_range = _parse_mjd_range(mjd_range) if mjd_range else None
+    if output_dir is None:
+        name = flatfield_qa_name(mjds=mjds, mjd_range=mjd_range, tileids=tileid_list, frames_file=frames_file)
+        output_dir = default_flatfield_qa_dir(drpver, name, redux_dir=redux_dir)
     table_path = os.path.join(output_dir, f"{label}.fits")
     html_path = os.path.join(output_dir, f"{label}.html")
 
@@ -827,9 +831,8 @@ def qa_flatfield_cli(drpver, redux_dir, mjd, mjd_list, mjd_range, tileid_list, f
         with open(frames_file) as f:
             frame_paths = [line.strip() for line in f if line.strip() and not line.startswith("#")]
     else:
-        mjds = [mjd] if mjd is not None else (mjd_list or None)
         frame_paths = find_frames(drpver, channels=channels, mjds=mjds, tileids=tileid_list, redux_dir=redux_dir,
-                                  mjd_range=_parse_mjd_range(mjd_range) if mjd_range else None)
+                                  mjd_range=mjd_range)
     if not frame_paths:
         raise click.UsageError("no lvmFrame files found for the given selection")
 
@@ -858,7 +861,7 @@ def qa_flatfield_cli(drpver, redux_dir, mjd, mjd_list, mjd_range, tileid_list, f
 @click.option('--flats-dir', type=str, default=None, help='Master calibrations directory. Defaults to $LVM_MASTER_DIR')
 @click.option('-d', '--drpver', type=str, default=None, help='Compare the master fiber flats of this pipeline version instead of the master calibrations directory')
 @click.option('--redux-dir', type=str, default=None, help='Reductions root directory for --drpver. Defaults to $LVM_SPECTRO_REDUX')
-@click.option('-o', '--output-dir', type=str, default=None, help='Directory of the dashboard and summary table. Defaults to fiberflat_qa/{kind}_vs_{mjd_ref} in the current directory')
+@click.option('-o', '--output-dir', type=str, default=None, help='Directory of the dashboard and summary table. Defaults to qa/fiberflat/{kind}_vs_{mjd_ref} in the master calibrations directory, or the reference epoch ancillary directory of --drpver')
 @click.option('--bin-width', type=float, default=50.0, help='Width in Angstroms of the wavelength bins the flats are compared in')
 @click.option('--telescopes', type=StrListType(), default=",".join(QA_TELESCOPES), help='Telescopes whose fibers enter the ratio statistics')
 @click.option('--max-deviation', type=float, default=0.01, help='Deviation of a ratio from 1 counted as off')
