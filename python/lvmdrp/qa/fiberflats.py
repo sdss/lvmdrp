@@ -44,6 +44,7 @@ from astropy.table import Table, hstack, vstack
 from plotly.offline import get_plotlyjs_version
 from plotly.subplots import make_subplots
 from scipy.spatial import cKDTree
+from scipy.stats import theilslopes
 from scipy.special import erf
 from tqdm import tqdm
 
@@ -1458,6 +1459,158 @@ def figure_gradient_vectors(gradients: Table):
     return fig
 
 
+def nightly_gradients(gradients: Table) -> Table:
+    """Median science IFU gradient per night (MJD) and channel, over the frames of the night
+
+    Parameters
+    ----------
+    gradients : Table
+        per frame gradients, as returned by `frame_gradients`
+
+    Returns
+    -------
+    Table
+        one row per channel and night with the number of frames, the median
+        gradient components (grad_x, grad_y), and the strength (length) and
+        direction (degrees from the IFU +x axis towards +y) of the median vector
+    """
+    names = ["channel", "mjd", "nframes", "grad_x", "grad_y", "strength", "direction"]
+    rows = []
+    for channel in "brz":
+        sel = gradients[gradients["channel"] == channel] if len(gradients) else gradients
+        for mjd in np.unique(sel["mjd"]) if len(sel) else []:
+            night = sel[sel["mjd"] == mjd]
+            gx, gy = float(np.nanmedian(night["grad_x"])), float(np.nanmedian(night["grad_y"]))
+            rows.append({"channel": channel, "mjd": int(mjd), "nframes": len(night), "grad_x": gx, "grad_y": gy,
+                         "strength": float(np.hypot(gx, gy)), "direction": float(np.degrees(np.arctan2(gy, gx)))})
+    return Table(rows=rows) if rows else Table(names=names, dtype=[str, int, int, float, float, float, float])
+
+
+def _rayleigh_pvalue(n: int, mean_resultant: float) -> float:
+    """p-value of the Rayleigh test for uniformly distributed directions (Zar 1999 approximation)"""
+    if n < 2 or not np.isfinite(mean_resultant):
+        return np.nan
+    rn = n * mean_resultant
+    return float(np.clip(np.exp(np.sqrt(1 + 4 * n + 4 * (n**2 - rn**2)) - (1 + 2 * n)), 0.0, 1.0))
+
+
+def _theil_sen(mjd, values, min_points: int = 3):
+    """Theil-Sen slope per year with its 95% confidence interval, NaN if too few points"""
+    mjd, values = np.asarray(mjd, dtype=float), np.asarray(values, dtype=float)
+    good = np.isfinite(mjd) & np.isfinite(values)
+    if good.sum() < min_points or np.ptp(mjd[good]) == 0:
+        return np.nan, np.nan, np.nan
+    slope, _, low, high = theilslopes(values[good], mjd[good], 0.95)
+    return 365.25 * slope, 365.25 * low, 365.25 * high
+
+
+def gradient_trends(nightly: Table) -> List[Dict]:
+    """Persistent science IFU gradient and its trends with MJD, per channel
+
+    Nights are the independent measurements: a real sky gradient changes
+    direction from night to night, while a smooth error in the flat field keeps
+    its direction in IFU coordinates.
+
+    Parameters
+    ----------
+    nightly : Table
+        nightly gradients, as returned by `nightly_gradients`
+
+    Returns
+    -------
+    list[dict]
+        one dict per channel with: nights, frames, MJD range; the persistent
+        gradient (median over nights of grad_x, grad_y) with the standard
+        errors of the medians, its strength, significance (strength over its
+        error) and direction; the direction consistency (mean resultant
+        length of the nightly directions, 0 for random and 1 for aligned) and
+        the Rayleigh test p-value against random directions; and the Theil-Sen
+        slopes in fraction per year, with 95% confidence intervals, of the
+        nightly grad_x, grad_y and strength versus MJD
+    """
+    trends = []
+    for channel in "brz":
+        sel = nightly[nightly["channel"] == channel] if len(nightly) else nightly
+        if len(sel) == 0:
+            continue
+        gx, gy = np.asarray(sel["grad_x"], dtype=float), np.asarray(sel["grad_y"], dtype=float)
+        n = int(np.isfinite(gx).sum())
+        mx, my = float(np.nanmedian(gx)), float(np.nanmedian(gy))
+        # standard error of the median from a robust scatter
+        ex, ey = (1.2533 * 1.4826 * np.nanmedian(np.abs(v - np.nanmedian(v))) / np.sqrt(n) if n > 1 else np.nan for v in (gx, gy))
+        strength = float(np.hypot(mx, my))
+        error = float(np.hypot(mx * ex, my * ey) / strength) if strength > 0 else np.nan
+        # a night without a gradient has no direction
+        has_direction = np.asarray(sel["strength"], dtype=float) > 0
+        angles = np.radians(np.asarray(sel["direction"], dtype=float)[has_direction])
+        ndirections = int(np.isfinite(angles).sum())
+        resultant = float(np.hypot(np.nanmean(np.cos(angles)), np.nanmean(np.sin(angles)))) if ndirections else np.nan
+        row = {"channel": channel, "nights": n, "frames": int(np.sum(sel["nframes"])),
+               "mjd_min": int(np.min(sel["mjd"])), "mjd_max": int(np.max(sel["mjd"])),
+               "grad_x": mx, "grad_x_err": ex, "grad_y": my, "grad_y_err": ey, "strength": strength,
+               "significance": strength / error if error and np.isfinite(error) and error > 0 else np.nan,
+               "direction": float(np.degrees(np.arctan2(my, mx))), "consistency": resultant,
+               "rayleigh_p": _rayleigh_pvalue(ndirections, resultant)}
+        for column in ("grad_x", "grad_y", "strength"):
+            row[f"trend_{column}"], row[f"trend_{column}_lo"], row[f"trend_{column}_hi"] = _theil_sen(sel["mjd"], sel[column])
+        trends.append(row)
+    return trends
+
+
+def figure_gradient_timeline(nightly: Table, trends: List[Dict]):
+    """Nightly strength and direction of the science IFU gradient versus MJD, per channel
+
+    The direction is shown relative to the channel's persistent (median)
+    direction, wrapped to [-180, 180) degrees, so a constant direction is a flat
+    band at zero whatever its absolute value.
+    """
+    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.08,
+                        subplot_titles=["Strength of the nightly median gradient", "Direction relative to the persistent gradient"])
+    persistent = {row["channel"]: row for row in trends}
+    lines = []
+    for i, channel in enumerate("brz"):
+        sel = nightly[nightly["channel"] == channel] if len(nightly) else nightly
+        if len(sel) == 0:
+            continue
+        color = SERIES[i]
+        mjd = np.asarray(sel["mjd"], dtype=float)
+        strength = 100 * np.asarray(sel["strength"], dtype=float)
+        reference = persistent[channel]["direction"]
+        offset = (np.asarray(sel["direction"], dtype=float) - reference + 180) % 360 - 180
+        customdata = np.stack([sel["nframes"], _fmt_array(100 * np.asarray(sel["grad_x"]), "+.2f"),
+                               _fmt_array(100 * np.asarray(sel["grad_y"]), "+.2f"), _fmt_array(sel["direction"], ".0f")], axis=-1)
+        marker = dict(size=7, color=color, opacity=0.7, line=dict(width=1, color=THEME["surface"]))
+        hover = (f"<b>MJD %{{x}}</b> \u00b7 {channel}<br>%{{customdata[0]}} frames<br>gradient (%{{customdata[1]}}, %{{customdata[2]}})%"
+                 "<br>direction %{customdata[3]}\u00b0")
+        fig.add_trace(go.Scatter(x=mjd, y=strength, mode="markers", name=channel, legendgroup=channel, marker=marker,
+                                 customdata=customdata, hovertemplate=hover + "<br>strength %{y:.2f}%<extra></extra>"), row=1, col=1)
+        fig.add_trace(go.Scatter(x=mjd, y=offset, mode="markers", name=channel, legendgroup=channel, showlegend=False, marker=marker,
+                                 customdata=customdata, hovertemplate=hover + f"<br>%{{y:+.0f}}\u00b0 from {reference:.0f}\u00b0<extra></extra>"),
+                      row=2, col=1)
+        slope = persistent[channel]["trend_strength"]
+        good = np.isfinite(strength)
+        if np.isfinite(slope) and good.sum() >= 3:
+            # Theil-Sen line through the median point, slope in % per year
+            x0, y0 = np.median(mjd[good]), np.median(strength[good])
+            line_x = np.array([mjd[good].min(), mjd[good].max()])
+            lines.append(go.Scatter(x=line_x, y=y0 + 100 * slope / 365.25 * (line_x - x0), mode="lines", legendgroup=channel,
+                                    showlegend=False, line=dict(width=3.5, color=color, dash="dash"),
+                                    hovertemplate=f"<b>{channel} trend</b><br>{100 * slope:+.2f}% per year<extra></extra>"))
+    # trend lines on top of the nightly points
+    for line in lines:
+        fig.add_trace(line, row=1, col=1)
+    fig.add_hline(y=0, line=dict(color=THEME["axis"], width=1), row=2, col=1)
+    fig.update_yaxes(title_text="Strength (%)", rangemode="tozero", row=1, col=1)
+    fig.update_yaxes(title_text="Direction (\u00b0)", range=[-180, 180], tickvals=[-180, -90, 0, 90, 180], row=2, col=1)
+    fig.update_xaxes(title_text="MJD", tickformat="d", row=2, col=1)
+    fig.update_layout(base_layout(560, hovermode="closest", margin=dict(l=64, r=16, t=56, b=52)))
+    fig.update_layout(legend=dict(x=1, xanchor="right"))
+    fig.update_annotations(font=dict(color=THEME["ink2"], size=13), x=0, xanchor="left")
+    style_axes(fig)
+    fig.update_xaxes(tickformat="d")
+    return fig
+
+
 def frame_ranking(summary: Table) -> Table:
     """Per frame median excess across reliable features, worst first"""
     reliable = summary[summary["reliable"]]
@@ -1529,6 +1682,8 @@ def write_flatfield_qa_report(summary: Table, aggregate: Table, out_html: str, r
     nightly_off = nightly_offsets(summary)
     ranking = frame_ranking(summary)
     gradients = frame_gradients(summary)
+    nightly_grad = nightly_gradients(gradients)
+    trends = gradient_trends(nightly_grad)
 
     figures = {
         "fig-excess": figure_excess_wavelength(summary, aggregate),
@@ -1537,6 +1692,7 @@ def write_flatfield_qa_report(summary: Table, aggregate: Table, out_html: str, r
         "fig-timeline": figure_excess_timeline(nightly),
         "fig-offsets-time": figure_offsets_timeline(nightly_off),
         "fig-gradients": figure_gradient_vectors(gradients),
+        "fig-gradient-time": figure_gradient_timeline(nightly_grad, trends),
     }
 
     # summary tiles
@@ -1595,6 +1751,26 @@ def write_flatfield_qa_report(summary: Table, aggregate: Table, out_html: str, r
          ("Typical amplitude (%)", "median gradient amplitude per frame")],
         gradient_rows, numeric=[False, True, True, True, True, True])
 
+    def _trend(row, column):
+        value, low, high = (row[f"trend_{column}{suffix}"] for suffix in ("", "_lo", "_hi"))
+        return f'{_fmt(value, sign=True)} <span class="range">[{_fmt(low, sign=True)}, {_fmt(high, sign=True)}]</span>'
+
+    trend_rows = [[escape(r["channel"]), f'{r["nights"]} <span class="range">({r["frames"]})</span>', f'{r["mjd_min"]}&ndash;{r["mjd_max"]}',
+                   f'{_fmt(r["grad_x"], sign=True)} &plusmn; {_fmt(r["grad_x_err"])}', f'{_fmt(r["grad_y"], sign=True)} &plusmn; {_fmt(r["grad_y_err"])}',
+                   _fmt(r["strength"]), _fmt(r["significance"], ".1f", scale=1), _fmt(r["direction"], ".0f", scale=1),
+                   _fmt(r["consistency"], ".2f", scale=1), _fmt(r["rayleigh_p"], ".1e", scale=1),
+                   _trend(r, "grad_x"), _trend(r, "grad_y"), _trend(r, "strength")] for r in trends]
+    gradient_trend_table = html_table(
+        [("Ch", "channel"), ("Nights (frames)", ""), ("MJD", "range"), ("Persistent x (%)", "median over nights, with its standard error"),
+         ("Persistent y (%)", "median over nights, with its standard error"), ("Strength (%)", "length of the persistent gradient"),
+         ("Significance (\u03c3)", "strength over its standard error"), ("Direction (\u00b0)", "from the IFU +x axis towards +y"),
+         ("Consistency", "mean resultant length of the nightly directions: 0 random, 1 aligned"),
+         ("Rayleigh p", "probability of this consistency if the directions were random"),
+         ("Trend x (%/yr) [95%]", "Theil-Sen slope of the nightly median versus MJD"),
+         ("Trend y (%/yr) [95%]", "Theil-Sen slope of the nightly median versus MJD"),
+         ("Trend strength (%/yr) [95%]", "Theil-Sen slope of the nightly strength versus MJD")],
+        trend_rows, numeric=[False, True, True, True, True, True, True, True, True, True, True, True, True])
+
     worst_rows = [[f'<span class="mono">{escape(r["filename"])}</span>', str(r["expnum"]), str(r["mjd"]), str(r["tileid"]),
                    escape(r["channel"]), str(r["nfeatures"]), _fmt(r["excess"]), _fmt(r["excess_max"]),
                    f'<span class="mono">{escape(r["worst"])}</span>'] for r in ranking[:nworst]]
@@ -1620,7 +1796,8 @@ def write_flatfield_qa_report(summary: Table, aggregate: Table, out_html: str, r
 
     html = REPORT_TEMPLATE.format(
         head=page_head(title), title=escape(title), drpvers=escape(drpvers), meta=meta_html(meta), tiles=tiles_html(tiles), definitions=definitions,
-        feature_table=feature_table, worst_table=worst_table, gradient_table=gradient_table, nightly_table=nightly_table, offsets_table=offsets_table,
+        feature_table=feature_table, worst_table=worst_table, gradient_table=gradient_table, gradient_trend_table=gradient_trend_table,
+        nightly_table=nightly_table, offsets_table=offsets_table,
         nworst=min(nworst, len(ranking)), maxdev=f"{100 * max_deviation:g}", plotly_version=get_plotlyjs_version(),
         figures=figures_json(figures), dark_map=json.dumps(DARK_COLORS), seq_dark=json.dumps(SEQUENTIAL_DARK))
 
@@ -1692,6 +1869,15 @@ DEFINITIONS_TEMPLATE = r"""<section id="definitions">
         <div class="eq">\[ \vec g_T = \frac{\left(g^{x}_{T},\ g^{y}_{T}\right)}{\langle S \rangle_T}, \qquad A_T = \frac{\max_{i \in T} S_i - \min_{i \in T} S_i}{2\,\langle S \rangle_T} \]</div>
       </div>
       <div class="def">
+        <h3>Persistent gradient and trends</h3>
+        <p>Nights \(k\) are the independent measurements, each with the median gradient of its frames
+        \(\vec g_k\). The persistent gradient is their median, with standard errors \(\epsilon\) from the robust
+        scatter; the consistency \(\bar R\) is the mean resultant length of the \(K\) nightly directions
+        \(\theta_k\), tested against random directions with the Rayleigh test. Trends are the Theil-Sen slopes of the
+        nightly values versus MJD (median of the pairwise slopes), with 95% confidence intervals.</p>
+        <div class="eq">\[ \begin{gathered} \vec g_\star = \mathrm{med}_k\,\vec g_k, \qquad \epsilon = \frac{1.2533 \cdot 1.4826\,\mathrm{MAD}_k}{\sqrt{K}} \\ \bar R = \frac{1}{K}\left|\sum_k e^{i\theta_k}\right|, \qquad \dot g = \mathrm{med}_{j \lt k} \frac{g_k - g_j}{t_k - t_j} \end{gathered} \]</div>
+      </div>
+      <div class="def">
         <h3>Outlier fibers</h3>
         <p>Fraction of the \(N\) good fibers whose corrected flux deviates more than \(\delta = @MAXDEV@\)
         (@MAXDEVPCT@%).</p>
@@ -1760,6 +1946,18 @@ REPORT_TEMPLATE = """{head}
     the gradient fit removes from the excess scatter, so check it here.</p>
     <div class="chart" id="fig-gradients" role="img" aria-label="Sky gradient vectors across the science IFU per frame"></div>
     <details><summary>Table view: gradients per channel</summary>{gradient_table}</details>
+  </section>
+
+  <section>
+    <h2>Gradient over the survey</h2>
+    <p>Is there a gradient that stays the same throughout the survey, and does it change with time? Each point is the
+    median gradient of one night. The strength of a real sky gradient varies from night to night and its direction is
+    random, so the directions would fill the whole range. A smooth illumination error in the flat field keeps its
+    direction in IFU coordinates: the directions cluster around zero, relative to the persistent gradient, and the
+    consistency in the table is close to 1. Dashed lines are the Theil-Sen trends of the strength with MJD. A night
+    with few frames has a noisier, and on average stronger, median gradient.</p>
+    <div class="chart" id="fig-gradient-time" role="img" aria-label="Nightly strength and direction of the science IFU gradient versus MJD"></div>
+    {gradient_trend_table}
   </section>
 
   <section>
@@ -2330,6 +2528,75 @@ def figure_gradients(summary: pd.DataFrame, mjd_ref: int, channels: str) -> go.F
     return _finish_epoch_figure(fig, channels)
 
 
+def figure_gradient_directions(summary: pd.DataFrame, mjd_ref: int, channels: str) -> go.Figure:
+    """Direction and strength of the gradient across the science IFU of each epoch, one polar panel per channel.
+
+    Each epoch relative to the reference is an arrow from the center to its
+    gradient vector at the IFU edge, (g_x, g_y): the angle is the direction in
+    which the ratio increases, measured from the IFU +x axis towards +y, and
+    the length its change from the center to the edge. Markers are colored by
+    epoch MJD; diamonds are epochs triggered by something other than normal
+    operations. The bold arrow is the median vector over the epochs.
+    """
+    data = summary[(summary["epoch"] != mjd_ref) & (summary["nvalues"] > 0)
+                   & np.isfinite(summary["grad_x"].astype(float)) & np.isfinite(summary["grad_y"].astype(float))]
+    gx, gy = 100 * data["grad_x"].astype(float), 100 * data["grad_y"].astype(float)
+    rmax = max(0.5, 1.1 * float(np.nanmax(np.hypot(gx, gy)))) if len(data) else 1.0
+    epochs = data["epoch"].astype(float)
+    cmin, cmax = (float(epochs.min()), float(epochs.max())) if len(data) else (0.0, 1.0)
+    # radial tick labels along the horizontal axis, on the side away from the typical gradient
+    label_angle = 180.0 if len(data) and np.median(gx) >= 0 else 0.0
+
+    fig = make_subplots(rows=1, cols=len(channels), specs=[[{"type": "polar"}] * len(channels)],
+                        subplot_titles=[f"{channel} channel" for channel in channels], horizontal_spacing=0.08)
+    for col, channel in enumerate(channels, start=1):
+        sel = data[data["channel"] == channel].sort_values("epoch")
+        x, y = 100 * sel["grad_x"].astype(float).to_numpy(), 100 * sel["grad_y"].astype(float).to_numpy()
+        r, theta = np.hypot(x, y), np.degrees(np.arctan2(y, x)) % 360
+        fig.add_trace(go.Scatterpolar(
+            r=[v for value in r for v in (0, value, None)], theta=[v for angle in theta for v in (angle, angle, None)],
+            mode="lines", line=dict(width=1.5, color=THEME["axis"]), hoverinfo="skip", showlegend=False), row=1, col=col)
+        routine = (sel["trigger"] == ROUTINE_TRIGGER).to_numpy()
+        fig.add_trace(go.Scatterpolar(
+            r=r, theta=theta, mode="markers", name="Epochs", legendgroup="epochs", showlegend=False,
+            marker=dict(size=10, color=sel["epoch"], colorscale=SEQUENTIAL, cmin=cmin, cmax=cmax,
+                        symbol=np.where(routine, "circle", "diamond"), line=dict(width=1.5, color=THEME["surface"]),
+                        showscale=col == len(channels),
+                        colorbar=dict(title=dict(text="Epoch MJD", side="right"), thickness=12, len=0.8, outlinewidth=0,
+                                      tickformat="d", tickfont=dict(color=THEME["muted"]))),
+            customdata=np.stack([sel["epoch"], [_short_trigger(t) for t in sel["trigger"]], x, y], axis=-1),
+            hovertemplate=(f"<b>MJD %{{customdata[0]}}</b> \u00b7 {channel}<br>%{{customdata[1]}}<br>"
+                           "direction %{theta:.0f}\u00b0, %{r:.2f}% at the edge<br>"
+                           "(%{customdata[2]:+.2f}, %{customdata[3]:+.2f})%<extra></extra>")), row=1, col=col)
+        if len(sel):
+            mx, my = float(np.median(x)), float(np.median(y))
+            mr, mtheta = float(np.hypot(mx, my)), float(np.degrees(np.arctan2(my, mx)) % 360)
+            fig.add_trace(go.Scatterpolar(
+                r=[0, mr], theta=[mtheta, mtheta], mode="lines+markers", name="Median", legendgroup="median", showlegend=col == 1,
+                line=dict(width=3, color=THEME["ink"]), marker=dict(size=[0, 9], color=THEME["ink"]),
+                hovertemplate=f"<b>median</b> \u00b7 {channel}<br>direction %{{theta:.0f}}\u00b0, %{{r:.2f}}% at the edge<extra></extra>"),
+                row=1, col=col)
+
+    # legend entries for the marker symbols
+    for symbol, label in (("circle", ROUTINE_TRIGGER), ("diamond", "Other trigger")):
+        fig.add_trace(go.Scatterpolar(r=[None], theta=[None], mode="markers", name=label, showlegend=True,
+                                      marker=dict(size=10, symbol=symbol, color=THEME["muted"])), row=1, col=1)
+
+    polar = dict(
+        bgcolor=THEME["surface"],
+        radialaxis=dict(range=[0, rmax], ticksuffix="%", angle=label_angle, tickangle=label_angle, gridcolor=THEME["grid"], linecolor=THEME["axis"],
+                        tickfont=dict(color=THEME["muted"], size=11)),
+        angularaxis=dict(rotation=0, direction="counterclockwise", tickmode="array", tickvals=[0, 90, 180, 270],
+                         ticktext=["+x", "+y", "\u2212x", "\u2212y"], gridcolor=THEME["grid"], linecolor=THEME["axis"],
+                         tickfont=dict(color=THEME["ink2"])),
+    )
+    fig.update_layout(base_layout(400, margin=dict(l=40, r=40, t=64, b=32)))
+    fig.update_layout(**{f"polar{'' if col == 1 else col}": polar for col in range(1, len(channels) + 1)})
+    fig.update_layout(legend=dict(x=0, xanchor="left", y=1.12))
+    fig.update_annotations(font=dict(color=THEME["ink2"], size=13), yshift=16)
+    return fig
+
+
 def _finish_epoch_figure(fig, channels):
     fig.update_xaxes(title_text="Epoch MJD", tickformat="d", row=len(channels), col=1)
     fig.update_layout(base_layout(200 * len(channels) + 110, margin=dict(l=72, r=16, t=56, b=52)))
@@ -2522,7 +2789,8 @@ def qa_fiberflat_epochs(mjd_ref: int = None, channels: str = "brz", kind: str = 
 
     figures = {"ratios|raw": figure_ratio_boxes(summary, mjd_ref, channels, missing, max_deviation=max_deviation),
                "ratios|corr": figure_ratio_boxes(summary, mjd_ref, channels, missing, max_deviation=max_deviation, prefix="corr_"),
-               "offsets": figure_offsets(summary, mjd_ref, channels), "gradients": figure_gradients(summary, mjd_ref, channels)}
+               "offsets": figure_offsets(summary, mjd_ref, channels), "gradients": figure_gradients(summary, mjd_ref, channels),
+               "gradient_directions": figure_gradient_directions(summary, mjd_ref, channels)}
     _write_fiberflat_dashboard(report_path, summary, figures, epochs, geometry, ifu_values, mjd_ref, channels, kind,
                                missing, bin_width, telescopes, max_deviation, flats_dir, drpver)
     log.info(f"written fiber flat epochs dashboard to {report_path}")
@@ -2653,6 +2921,11 @@ BODY_TEMPLATE = r"""
   <p>The other large-scale part: the change of the ratio from the center of the science IFU to its edge, along the IFU
   axes. A gradient that appears in every epoch belongs to the reference flat.</p>
   <div class="chart" data-fig="gradients" role="img" aria-label="Gradient across the science IFU versus epoch MJD"></div>
+  <p>The same gradients as directions on the science IFU: each arrow points where the ratio increases and its length is
+  the change from the center to the edge. Arrows that cluster around one direction, and a long median arrow (bold),
+  point to an illumination pattern in the reference flat; arrows scattered in all directions are changes of the
+  individual epochs.</p>
+  <div class="chart" data-fig="gradient_directions" role="img" aria-label="Direction of the gradient across the science IFU per epoch"></div>
 </section>
 
 <section>
@@ -2697,6 +2970,12 @@ BODY_TEMPLATE = r"""
       spectrograph and an intercept and gradient per telescope \(T\), with \(\hat x_i, \hat y_i\) the fiber positions in
       units of the IFU radius (iterative 4&sigma; clipping).</p>
       <div class="eq">\[ \frac{\bar R^{e}_{i}}{m_e} - 1 = a_{T(i)} + g^{x}_{T(i)}\,\hat x_i + g^{y}_{T(i)}\,\hat y_i + o_{s(i)} \]</div>
+    </div>
+    <div class="def">
+      <h3>Gradient direction</h3>
+      <p>Direction in which the ratio increases across the science IFU, measured from the IFU \(+x\) axis towards
+      \(+y\), and the change of the ratio from the center to the edge in that direction.</p>
+      <div class="eq">\[ \theta_e = \operatorname{atan2}\left(g^{y}_{\mathrm{Sci}},\ g^{x}_{\mathrm{Sci}}\right), \qquad |g_e| = \sqrt{\left(g^{x}_{\mathrm{Sci}}\right)^2 + \left(g^{y}_{\mathrm{Sci}}\right)^2} \]</div>
     </div>
     <div class="def">
       <h3>Fiber-level ratio</h3>

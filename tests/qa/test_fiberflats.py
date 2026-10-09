@@ -180,7 +180,7 @@ def test_report(tmp_path):
     assert html.isascii()
     assert "cdn.jsdelivr.net/npm/mathjax@" in html and 'id="definitions"' in html
     assert r"e = \sqrt{\max\left(s^2 - n^2,\ 0\right)}" in html
-    for div in ("fig-excess", "fig-offsets", "fig-outliers", "fig-timeline", "fig-offsets-time"):
+    for div in ("fig-excess", "fig-offsets", "fig-outliers", "fig-timeline", "fig-offsets-time", "fig-gradient-time"):
         assert f'id="{div}"' in html
     assert "cdn.jsdelivr.net/npm/plotly.js-dist-min@" in html
     assert "lvmFrame-r-00000005.fits" in html
@@ -192,6 +192,56 @@ def test_report(tmp_path):
     hdus[1].name = "FRAMES"
     hdus.writeto(table_path, overwrite=True)
     assert os.path.isfile(report_flatfield_qa(table_path))
+
+
+def make_frame_gradients(persistent, slope_per_year=(0.0, 0.0), nnights=150, sky=0.03, seed=3):
+    """Per frame science IFU gradients: a persistent gradient changing linearly with time plus random sky gradients"""
+    rng = np.random.default_rng(seed)
+    rows = []
+    for channel in "brz":
+        for night in range(nnights):
+            mjd = 60300 + 4 * night
+            years = (mjd - 60300) / 365.25
+            gx, gy = (p + s * years for p, s in zip(persistent, slope_per_year))
+            for frame in range(rng.integers(1, 5)):
+                angle, size = rng.uniform(0, 2 * np.pi), abs(rng.normal(0, sky))
+                rows.append({"filename": f"{channel}-{night}-{frame}", "channel": channel, "mjd": mjd, "expnum": 10 * night + frame,
+                             "nfeatures": 5, "grad_x": gx + size * np.cos(angle), "grad_y": gy + size * np.sin(angle), "grad_amp": 0.01})
+    return Table(rows=rows)
+
+
+def test_persistent_gradient_and_trend():
+    nightly = ff.nightly_gradients(make_frame_gradients(persistent=(0.02, -0.01), slope_per_year=(0.01, 0.0)))
+    assert set(nightly["channel"]) == set("brz") and len(nightly) == 3 * 150
+    for row in ff.gradient_trends(nightly):
+        # the persistent x component is the median over the run, at its middle
+        assert row["grad_x"] == pytest.approx(0.02 + 0.01 * (4 * 149 / 2) / 365.25, abs=0.004)
+        assert row["grad_y"] == pytest.approx(-0.01, abs=0.004)
+        assert row["significance"] > 10 and row["consistency"] > 0.7 and row["rayleigh_p"] < 1e-10
+        # the slopes scatter by ~0.2% per year with these numbers of nights and sky gradients
+        assert row["trend_grad_x"] == pytest.approx(0.01, abs=0.006) and row["trend_grad_x_lo"] > 0
+        assert row["trend_grad_y"] == pytest.approx(0.0, abs=0.006)
+
+
+def test_sky_gradients_are_not_persistent():
+    nightly = ff.nightly_gradients(make_frame_gradients(persistent=(0.0, 0.0)))
+    for row in ff.gradient_trends(nightly):
+        assert row["significance"] < 3 and row["consistency"] < 0.3 and row["rayleigh_p"] > 1e-3
+        for column in ("grad_x", "grad_y"):
+            assert row[f"trend_{column}"] == pytest.approx(0.0, abs=0.006)
+    assert len(ff.figure_gradient_timeline(nightly, ff.gradient_trends(nightly)).data) >= 6
+
+
+def test_zero_gradients_have_no_direction():
+    gradients = make_frame_gradients(persistent=(0.0, 0.0), sky=0.0, nnights=5)
+    row = ff.gradient_trends(ff.nightly_gradients(gradients))[0]
+    assert row["strength"] == 0 and np.isnan(row["consistency"]) and np.isnan(row["rayleigh_p"])
+
+
+def test_gradient_trends_without_data():
+    nightly = ff.nightly_gradients(Table(names=["filename", "channel", "mjd", "expnum", "nfeatures", "grad_x", "grad_y", "grad_amp"]))
+    assert len(nightly) == 0 and ff.gradient_trends(nightly) == []
+    ff.figure_gradient_timeline(nightly, [])
 
 
 def test_fit_gaussian_floor():
@@ -347,7 +397,8 @@ def test_qa_fiberflat_epochs(tmp_path, monkeypatch):
     html = open(result["report"], encoding="utf-8").read()
     assert html.isascii()
     assert 'data-fig="ratios|corr"' in html and 'data-fig="offsets"' in html and 'id="ifu-grid"' in html
-    assert set(result["figures"]) == {"ratios|raw", "ratios|corr", "offsets", "gradients"}
+    assert 'data-fig="gradient_directions"' in html
+    assert set(result["figures"]) == {"ratios|raw", "ratios|corr", "offsets", "gradients", "gradient_directions"}
     assert "replaced a motor" in html
     assert os.path.isfile(result["report"].replace(".html", ".csv"))
 
