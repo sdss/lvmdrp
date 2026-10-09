@@ -15,7 +15,7 @@ from cloup.constraints import mutually_exclusive, RequireExactly
 import bottleneck as bn
 from astropy.stats import biweight_location
 
-from lvmdrp.core.constants import CALIBRATION_MAPPINGS, CALIBRATION_TYPES, LVM_REFERENCE_COLUMN, SKYLINES_FIBERFLAT
+from lvmdrp.core.constants import CAMERAS, CALIBRATION_MAPPINGS, CALIBRATION_TYPES, LVM_REFERENCE_COLUMN, SKYLINES_FIBERFLAT
 from lvmdrp import __version__ as drpver
 from lvmdrp.main import run_drp, reduce_file, check_daily_mjd, parse_mjds, read_expfile, create_drpall, cache_std_xp_spectra, cache_sci_xp_spectra
 from lvmdrp.functions.skyMethod import configureSkyModel_drp
@@ -38,6 +38,19 @@ from lvmdrp.functions.run_calseq import (
     create_twilight_fiberflats,
     create_fiberflats_corrections,
     measure_fiberflat_factors)
+from lvmdrp.functions.pixelflats import (
+    load_pixflat_epochs,
+    create_pixflats,
+    create_super_pixflats,
+    tag_pixelflats,
+    ARTIFACT_BINS,
+)
+from lvmdrp.qa.pixelflats import qa_pixelflats, qa_raw_pixelflats, QA_PARTS
+from lvmdrp.qa.fiberflats import (
+    find_frames, run_flatfield_qa_batch, report_flatfield_qa, qa_fiberflat_epochs, load_calibration_epochs,
+    flatfield_qa_name, default_flatfield_qa_dir, TELESCOPES as QA_TELESCOPES,
+)
+
 
 from sdss_access import Access
 
@@ -562,6 +575,83 @@ def fiberflats(mjd, mjd_list, mjd_range, epochs_file, channels, skip_sequence_se
             dry_run=dry_run)
 
 
+@cli.command('pixelflats', short_help='Run pixelflats reductions', context_settings=dict(show_default=True))
+@click.option('-m', '--mjd', type=int, help='an MJD to reduce')
+@click.option('-l', '--mjd-list', type=IntListType(), help='a list of specific MJDs to reduce')
+@click.option('-r', '--mjd-range', type=str, help='a range of MJDs to reduce')
+@click.option('--epochs-file', type=str, default=None, help="Path to a calibrations epoch file")
+@click.option('--cameras', type=StrListType(), default=",".join(CAMERAS), help="Spectrograph camera that will be analysed")
+@click.option('--smoothing-box', type=int, default=31, help="Size in pixels of the median-smoothing box used to remove background")
+@click.option('--min-flatfield', type=float, default=0.0, help="Minimum valid flat field value, values below will be set to 1.0")
+@click.option('-s', '--skip-done', is_flag=True, default=False, help='flag to skip reduction steps that have already been done')
+@click.option("--dry-run", is_flag=True, default=False, help="Shows useful information about the current setup without actually running reductions")
+@cloup.constraint(mutually_exclusive, ['mjd', 'mjd_list', 'mjd_range'])
+def pixelflats(mjd, mjd_list, mjd_range, epochs_file, cameras, smoothing_box, min_flatfield, skip_done, dry_run):
+
+    # parse MJDs
+    mjds = parse_mjds(mjd=mjd or mjd_list or mjd_range or None)
+    if mjds is not None and not isinstance(mjds, (list, tuple)):
+        mjds = [mjds]
+
+    # use these mjds to filter pixelflats epochs
+    pixflat_epochs = load_pixflat_epochs(epochs_path=epochs_file, filter_by_mjds=mjds, filter_by_cameras=cameras)
+
+    # throw error if filtered epochs are empty
+    if not pixflat_epochs:
+        available = list(load_pixflat_epochs(epochs_path=epochs_file, verbose=False))
+        raise ValueError(f"Invalid values in `mjds`: {mjds}. Expected values in {available}")
+
+    for mjd_epoch, pixflat_epoch in pixflat_epochs.items():
+        mjds = pixflat_epoch.get("sources")
+        sequences = pixflat_epoch.get("sequences", {})
+        for camera, sequence in sequences.items():
+            create_pixflats(
+                mjds=mjds,
+                mjd_epoch=mjd_epoch,
+                camera=camera,
+                sequence=sequence,
+                size=smoothing_box,
+                min_flatfield=min_flatfield,
+                skip_done=skip_done,
+                dry_run=dry_run)
+
+
+@cli.command('super-pixelflats', short_help='Run pixelflats reductions combining all epochs into a super pixel flat field', context_settings=dict(show_default=True))
+@click.option('--mjd-epoch', type=int, required=True, help='MJD of the super pixel flat fields epoch')
+@click.option('-m', '--mjd', type=int, help='an MJD to reduce')
+@click.option('-l', '--mjd-list', type=IntListType(), help='a list of specific MJDs to reduce')
+@click.option('-r', '--mjd-range', type=str, help='a range of MJDs to reduce')
+@click.option('--epochs-file', type=str, default=None, help="Path to a calibrations epoch file")
+@click.option('--cameras', type=StrListType(), default=",".join(CAMERAS), help="Spectrograph camera that will be analysed")
+@click.option('--smoothing-box', type=int, default=31, help="Size in pixels of the median-smoothing box used to remove background")
+@click.option('--min-flatfield', type=float, default=0.0, help="Minimum valid flat field value, values below will be set to 1.0")
+@click.option('-s', '--skip-done', is_flag=True, default=False, help='flag to skip reduction steps that have already been done')
+@click.option("--dry-run", is_flag=True, default=False, help="Shows useful information about the current setup without actually running reductions")
+@cloup.constraint(mutually_exclusive, ['mjd', 'mjd_list', 'mjd_range'])
+def super_pixelflats(mjd_epoch, mjd, mjd_list, mjd_range, epochs_file, cameras, smoothing_box, min_flatfield, skip_done, dry_run):
+
+    # parse MJDs
+    mjds = parse_mjds(mjd=mjd or mjd_list or mjd_range or None)
+    if mjds is not None and not isinstance(mjds, (list, tuple)):
+        mjds = [mjds]
+
+    # use these mjds to filter pixelflats epochs
+    pixflat_epochs = load_pixflat_epochs(epochs_path=epochs_file, filter_by_mjds=mjds, filter_by_cameras=cameras)
+
+    # throw error if filtered epochs are empty
+    if not pixflat_epochs:
+        available = list(load_pixflat_epochs(epochs_path=epochs_file, verbose=False))
+        raise ValueError(f"Invalid values in `mjds`: {mjds}. Expected values in {available}")
+
+    create_super_pixflats(
+        pixflat_epochs=pixflat_epochs,
+        mjd_epoch=mjd_epoch,
+        size=smoothing_box,
+        min_flatfield=min_flatfield,
+        skip_done=skip_done,
+        dry_run=dry_run)
+
+
 @click.command('create-tag', short_help='Create a tag for long-term calibrations', context_settings=dict(show_default=True))
 @click.option('-m', '--mjd', type=int, help='an MJD to reduce')
 @click.option('-l', '--mjd-list', type=IntListType(), help='a list of specific MJDs to reduce')
@@ -572,7 +662,7 @@ def fiberflats(mjd, mjd_list, mjd_range, epochs_file, channels, skip_sequence_se
 @click.option("--dry-run", is_flag=True, default=False, help="Shows useful information about the current setup without actually running reductions")
 @cloup.constraint(mutually_exclusive, ['mjd', 'mjd_list', 'mjd_range'])
 @cloup.constraint(RequireExactly(1), ['mjd', 'mjd_list', 'mjd_range'])
-def create_tag(mjd, mjd_list, mjd_range, from_epochs, epochs_file, version, dry_run):
+def create_longterm_tag(mjd, mjd_list, mjd_range, from_epochs, epochs_file, version, dry_run):
 
     # parse calibration MJDs
     epochs = {}
@@ -588,6 +678,213 @@ def create_tag(mjd, mjd_list, mjd_range, from_epochs, epochs_file, version, dry_
         flavors = []
         [flavors.extend(CALIBRATION_MAPPINGS.get(calname, [calname])) for calname in CALIBRATION_TYPES]
         tag_longterm_calibrations(mjd=mjd, version=version, flavors=flavors, dry_run=dry_run)
+
+
+@cli.command('tag-pixelflats', short_help='Tag pixel flats for a pipeline version', context_settings=dict(show_default=True))
+@click.option('-m', '--mjd', type=int, required=True, help='Pixel-flat epoch MJD to tag')
+@click.option('--version', type=str, default=drpver, help='Version of the calibration set')
+@click.option("--dry-run", is_flag=True, default=False, help="Show source and destination paths without copying files")
+def create_pixelflats_tag(mjd, version, dry_run):
+    """Copy the single pixel-flat epoch into the sandbox calibration directory."""
+    tag_pixelflats(epoch_mjd=mjd, version=version, dry_run=dry_run)
+
+
+def _parse_artifact_bins(ctx, param, value):
+    try:
+        return tuple(tuple(int(edge) for edge in pair.split('-')) for pair in value.split(','))
+    except ValueError:
+        raise click.BadParameter(f"expected comma-separated 'min-max' pairs, got {value!r}")
+
+
+@cli.command('qa-raw-pixelflats', short_help='Run the QA of the raw pixel-flat sequences of an epoch', context_settings=dict(show_default=True))
+@click.option('-m', '--mjd-epoch', type=int, required=True, help='MJD of the pixel-flat epoch, as in the epochs file')
+@click.option('--cameras', type=StrListType(), default=",".join(CAMERAS), help="Spectrograph cameras to check")
+@click.option('--epochs-file', type=str, default=None, help="Path to a pixel-flat epochs file")
+@click.option('-o', '--output-dir', type=str, default=None, help="Directory of the dashboard and measurements table. Defaults to a pixflat_qa directory in the epoch's ancillary directory")
+@click.option('-n', '--nprocs', type=int, default=1, help="Number of processes measuring the raw frames")
+@click.option('--cut-rows', type=IntListType(), default="1020,3060", help="Rows of the illumination cuts along X")
+@click.option('--cut-columns', type=IntListType(), default="1021,3098", help="Columns of the illumination cuts along Y")
+@click.option('--cut-width', type=int, default=21, help="Width in pixels of the band collapsed into each cut")
+@click.option('--combined', is_flag=True, default=False, help="Make the illumination cuts on the average of all the flats instead of the first one")
+@click.option('--image-binning', type=int, default=16, help="Binning factor of the raw image shown next to the cuts")
+@click.option('--n-contrast', type=int, default=5, help="Number of contrast measurements per cut, from the CCD center towards the edge")
+@click.option('--contrast-window', type=int, default=51, help="Width in pixels of each contrast window")
+@click.option('--saturation', type=float, default=65000.0, help="Raw count level (ADU) at and above which a pixel counts as saturated")
+@click.option('--target-precision', type=float, default=0.002, help="Poisson-limited precision the accumulated flats should reach")
+@click.option('--max-level-deviation', type=float, default=0.02, help="Largest deviation of a flat's level from the sequence median before it is flagged")
+@click.option('--max-saturated', type=float, default=1e-4, help="Largest fraction of saturated pixels in a flat quadrant before it is flagged")
+@click.option('--max-dark-signal', type=float, default=20.0, help="Largest signal in a dark (e-/pixel above the overscan) before it is flagged")
+@click.option('--remeasure', is_flag=True, default=False, help="Measure all the raw frames again instead of reusing the measurements table")
+@click.option("--dry-run", is_flag=True, default=False, help="Show the sequences, raw files found and output paths without measuring anything")
+def qa_raw_pixelflats_cli(mjd_epoch, cameras, epochs_file, output_dir, nprocs, cut_rows, cut_columns, cut_width, combined,
+                          image_binning, n_contrast, contrast_window, saturation, target_precision, max_level_deviation,
+                          max_saturated, max_dark_signal, remeasure, dry_run):
+    """Check the raw pixel-flat sequences of an epoch and write an HTML dashboard."""
+    epochs = load_pixflat_epochs(epochs_path=epochs_file, verbose=False) if epochs_file else None
+    qa_raw_pixelflats(mjd_epoch=mjd_epoch, cameras=cameras, epochs=epochs, output_dir=output_dir, nprocs=nprocs,
+                      cut_rows=cut_rows, cut_columns=cut_columns, cut_width=cut_width, combined=combined,
+                      image_binning=image_binning, n_contrast=n_contrast, contrast_window=contrast_window,
+                      saturation=saturation, target_precision=target_precision, max_level_deviation=max_level_deviation,
+                      max_saturated=max_saturated, max_dark_signal=max_dark_signal, skip_done=not remeasure, dry_run=dry_run)
+
+
+@cloup.command('qa-pixelflats', short_help='Run the QA of the pixel flats of an epoch against a reference epoch', show_constraints=True, context_settings=dict(show_default=True))
+@click.option('-t', '--mjd-tar', type=int, required=True, help='MJD of the target pixel-flat epoch, the one being checked')
+@click.option('-r', '--mjd-ref', type=int, required=True, help='MJD of the reference pixel-flat epoch, the one to compare against')
+@click.option('--cameras', type=StrListType(), default=",".join(CAMERAS), help="Spectrograph cameras to check")
+@click.option('--parts', type=StrListType(), default=",".join(QA_PARTS), help=f"Parts of the QA to run, any of {','.join(QA_PARTS)}")
+@click.option('--test-mjd', type=int, default=None, help='MJD of the exposure used for the flat-fielded comparison')
+@click.option('--test-expnum', type=int, default=None, help='Exposure number used for the flat-fielded comparison. If omitted, the comparison is skipped')
+@click.option('--epochs-file', type=str, default=None, help="Path to a pixel-flat epochs file")
+@click.option('-o', '--output-dir', type=str, default=None, help="Directory of the dashboard. Defaults to a pixflat_qa directory in the target epoch's ancillary directory")
+@click.option('--bins', type=str, default=",".join(f"{lo}-{hi}" for lo, hi in ARTIFACT_BINS), callback=_parse_artifact_bins, help="Region-size bins used to group artifacts, as comma-separated 'min-max' pairs")
+@click.option('--bbox-size', type=int, default=30, help="Width of each artifact cutout in pixels")
+@click.option('--max-regions', type=int, default=10, help="Maximum number of artifact regions shown per size bin")
+@click.option('--min-consistency', type=float, default=99.0, help="Lowest percentage of pixels within 1%% of the reference before a camera is flagged")
+@click.option('-s', '--skip-done', is_flag=True, default=False, help='flag to reuse existing test-frame reductions')
+@click.option("--dry-run", is_flag=True, default=False, help="Show the cameras, test-frame paths and dashboard path without running any check")
+@cloup.constraint(cloup.constraints.all_or_none, ['test_mjd', 'test_expnum'])
+def qa_pixelflats_cli(mjd_tar, mjd_ref, cameras, parts, test_mjd, test_expnum, epochs_file, output_dir,
+                      bins, bbox_size, max_regions, min_consistency, skip_done, dry_run):
+    """Compare the pixel flats of a target epoch against a reference epoch and write an HTML dashboard."""
+    unknown = set(parts).difference(QA_PARTS)
+    if unknown:
+        raise click.BadParameter(f"unknown parts {sorted(unknown)}, expected any of {', '.join(QA_PARTS)}", param_hint="--parts")
+    test_frames = None
+    if test_expnum is not None:
+        test_frames = get_frames_metadata(mjd=test_mjd, suffix="fits.gz", overwrite=False).query("expnum == @test_expnum")
+        if test_frames.empty:
+            raise click.BadParameter(f"exposure {test_expnum} not found in MJD {test_mjd}", param_hint="--test-expnum")
+
+    epochs = load_pixflat_epochs(epochs_path=epochs_file, verbose=False) if epochs_file else None
+
+    qa_pixelflats(mjd_tar=mjd_tar, mjd_ref=mjd_ref, skip_done=skip_done, dry_run=dry_run, cameras=cameras, parts=parts,
+                  test_frames=test_frames, epochs=epochs, output_dir=output_dir,
+                  bins=bins, bbox_size=bbox_size, max_regions=max_regions, min_consistency=min_consistency)
+
+
+def _parse_mjd_range(value):
+    """Parse an 'MJD1-MJD2' range into an inclusive (min, max) tuple."""
+    try:
+        start, end = map(int, value.split("-"))
+    except ValueError:
+        raise click.BadParameter(f"expected 'MJD1-MJD2', got {value!r}", param_hint="--mjd-range")
+    return min(start, end), max(start, end)
+
+
+@cloup.command('qa-flatfield', short_help='Run the flat-field QA on flat-fielded science frames and write an HTML report', show_constraints=True, context_settings=dict(show_default=True))
+@click.option('-d', '--drpver', type=str, default=drpver, help='Pipeline version (tag) whose lvmFrame files are checked')
+@click.option('--redux-dir', type=str, default=None, help='Reductions root directory. Defaults to $LVM_SPECTRO_REDUX')
+@click.option('-m', '--mjd', type=int, help='an MJD to check')
+@click.option('-l', '--mjd-list', type=IntListType(), help='a list of specific MJDs to check')
+@click.option('-r', '--mjd-range', type=str, help="a range of MJDs to check, as 'MJD1-MJD2'")
+@click.option('-t', '--tileid-list', type=IntListType(), default=None, help='a list of tile IDs to check')
+@click.option('-F', '--frames-file', type=click.Path(exists=True, dir_okay=False), default=None, help='a text file with one lvmFrame path per line, instead of searching the reductions')
+@click.option('-c', '--channels', type=str, default="brz", help='Channels to check')
+@click.option('-o', '--output-dir', type=str, default=None, help='Directory of the report and summary table. Defaults to qa/flatfield/{selection} in the reductions of --drpver, e.g. qa/flatfield/mjd_60300-61330')
+@click.option('--label', type=str, default="flatfield_qa", help='Name of the summary table and report')
+@click.option('--title', type=str, default="LVM Flat-Field QA", help='Title of the HTML report')
+@click.option('-n', '--nprocs', type=int, default=1, help='Number of processes measuring frames')
+@click.option('--min-exptime', type=float, default=0.0, help='Frames with shorter exposure times (seconds) are skipped')
+@click.option('--telescopes', type=StrListType(), default=",".join(QA_TELESCOPES), help='Telescopes whose fibers are measured')
+@click.option('--line-method', type=click.Choice(["fit", "integrate"]), default="fit", help='Sky line measurement: Gaussian plus continuum floor fit, or sideband-subtracted window sum')
+@click.option('--gradient-deg', type=click.Choice(["0", "1", "2", "none"]), default="1", help='Degree of the sky gradient fitted across each IFU with the spectrograph offsets (0: offsets only, none: no correction)')
+@click.option('--min-snr', type=float, default=10.0, help='Minimum median S/N of a reliable feature')
+@click.option('--min-good-fraction', type=float, default=0.8, help='Minimum fraction of good line fits of a reliable sky line')
+@click.option('--min-contrast', type=float, default=1.0, help='Minimum median line peak over continuum of a reliable sky line')
+@click.option('--max-deviation', type=float, default=0.02, help='Deviation from 1 of a normalized flux counted as an outlier fiber')
+@click.option('--checkpoint-every', type=int, default=200, help='Number of frames after which the summary table is written')
+@click.option('--frame-plots', is_flag=True, default=False, help='Also save the QA plot of each frame')
+@click.option('--overwrite', is_flag=True, default=False, help='Measure all frames again instead of resuming from an existing summary table')
+@click.option('--report-only', is_flag=True, default=False, help='Only regenerate the HTML report from an existing summary table')
+@click.option('--dry-run', is_flag=True, default=False, help='Show the frames found and the output paths without measuring anything')
+@cloup.constraint(mutually_exclusive, ['mjd', 'mjd_list', 'mjd_range'])
+@cloup.constraint(mutually_exclusive, ['frames_file', 'mjd'])
+@cloup.constraint(mutually_exclusive, ['frames_file', 'mjd_list'])
+@cloup.constraint(mutually_exclusive, ['frames_file', 'mjd_range'])
+def qa_flatfield_cli(drpver, redux_dir, mjd, mjd_list, mjd_range, tileid_list, frames_file, channels, output_dir, label, title,
+                     nprocs, min_exptime, telescopes, line_method, gradient_deg, min_snr, min_good_fraction, min_contrast,
+                     max_deviation, checkpoint_every, frame_plots, overwrite, report_only, dry_run):
+    """Measure sky lines and continuum windows in lvmFrame files, and write an HTML report of the flat-field quality across wavelength and time.
+
+    Runs can be resumed: frames already in the summary table are skipped unless --overwrite is given.
+    """
+    mjds = [mjd] if mjd is not None else (mjd_list or None)
+    mjd_range = _parse_mjd_range(mjd_range) if mjd_range else None
+    if output_dir is None:
+        name = flatfield_qa_name(mjds=mjds, mjd_range=mjd_range, tileids=tileid_list, frames_file=frames_file)
+        output_dir = default_flatfield_qa_dir(drpver, name, redux_dir=redux_dir)
+    table_path = os.path.join(output_dir, f"{label}.fits")
+    html_path = os.path.join(output_dir, f"{label}.html")
+
+    if report_only:
+        if not os.path.isfile(table_path):
+            raise click.UsageError(f"no summary table to report from: {table_path}")
+        if dry_run:
+            click.echo(f"would regenerate {html_path} from {table_path}")
+            return
+        report_flatfield_qa(table_path, out_html=html_path, title=title, run_info={"telescopes": telescopes})
+        click.echo(f"report written to {html_path}")
+        return
+
+    if frames_file:
+        with open(frames_file) as f:
+            frame_paths = [line.strip() for line in f if line.strip() and not line.startswith("#")]
+    else:
+        frame_paths = find_frames(drpver, channels=channels, mjds=mjds, tileids=tileid_list, redux_dir=redux_dir,
+                                  mjd_range=mjd_range)
+    if not frame_paths:
+        raise click.UsageError("no lvmFrame files found for the given selection")
+
+    if dry_run:
+        click.echo(f"{len(frame_paths)} lvmFrame files, e.g.:")
+        for path in frame_paths[:5]:
+            click.echo(f"  {path}")
+        click.echo(f"summary table: {table_path}")
+        click.echo(f"report: {html_path}")
+        return
+
+    run_flatfield_qa_batch(frame_paths, out_dir=output_dir, label=label, nprocs=nprocs, frame_plots=frame_plots,
+                           min_exptime=min_exptime, overwrite=overwrite, checkpoint_every=checkpoint_every, report_title=title,
+                           telescopes=tuple(telescopes), line_method=line_method,
+                           gradient_deg=None if gradient_deg == "none" else int(gradient_deg),
+                           min_snr=min_snr, min_good_fraction=min_good_fraction, min_contrast=min_contrast,
+                           max_deviation=max_deviation)
+    click.echo(f"report written to {html_path}")
+
+
+@cloup.command('qa-fiberflats', short_help='Compare the master fiber flats of all calibration epochs against a reference epoch', show_constraints=True, context_settings=dict(show_default=True))
+@click.option('-r', '--mjd-ref', type=int, default=None, help='MJD of the reference calibration epoch. Defaults to the latest epoch with flats in all channels')
+@click.option('-c', '--channels', type=str, default="brz", help='Channels to compare')
+@click.option('-k', '--kind', type=click.Choice(["twilight", "dome"]), default="twilight", help='Kind of fiber flat')
+@click.option('--epochs-file', type=str, default=None, help='Path to a calibration epochs file. Defaults to calibration-epochs.yaml in $LVMCORE_DIR/calibrations')
+@click.option('--flats-dir', type=str, default=None, help='Master calibrations directory. Defaults to $LVM_MASTER_DIR')
+@click.option('-d', '--drpver', type=str, default=None, help='Compare the master fiber flats of this pipeline version instead of the master calibrations directory')
+@click.option('--redux-dir', type=str, default=None, help='Reductions root directory for --drpver. Defaults to $LVM_SPECTRO_REDUX')
+@click.option('-o', '--output-dir', type=str, default=None, help='Directory of the dashboard and summary table. Defaults to qa/fiberflat/{kind}_vs_{mjd_ref} in the master calibrations directory, or the reference epoch ancillary directory of --drpver')
+@click.option('--bin-width', type=float, default=50.0, help='Width in Angstroms of the wavelength bins the flats are compared in')
+@click.option('--telescopes', type=StrListType(), default=",".join(QA_TELESCOPES), help='Telescopes whose fibers enter the ratio statistics')
+@click.option('--max-deviation', type=float, default=0.01, help='Deviation of a ratio from 1 counted as off')
+@click.option('--gradient-deg', type=click.IntRange(0, 2), default=1, help='Degree of the gradient across each IFU in the decomposition of the ratios')
+@click.option('--dry-run', is_flag=True, default=False, help='Show the flats found and the output paths without reading flats')
+@cloup.constraint(cloup.constraints.If('redux_dir', then=cloup.constraints.require_all), ['drpver'])
+@cloup.constraint(mutually_exclusive, ['flats_dir', 'drpver'])
+def qa_fiberflats_cli(mjd_ref, channels, kind, epochs_file, flats_dir, drpver, redux_dir, output_dir, bin_width, telescopes,
+                      max_deviation, gradient_deg, dry_run):
+    """Compare the master fiber flats of the calibration epochs against a reference epoch and write an HTML dashboard.
+
+    The epochs, their triggers and comments come from the calibration epochs file.
+    """
+    epochs = load_calibration_epochs(epochs_file)
+    try:
+        result = qa_fiberflat_epochs(mjd_ref=mjd_ref, channels=channels, kind=kind, epochs=epochs, flats_dir=flats_dir,
+                                     drpver=drpver, redux_dir=redux_dir, output_dir=output_dir, bin_width=bin_width,
+                                     telescopes=tuple(telescopes), max_deviation=max_deviation, gradient_deg=gradient_deg,
+                                     dry_run=dry_run)
+    except (ValueError, FileNotFoundError) as e:
+        raise click.UsageError(str(e))
+    if result["report"]:
+        click.echo(f"dashboard written to {result['report']}")
 
 
 @cli.command('fix-pixel-shifts', short_help='Fix the electronic pixel shifts in the raw data', context_settings=dict(show_default=True))
@@ -726,11 +1023,18 @@ calibrations.add_command(detrend)
 calibrations.add_command(longterm)
 calibrations.add_command(nightly)
 calibrations.add_command(fiberflats)
+calibrations.add_command(pixelflats)
+calibrations.add_command(super_pixelflats)
+calibrations.add_command(qa_pixelflats_cli)
+calibrations.add_command(qa_raw_pixelflats_cli)
+calibrations.add_command(qa_fiberflats_cli)
 calibrations.add_command(fiberflat_corrections)
 calibrations.add_command(ffactors_experiment)
 calibrations.add_command(cluster_calibs)
-calibrations.add_command(create_tag)
+calibrations.add_command(create_pixelflats_tag)
+calibrations.add_command(create_longterm_tag)
 cli.add_command(calibrations)
+cli.add_command(qa_flatfield_cli)
 
 # -----------------------------------------------------------------------------------------------------------------------------------------
 
