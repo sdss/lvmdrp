@@ -157,6 +157,39 @@ sky_qa
    :undoc-members:
    :show-inheritance:
 
+.. _api-pixelflats:
+
+pixelflats
+^^^^^^^^^^
+
+.. automodule:: lvmdrp.functions.pixelflats
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+QA
+--
+
+.. _api-qa-pixelflats:
+
+pixelflats
+^^^^^^^^^^
+
+.. automodule:: lvmdrp.qa.pixelflats
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. _api-qa-report:
+
+report
+^^^^^^
+
+.. automodule:: lvmdrp.qa.report
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 Core
 ----
 

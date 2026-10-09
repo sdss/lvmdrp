@@ -9,3 +9,5 @@ from . import (
     rssMethod,
     specialMethod
 )
+
+__all__ = ["commandMethod", "cubeMethod", "headerMethod", "imageMethod", "plotMethod", "rssMethod", "specialMethod"]

@@ -83,6 +83,36 @@ DEFAULT_GAIN = {
 }
 DEFAULT_PTC_PATH = os.path.join(os.environ["LVMCORE_DIR"], "metrology", "PTC_fit.txt")
 
+# per-quadrant gain corrections, the header gains are divided by these (see correct_gains)
+gain_corrs = {'b1': numpy.asarray([1.        , 0.96936066, 0.98936944, 0.99164104]),
+ 'b2': numpy.asarray([1.        , 0.99146405, 1.00614175, 1.01945662]),
+ 'b3': numpy.asarray([1.        , 0.97158781, 1.01023353, 1.01257099]),
+ 'r1': numpy.asarray([1.        , 0.99306088, 0.97766919, 1.00602193]),
+ 'r2': numpy.asarray([1.        , 0.97837479, 1.01929449, 1.03547192]),
+ 'r3': numpy.asarray([1.        , 0.99283228, 1.0197669 , 1.04401763]),
+ 'z1': numpy.asarray([1.        , 0.91468884, 1.04798286, 0.98482936]),
+ 'z2': numpy.asarray([1.        , 1.04603072, 0.97786641, 1.05365208]),
+ 'z3': numpy.asarray([1.        , 1.00523225, 1.00502321, 1.06469578])}
+
+
+def correct_gains(camera, gains):
+    """Applies the per-quadrant gain corrections to the header gains of a camera
+
+    Parameters
+    ----------
+    camera : str
+        camera name, e.g. 'b1'
+    gains : array-like
+        header gains of the four quadrants (e-/ADU)
+
+    Returns
+    -------
+    numpy.ndarray
+        corrected gains, rounded to two decimals
+    """
+    return numpy.round(numpy.asarray(gains, dtype=float) / gain_corrs[camera], 2)
+
+
 description = "Provides Methods to process 2D images"
 
 __all__ = [
@@ -3000,32 +3030,7 @@ def preproc_raw_frame(
         # gain = numpy.asarray(DEFAULT_GAIN[org_header["CCD"]])
         gain = numpy.asarray([org_header[f"{gain_prefix}{iquad+1}"] for iquad in range(NQUADS)])
 
-        if camera == "b1":
-            gain[1] *= 1.036
-        if camera == "b2":
-            gain[1] *= 1.013
-            gain[2] *= 1.011
-        if camera == "b3":
-            gain[1] *= 1.029
-            gain[2] *= 1.012
-        if camera == "r1":
-            gain[1] *= 1.011
-            gain[2] *= 1.027
-        if camera == "r2":
-            gain[1] *= 1.025
-            gain[2] *= 1.017
-        if camera == "r3":
-            gain[1] *= 1.010
-            gain[2] *= 1.020
-        if camera == "z1":
-            gain[1] *= 1.093
-            gain[3] *= 1.063
-        if camera == "z2":
-            gain[0] *= 1.043
-            gain[2] *= 1.089
-        if camera == "z3":
-            gain[3] /= 1.056
-        gain = numpy.round(gain, 2)
+        gain = correct_gains(camera, gain)
 
         log.info(f"using header GAIN = {gain.tolist()} (e-/ADU)")
 
@@ -3317,6 +3322,7 @@ def detrend_frame(
     reject_cr: bool = True,
     increase_radius: int = 1,
     median_box: list = [0, 0],
+    normalize_pixelflat: bool = True,
     display_plots: bool = False,
 ):
     """detrends input image by subtracting bias, dark and flatfielding
@@ -3347,6 +3353,8 @@ def detrend_frame(
         Number of pixels by which the mask will be growth through a convolution with box kernel of side 2*increase_radius+1, by default 1
     median_box : tuple, optional
         size of the median box to refine pixel mask, by default [0,0]
+    normalize_pixelflat : bool, optional
+        normalize by median value pixel flat frames, defaults to True
     display_plots : str, optional
         whether to show plots on display or not, by default False
     """
@@ -3481,7 +3489,7 @@ def detrend_frame(
 
     # normalize in case of pixel flat calibration
     # 'pixflat' is the imagetyp that a pixel flat can have
-    if img_type == "pixflat":
+    if img_type == "pixflat" and normalize_pixelflat:
         flat_array = numpy.ma.masked_array(
             detrended_img._data, mask=detrended_img._mask
         )

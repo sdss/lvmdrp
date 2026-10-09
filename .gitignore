@@ -55,8 +55,9 @@ tests/*coverage*
 # Mac OSX
 .DS_Store
 
-_*
+_data*
 *.zip
+*.pkl
 .vscode
 *.db
 
