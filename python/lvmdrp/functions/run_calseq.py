@@ -2448,7 +2448,9 @@ def create_wavelengths(mjd, epochs=None, use_longterm_cals=True, kind="longterm"
                                         in_model=calibs["model"][camera])
 
         # combine extracted arcs into master arc
-        if skip_done and os.path.isfile(xarc_path):
+        if xarc_path in xarc_paths:
+            log.info(f"single arc {xarc_path}, skipping combination")
+        elif skip_done and os.path.isfile(xarc_path):
             log.info(f"skipping combined arc {xarc_path}, file already exists")
         else:
             rss_tasks.combine_rsss(in_rsss=xarc_paths, out_rss=xarc_path, method="median", normalize=True, normalize_percentile=99)
