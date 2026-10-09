@@ -188,23 +188,32 @@ def _expand_sequence(sequence, repeat=False):
     Raises
     ------
     ValueError
-        If ``sequence["kind"]`` is malformed (see :func:`_parse_kind`), or
-        if the number of effective exposures is not evenly divisible by the
-        group size implied by ``kind``.
+        If ``sequence["kind"]`` is malformed (see :func:`_parse_kind`) or
+        repeats an exposure type (e.g. ``'1f1d1f'``), or if the number of
+        effective exposures is zero or not evenly divisible by the group size
+        implied by ``kind``.
     """
     typ_maps = {"f": "flat", "b": "bias", "d": "dark"}
 
     kind = sequence.get("kind")
     pairs = _parse_kind(kind)
     typs = [typ for _, typ in pairs]
+    if len(set(typs)) != len(typs):
+        raise ValueError(f"Sequence kind {kind!r} repeats an exposure type, which can't be grouped; use kind {AUTO_KIND!r} instead")
     nums = {typ_maps[typ]: count for count, typ in pairs}
+    group_size = sum(nums.values())
     expnums = sequence.get("expnums")
     rejects = sequence.get("rejects", [])
 
-    expnums = np.asarray(list(set(expnums).difference(rejects)))
+    expnums = np.asarray(list(set(expnums).difference(rejects)), dtype="int")
     expnums.sort()
+    if expnums.size == 0 or expnums.size % group_size:
+        raise ValueError(
+            f"{expnums.size} effective exposure(s) can't be split into groups of {group_size} "
+            f"for sequence kind {kind!r}: fix the kind or add the left-over exposures to the rejects"
+        )
 
-    expnums_split = np.split(expnums, expnums.size//sum(nums.values()))
+    expnums_split = np.split(expnums, expnums.size // group_size)
     expnums_dict = {typ_maps[typ]: np.array([], dtype="int") for typ in typs}
     for exps in expnums_split:
         offset = 0
@@ -552,7 +561,7 @@ def validate_sequence_kind(epochs, mjd_epoch, camera):
     existing_rejects = set(_parse_expnums(sequence.get("rejects", []) or []))
     effective_expnums = np.asarray([expnum for expnum in expnums if expnum not in existing_rejects])
     log.info(
-        f"shifted-exposure sequence: {mjd_epoch = }, {camera = }, {kind = }, "
+        f"validating sequence: {mjd_epoch = }, {camera = }, {kind = }, "
         f"{group_size = }, raw_count = {expnums.size}, "
         f"raw_range = {(int(expnums[0]), int(expnums[-1])) if expnums.size else None}, "
         f"existing_rejects = {sorted(existing_rejects)}, "
@@ -835,6 +844,10 @@ def _pair_position(flats, frames, label, camera):
 def detrend_pixelflats(mjds, camera, flat_expnums, bias_expnums=[], dark_expnums=[], use_pixmask=True, skip_done=True, pairing="following"):
     """Preprocess and detrend pixel-flat, bias, and dark exposures.
 
+    Each flat is bias-subtracted with its paired bias and dark-subtracted with
+    its paired dark, scaled to the flat's exposure time. The darks take out the
+    stray light expected in the z channels.
+
     Parameters
     ----------
     mjds : int or array-like
@@ -928,10 +941,9 @@ def detrend_pixelflats(mjds, camera, flat_expnums, bias_expnums=[], dark_expnums
             rdark_path = path.full("lvm_raw", hemi="s", mjd=dark.mjd, camspec=camera, expnum=dark.expnum)
             pdark_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=dark.mjd, kind="p", imagetype="dark", expnum=dark.expnum, camera=camera)
             ddark_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=dark.mjd, kind="d", imagetype="dark", expnum=dark.expnum, camera=camera)
-            if skip_done and os.path.isfile(pdark_path):
-                pass
-            else:
+            if not (skip_done and os.path.isfile(pdark_path)):
                 image_tasks.preproc_raw_frame(in_image=rdark_path, out_image=pdark_path, in_mask=mpixmask_path, assume_imagetyp="dark", replace_with_nan=False)
+            if not (skip_done and os.path.isfile(ddark_path)):
                 image_tasks.detrend_frame(in_image=pdark_path, out_image=ddark_path, in_bias=pbias_path, reject_cr=False, replace_with_nan=False)
             ddark_path = ddark_path if os.path.isfile(ddark_path) else None
         else:
@@ -946,7 +958,7 @@ def detrend_pixelflats(mjds, camera, flat_expnums, bias_expnums=[], dark_expnums
             pass
         else:
             image_tasks.preproc_raw_frame(in_image=rflat_path, out_image=pflat_path, in_mask=mpixmask_path, assume_imagetyp="pixflat", replace_with_nan=False)
-            image_tasks.detrend_frame(in_image=pflat_path, out_image=dflat_path, in_bias=pbias_path, reject_cr=False, normalize_pixelflat=False, replace_with_nan=False)
+            image_tasks.detrend_frame(in_image=pflat_path, out_image=dflat_path, in_bias=pbias_path, in_dark=ddark_path, reject_cr=False, normalize_pixelflat=False, replace_with_nan=False)
         if os.path.isfile(dflat_path):
             dflat_paths.append(dflat_path)
 
@@ -1603,18 +1615,19 @@ def _calculate_artifact_centroids(labels_bins, max_nregions=10):
     Returns
     -------
     list[list[tuple[int, int]]]
-        Integer ``(row, column)`` centroids for up to ``max_nregions`` regions
-        in each bin.
+        Integer ``(row, column)`` centroids of up to ``max_nregions`` regions
+        in each bin, largest first.
     """
     artifacts = []
     for mask, labels, n in labels_bins:
-        bin = []
-        for ireg in range(1, min(max_nregions + 1, n + 1)):
-            i, j = ndi.center_of_mass(mask, labels, index=ireg)
-            i = int(i)
-            j = int(j)
-            bin.append((i, j))
-        artifacts.append(bin)
+        if n == 0:
+            artifacts.append([])
+            continue
+        indices = np.arange(1, n + 1)
+        sizes = ndi.sum(mask, labels, index=indices)
+        largest = indices[np.argsort(sizes, kind="stable")[::-1][:max_nregions]]
+        centroids = ndi.center_of_mass(mask, labels, index=largest)
+        artifacts.append([(int(i), int(j)) for i, j in centroids])
 
     return artifacts
 
@@ -1643,10 +1656,7 @@ def _display_artifacts(img, artifacts, bbox_size=15, max_nregions=10, vmin=None,
     Returns
     -------
     plotly.graph_objects.Figure
-        Plotly figure containing the artifact cutouts.
-    numpy.ndarray
-        Array of Plotly trace references arranged as a ``(nbins, max_nregions)``
-        object array.
+        Plotly figure containing the artifact cutouts, one row per size bin.
     """
     use_norm = vmin is None or vmax is None
     nrows = len(artifacts)

@@ -941,9 +941,17 @@ class Image(Header):
         return self._error
 
     def get_ivar(self):
+        """Returns the inverse variance of the image, zero where the error is not positive and finite
+
+        Returns
+        -------
+        numpy.ndarray or None
+            inverse variance, None if the image has no error
+        """
         if self._error is None:
             return None
-        return numpy.divide(1.0, self._error**2, out=numpy.zeros_like(self._error))
+        valid = numpy.isfinite(self._error) & (self._error > 0)
+        return numpy.divide(1.0, self._error**2, out=numpy.zeros_like(self._error, dtype=float), where=valid)
 
     def getPixel(self, y, x):
         """
@@ -1059,12 +1067,34 @@ class Image(Header):
         return new_image
 
     def apply_per_quadrant(self, func, *args, **kwargs):
+        """Applies a function to each quadrant of the image separately
+
+        The quadrants are the '* AMP? TRIMSEC' sections in the header.
+
+        Parameters
+        ----------
+        func : callable
+            function taking the quadrant image as first argument and returning
+            the processed quadrant image
+        *args, **kwargs
+            additional arguments passed to `func`
+
+        Returns
+        -------
+        Image
+            copy of the image with each quadrant replaced by the output of `func`
+
+        Raises
+        ------
+        ValueError
+            if no quadrant section is found in the header
+        """
         sections = list(self.getHdrValue("*AMP? TRIMSEC*").values())
         if len(sections) == 0:
             raise ValueError("No quadrant section found in primary header")
 
         f_image = copy(self)
-        for _, sec in enumerate(sections):
+        for sec in sections:
             quad = self.getSection(sec)
             quad = func(quad, *args, **kwargs)
             f_image.setSection(sec, quad)

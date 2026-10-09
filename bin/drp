@@ -594,7 +594,8 @@ def pixelflats(mjd, mjd_list, mjd_range, epochs_file, cameras, smoothing_box, mi
 
     # throw error if filtered epochs are empty
     if not pixflat_epochs:
-        raise ValueError(f"Invalid values in `mjds`: {mjds}. Expected values in {list(pixflat_epochs.keys())}")
+        available = list(load_pixflat_epochs(epochs_path=epochs_file, verbose=False))
+        raise ValueError(f"Invalid values in `mjds`: {mjds}. Expected values in {available}")
 
     for mjd_epoch, pixflat_epoch in pixflat_epochs.items():
         mjds = pixflat_epoch.get("sources")
@@ -635,7 +636,8 @@ def super_pixelflats(mjd_epoch, mjd, mjd_list, mjd_range, epochs_file, cameras, 
 
     # throw error if filtered epochs are empty
     if not pixflat_epochs:
-        raise ValueError(f"Invalid values in `mjds`: {mjds}. Expected values in {list(pixflat_epochs.keys())}")
+        available = list(load_pixflat_epochs(epochs_path=epochs_file, verbose=False))
+        raise ValueError(f"Invalid values in `mjds`: {mjds}. Expected values in {available}")
 
     create_super_pixflats(
         pixflat_epochs=pixflat_epochs,

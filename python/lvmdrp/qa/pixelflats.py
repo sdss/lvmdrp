@@ -1,12 +1,12 @@
 # encoding: utf-8
 """Pixel-flat QA dashboards.
 
-Two self-contained interactive HTML dashboards, styled like the fiber flat-field
-QA report (:mod:`lvmdrp.qa.flatfield`):
+Two self-contained interactive HTML dashboards, built with the shared QA report
+theme and page (:mod:`lvmdrp.qa.report`):
 
 - :func:`qa_raw_pixelflats`: the raw pixel-flat sequence of one epoch, as
   defined in the epochs file. For each camera it describes the sequence and
-  its completeness, the signal and photons reached using the header gains, the
+  its completeness, the signal and photons reached using the corrected header gains, the
   lamp stability, the dark and bias levels, the read noise, the saturation and
   the illumination pattern.
 - :func:`qa_pixelflats`: the master pixel flats produced for a target epoch,
@@ -167,7 +167,8 @@ def describe_sequence(epoch, camera):
         groups, _ = pf._classify_sequence(pf._parse_sequence(sequence, expand=False), mjds=epoch["sources"], camera=camera)
         roles = {int(expnum): role for role, role_expnums in groups.items() for expnum in role_expnums}
         exposures = [{"expnum": expnum, "role": roles.get(expnum, "unclassified")} for expnum in effective]
-        kind_text = " + ".join(_plural(len(role_expnums), role) for role, role_expnums in groups.items() if len(role_expnums)) + ", by IMAGETYP"
+        counts = " + ".join(_plural(len(role_expnums), role) for role, role_expnums in groups.items() if len(role_expnums))
+        kind_text = f"{counts}, by IMAGETYP" if counts else "by IMAGETYP, none classified"
         # without a pattern, a group is a run of consecutive flats with the exposures that follow it
         flags = [exposure["role"] == "flat" for exposure in exposures]
         ngroups = sum(flag and (i == 0 or not flags[i - 1]) for i, flag in enumerate(flags))
@@ -205,8 +206,10 @@ def measure_raw_frame(raw_path, saturation=65000.0):
 
     For each quadrant, the overscan level and noise are measured in the
     ``BIASSEC`` region and the illumination in the ``TRIMSEC`` region, and
-    converted to electrons with the ``GAIN`` header values (or the default
-    gains if missing).
+    converted to electrons with the ``GAIN`` header values divided by the
+    pipeline's gain corrections, as in the preprocessing (see
+    :func:`~lvmdrp.functions.imageMethod.correct_gains`), or with the default
+    gains if the header has none.
 
     Parameters
     ----------
@@ -236,6 +239,8 @@ def measure_raw_frame(raw_path, saturation=65000.0):
     gain_source = "header"
     if any(gain is None for gain in gains):
         gains, gain_source = image_tasks.DEFAULT_GAIN.get(camera, [np.nan] * NQUADS), "default"
+    else:
+        gains = image_tasks.correct_gains(camera, gains)
 
     row = {
         "path": raw_path, "camera": camera, "expnum": int(header.get("EXPOSURE", -1)), "mjd": int(header.get("MJD", -1)),
@@ -596,7 +601,7 @@ def qa_raw_pixelflats(mjd_epoch, cameras=CAMERAS, epochs=None, output_dir=None, 
        each exposure, the rejects, and which raw files are on disk.
     2. Measure every non-rejected raw frame (:func:`measure_raw_frame`): the
        overscan level and read noise, and the illumination in electrons using
-       the header gains, per quadrant.
+       the corrected header gains, per quadrant.
     3. Summarize the sequence (:func:`_raw_camera_stats`): completeness,
        IMAGETYP of each exposure against its role, signal accumulated over the
        flats and the Poisson-limited precision it allows, level stability,
@@ -881,7 +886,7 @@ def _write_raw_dashboard(report_path, mjd_epoch, epoch, cameras, descriptions, p
         ])
     sequence_table = html_table(
         [("Camera", ""), ("Status", "ok: no issues; warn: issues listed; bad: no flats measured or no valid sequence"),
-         ("Kind", "exposure pattern repeated along the sequence, or auto for types taken from IMAGETYP"), ("Exposures", "ranges in the epochs file, end excluded"),
+         ("Kind", "exposure pattern repeated along the sequence, or auto for types taken from IMAGETYP"), ("Exposures", "ranges in the epochs file, inclusive"),
          ("Rejects", "excluded in the epochs file"), ("Groups", "complete groups (+ exposures of an incomplete last group); for auto, runs of consecutive flats"),
          ("Flats", "raw files found / expected"), ("Darks", "raw files found / expected"), ("Biases", "raw files found / expected"),
          ("Flats: exptime (s) · lamps", "exposure times and lamps on in the flats"), ("Issues", "")],
@@ -899,7 +904,7 @@ def _write_raw_dashboard(report_path, mjd_epoch, epoch, cameras, descriptions, p
                 _num(100 * stat["precision_q"][q], ".3f"), _num(100 * stat["precision_dim_q"][q], ".3f"), _num(stat["rdnoise_q"][q], ".2f"),
             ])
     photon_table = html_table(
-        [("Camera", ""), ("Amp", ""), ("Gain (e-/ADU)", "median of the GAIN header values"), ("Flats", "measured"),
+        [("Camera", ""), ("Amp", ""), ("Gain (e-/ADU)", "median of the corrected GAIN header values"), ("Flats", "measured"),
          ("Per flat (e-)", "median over the flats of the signal per pixel"), ("Per flat, dim (e-)", "5th percentile of the pixels"),
          ("Accumulated (e-)", "summed over the flats"), ("Accumulated, dim (e-)", "5th percentile, summed over the flats"),
          ("Precision (%)", "Poisson-limited, median illumination"), ("Precision, dim (%)", "Poisson-limited, dimmest 5% of pixels"),
@@ -983,7 +988,7 @@ def _write_raw_dashboard(report_path, mjd_epoch, epoch, cameras, descriptions, p
         sections += [
             f"""<section>
     <h2>Photons reached</h2>
-    <p>Signal accumulated over all the flats of each camera, per quadrant, in electrons per pixel using the header gains.
+    <p>Signal accumulated over all the flats of each camera, per quadrant, in electrons per pixel using the header gains with the pipeline's gain corrections.
     Filled markers are the median illumination, open markers the dimmest 5% of pixels. The dashed line is the signal
     needed for a {100 * target_precision:g}% Poisson-limited pixel flat; the precision also includes the read noise of
     every flat.</p>
@@ -1023,7 +1028,7 @@ def _write_raw_dashboard(report_path, mjd_epoch, epoch, cameras, descriptions, p
 
 RAW_DEFINITIONS = r"""<section id="definitions">
     <h2>How the quantities are computed</h2>
-    <p>Quadrants (amplifiers) are indexed by \(q\), flats by \(k\). \(g_q\) is the gain from the header, \(T_q\) the
+    <p>Quadrants (amplifiers) are indexed by \(q\), flats by \(k\). \(g_q\) is the header gain divided by the pipeline's gain correction, \(T_q\) the
     science region (TRIMSEC) and \(O_q\) the overscan region (BIASSEC). MAD is the median absolute deviation.</p>
     <div class="defs">
       <div class="def">
