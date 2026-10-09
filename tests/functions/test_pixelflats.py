@@ -1,11 +1,14 @@
 # encoding: utf-8
 #
 
+import os
+
 import numpy as np
 import pandas as pd
 import pytest
 from scipy import ndimage as ndi
 
+from lvmdrp import path
 from lvmdrp.core.image import Image
 from lvmdrp.functions import pixelflats as pf
 from lvmdrp.qa import pixelflats as qa
@@ -108,3 +111,9 @@ def test_describe_sequence_roles(monkeypatch):
 def test_get_ivar_ignores_invalid_errors():
     image = Image(data=np.ones(4), error=np.array([0.5, 0.0, np.inf, np.nan]))
     assert image.get_ivar().tolist() == [4.0, 0.0, 0.0, 0.0]
+
+
+def test_pixflat_qa_dir_matches_ancillary_tree():
+    anc_path = path.full("lvm_anc", drpver=qa.drpver, tileid=11111, mjd=60741, kind="p",
+                         imagetype="pixflat_qa", expnum=0, camera="b1")
+    assert qa._qa_dir(60741, "60741_raw") == os.path.join(os.path.dirname(anc_path), "pixflat_qa", "60741_raw")

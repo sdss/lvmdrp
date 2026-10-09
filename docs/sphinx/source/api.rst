@@ -170,6 +170,16 @@ pixelflats
 QA
 --
 
+.. _api-qa-fiberflats:
+
+fiberflats
+^^^^^^^^^^
+
+.. automodule:: lvmdrp.qa.fiberflats
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 .. _api-qa-pixelflats:
 
 pixelflats

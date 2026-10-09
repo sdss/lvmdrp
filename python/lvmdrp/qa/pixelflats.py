@@ -32,7 +32,7 @@ from lvmdrp.functions import imageMethod as image_tasks
 from lvmdrp.functions import pixelflats as pf
 from lvmdrp.qa.report import (
     MONO_FONT, SERIES, STATUS_COLORS, THEME,
-    badge, base_layout, html_table, issues_html, picker, restyle, style_axes, write_dashboard,
+    badge, base_layout, epoch_qa_dir, html_table, issues_html, picker, restyle, style_axes, write_dashboard,
 )
 
 
@@ -84,7 +84,9 @@ def _num(value, fmt=".2f", missing="–"):
 def _qa_dir(mjd_epoch, name):
     """Return the default directory of a pixel-flat QA dashboard.
 
-    The directory sits in the ancillary directory of the given epoch.
+    The directory sits in the ancillary directory of the given epoch, in the
+    reductions of the current pipeline version (see
+    :func:`~lvmdrp.qa.report.epoch_qa_dir`).
 
     Parameters
     ----------
@@ -98,11 +100,7 @@ def _qa_dir(mjd_epoch, name):
     str
         Path to the QA directory.
     """
-    anc_path = path.full(
-        "lvm_anc", drpver=drpver, tileid=11111, mjd=mjd_epoch, kind="p",
-        imagetype="pixflat_qa", expnum=0, camera=CAMERAS[0],
-    )
-    return os.path.join(os.path.dirname(anc_path), "pixflat_qa", name)
+    return epoch_qa_dir(drpver, mjd_epoch, "pixflat", name)
 
 
 # ---------------------------------------------------------------------------
