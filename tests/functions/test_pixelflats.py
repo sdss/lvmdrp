@@ -2,6 +2,7 @@
 #
 
 import numpy as np
+import pandas as pd
 import pytest
 from scipy import ndimage as ndi
 
@@ -100,7 +101,8 @@ def test_describe_sequence_roles(monkeypatch):
     assert (description["ngroups"], description["nleftover"]) == (2, 1)
     assert exposures.role.to_dict() == {100: "flat", 101: "flat", 102: "dark", 103: "flat", 104: "flat",
                                         105: "dark", 106: "rejected", 107: "unassigned"}
-    assert exposures.path[104] is None
+    assert pd.isna(exposures.path[104])
+    assert exposures.path[100] == "100.fits"
 
 
 def test_get_ivar_ignores_invalid_errors():

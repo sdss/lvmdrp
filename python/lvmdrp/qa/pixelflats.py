@@ -192,7 +192,9 @@ def describe_sequence(epoch, camera):
         "camera": camera, "kind": kind, "kind_text": kind_text,
         "group_size": group_size, "ngroups": ngroups, "nleftover": nleftover,
         "expnums": sequence.get("expnums") or [], "rejects": sequence.get("rejects") or [],
-        "exposures": pd.DataFrame(exposures, columns=["expnum", "role", "path"]).sort_values("expnum", ignore_index=True),
+        # object dtype keeps missing paths as None, where newer pandas would infer a string column with NaN
+        "exposures": pd.DataFrame(exposures, columns=["expnum", "role", "path"], dtype=object)
+                       .astype({"expnum": int}).sort_values("expnum", ignore_index=True),
     }
 
 
@@ -435,7 +437,7 @@ def figure_sequence_strip(descriptions, frames, outliers):
     rows = []
     for camera, description in descriptions.items():
         for exposure in description["exposures"].itertuples():
-            rows.append((camera, exposure.expnum, exposure.role, exposure.path is not None))
+            rows.append((camera, exposure.expnum, exposure.role, pd.notna(exposure.path)))
     table = pd.DataFrame(rows, columns=["camera", "expnum", "role", "found"])
     if len(frames):
         table = table.merge(frames[["camera", "expnum", "imagetyp", "lamps", "signal"]], on=["camera", "expnum"], how="left")
@@ -693,7 +695,7 @@ def qa_raw_pixelflats(mjd_epoch, cameras=CAMERAS, epochs=None, output_dir=None, 
 
     to_measure = [
         exposure.path for description in descriptions.values()
-        for exposure in description["exposures"].itertuples() if exposure.role != "rejected" and exposure.path is not None
+        for exposure in description["exposures"].itertuples() if exposure.role != "rejected" and pd.notna(exposure.path)
     ]
 
     if dry_run:
