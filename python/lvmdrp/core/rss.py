@@ -3803,6 +3803,121 @@ class lvmFrame(lvmBaseProduct):
         self._template.writeto(out_file, overwrite=True)
 
 
+class lvmArc(lvmFrame):
+    """lvmArc class
+
+    Continuum subtracted extracted arc exposure along with the measured arc
+    lines (centroids, FWHMs, fluxes and rejection mask) and the wavelength and
+    LSF solutions.
+    """
+
+    # line measurement extensions and their data types
+    LINES_EXTENSIONS = {"LINE_CENT": "f4", "LINE_FWHM": "f4", "LINE_FLUX": "f4", "LINE_MASK": "?"}
+    # extension names used in previous versions of this product
+    LEGACY_EXTENSIONS = {"LXPEAK": "LINE_CENT", "LXFWHM": "LINE_FWHM", "LXFLUX": "LINE_FLUX", "LXMASK": "LINE_MASK"}
+
+    @classmethod
+    def from_hdulist(cls, hdulist):
+        header = cls.header_from_hdulist(hdulist)
+
+        data = hdulist["FLUX"].data
+        error = numpy.divide(1, hdulist["IVAR"].data, where=hdulist["IVAR"].data != 0, out=numpy.zeros_like(hdulist["IVAR"].data))
+        error = numpy.sqrt(error)
+        mask = hdulist["MASK"].data.astype("bool")
+        lines = {}
+        for extname in list(cls.LINES_EXTENSIONS) + list(cls.LEGACY_EXTENSIONS):
+            if extname in hdulist and hdulist[extname].data is not None:
+                lines.setdefault(cls.LEGACY_EXTENSIONS.get(extname, extname), Table(hdulist[extname].data))
+        wave_trace = Table(hdulist["WAVE_TRACE"].data) if hdulist["WAVE_TRACE"].data is not None else None
+        lsf_trace = Table(hdulist["LSF_TRACE"].data) if hdulist["LSF_TRACE"].data is not None else None
+        slitmap = Table.read(hdulist["SLITMAP"]) if "SLITMAP" in hdulist else None
+        return cls(data=data, error=error, mask=mask, header=header, lines=lines,
+                   wave_trace=wave_trace, lsf_trace=lsf_trace, slitmap=slitmap)
+
+    def __init__(self, data=None, error=None, mask=None, ref_wave=None,
+                 cent_line=None, fwhm_line=None, flux_line=None, mask_line=None, lines=None,
+                 wave_trace=None, lsf_trace=None, header=None, slitmap=None):
+        """
+        Parameters
+        ----------
+        ref_wave : array_like, optional
+            Reference wavelengths of the measured lines, shape (nlines,)
+        cent_line, fwhm_line, flux_line, mask_line : array_like, optional
+            Line centroids, FWHMs (pixels), fluxes and rejection mask, shape (nfibers, nlines)
+        lines : dict[str, astropy.table.Table], optional
+            Line measurement tables keyed by extension name (e.g., as read from a file),
+            taking precedence over the arrays above
+        """
+        lvmFrame.__init__(self, data=data, error=error, mask=mask, wave_trace=wave_trace, lsf_trace=lsf_trace, header=header, slitmap=slitmap)
+
+        lines = lines or {}
+        values = dict(zip(self.LINES_EXTENSIONS, [cent_line, fwhm_line, flux_line, mask_line]))
+        self._lines = {extname: lines.get(extname, self._lines_table(ref_wave, values[extname], extname))
+                       for extname in self.LINES_EXTENSIONS}
+
+        self._blueprint = dp.load_blueprint(name="lvmArc")
+        self._template = dp.dump_template(dataproduct_bp=self._blueprint, save=False)
+
+    def _lines_table(self, ref_wave, values, extname):
+        """Returns a table with one column per reference wavelength and one row per fiber"""
+        if ref_wave is None or values is None:
+            return None
+        names = [f"{wave:.4f}" for wave in ref_wave]
+        return Table(data=numpy.asarray(values, dtype=self.LINES_EXTENSIONS[extname]), names=names)
+
+    def get_lines(self):
+        """Returns the measured arc lines
+
+        Returns
+        -------
+        ref_wave : numpy.ndarray
+            Reference wavelengths of the lines, shape (nlines,)
+        cent, fwhm, flux : numpy.ndarray
+            Centroids, FWHMs (in pixels) and integrated fluxes, shape (nfibers, nlines)
+        mask : numpy.ndarray
+            Rejected lines, shape (nfibers, nlines). If no mask is stored, lines with
+            invalid measurements are rejected
+        """
+        if self._lines["LINE_CENT"] is None:
+            raise ValueError("no arc lines stored in this lvmArc")
+        ref_wave = numpy.asarray([float(name) for name in self._lines["LINE_CENT"].colnames])
+
+        def _as_array(extname):
+            table, dtype = self._lines[extname], self.LINES_EXTENSIONS[extname]
+            if table is None:
+                return numpy.full((self._fibers, ref_wave.size), numpy.nan, dtype=dtype)
+            return numpy.asarray([table[name] for name in table.colnames], dtype=dtype).T
+
+        cent, fwhm, flux = _as_array("LINE_CENT"), _as_array("LINE_FWHM"), _as_array("LINE_FLUX")
+        if self._lines["LINE_MASK"] is not None:
+            mask = _as_array("LINE_MASK")
+        else:
+            mask = numpy.isnan(cent) | numpy.isnan(fwhm) | numpy.isnan(flux)
+        return ref_wave, cent, fwhm, flux, mask
+
+    def writeFitsData(self, out_file, replace_masked=True):
+        # replace masked pixels
+        if replace_masked:
+            self.apply_pixelmask()
+
+        # update headers
+        self.update_header()
+        # fill in rest of the template
+        self._template["FLUX"].data = self._data
+        self._template["IVAR"].data = numpy.divide(1, self._error**2, where=self._error != 0, out=numpy.zeros_like(self._error))
+        self._template["MASK"].data = self._mask.astype("uint8")
+        for extname, table in self._lines.items():
+            self._template[extname] = pyfits.BinTableHDU(data=table, name=extname)
+        self._template["WAVE_TRACE"] = pyfits.BinTableHDU(data=self._wave_trace, name="WAVE_TRACE")
+        self._template["LSF_TRACE"] = pyfits.BinTableHDU(data=self._lsf_trace, name="LSF_TRACE")
+        self._template["SLITMAP"] = pyfits.BinTableHDU(data=self._slitmap, name="SLITMAP")
+        self._template.verify("silentfix")
+
+        os.makedirs(os.path.dirname(out_file), exist_ok=True)
+        self._template[0].header["FILENAME"] = os.path.basename(out_file)
+        self._template.writeto(out_file, overwrite=True)
+
+
 class lvmFFrame(lvmBaseProduct):
     """lvmFFrame class"""
 

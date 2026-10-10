@@ -1,9 +1,11 @@
 
 name: lvmArc
-short: the extracted arc frame
+short: the extracted arc frame with measured arc lines
 description: |
-  This is the extracted arc frame, including wavelength calibration and removal of fiber-to-fiber
-  flat field variations. The format is similar to MaNGA mgArc files.
+  This is the continuum subtracted extracted arc exposure, along with the arc lines measured in it
+  (centroids, FWHMs, fluxes and rejection mask) and the wavelength and LSF solutions fitted to this
+  exposure. The master wavelength and LSF solutions are fitted combining the line measurements of
+  several lvmArc exposures.
 location: $LVM_SPECTRO_REDUX/[DRPVER]/[TILEID]/[MJD]/
 created_by: module.py
 used_by: module.py
@@ -20,7 +22,7 @@ hdu0:
     comment: the DRP quality bitmask
 hdu1:
   name: FLUX
-  description: extracted flux from the arc image
+  description: continuum subtracted extracted flux from the arc image, as used in the line measurements
   is_image: true
   shape: CCDROW x NFIBER
 hdu2:
@@ -34,10 +36,9 @@ hdu3:
   is_image: true
   shape: NFIBER
 hdu4:
-  name: LXPEAK
+  name: LINE_CENT
   description:
-    wavelength and X positions of good arc lamp lines. Column names contain the reference wavelengths,
-    the NFIBER rows contains the lamp line X positions along the CCD.
+    centroids along the CCD X axis of the measured arc lamp lines. One column per reference wavelength (column names), one row per fiber.
   is_image: false
   shape: BINARY FITS TABLE
   columns:
@@ -45,13 +46,64 @@ hdu4:
       name: refwave
       type: float32
       unit: 'Angstrom'
-      description: 'reference wavelength for used lamp lines in air'
-    XPIXEL:
-      name: xpixel
+      description: 'reference wavelength of the lamp line in air, used as column name'
+    CENT:
+      name: cent
+      type: float32
+      unit: 'pix'
+      description: 'line centroid in pixels'
+hdu5:
+  name: LINE_FWHM
+  description:
+    FWHM of the measured arc lamp lines. One column per reference wavelength (column names), one row per fiber.
+  is_image: false
+  shape: BINARY FITS TABLE
+  columns:
+    REFWAVE:
+      name: refwave
+      type: float32
+      unit: 'Angstrom'
+      description: 'reference wavelength of the lamp line in air, used as column name'
+    FWHM:
+      name: fwhm
+      type: float32
+      unit: 'pix'
+      description: 'line FWHM in pixels'
+hdu6:
+  name: LINE_FLUX
+  description:
+    integrated flux of the measured arc lamp lines. One column per reference wavelength (column names), one row per fiber.
+  is_image: false
+  shape: BINARY FITS TABLE
+  columns:
+    REFWAVE:
+      name: refwave
+      type: float32
+      unit: 'Angstrom'
+      description: 'reference wavelength of the lamp line in air, used as column name'
+    FLUX:
+      name: flux
       type: float32
       unit: ''
-      description: 'X position in pixels for the measured lines centroids'
-hdu5:
+      description: 'line integrated flux'
+hdu7:
+  name: LINE_MASK
+  description:
+    rejection mask of the arc lamp lines (True = rejected, e.g., failed fit or unlit fiber). Measurements are kept in the other tables regardless of this mask. One column per reference wavelength (column names), one row per fiber.
+  is_image: false
+  shape: BINARY FITS TABLE
+  columns:
+    REFWAVE:
+      name: refwave
+      type: float32
+      unit: 'Angstrom'
+      description: 'reference wavelength of the lamp line in air, used as column name'
+    MASK:
+      name: mask
+      type: bool
+      unit: ''
+      description: 'line rejection flag'
+hdu8:
   name: WAVE_TRACE
   description: wavelength solution as Legendre polynomials for all fibers
   is_image: false
@@ -77,7 +129,7 @@ hdu5:
       type: float64
       unit: ''
       description: ''
-hdu6:
+hdu9:
   name: LSF_TRACE
   description: LSF solution traceset in Angstroms
   is_image: false
@@ -103,3 +155,104 @@ hdu6:
       type: float32
       unit: null
       description: 'polynomial coefficients'
+hdu10:
+  name: SLITMAP
+  description: slitmap table describing fiber positions for this exposure
+  is_image: false
+  shape: BINARY FITS TABLE
+  columns:
+    FIBEID:
+      name: fiberid
+      type: uint16
+      description: number of the fiber along the slithead
+      unit: null
+    SPECTROGRAPHID:
+      name: spectrographid
+      type: uint16
+      description: the spectrograph id number, either 1, 2 or 3
+      unit: null
+    BLOCKID:
+      name: blockid
+      type: str
+      description: the ID label of the block along the slit
+      unit: null
+    FINBLOCK:
+      name: finblock
+      type: uint16
+      description: the fiber number within the v-groove block
+      unit: null
+    TARGETTYPE:
+      name: targettype
+      type: str
+      description: the type of fiber, either science, standard or sky
+      unit: null
+    IFULABEL:
+      name: ifulabel
+      type: str
+      description: an ID label for the telescope + sector
+      unit: null
+    FINIFU:
+      name: finifu
+      type: uint16
+      description: a running fiber number within the IFU from 1 to N
+      unit: null
+    TELESCOPE:
+      name: telescope
+      type: str
+      description: the name of the telescope; Sci, Spec, SkyE/W for science, standards, or skies
+      unit: null
+    XPMM:
+      name: xpmm
+      type: float32
+      description: the x coordinate in mm of the fiber relative to the centroid
+      unit: mm
+    YPMM:
+      name: ypmm
+      type: float32
+      description: the y coordinate in mm of the fiber relative to the centroid
+      unit: mm
+    RINGNUM:
+      name: ringnum
+      type: uint16
+      description: the number of the IFU ring the fiber belongs to
+      unit: null
+    ORIG_IFULABEL:
+      name: orig_ifulabel
+      type: str
+      description: the original IFU label from the Excel document. WRONG! DO NOT USE!
+      unit: null
+    ORIG_SLITLABEL:
+      name: orig_slitlabel
+      type: str
+      description: the original slitblock label from the Excel document. WRONG! DO NOT USE!
+      unit: null
+    FINSECTOR:
+      name: finsector
+      type: uint16
+      description: the original fiber number within the IFU sector
+      unit: null
+    FMAP:
+      name: fmap
+      type: str
+      description: the current fiber flow FROM:TO from the IFU position to the SLIT position.
+      unit: null
+    YPIX_B:
+      name: ypix_b
+      type: float32
+      description: the y coordinate in pixels of the fiber at column 2000 for channel b
+      unit: pix
+    YPIX_R:
+      name: ypix_r
+      type: float32
+      description: the y coordinate in pixels of the fiber at column 2000 for channel r
+      unit: pix
+    YPIX_Z:
+      name: ypix_z
+      type: float32
+      description: the y coordinate in pixels of the fiber at column 2000 for channel z
+      unit: pix
+    FIBSTATUS:
+      name: fibstatus
+      type: uint16
+      description: the status of the fiber, 0=good, 1=dead, 2=low, 3=repair, 4=short
+      unit: null
