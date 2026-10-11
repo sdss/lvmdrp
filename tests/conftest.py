@@ -234,3 +234,81 @@ def make_framefits(reduxdir):
         paths = reduxdir(tileid, mjd)
         return create_fake_frame_fits(paths, kind=kind, tileid=tileid, mjd=mjd, expnum=expnum, camera=camera)
     yield _make_fits
+
+# synthetic arcs: one spectrograph block with a few standard fibers and a line list at
+# wavelengths no arc lamp map has, so that the given lines are used as they are
+ARC_NFIBERS, ARC_NPIX, ARC_FWHM, ARC_STD = 60, 600, 2.5, (5, 20, 35, 50)
+ARC_LINES_PIX = np.linspace(40, ARC_NPIX - 40, 12)
+ARC_WAVES = 20000.0 + 0.5 * ARC_LINES_PIX + 2e-5 * ARC_LINES_PIX**2
+
+
+def arc_slitmap(nfibers=ARC_NFIBERS):
+    """ slitmap of a single spectrograph block with a few standard fibers """
+    from astropy.table import Table
+    telescope = np.array(["Sci"] * nfibers, dtype="<U4")
+    telescope[list(ARC_STD)] = "Spec"
+    labels = [f"P1-{list(ARC_STD).index(i) + 1}" if i in ARC_STD else f"S1-{i + 1}" for i in range(nfibers)]
+    return Table({"fiberid": np.arange(1, nfibers + 1), "spectrographid": np.ones(nfibers, dtype=int),
+                  "telescope": telescope, "orig_ifulabel": labels})
+
+
+@pytest.fixture(scope="session")
+def make_arc():
+    """ fixture factory of synthetic extracted arcs (lvmdrp.core.rss.RSS)
+
+    Lines have a FWHM of ARC_FWHM pixels at ARC_LINES_PIX + `shift`; only the standard fiber
+    `lit_std` (an index into ARC_STD) is illuminated.
+    """
+    from lvmdrp.core.rss import RSS
+    from scipy.special import erf
+
+    def _make_arc(expnum=1, shift=0.0, lit_std=0, camera="b1", seed=None):
+        rng = np.random.default_rng(expnum if seed is None else seed)
+        x = np.arange(ARC_NPIX, dtype=float)
+        sigma = ARC_FWHM / 2.3548
+        data = np.full((ARC_NFIBERS, ARC_NPIX), 10.0)
+        for xc, amp in zip(ARC_LINES_PIX + shift, np.linspace(3000, 8000, ARC_LINES_PIX.size)):
+            flux = amp * sigma * np.sqrt(2 * np.pi)
+            data += 0.5 * flux * (erf((x + 0.5 - xc) / (np.sqrt(2) * sigma)) - erf((x - 0.5 - xc) / (np.sqrt(2) * sigma)))
+        unlit = [fiber for k, fiber in enumerate(ARC_STD) if k != lit_std]
+        data[unlit] *= 0.01
+        error = np.sqrt(np.abs(data) + 25)
+        data = data + rng.normal(0, 1, data.shape) * error
+        slitmap = arc_slitmap()
+        header = fits.Header({"CCD": camera, "SPEC": "sp1", "BUNIT": "electron", "IMAGETYP": "arc", "EXPOSURE": expnum,
+                              # taken before the MJD rollover of the night: the SJD (SMJD) is the night's directory
+                              "MJD": 60999, "SMJD": 61000, "TILEID": 11111, "EXPTIME": 10.0,
+                              "NEON": "ON", "HGNE": "OFF", "ARGON": "OFF", "XENON": "OFF",
+                              "CALIBFIB": slitmap["orig_ifulabel"][ARC_STD[lit_std]]})
+        return RSS(data=data.astype(np.float32), error=error.astype(np.float32), mask=np.zeros(data.shape, dtype=bool),
+                   header=header, slitmap=slitmap)
+
+    # line list and layout of the synthetic arcs, for the tests
+    _make_arc.pixels, _make_arc.waves, _make_arc.fwhm, _make_arc.std = ARC_LINES_PIX, ARC_WAVES, ARC_FWHM, ARC_STD
+    _make_arc.nfibers, _make_arc.npix = ARC_NFIBERS, ARC_NPIX
+    _make_arc.slitmap = arc_slitmap
+    yield _make_arc
+
+
+@pytest.fixture(scope="session")
+def measured_arcs(tmp_path_factory, make_arc):
+    """ two synthetic arcs shifted by one pixel, extracted and measured into lvmArc products, once per session
+
+    Returns a namespace with the extracted arcs (xarcs), the lvmArc products (larcs), the measurement
+    parameters (kws) and the directory holding them (dir).
+    """
+    from types import SimpleNamespace
+    import lvmdrp.functions.rssMethod as rm
+
+    path = tmp_path_factory.mktemp("arcs")
+    kws = dict(pixel=make_arc.pixels, ref_lines=make_arc.waves, use_line=np.ones(make_arc.pixels.size, bool),
+               ref_fiber=30, cc_max_shift=5, poly_disp=3, poly_fwhm=2)
+    xarcs, larcs = [], []
+    for expnum, shift, lit in ((1, 0.0, 0), (2, 1.0, 1)):
+        xarc = str(path / f"lvm-xarc-b1-{expnum:08d}.fits")
+        make_arc(expnum=expnum, shift=shift, lit_std=lit).writeFitsData(xarc)
+        larc = str(path / f"lvmArc-b1-{expnum:08d}.fits")
+        rm.measure_arc_lines(in_arc=xarc, out_arc=larc, **kws)
+        xarcs.append(xarc)
+        larcs.append(larc)
+    return SimpleNamespace(xarcs=xarcs, larcs=larcs, kws=kws, dir=path)

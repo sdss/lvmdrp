@@ -1032,6 +1032,24 @@ def write_report(all_metrics, report_path, mjd_epoch, kind, mjds, problems=None)
     {summary_table}
   </section>""",
         f"""<section>
+    <h2>Arc spectra and fitted lines</h2>
+    <p>Continuum-subtracted arc spectrum of one fiber with the fitted model of each line over its fitting window, and the
+    residuals in units of the error below, for the first, middle and last exposures. The reference fiber of the line
+    measurements is shown first; the other fibers are spread along the slit unless chosen with <span class="mono">--fibers</span>.
+    The chart names the fiber. Rejected lines are marked with a cross where the other fibers place them. Between lines, one
+    pixel in {SPECTRUM_THINNING} is drawn. <em>arcsinh</em> stretches the flux as asinh(flux / &sigma;), with &sigma; the noise of the
+    fiber between lines: linear near zero and logarithmic for bright lines.</p>
+    {picker("fig-spectrum", "spectrum", [camera_dim, spectrum_dim, fiber_dim], 560)}
+  </section>""",
+        f"""<section>
+    <h2>Line profile residuals</h2>
+    <p>Data minus the fitted Gaussian around each line, as a fraction of the line peak, against the offset from the
+    centroid. Across fibers, the residuals of all lines are combined in groups of {FIBER_BIN} fibers; across lines, those of all
+    fibers, over the window each line was fitted in. A symmetric pattern means the line profile is not Gaussian; an
+    antisymmetric one means it is skewed.{" The sum of exposures shows the profile of the arcs summed in pixels." if has_sum else ""}</p>
+    {picker("fig-profile", "profile", [camera_dim, exposure_dim, ("Across", [("fiber", "Fibers"), ("line", "Lines")])], 460)}
+  </section>""",
+        f"""<section>
     <h2>Polynomial fits</h2>
     <p>Each fiber's wavelength or LSF polynomial at the measured lines. <em>Residuals</em> shows model minus data;
     <em>minus linear term</em> shows the solution and the lines after removing a straight line fitted to each fiber's
@@ -1050,24 +1068,6 @@ def write_report(all_metrics, report_path, mjd_epoch, kind, mjds, problems=None)
     <p>Coefficients of each fiber's polynomial, in powers of the pixel coordinate. They should vary smoothly along the slit.
     Open circles are fibers whose solution was interpolated from their neighbors.</p>
     {picker("fig-coeffs", "coeffs", [camera_dim, solution_dim, method_dim], 860)}
-  </section>""",
-        f"""<section>
-    <h2>Line profile residuals</h2>
-    <p>Data minus the fitted Gaussian around each line, as a fraction of the line peak, against the offset from the
-    centroid. Across fibers, the residuals of all lines are combined in groups of {FIBER_BIN} fibers; across lines, those of all
-    fibers, over the window each line was fitted in. A symmetric pattern means the line profile is not Gaussian; an
-    antisymmetric one means it is skewed.{" The sum of exposures shows the profile of the arcs summed in pixels." if has_sum else ""}</p>
-    {picker("fig-profile", "profile", [camera_dim, exposure_dim, ("Across", [("fiber", "Fibers"), ("line", "Lines")])], 460)}
-  </section>""",
-        f"""<section>
-    <h2>Arc spectra and fitted lines</h2>
-    <p>Continuum-subtracted arc spectrum of one fiber with the fitted model of each line over its fitting window, and the
-    residuals in units of the error below, for the first, middle and last exposures. The reference fiber of the line
-    measurements is shown first; the other fibers are spread along the slit unless chosen with <span class="mono">--fibers</span>.
-    The chart names the fiber. Rejected lines are marked with a cross where the other fibers place them. Between lines, one
-    pixel in {SPECTRUM_THINNING} is drawn. <em>arcsinh</em> stretches the flux as asinh(flux / &sigma;), with &sigma; the noise of the
-    fiber between lines: linear near zero and logarithmic for bright lines.</p>
-    {picker("fig-spectrum", "spectrum", [camera_dim, spectrum_dim, fiber_dim], 560)}
   </section>""",
         f"""<section>
     <h2>Combining exposures</h2>

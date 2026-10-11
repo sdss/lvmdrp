@@ -7,7 +7,10 @@ def individual_frames_table(headers):
     """Returns the FRAMES table listing the individual exposures of a combined product
 
     The table holds the metadata needed to reconstruct the paths of the
-    individual frames, one row per exposure.
+    individual frames, one row per exposure. Its MJD column is the SJD of the
+    frame (header SMJD), as used in the directory paths, so that exposures taken
+    before the MJD rollover of the night point to the night's directory. The
+    header MJD is used only for frames without SMJD.
 
     Parameters
     ----------
@@ -23,7 +26,7 @@ def individual_frames_table(headers):
     for header in headers:
         frames.add_row([
             header.get("TILEID", 11111),
-            header.get("MJD", -1),
+            header.get("SMJD", header.get("MJD", -1)),
             header.get("EXPOSURE", -1),
             header.get("SPEC", ""),
             header.get("CCD", ""),
