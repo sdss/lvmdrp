@@ -277,6 +277,16 @@ def _half_width(lvmarc):
     return int(lvmarc._header.get(f"{camera} WAVE APERTURE", DEFAULT_APERTURE)) // 2
 
 
+def _line_model(pix, cent, fwhm, flux, bkg):
+    """Fitted line model at pixels `pix`: a pixel-integrated Gaussian of total flux `flux` plus a constant background
+
+    This is the model of :meth:`~lvmdrp.core.spectrum1d.Spectrum1D.fitSepGauss`, whose fiber profile kernel is negligible.
+    All arguments broadcast together.
+    """
+    norm = np.sqrt(2) * fwhm / (2 * np.sqrt(2 * np.log(2)))
+    return 0.5 * flux * (erf((pix + 0.5 - cent) / norm) - erf((pix - 0.5 - cent) / norm)) + bkg
+
+
 def _profile_points(lvmarc, line_index):
     """Residuals of the Gaussian fits to the lines of one arc, relative to each line's peak
 
@@ -307,8 +317,7 @@ def _profile_points(lvmarc, line_index):
     inside = (pix >= 0) & (pix < npixels)
     pix_c = np.clip(pix, 0, npixels - 1).astype(int)
     values = data[np.arange(nfibers)[:, None, None], pix_c]
-    norm = np.sqrt(2) * sigma[..., None]
-    model = 0.5 * flux[..., None] * (erf((pix + 0.5 - cent[..., None]) / norm) - erf((pix - 0.5 - cent[..., None]) / norm)) + bkg[..., None]
+    model = _line_model(pix, cent[..., None], fwhm[..., None], flux[..., None], bkg[..., None])
     dx = pix - cent[..., None]
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", category=RuntimeWarning)
@@ -318,6 +327,75 @@ def _profile_points(lvmarc, line_index):
     lines = np.broadcast_to(np.array([line_index.get(wave, -1) for wave in waves])[None, :, None], pix.shape)
     keep &= lines >= 0
     return fibers[keep], lines[keep], dx[keep], residual[keep]
+
+
+# arc spectra: the reference fiber of the line measurements and up to four more fibers, spread along the slit by default
+SPECTRUM_POSITIONS = (0.05, 0.35, 0.65, 0.95)
+MAX_SPECTRUM_FIBERS = len(SPECTRUM_POSITIONS)
+DEFAULT_REFERENCE_FIBER = 319
+# pixels kept between the line windows when drawing a spectrum (1 in every N)
+SPECTRUM_THINNING = 8
+
+
+def _spread_fibers(fibers):
+    """Good non-standard fibers spread along the slit, at :data:`SPECTRUM_POSITIONS`"""
+    candidates = fibers[fibers.good & (fibers.telescope != "Spec")]
+    if candidates.empty:
+        candidates = fibers
+    return [int(candidates.fiber.iloc[int(round(quantile * (len(candidates) - 1)))]) for quantile in SPECTRUM_POSITIONS]
+
+
+def _arc_spectra(lvmarc, fibers):
+    """Arc spectrum, its error and the fitted lines of the given fibers of an lvmArc
+
+    Parameters
+    ----------
+    lvmarc : lvmdrp.core.rss.lvmArc
+        Arc exposure with its line measurements
+    fibers : dict[str, int]
+        Fiber index of each option of the fiber selector
+
+    Returns
+    -------
+    dict[str, dict]
+        Spectrum and lines of each fiber, by selector option
+    """
+    waves, cent, fwhm, flux, mask = lvmarc.get_lines()
+    bkg = np.nan_to_num(lvmarc.get_line_table("LINE_BKG"), nan=0.0)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", category=RuntimeWarning)
+        # where each line sits, from the other fibers, to mark it where it was rejected
+        expected = np.nanmedian(np.where(mask, np.nan, cent), axis=0)
+    spectra = {}
+    for key, fiber in fibers.items():
+        data = lvmarc._data[fiber].astype(float)
+        error = lvmarc._error[fiber].astype(float) if lvmarc._error is not None else np.full(data.shape, np.nan)
+        if lvmarc._mask is not None:
+            data = np.where(lvmarc._mask[fiber], np.nan, data)
+        error = np.where(np.isfinite(error) & (error > 0), error, np.nan)
+        spectra[key] = {"fiber": fiber, "data": data, "error": error, "waves": waves, "cent": cent[fiber], "fwhm": fwhm[fiber],
+                        "flux": flux[fiber], "bkg": bkg[fiber], "mask": mask[fiber], "expected": expected,
+                        "half_width": _half_width(lvmarc)}
+    return spectra
+
+
+def _asinh_ticks(scale, ymin, ymax, min_spacing=0.8):
+    """Ticks of an arcsinh(flux / scale) axis at round flux values, spread out from zero in both directions"""
+    values = [m * 10.0 ** k for k in range(-2, 8) for m in (1, 2, 5)]
+    kept = [0.0]
+    for sign in (1, -1):
+        last = 0.0
+        for value in values:
+            flux = sign * value
+            if not ymin <= flux <= ymax:
+                continue
+            t = np.arcsinh(flux / scale)
+            if abs(t - last) >= min_spacing:
+                kept.append(flux)
+                last = t
+    kept.sort()
+    labels = [f"{v / 1e6:g}M" if abs(v) >= 1e6 else f"{v / 1e3:g}k" if abs(v) >= 1e3 else f"{v:g}" for v in kept]
+    return [float(np.arcsinh(v / scale)) for v in kept], labels
 
 
 def _profile_maps(points, nfibers, nlines, edges):
@@ -337,13 +415,16 @@ def _profile_maps(points, nfibers, nlines, edges):
             "core_rms": np.sqrt(np.nanmean(profile[core] ** 2)) if np.isfinite(profile[core]).any() else np.nan}
 
 
-def camera_metrics(paths):
+def camera_metrics(paths, fibers=None):
     """Measure the quality of both master solutions of a camera and how the combination methods compare
 
     Parameters
     ----------
     paths : dict
         Paths of the products, see :func:`compare_camera`
+    fibers : list[int], optional
+        Up to four fibers whose arc spectra are shown next to the reference fiber. By default, fibers
+        spread along the slit
 
     Returns
     -------
@@ -420,7 +501,7 @@ def camera_metrics(paths):
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", category=RuntimeWarning)
-        fibers = pd.DataFrame({
+        fibers_table = pd.DataFrame({
             "camera": paths["camera"], "fiber": np.arange(nfibers), "label": labels, "telescope": telescopes, "good": good,
             "wave_scatter": [_robust_scatter(row) for row in fits["measurements"]["wave"]["residual"]],
             "lsf_scatter": [_robust_scatter(row) for row in fits["measurements"]["lsf"]["residual"]],
@@ -432,11 +513,26 @@ def camera_metrics(paths):
             "predicted_dfwhm2": predicted, "observed_dfwhm2": observed,
         })
 
+    # arc spectra of the reference fiber and the selected fibers, in the first, middle and last exposures and in the sum
+    camera = paths["camera"]
+    reference = int(lvmarcs[0]._header.get(f"{camera} WAVE REFFIB", DEFAULT_REFERENCE_FIBER))
+    if fibers is None:
+        selected = _spread_fibers(fibers_table)
+    else:
+        selected = [int(fiber) for fiber in fibers if 0 <= int(fiber) < nfibers]
+        if len(selected) < len(fibers):
+            log.warning(f"{camera}: fibers outside 0-{nfibers - 1} skipped: {[f for f in fibers if not 0 <= int(f) < nfibers]}")
+    spectrum_fibers = {"ref": reference, **{str(i + 1): fiber for i, fiber in enumerate(selected[:MAX_SPECTRUM_FIBERS])}}
+    spectra = {exposures[k]: _arc_spectra(lvmarcs[k], spectrum_fibers) for k in sorted({0, len(lvmarcs) // 2, len(lvmarcs) - 1})}
+    if sum_arc is not None:
+        spectra["sum"] = _arc_spectra(sum_arc, spectrum_fibers)
+
     return {
         "camera": paths["camera"], "methods": methods, "narcs": len(lvmarcs), "expnums": exposures, "ref_lines": ref_lines,
-        "profile_edges": edges, "products": paths,
+        "profile_edges": edges, "products": paths, "spectra": spectra,
         "wave_lines": wave_lines, "width_single": width_single, "bias": bias, "offsets": offsets, "weights": weights,
-        "fits": fits, "profiles": profiles, "good": good, "fibers": fibers, "labels": labels, "telescopes": telescopes,
+        "fits": fits, "profiles": profiles, "good": good, "fibers": fibers_table, "labels": labels, "telescopes": telescopes,
+        "spectrum_fibers": spectrum_fibers, "user_fibers": fibers is not None,
     }
 
 
@@ -486,8 +582,8 @@ def _alpha(color, alpha):
 
 
 def _r(values, decimals=4):
-    """Round for the page, keeping NaN as gaps"""
-    return np.round(np.asarray(values, dtype=float), decimals)
+    """Round for the page, keeping NaN as gaps, as float32: plotly stores arrays in binary, so this halves their size"""
+    return np.round(np.asarray(values, dtype=float), decimals).astype(np.float32)
 
 
 def _percentiles(values, axis=0):
@@ -635,6 +731,104 @@ def fig_profile(metrics, exposure, axis):
     return fig
 
 
+def fig_spectrum(metrics, exposure, key):
+    """Arc spectrum of one fiber with the fitted line models, and the residuals in units of the error
+
+    The flux axis switches between linear and arcsinh(flux / sigma), with sigma the noise of the
+    fiber between the lines: linear near zero and logarithmic for bright lines.
+    """
+    spec = metrics["spectra"].get(exposure, {}).get(key)
+    if spec is None:
+        return None
+    data, error, fiber, half_width = spec["data"], spec["error"], spec["fiber"], spec["half_width"]
+    npixels = data.size
+    pix = np.arange(npixels)
+    valid = ~spec["mask"] & np.isfinite(spec["cent"]) & np.isfinite(spec["fwhm"]) & np.isfinite(spec["flux"]) & (spec["fwhm"] > 0)
+
+    # model of each line over its fitting window; where windows overlap, the nearest line's model
+    model = np.full(npixels, np.nan)
+    distance = np.full(npixels, np.inf)
+    for c, w, f, b in zip(spec["cent"][valid], spec["fwhm"][valid], spec["flux"][valid], spec["bkg"][valid]):
+        window = np.arange(max(0, int(round(c)) - half_width), min(npixels, int(round(c)) + half_width + 1))
+        window = window[np.abs(window - c) < distance[window]]
+        model[window] = _line_model(window, c, w, f, b)
+        distance[window] = np.abs(window - c)
+    in_window = np.isfinite(model)
+    keep = in_window | (pix % SPECTRUM_THINNING == 0)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", category=RuntimeWarning)
+        chi = (data - model) / error
+    # model pixels only, with a gap where one window ends and the next one starts
+    xw = pix[in_window]
+    breaks = np.flatnonzero(np.diff(xw) > 1) + 1
+    xm = np.insert(xw.astype(float), breaks, np.nan)
+    ym = np.insert(model[in_window], breaks, np.nan)
+    peaks = _line_model(np.round(spec["cent"][valid]), spec["cent"][valid], spec["fwhm"][valid], spec["flux"][valid], spec["bkg"][valid])
+    wave_curve = metrics["fits"]["measurements"]["wave"]["curves"][fiber]
+    line_waves = np.interp(spec["cent"][valid], pix, wave_curve)
+
+    # arcsinh stretch with the noise between the lines
+    between = data[~in_window & np.isfinite(data)]
+    scale = _robust_scatter(between) if between.size > 10 else np.nan
+    scale = scale if np.isfinite(scale) and scale > 0 else 1.0
+    stretched = {name: _r(np.arcsinh(values / scale), 4) for name, values in (("model", ym), ("data", data[keep]), ("peaks", peaks))}
+    finite = data[np.isfinite(data)]
+    tickvals, ticktext = _asinh_ticks(scale, finite.min() if finite.size else 0.0, finite.max() if finite.size else 1.0)
+
+    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, row_heights=[0.72, 0.28], vertical_spacing=0.04)
+    # traces 0-2 carry the flux and are switched by the scale buttons
+    fig.add_trace(go.Scatter(x=xm.astype(np.float32), y=_r(ym, 0), mode="lines", name="fitted lines",
+                             line=dict(color=_alpha(METHOD_COLORS["measurements"], 0.45), width=4), connectgaps=False,
+                             hovertemplate="X %{x} pix<br>%{y:.0f}<extra>model</extra>"), row=1, col=1)
+    fig.add_trace(go.Scatter(x=pix[keep].astype(np.int16), y=_r(data[keep], 0), mode="lines", name="arc spectrum",
+                             line=dict(color=THEME["ink2"], width=1), hovertemplate="X %{x} pix<br>%{y:.0f}<extra>data</extra>"), row=1, col=1)
+    fig.add_trace(go.Scatter(x=_r(spec["cent"][valid], 2), y=_r(peaks, 1), mode="markers", name="line centroids",
+                             marker=dict(color=METHOD_COLORS["measurements"], size=7, line=dict(color=THEME["surface"], width=1.5)),
+                             customdata=np.stack([_r(spec["waves"][valid], 3), _r(line_waves, 3), _r(spec["fwhm"][valid], 3)], axis=1),
+                             hovertemplate="line %{customdata[0]} &#8491; at X %{x:.2f} pix<br>solution %{customdata[1]} &#8491;"
+                                           "<br>FWHM %{customdata[2]} pix<extra></extra>"), row=1, col=1)
+    rejected = spec["mask"] & np.isfinite(spec["expected"])
+    if rejected.any():
+        fig.add_trace(go.Scatter(x=_r(spec["expected"][rejected], 2), y=np.zeros(rejected.sum(), dtype=np.float32), mode="markers",
+                                 name="rejected lines",
+                                 marker=dict(color=METHOD_COLORS["pixels"], size=9, symbol="x-thin", line=dict(color=METHOD_COLORS["pixels"], width=2)),
+                                 customdata=_r(spec["waves"][rejected], 3),
+                                 hovertemplate="line %{customdata} &#8491; rejected<br>expected at X %{x:.1f} pix<extra></extra>"), row=1, col=1)
+    fig.add_hline(y=0, line=dict(color=THEME["axis"], width=1), row=2, col=1)
+    fig.add_trace(go.Scatter(x=pix[in_window].astype(np.int16), y=_r(chi[in_window], 1), mode="markers", name="residuals", showlegend=False,
+                             marker=dict(color=METHOD_COLORS["measurements"], size=3),
+                             hovertemplate="X %{x} pix<br>%{y:+.1f} &#963;<extra>residual</extra>"), row=2, col=1)
+
+    # the same flux traces stretched by arcsinh, hidden until selected: the buttons only switch visibility and ticks
+    nlinear = len(fig.data)
+    fig.add_trace(go.Scatter(x=xm.astype(np.float32), y=stretched["model"], mode="lines", name="fitted lines", visible=False,
+                             line=dict(color=_alpha(METHOD_COLORS["measurements"], 0.45), width=4), connectgaps=False,
+                             hovertemplate="X %{x} pix<extra>model</extra>"), row=1, col=1)
+    fig.add_trace(go.Scatter(x=pix[keep].astype(np.int16), y=stretched["data"], mode="lines", name="arc spectrum", visible=False,
+                             line=dict(color=THEME["ink2"], width=1), hovertemplate="X %{x} pix<extra>data</extra>"), row=1, col=1)
+    fig.add_trace(go.Scatter(x=_r(spec["cent"][valid], 2), y=stretched["peaks"], mode="markers", name="line centroids", visible=False,
+                             marker=dict(color=METHOD_COLORS["measurements"], size=7, line=dict(color=THEME["surface"], width=1.5)),
+                             customdata=fig.data[2].customdata, hovertemplate=fig.data[2].hovertemplate), row=1, col=1)
+    flux_linear, flux_asinh = [0, 1, 2], [nlinear, nlinear + 1, nlinear + 2]
+    visible_linear = [i not in flux_asinh for i in range(len(fig.data))]
+    visible_asinh = [i not in flux_linear for i in range(len(fig.data))]
+    linear = [{"visible": visible_linear}, {"yaxis.tickmode": "auto", "yaxis.title.text": "Flux"}]
+    asinh = [{"visible": visible_asinh},
+             {"yaxis.tickmode": "array", "yaxis.tickvals": tickvals, "yaxis.ticktext": ticktext, "yaxis.title.text": "Flux (arcsinh)"}]
+    fig.update_layout(**base_layout(560, margin=dict(l=72, r=16, t=48, b=52)))
+    fig.update_layout(updatemenus=[dict(type="buttons", direction="right", x=1, xanchor="right", y=1.08, yanchor="bottom",
+                                        bgcolor=THEME["surface"], bordercolor=THEME["axis"], font=dict(color=THEME["ink2"], size=12),
+                                        buttons=[dict(label="Linear", method="update", args=linear),
+                                                 dict(label="arcsinh", method="update", args=asinh)])])
+    fig.update_yaxes(title_text="Flux", row=1, col=1)
+    fig.update_yaxes(title_text="(data &#8722; model) / &#963;", row=2, col=1)
+    fig.update_xaxes(title_text="X (pix)", row=2, col=1)
+    name = "Reference fiber" if key == "ref" else "Fiber"
+    fig.update_layout(title=dict(text=f"{name} {fiber} ({metrics['labels'][fiber]}, {metrics['telescopes'][fiber]})",
+                                 font=dict(color=THEME["ink2"], size=13), x=0.01, xanchor="left", y=0.98))
+    return style_axes(fig)
+
+
 def fig_bias(metrics):
     """Master LSF minus the line widths of single exposures, median over fibers, for each line"""
     fig = go.Figure()
@@ -749,6 +943,11 @@ def write_report(all_metrics, report_path, mjd_epoch, kind, mjds, problems=None)
                 coeffs = fig_coeffs(metrics, method, solution)
                 if coeffs is not None:
                     figures[f"coeffs|{camera}|{solution}|{method}"] = coeffs
+        for exposure in metrics["spectra"]:
+            for key in metrics["spectrum_fibers"]:
+                spectrum = fig_spectrum(metrics, exposure, key)
+                if spectrum is not None:
+                    figures[f"spectrum|{camera}|{exposure}|{key}"] = spectrum
         for exposure in metrics["profiles"]:
             for axis in ("fiber", "line"):
                 profile = fig_profile(metrics, exposure, axis)
@@ -761,6 +960,16 @@ def write_report(all_metrics, report_path, mjd_epoch, kind, mjds, problems=None)
     exposures = all_metrics[0]["expnums"] if all_metrics else []
     exposure_dim = ("Exposure", [("all", "All exposures")] + [(expnum, expnum) for expnum in exposures]
                     + ([("sum", "Sum of exposures")] if has_sum else []))
+    # arc spectra: the reference fiber first, then the selected fibers (the same numbers in every camera if given)
+    first = all_metrics[0] if all_metrics else None
+    spectrum_dim = ("Exposure", [(exposure, "Sum of exposures" if exposure == "sum" else exposure) for exposure in (first["spectra"] if first else [])])
+    fiber_options = [("ref", "Reference fiber")]
+    if first is not None:
+        for key, fiber in first["spectrum_fibers"].items():
+            if key != "ref":
+                position = SPECTRUM_POSITIONS[int(key) - 1]
+                fiber_options.append((key, f"Fiber {fiber}" if first["user_fibers"] else f"{100 * position:g}% along the slit"))
+    fiber_dim = ("Fiber", fiber_options)
 
     # tiles: quality of the per-arc master solutions first, then the combination
     with warnings.catch_warnings():
@@ -851,6 +1060,16 @@ def write_report(all_metrics, report_path, mjd_epoch, kind, mjds, problems=None)
     {picker("fig-profile", "profile", [camera_dim, exposure_dim, ("Across", [("fiber", "Fibers"), ("line", "Lines")])], 460)}
   </section>""",
         f"""<section>
+    <h2>Arc spectra and fitted lines</h2>
+    <p>Continuum-subtracted arc spectrum of one fiber with the fitted model of each line over its fitting window, and the
+    residuals in units of the error below, for the first, middle and last exposures. The reference fiber of the line
+    measurements is shown first; the other fibers are spread along the slit unless chosen with <span class="mono">--fibers</span>.
+    The chart names the fiber. Rejected lines are marked with a cross where the other fibers place them. Between lines, one
+    pixel in {SPECTRUM_THINNING} is drawn. <em>arcsinh</em> stretches the flux as asinh(flux / &sigma;), with &sigma; the noise of the
+    fiber between lines: linear near zero and logarithmic for bright lines.</p>
+    {picker("fig-spectrum", "spectrum", [camera_dim, spectrum_dim, fiber_dim], 560)}
+  </section>""",
+        f"""<section>
     <h2>Combining exposures</h2>
     <p>Master LSF {"of both combinations " if has_sum else ""}minus the FWHM of each line in single exposures (median over
     exposures), median over fibers with the 16&ndash;84% range as error bars. Single exposures carry the LSF a science exposure
@@ -882,7 +1101,7 @@ def write_report(all_metrics, report_path, mjd_epoch, kind, mjds, problems=None)
 
 
 def qa_arc_combinations(mjd_epoch, cameras=CAMERAS, kind="longterm", epochs=None, output_dir=None, with_sum=False,
-                        extract=False, nprocs=1, skip_done=True, dry_run=False):
+                        fibers=None, extract=False, nprocs=1, skip_done=True, dry_run=False):
     """Write the wavelength and LSF QA dashboard of a calibration epoch
 
     For each camera:
@@ -913,6 +1132,8 @@ def qa_arc_combinations(mjd_epoch, cameras=CAMERAS, kind="longterm", epochs=None
         in the epoch's ancillary directory
     with_sum : bool, optional
         Also compare with the arcs summed in pixels, which takes one measurement per camera, by default False
+    fibers : list[int], optional
+        Up to four fibers whose arc spectra are shown next to the reference fiber. By default, fibers spread along the slit
     extract : bool, optional
         Detrend and extract the arcs needed and not extracted yet, by default False
     nprocs : int, optional
@@ -930,6 +1151,8 @@ def qa_arc_combinations(mjd_epoch, cameras=CAMERAS, kind="longterm", epochs=None
     from lvmdrp.functions.run_calseq import load_epochs_file, get_arc_sequence, extract_arcs, get_calib_paths
     from lvmdrp.main import reduce_2d
 
+    if fibers is not None and len(fibers) > MAX_SPECTRUM_FIBERS:
+        raise ValueError(f"at most {MAX_SPECTRUM_FIBERS} fibers can be shown besides the reference fiber, got {len(fibers)}")
     cameras = [camera for camera in CAMERAS if camera in cameras]
     output_dir = output_dir or _qa_dir(mjd_epoch, f"{mjd_epoch}_{kind}_arcs")
     report_path = os.path.join(output_dir, f"wave-qa_{mjd_epoch}_{kind}.html")
@@ -1003,7 +1226,7 @@ def qa_arc_combinations(mjd_epoch, cameras=CAMERAS, kind="longterm", epochs=None
                 log.warning(f"{camera}: {len(paths['missing'])} arcs without lvmArc or extracted arc" + ("" if extract else " (try --extract)"))
             if paths["sum_problem"]:
                 caveats[camera] = f"summed arcs skipped: {paths['sum_problem']}"
-            all_metrics.append(camera_metrics(paths))
+            all_metrics.append(camera_metrics(paths, fibers=fibers))
         except Exception as error:
             problems[camera] = f"failed: {error}"
             log.error(f"{camera}: {problems[camera]}")
