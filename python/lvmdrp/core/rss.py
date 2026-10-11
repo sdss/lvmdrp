@@ -3812,7 +3812,7 @@ class lvmArc(lvmFrame):
     """
 
     # line measurement extensions and their data types
-    LINES_EXTENSIONS = {"LINE_CENT": "f4", "LINE_FWHM": "f4", "LINE_FLUX": "f4", "LINE_MASK": "?"}
+    LINES_EXTENSIONS = {"LINE_CENT": "f4", "LINE_FWHM": "f4", "LINE_FLUX": "f4", "LINE_MASK": "?", "LINE_BKG": "f4"}
     # extension names used in previous versions of this product
     LEGACY_EXTENSIONS = {"LXPEAK": "LINE_CENT", "LXFWHM": "LINE_FWHM", "LXFLUX": "LINE_FLUX", "LXMASK": "LINE_MASK"}
 
@@ -3824,26 +3824,36 @@ class lvmArc(lvmFrame):
         error = numpy.divide(1, hdulist["IVAR"].data, where=hdulist["IVAR"].data != 0, out=numpy.zeros_like(hdulist["IVAR"].data))
         error = numpy.sqrt(error)
         mask = hdulist["MASK"].data.astype("bool")
+        def _table(extname):
+            # tables written empty (e.g., traces of an exposure whose individual fit failed) are missing
+            if extname not in hdulist:
+                return None
+            hdu = hdulist[extname]
+            if hdu.data is None or len(hdu.columns) == 0 or len(hdu.data) == 0:
+                return None
+            return Table(hdu.data)
+
         lines = {}
         for extname in list(cls.LINES_EXTENSIONS) + list(cls.LEGACY_EXTENSIONS):
-            if extname in hdulist and hdulist[extname].data is not None:
-                lines.setdefault(cls.LEGACY_EXTENSIONS.get(extname, extname), Table(hdulist[extname].data))
-        wave_trace = Table(hdulist["WAVE_TRACE"].data) if hdulist["WAVE_TRACE"].data is not None else None
-        lsf_trace = Table(hdulist["LSF_TRACE"].data) if hdulist["LSF_TRACE"].data is not None else None
-        slitmap = Table.read(hdulist["SLITMAP"]) if "SLITMAP" in hdulist else None
+            table = _table(extname)
+            if table is not None:
+                lines.setdefault(cls.LEGACY_EXTENSIONS.get(extname, extname), table)
+        wave_trace = _table("WAVE_TRACE")
+        lsf_trace = _table("LSF_TRACE")
+        slitmap = Table.read(hdulist["SLITMAP"]) if _table("SLITMAP") is not None else None
         return cls(data=data, error=error, mask=mask, header=header, lines=lines,
                    wave_trace=wave_trace, lsf_trace=lsf_trace, slitmap=slitmap)
 
     def __init__(self, data=None, error=None, mask=None, ref_wave=None,
-                 cent_line=None, fwhm_line=None, flux_line=None, mask_line=None, lines=None,
+                 cent_line=None, fwhm_line=None, flux_line=None, mask_line=None, bkg_line=None, lines=None,
                  wave_trace=None, lsf_trace=None, header=None, slitmap=None):
         """
         Parameters
         ----------
         ref_wave : array_like, optional
             Reference wavelengths of the measured lines, shape (nlines,)
-        cent_line, fwhm_line, flux_line, mask_line : array_like, optional
-            Line centroids, FWHMs (pixels), fluxes and rejection mask, shape (nfibers, nlines)
+        cent_line, fwhm_line, flux_line, mask_line, bkg_line : array_like, optional
+            Line centroids, FWHMs (pixels), fluxes, rejection mask and fitted local backgrounds, shape (nfibers, nlines)
         lines : dict[str, astropy.table.Table], optional
             Line measurement tables keyed by extension name (e.g., as read from a file),
             taking precedence over the arrays above
@@ -3851,7 +3861,7 @@ class lvmArc(lvmFrame):
         lvmFrame.__init__(self, data=data, error=error, mask=mask, wave_trace=wave_trace, lsf_trace=lsf_trace, header=header, slitmap=slitmap)
 
         lines = lines or {}
-        values = dict(zip(self.LINES_EXTENSIONS, [cent_line, fwhm_line, flux_line, mask_line]))
+        values = dict(zip(self.LINES_EXTENSIONS, [cent_line, fwhm_line, flux_line, mask_line, bkg_line]))
         self._lines = {extname: lines.get(extname, self._lines_table(ref_wave, values[extname], extname))
                        for extname in self.LINES_EXTENSIONS}
 
@@ -3864,6 +3874,14 @@ class lvmArc(lvmFrame):
             return None
         names = [f"{wave:.4f}" for wave in ref_wave]
         return Table(data=numpy.asarray(values, dtype=self.LINES_EXTENSIONS[extname]), names=names)
+
+    def get_line_table(self, extname):
+        """Returns one line measurement table as an array of shape (nfibers, nlines), NaN (False for LINE_MASK) if not stored"""
+        table, dtype = self._lines.get(extname), self.LINES_EXTENSIONS[extname]
+        if table is None:
+            nlines = len(self._lines["LINE_CENT"].colnames) if self._lines["LINE_CENT"] is not None else 0
+            return numpy.zeros((self._fibers, nlines), dtype=bool) if dtype == "?" else numpy.full((self._fibers, nlines), numpy.nan, dtype=dtype)
+        return numpy.asarray([table[name] for name in table.colnames], dtype=dtype).T
 
     def get_lines(self):
         """Returns the measured arc lines

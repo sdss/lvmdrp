@@ -104,6 +104,23 @@ hdu7:
       unit: ''
       description: 'line rejection flag'
 hdu8:
+  name: LINE_BKG
+  description:
+    constant local background fitted together with each arc lamp line, in the units of FLUX. One column per reference wavelength (column names), one row per fiber.
+  is_image: false
+  shape: BINARY FITS TABLE
+  columns:
+    REFWAVE:
+      name: refwave
+      type: float32
+      unit: 'Angstrom'
+      description: 'reference wavelength of the lamp line in air, used as column name'
+    BKG:
+      name: bkg
+      type: float32
+      unit: ''
+      description: 'fitted local background'
+hdu9:
   name: WAVE_TRACE
   description: wavelength solution as Legendre polynomials for all fibers
   is_image: false
@@ -129,7 +146,7 @@ hdu8:
       type: float64
       unit: ''
       description: ''
-hdu9:
+hdu10:
   name: LSF_TRACE
   description: LSF solution traceset in Angstroms
   is_image: false
@@ -155,7 +172,7 @@ hdu9:
       type: float32
       unit: null
       description: 'polynomial coefficients'
-hdu10:
+hdu11:
   name: SLITMAP
   description: slitmap table describing fiber positions for this exposure
   is_image: false

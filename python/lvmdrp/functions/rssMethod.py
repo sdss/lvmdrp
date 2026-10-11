@@ -434,8 +434,8 @@ def _measure_arc(arc, qa_path, ref_fiber=319, pixel=[], ref_lines=[], use_line=[
     -------
     ref_lines : numpy.ndarray
         Reference wavelengths of the measured lines, sorted by pixel position
-    flux, cent_wave, fwhm, masked : numpy.ndarray
-        Line fluxes, centroids, FWHMs (pixels) and rejection mask, shape (nfibers, nlines)
+    flux, cent_wave, fwhm, masked, bkg : numpy.ndarray
+        Line fluxes, centroids, FWHMs (pixels), rejection mask and local backgrounds, shape (nfibers, nlines)
     parc : lvmdrp.core.rss.RSS
         Continuum subtracted arc used in the line measurements
     pixel : numpy.ndarray
@@ -498,7 +498,7 @@ def _measure_arc(arc, qa_path, ref_fiber=319, pixel=[], ref_lines=[], use_line=[
     axs_fibers = {}
     for ifiber in [ref_fiber] + list(plot_fibers):
         axs_fibers[ifiber] = _make_arcline_axes(display_plots, pixel=pixel, ref_lines=ref_lines, ifiber=ifiber)
-    _, flux, cent_wave, fwhm, masked = parc.measureArcLines(
+    _, flux, cent_wave, fwhm, masked, bkg = parc.measureArcLines(
         ref_fiber,
         pixel,
         aperture=aperture,
@@ -509,6 +509,7 @@ def _measure_arc(arc, qa_path, ref_fiber=319, pixel=[], ref_lines=[], use_line=[
         fwhm_range=fwhm_range,
         bg_range=bg_range,
         axs=axs_fibers,
+        return_bg=True,
     )
     for ifiber, (fig, axs) in axs_fibers.items():
         save_fig(fig, product_path=qa_path, to_display=display_plots, figure_path="qa", label=f"lines_fitting_{ifiber:04d}")
@@ -516,8 +517,9 @@ def _measure_arc(arc, qa_path, ref_fiber=319, pixel=[], ref_lines=[], use_line=[
     parc.setHdrValue(f"HIERARCH {camera} WAVE CC STRETCH", mhat, "Arc lines CC stretch")
     parc.setHdrValue(f"HIERARCH {camera} WAVE CC SHIFT", bhat, "Arc lines CC shift [pix]")
     parc.setHdrValue(f"HIERARCH {camera} WAVE REFFIB", ref_fiber, "Arc lines reference fiber")
+    parc.setHdrValue(f"HIERARCH {camera} WAVE APERTURE", aperture, "Arc lines fitting window [pix]")
 
-    return ref_lines, flux, cent_wave, fwhm, masked, parc, pixel, mhat, bhat
+    return ref_lines, flux, cent_wave, fwhm, masked, bkg, parc, pixel, mhat, bhat
 
 
 def _fit_wavelength_lsf(ref_lines, flux, cent_wave, fwhm, masked, pixels, header, qa_path,
@@ -740,16 +742,16 @@ def _combine_lvmarcs_lines(lvmarcs):
     return ref_lines[sort], flux[..., sort], cent[..., sort], fwhm[..., sort], masked[..., sort]
 
 
-def _make_lvmarc(arc, ref_lines, cent_wave, fwhm, flux, masked, wave_trace=None, lsf_trace=None, header=None):
+def _make_lvmarc(arc, ref_lines, cent_wave, fwhm, flux, masked, bkg=None, wave_trace=None, lsf_trace=None, header=None):
     """Returns an lvmArc from a continuum subtracted arc (see `_prepare_arc`) and its line measurements"""
     return lvmArc(data=arc._data, error=arc._error, mask=arc._mask, header=header if header is not None else arc._header,
-                  ref_wave=ref_lines, cent_line=cent_wave, fwhm_line=fwhm, flux_line=flux, mask_line=masked,
+                  ref_wave=ref_lines, cent_line=cent_wave, fwhm_line=fwhm, flux_line=flux, mask_line=masked, bkg_line=bkg,
                   wave_trace=wave_trace, lsf_trace=lsf_trace, slitmap=arc._slitmap)
 
 
 def _measure_and_fit_arc(arc, qa_path, measure_kws, fit_kws, display_plots=False):
     """Measures lines in a single arc and fits its wavelength/LSF solutions, returning an lvmArc"""
-    ref_lines, flux, cent_wave, fwhm, masked, parc, pixel, mhat, bhat = _measure_arc(
+    ref_lines, flux, cent_wave, fwhm, masked, bkg, parc, pixel, mhat, bhat = _measure_arc(
         arc, qa_path=qa_path, display_plots=display_plots, **measure_kws)
 
     # fit individual wavelength/LSF solutions
@@ -765,7 +767,7 @@ def _measure_and_fit_arc(arc, qa_path, measure_kws, fit_kws, display_plots=False
         wave_trace, lsf_trace = None, None
 
     # store the continuum subtracted arc used in the measurements
-    return _make_lvmarc(parc, ref_lines, cent_wave, fwhm, flux, masked,
+    return _make_lvmarc(parc, ref_lines, cent_wave, fwhm, flux, masked, bkg=bkg,
                         wave_trace=wave_trace, lsf_trace=lsf_trace, header=header)
 
 
