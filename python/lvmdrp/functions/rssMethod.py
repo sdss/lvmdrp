@@ -513,9 +513,9 @@ def _measure_arc(arc, qa_path, ref_fiber=319, pixel=[], ref_lines=[], use_line=[
     for ifiber, (fig, axs) in axs_fibers.items():
         save_fig(fig, product_path=qa_path, to_display=display_plots, figure_path="qa", label=f"lines_fitting_{ifiber:04d}")
 
-    parc.setHdrValue("HIERARCH PIPE ARC CC STRETCH", mhat, "Stretch of reference lines cross-correlation")
-    parc.setHdrValue("HIERARCH PIPE ARC CC SHIFT", bhat, "Shift of reference lines cross-correlation [pix]")
-    parc.setHdrValue("HIERARCH PIPE ARC REFFIB", ref_fiber, "Reference fiber in arc lines measurements")
+    parc.setHdrValue(f"HIERARCH {camera} WAVE CC STRETCH", mhat, "Arc lines CC stretch")
+    parc.setHdrValue(f"HIERARCH {camera} WAVE CC SHIFT", bhat, "Arc lines CC shift [pix]")
+    parc.setHdrValue(f"HIERARCH {camera} WAVE REFFIB", ref_fiber, "Arc lines reference fiber")
 
     return ref_lines, flux, cent_wave, fwhm, masked, parc, pixel, mhat, bhat
 
@@ -678,14 +678,15 @@ def _fit_wavelength_lsf(ref_lines, flux, cent_wave, fwhm, masked, pixels, header
     save_fig(fig_lsf, product_path=qa_path, to_display=display_plots, figure_path='qa', label="fit_lsf")
 
     # update header
-    header["HIERARCH PIPE DISP POLY"] = (poly_disp, "Order of the dispersion polynomial")
-    header["HIERARCH PIPE DISP RMS MEDIAN"] = (bn.nanmedian(wave_rms), "Median RMS of disp sol")
-    header["HIERARCH PIPE DISP RMS MIN"] = (bn.nanmin(wave_rms), "Min RMS of disp sol")
-    header["HIERARCH PIPE DISP RMS MAX"] = (bn.nanmax(wave_rms), "Max RMS of disp sol")
-    header["HIERARCH PIPE FWHM POLY"] = (poly_fwhm, "Order of the resolution polynomial")
-    header["HIERARCH PIPE FWHM RMS MEDIAN"] = (bn.nanmedian(lsf_rms), "Median RMS of FWHM sol")
-    header["HIERARCH PIPE FWHM RMS MIN"] = (bn.nanmin(lsf_rms), "Min RMS of FWHM sol")
-    header["HIERARCH PIPE FWHM RMS MAX"] = (bn.nanmax(lsf_rms), "Max RMS of FWHM sol")
+    camera = header.get("CCD", "")
+    header[f"HIERARCH {camera} WAVE DISP POLY"] = (poly_disp, "Order of the dispersion polynomial")
+    header[f"HIERARCH {camera} WAVE DISP RMS MEDIAN"] = (bn.nanmedian(wave_rms), "Median RMS of disp sol")
+    header[f"HIERARCH {camera} WAVE DISP RMS MIN"] = (bn.nanmin(wave_rms), "Min RMS of disp sol")
+    header[f"HIERARCH {camera} WAVE DISP RMS MAX"] = (bn.nanmax(wave_rms), "Max RMS of disp sol")
+    header[f"HIERARCH {camera} WAVE FWHM POLY"] = (poly_fwhm, "Order of the resolution polynomial")
+    header[f"HIERARCH {camera} WAVE FWHM RMS MEDIAN"] = (bn.nanmedian(lsf_rms), "Median RMS of FWHM sol")
+    header[f"HIERARCH {camera} WAVE FWHM RMS MIN"] = (bn.nanmin(lsf_rms), "Min RMS of FWHM sol")
+    header[f"HIERARCH {camera} WAVE FWHM RMS MAX"] = (bn.nanmax(lsf_rms), "Max RMS of FWHM sol")
 
     mask = numpy.zeros((nfibers, pixels.size), dtype=bool)
     mask[(~good_fibers)|(wave_coeffs==0).all(axis=1)] = True
@@ -783,12 +784,20 @@ def _fit_from_lvmarcs(lvmarcs, out_wave, out_lsf, ref_fiber=319, flux_range=[100
     arc = RSS()
     arc.combineRSS([copy(lvmarc) for lvmarc in lvmarcs], method="median", normalize=narcs > 1, normalize_percentile=99)
     header = arc._header.copy()
-    header["HIERARCH PIPE ARC NCOMB"] = (narcs, "Number of arcs with lines measured individually")
-    header["HIERARCH PIPE ARC EXPNUMS"] = (",".join(str(lvmarc._header.get("EXPOSURE")) for lvmarc in lvmarcs), "Combined arc exposures")
+    header["NFRAMES"] = (narcs, "Number of exposures combined")
+    # drop keywords of the individual exposures (and their older PIPE names) inherited from the first arc
+    camera = header.get("CCD", "")
+    for pattern in (f"{camera} WAVE CC *", f"{camera} WAVE REFFIB", "PIPE ARC *", "PIPE DISP *", "PIPE FWHM *"):
+        for key in list(header[pattern].keys()) if "*" in pattern else [pattern]:
+            header.remove(key, ignore_missing=True, remove_all=True)
 
     wave_trace, fwhm_trace, fwhm_wave = _fit_wavelength_lsf(
         ref_lines, flux, cent_wave, fwhm, masked, pixels=arc._pixels, header=header, qa_path=out_wave,
         ref_fiber=ref_fiber, flux_range=flux_range, arc=arc, display_plots=display_plots, **fit_kws)
+
+    # list the combined arc exposures in the FRAMES extension
+    for trace in (wave_trace, fwhm_trace):
+        trace.setIndividualFrames([lvmarc._header for lvmarc in lvmarcs])
 
     log.info(f"writing wavelength/LSF to '{out_wave}' and '{out_lsf}'")
     wave_trace.writeFitsData(out_wave)

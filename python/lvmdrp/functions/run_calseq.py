@@ -2365,6 +2365,67 @@ def create_illumination_corrections(mjd, use_longterm_cals=True, expnums=None):
     raise NotImplementedError("create_illumination_corrections")
 
 
+def get_arc_sequence(mjd, epochs=None, kind="longterm"):
+    """Returns the arc exposures used to create the wavelength calibrations of an epoch
+
+    Parameters
+    ----------
+    mjd : int
+        MJD of the calibration epoch
+    epochs : dict, optional
+        Calibration epochs as returned by `load_epochs_file`. If None, the arcs are taken from `mjd` alone
+    kind : str, optional
+        Calibration sequence length, either 'nightly' or 'longterm', by default 'longterm'
+
+    Returns
+    -------
+    mjds : list[int]
+        MJDs from which the arcs are sourced
+    frames : pd.DataFrame
+        Metadata of the chosen arc frames, one row per exposure and camera
+    expnums : array_like
+        Chosen exposure numbers
+    """
+    epoch = get_epoch(mjd=mjd, epochs=epochs or {}, epochs_kind="calibration", error_on_missing_mjd=False)
+    mjds = epoch["wave"]
+
+    frames = md.get_calibrations_metadata(mjds=mjds, calibration="wave")
+    frames, expnums = choose_sequence(frames, calibration="wave", kind=kind)
+    return mjds, frames, expnums
+
+
+def extract_arcs(arcs, calibs, skip_done=True):
+    """Extracts individual detrended arc exposures of a camera
+
+    Parameters
+    ----------
+    arcs : pd.DataFrame
+        Metadata of the arc frames of a single camera
+    calibs : dict
+        Calibration paths, including 'centroids', 'sigmas' and 'model'
+    skip_done : bool, optional
+        Skip arcs already extracted, by default True
+
+    Returns
+    -------
+    list[str]
+        Paths to the extracted arcs, in the same order as `arcs`
+    """
+    xarc_paths = []
+    for arc in arcs.to_dict("records"):
+        camera = arc["camera"]
+        darc_path = path.full("lvm_anc", drpver=drpver, kind="d", imagetype="arc", **arc)
+        xarc_paths.append(path.full("lvm_anc", drpver=drpver, kind="x", imagetype="arc", **arc))
+        if skip_done and os.path.isfile(xarc_paths[-1]):
+            log.info(f"skipping extracted arc {xarc_paths[-1]}, file already exists")
+            continue
+        image_tasks.extract_spectra(in_image=darc_path, out_rss=xarc_paths[-1],
+                                    in_trace=calibs["centroids"][camera],
+                                    in_sigma=calibs["sigmas"][camera],
+                                    in_model=calibs["model"][camera])
+    return xarc_paths
+
+
 def create_wavelengths(mjd, epochs=None, use_longterm_cals=True, kind="longterm", skip_done=True, dry_run=False):
     """Reduces an arc sequence to create master wavelength solutions
 
@@ -2397,11 +2458,7 @@ def create_wavelengths(mjd, epochs=None, use_longterm_cals=True, kind="longterm"
         _create_wavelengths_60177(use_longterm_cals=use_longterm_cals, skip_done=skip_done, dry_run=dry_run)
         return
 
-    epoch = get_epoch(mjd=mjd, epochs=epochs or {}, epochs_kind="calibration", error_on_missing_mjd=False)
-    mjds = epoch["wave"]
-
-    frames = md.get_calibrations_metadata(mjds=mjds, calibration="wave")
-    frames, expnums = choose_sequence(frames, calibration="wave", kind=kind)
+    mjds, frames, expnums = get_arc_sequence(mjd=mjd, epochs=epochs, kind=kind)
     if frames.empty:
         log.error("no arc frames found, skipping production of wavelength calibrations")
         return
@@ -2429,17 +2486,7 @@ def create_wavelengths(mjd, epochs=None, use_longterm_cals=True, kind="longterm"
             mlsf_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, camera=camera, kind="nlsf")
 
         # extract individual arcs, accounting for fiber thermal shifts in each exposure
-        xarc_paths = []
-        for arc in arcs.to_dict("records"):
-            darc_path = path.full("lvm_anc", drpver=drpver, kind="d", imagetype="arc", **arc)
-            xarc_paths.append(path.full("lvm_anc", drpver=drpver, kind="x", imagetype="arc", **arc))
-            if skip_done and os.path.isfile(xarc_paths[-1]):
-                log.info(f"skipping extracted arc {xarc_paths[-1]}, file already exists")
-                continue
-            image_tasks.extract_spectra(in_image=darc_path, out_rss=xarc_paths[-1],
-                                        in_trace=calibs["centroids"][camera],
-                                        in_sigma=calibs["sigmas"][camera],
-                                        in_model=calibs["model"][camera])
+        xarc_paths = extract_arcs(arcs, calibs=calibs, skip_done=skip_done)
 
         # TODO: maybe subtract stray light?
 

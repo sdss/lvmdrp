@@ -1,5 +1,35 @@
 from astropy.io import fits as pyfits
+from astropy.table import Table
 import numpy as np
+
+
+def individual_frames_table(headers):
+    """Returns the FRAMES table listing the individual exposures of a combined product
+
+    The table holds the metadata needed to reconstruct the paths of the
+    individual frames, one row per exposure.
+
+    Parameters
+    ----------
+    headers : list[astropy.io.fits.Header]
+        Headers of the individual frames
+
+    Returns
+    -------
+    astropy.table.Table
+        Table with columns TILEID, MJD, EXPNUM, SPEC, CAMERA and EXPTIME
+    """
+    frames = Table(names=["TILEID", "MJD", "EXPNUM", "SPEC", "CAMERA", "EXPTIME"], dtype=(int, int, int, str, str, float))
+    for header in headers:
+        frames.add_row([
+            header.get("TILEID", 11111),
+            header.get("MJD", -1),
+            header.get("EXPOSURE", -1),
+            header.get("SPEC", ""),
+            header.get("CCD", ""),
+            header.get("EXPTIME", np.nan),
+        ])
+    return frames
 
 class Header(object):
     def __init__(self, header=None, origin=None):
