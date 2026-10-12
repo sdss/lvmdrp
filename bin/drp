@@ -341,6 +341,7 @@ def detrend(mjd, mjd_list, mjd_range, calibration, dry_run, skip_done):
 @click.option('--full-ncolumns', type=int, default=40, help='number of columns to full fiber tracing')
 @click.option('-x', '--extract-md', is_flag=True, default=False, help='flag to extract metadata or use cached metadata if exist')
 @click.option('-s', '--skip-done', is_flag=True, default=False, help='flag to skip reduction steps that have already been done')
+@click.option('--remeasure-arcs', is_flag=True, default=False, help='measure the arc lines again (and refit the wavelength/LSF solutions) even with --skip-done; detrended and extracted arcs are reused')
 @click.option('-c', '--clean-ancillary', is_flag=True, default=False, help='Remove ancillary paths after run')
 @click.option("--dry-run", is_flag=True, default=False, help="Shows useful information about the current setup without actually running reductions")
 @cloup.constraint(mutually_exclusive, ['mjd', 'mjd_list', 'mjd_range'])
@@ -351,7 +352,7 @@ def longterm(mjd, mjd_list, mjd_range, from_epochs, epochs_file, reject_cr,
              skip_dome, skip_twilight,
              ldls_threshold, qrtz_threshold,
              cent_ncolumns, full_ncolumns,
-             extract_md, skip_done, clean_ancillary,
+             extract_md, skip_done, remeasure_arcs, clean_ancillary,
              dry_run):
     """ Run calibration sequence reduction """
 
@@ -380,6 +381,7 @@ def longterm(mjd, mjd_list, mjd_range, from_epochs, epochs_file, reject_cr,
             skip_sequence_selection=skip_sequence_selection,
             skip_combination=skip_combination,
             skip_done=skip_done,
+            remeasure_arcs=remeasure_arcs,
             keep_ancillary=not clean_ancillary,
             dry_run=dry_run)
 
@@ -400,6 +402,7 @@ def longterm(mjd, mjd_list, mjd_range, from_epochs, epochs_file, reject_cr,
 @click.option('--full-ncolumns', type=int, default=40, help='number of columns to full fiber tracing')
 @click.option('-x', '--extract-md', is_flag=True, default=False, help='flag to extract metadata or use cached metadata if exist')
 @click.option('-s', '--skip-done', is_flag=True, default=False, help='flag to skip reduction steps that have already been done')
+@click.option('--remeasure-arcs', is_flag=True, default=False, help='measure the arc lines again (and refit the wavelength/LSF solutions) even with --skip-done; detrended and extracted arcs are reused')
 @click.option('-c', '--clean-ancillary', is_flag=True, default=False, help='Remove ancillary paths after run')
 @click.option('--fflats-from-to', type=int, default=((None, None),), nargs=2, multiple=True, help='Move twilight fiberflats from one MJD to another MJD')
 @click.option("--dry-run", is_flag=True, default=False, help="Shows useful information about the current setup without actually running reductions")
@@ -410,7 +413,7 @@ def nightly(mjd, mjd_list, mjd_range, reject_cr,
                  skip_dome, skip_twilight,
                  ldls_threshold, qrtz_threshold,
                  cent_ncolumns, full_ncolumns,
-                 extract_md, skip_done, clean_ancillary,
+                 extract_md, skip_done, remeasure_arcs, clean_ancillary,
                  fflats_from_to, dry_run):
     """ Run calibration sequence reduction """
 
@@ -433,7 +436,7 @@ def nightly(mjd, mjd_list, mjd_range, reject_cr,
             only_cals=only_cals,
             counts_thresholds={"ldls": ldls_threshold, "quartz": qrtz_threshold},
             cent_guess_ncolumns=cent_ncolumns, trace_full_ncolumns=full_ncolumns,
-            extract_metadata=extract_md, skip_done=skip_done,
+            extract_metadata=extract_md, skip_done=skip_done, remeasure_arcs=remeasure_arcs,
             keep_ancillary=not clean_ancillary,
             fflats_from=fflats_from[fflats_to.index(mjd)] if mjd in fflats_to else None,
             dry_run=dry_run)

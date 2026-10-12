@@ -1067,7 +1067,7 @@ def _log_dry_run(frames, calibs=None, settings=None, caller=None, show_calibrati
             log.info(r)
 
 
-def _create_wavelengths_60177(use_longterm_cals=True, skip_done=True, dry_run=False):
+def _create_wavelengths_60177(use_longterm_cals=True, skip_done=True, remeasure_arcs=False, dry_run=False):
     """Reduce arc sequence for MJD = 60177"""
     pixwav = {"z1": np.asarray([
     [88.57, 7488.8712, 1],
@@ -1231,7 +1231,7 @@ def _create_wavelengths_60177(use_longterm_cals=True, skip_done=True, dry_run=Fa
         larc_paths = []
         for arc, xarc_path in zip(arcs.to_dict("records"), xarc_paths[camera]):
             larc_paths.append(path.full("lvm_frame", drpver=drpver, tileid=arc["tileid"], mjd=arc["mjd"], expnum=arc["expnum"], kind=f"Arc-{camera}"))
-            if skip_done and os.path.isfile(larc_paths[-1]):
+            if skip_done and not remeasure_arcs and os.path.isfile(larc_paths[-1]):
                 log.info(f"skipping arc lines measurements {larc_paths[-1]}, file already exists")
                 continue
             rss_tasks.measure_arc_lines(in_arc=xarc_path, out_arc=larc_paths[-1],
@@ -2426,7 +2426,7 @@ def extract_arcs(arcs, calibs, skip_done=True):
     return xarc_paths
 
 
-def create_wavelengths(mjd, epochs=None, use_longterm_cals=True, kind="longterm", skip_done=True, dry_run=False):
+def create_wavelengths(mjd, epochs=None, use_longterm_cals=True, kind="longterm", skip_done=True, remeasure_arcs=False, dry_run=False):
     """Reduces an arc sequence to create master wavelength solutions
 
     Given a set of MJDs and (optionally) exposure numbers, create wavelength
@@ -2449,13 +2449,16 @@ def create_wavelengths(mjd, epochs=None, use_longterm_cals=True, kind="longterm"
         Kind of calibration frames to produce, by default 'longterm'
     skip_done : bool
         Skip pipeline steps that have already been done
+    remeasure_arcs : bool, optional
+        Measure the arc lines again (and refit the wavelength/LSF solutions) even with `skip_done`;
+        the detrended and extracted arcs are still reused, by default False
     dry_run : bool, optional
         Logs useful information abaut the current setup without actually reducing, by default False
     """
     # run wavelength calibration for special MJDs
     if mjd == 60177:
         log.info(f"running dedicated script to create wavelength calibrations for MJD = {mjd}")
-        _create_wavelengths_60177(use_longterm_cals=use_longterm_cals, skip_done=skip_done, dry_run=dry_run)
+        _create_wavelengths_60177(use_longterm_cals=use_longterm_cals, skip_done=skip_done, remeasure_arcs=remeasure_arcs, dry_run=dry_run)
         return
 
     mjds, frames, expnums = get_arc_sequence(mjd=mjd, epochs=epochs, kind=kind)
@@ -2494,7 +2497,7 @@ def create_wavelengths(mjd, epochs=None, use_longterm_cals=True, kind="longterm"
         larc_paths = []
         for arc, xarc_path in zip(arcs.to_dict("records"), xarc_paths):
             larc_paths.append(path.full("lvm_frame", drpver=drpver, tileid=arc["tileid"], mjd=arc["mjd"], expnum=arc["expnum"], kind=f"Arc-{camera}"))
-            if skip_done and os.path.isfile(larc_paths[-1]):
+            if skip_done and not remeasure_arcs and os.path.isfile(larc_paths[-1]):
                 log.info(f"skipping arc lines measurements {larc_paths[-1]}, file already exists")
                 continue
             rss_tasks.measure_arc_lines(in_arc=xarc_path, out_arc=larc_paths[-1])
@@ -2547,7 +2550,7 @@ def detrend_calibrations(mjd, calibration, dry_run=False, skip_done=True):
 def reduce_nightly_sequence(mjd, use_longterm_cals=False, reject_cr=True, only_cals=CALIBRATION_TYPES,
                             counts_thresholds=COUNTS_THRESHOLDS, cent_guess_ncolumns=140, trace_full_ncolumns=40,
                             extract_metadata=False, skip_done=True, keep_ancillary=False,
-                            fflats_from=None, link_pixelmasks=True, dry_run=False):
+                            fflats_from=None, link_pixelmasks=True, remeasure_arcs=False, dry_run=False):
     """Reduces the nightly calibration sequence:
 
     The nightly calibration sequence consists of the following exposures:
@@ -2575,6 +2578,9 @@ def reduce_nightly_sequence(mjd, use_longterm_cals=False, reject_cr=True, only_c
         Skip pipeline steps that have already been done
     keep_ancillary : bool
         Keep ancillary files, by default False
+    remeasure_arcs : bool, optional
+        Measure the arc lines again (and refit the wavelength/LSF solutions) even with `skip_done`;
+        the detrended and extracted arcs are still reused, by default False
     fflats_from : int, optional
         Copy twilight fiberflats from given MJD, by default None (no copy)
     link_pixelmasks : bool, optional
@@ -2608,7 +2614,8 @@ def reduce_nightly_sequence(mjd, use_longterm_cals=False, reject_cr=True, only_c
                               skip_done=skip_done, dry_run=dry_run)
 
     if "wave" in only_cals:
-        create_wavelengths(mjd=mjd, use_longterm_cals=use_longterm_cals, kind="nightly", skip_done=skip_done, dry_run=dry_run)
+        create_wavelengths(mjd=mjd, use_longterm_cals=use_longterm_cals, kind="nightly", skip_done=skip_done,
+                           remeasure_arcs=remeasure_arcs, dry_run=dry_run)
 
     if "dome" in only_cals:
         create_dome_fiberflats(mjd=mjd, use_longterm_cals=use_longterm_cals, kind="nightly", skip_done=skip_done, dry_run=dry_run)
@@ -2628,7 +2635,7 @@ def reduce_longterm_sequence(mjd, epochs=None, use_longterm_cals=True,
                              skip_sequence_selection=False,
                              skip_combination=False,
                              skip_done=True, keep_ancillary=False,
-                             link_pixelmasks=True,
+                             link_pixelmasks=True, remeasure_arcs=False,
                              dry_run=False):
     """Reduces the long-term calibration sequence:
 
@@ -2663,6 +2670,9 @@ def reduce_longterm_sequence(mjd, epochs=None, use_longterm_cals=True,
         Skip pipeline steps that have already been done
     keep_ancillary : bool
         Keep ancillary files, by default False
+    remeasure_arcs : bool, optional
+        Measure the arc lines again (and refit the wavelength/LSF solutions) even with `skip_done`;
+        the detrended and extracted arcs are still reused, by default False
     link_pixelmasks : bool, optional
         Create a symbolic link of current version of pixel mask and pixel flats to current version, by default True
     dry_run : bool, optional
@@ -2697,7 +2707,8 @@ def reduce_longterm_sequence(mjd, epochs=None, use_longterm_cals=True,
             dry_run=dry_run)
 
     if "wave" in only_cals:
-        create_wavelengths(mjd=mjd, epochs=epochs, use_longterm_cals=use_longterm_cals, skip_done=skip_done, dry_run=dry_run)
+        create_wavelengths(mjd=mjd, epochs=epochs, use_longterm_cals=use_longterm_cals, skip_done=skip_done,
+                           remeasure_arcs=remeasure_arcs, dry_run=dry_run)
 
     if "dome" in only_cals:
         create_dome_fiberflats(mjd=mjd, cals_mjd=mjd, use_longterm_cals=use_longterm_cals, kind="longterm", skip_done=skip_done, dry_run=dry_run)
