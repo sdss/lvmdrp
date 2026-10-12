@@ -9,6 +9,8 @@ This document records the main changes to the drp code.
 1.3.3dev (unreleased)
 ---------------------
 
+- Bumped ``skycalc_cli`` to 1.5, which no longer imports the deprecated ``pkg_resources``; removes the setuptools warning on every ``drp`` call and the ``ModuleNotFoundError`` with setuptools>=81 (#257)
+- Replaced lvmdrp's own ``pkg_resources.parse_version`` with ``packaging.version.parse``
 
 
 1.3.2 (02-09-2026)
