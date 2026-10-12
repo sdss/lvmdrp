@@ -570,20 +570,24 @@ def synthetic_mags(wave, flux):
 
 
 def read_cframe(cframe_path, rows):
-    """lvmCFrame restricted to the given fibers, with all its sensitivity curves"""
+    """lvmCFrame restricted to the given fibers, with all its sensitivity curves, and the median LSF of all its fibers"""
     with fits.open(cframe_path, memmap=True) as hdus:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", category=RuntimeWarning)
+            lsf = np.nanmedian(np.asarray(hdus["LSF"].data, dtype=float), axis=0)
         header = lvmCFrame.header_from_hdulist(hdus)
         ivar = np.asarray(hdus["IVAR"].data[rows], dtype=np.float32)
         with np.errstate(divide="ignore"):
             error = np.where(ivar > 0, 1 / np.sqrt(ivar), np.nan).astype(np.float32)
-        return lvmCFrame(data=np.asarray(hdus["FLUX"].data[rows], dtype=np.float32), error=error,
+        cframe = lvmCFrame(data=np.asarray(hdus["FLUX"].data[rows], dtype=np.float32), error=error,
                          mask=np.asarray(hdus["MASK"].data[rows], dtype=bool), header=header.copy(),
                          wave=np.asarray(hdus["WAVE"].data), lsf=np.asarray(hdus["LSF"].data[rows]),
                          fluxcal_std=Table.read(hdus["FLUXCAL_STD"]), fluxcal_sci=Table.read(hdus["FLUXCAL_SCI"]),
                          fluxcal_mod=Table.read(hdus["FLUXCAL_MOD"]), slitmap=Table.read(hdus["SLITMAP"])[rows])
+    return cframe, lsf
 
 
-def calibrate_with_methods(cframe, methods=None):
+def calibrate_with_methods(cframe, methods=None, lsf=None):
     """Spectra flux calibrated with each method, swapping the applied calibration (see :meth:`~lvmdrp.core.rss.RSS.swap_fluxcal`)
 
     Parameters
@@ -592,6 +596,9 @@ def calibrate_with_methods(cframe, methods=None):
         flux-calibrated frame
     methods : list[str], optional
         flux calibration methods, by default 'MOD', 'STD' and 'SCI'
+    lsf : numpy.ndarray, optional
+        LSF of the telluric transmission of the 'MOD' method, by default the
+        median of the LSF of the frame across fibers
 
     Returns
     -------
@@ -601,6 +608,7 @@ def calibrate_with_methods(cframe, methods=None):
     methods = methods or FLUXCAL_METHODS
     applied = cframe._header.get("FLUXCAL")
     spectra, unavailable = {}, {}
+    telluric_corrector = None
     for method in methods:
         sens = cframe.get_fluxcal(source=method.lower())
         if sens is None or not np.isfinite(np.asarray(sens["mean"], dtype=float)).any():
@@ -612,9 +620,12 @@ def calibrate_with_methods(cframe, methods=None):
         if applied is None:
             unavailable[method] = "the flux calibration method applied is not in the header"
             continue
+        if "MOD" in (method, applied) and telluric_corrector is None:
+            telluric_corrector = fluxcal.TelluricCalculator()
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", category=RuntimeWarning)
-            spectra[method] = np.asarray(cframe.swap_fluxcal(method, inplace=False)._data, dtype=float)
+            swapped = cframe.swap_fluxcal(method, inplace=False, lsf=lsf, telluric_corrector=telluric_corrector)
+        spectra[method] = np.asarray(swapped._data, dtype=float)
     return spectra, unavailable
 
 
@@ -1339,10 +1350,10 @@ def qa_science_exposure(expnum, cameras=CAMERAS, parts=QA_PARTS, sky_lines=None,
                 header = hdus["PRIMARY"].header
                 stars = standard_stars(header, Table.read(hdus["SLITMAP"]))
             if stars:
-                cframe = read_cframe(cframe_path, [star["row"] for star in stars])
+                cframe, lsf = read_cframe(cframe_path, [star["row"] for star in stars])
                 wave = np.asarray(cframe._wave, dtype=float)
                 applied = cframe._header.get("FLUXCAL")
-                spectra, unavailable = calibrate_with_methods(cframe)
+                spectra, unavailable = calibrate_with_methods(cframe, lsf=lsf)
                 for method, reason in unavailable.items():
                     log.warning(f"flux calibration method {method} not shown: {reason}")
                 methods = [method for method in FLUXCAL_METHODS if method in spectra]
@@ -1381,7 +1392,8 @@ def qa_science_exposure(expnum, cameras=CAMERAS, parts=QA_PARTS, sky_lines=None,
     <h2>6. {PART_TITLES['fluxcal']}</h2>
     <p>The standard stars observed through the spectrophotometric telescope, from the lvmCFrame, calibrated with each flux
     calibration method: the applied one, <span class="mono">{escape(str(applied))}</span>, and the others swapped in with
-    their sensitivity curves in the lvmCFrame. The telluric correction of the MOD method is not swapped. The sky is not subtracted, which only shows at the sky
+    their sensitivity curves in the lvmCFrame as the flux calibration would apply them, including the telluric correction
+    of the MOD method. The sky is not subtracted, which only shows at the sky
     lines for these bright stars.{missing_methods} The magnitudes are AB magnitudes in the Gaussian LVM photometric bands,
     synthesized from the LVM and the Gaia XP spectra with the routine of the flux calibration. The XP spectra are shown for
     reference only: their resolution and smoothing are not those of LVM, so they are not divided into the LVM spectra.</p>

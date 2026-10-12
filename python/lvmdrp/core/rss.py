@@ -3541,16 +3541,55 @@ class RSS(FiberRows):
 
         return x, y, z, coeffs, factor, science_g
 
-    def swap_fluxcal(self, method, inplace=True):
+    # airmass keyword of the spectra calibrated together, as in apply_fluxcal
+    _FLUXCAL_GROUPS = {"SCIAM": ("_data", "_error", "_sky", "_sky_error"),
+                       "SKYEAM": ("_sky_east", "_sky_east_error"),
+                       "SKYWAM": ("_sky_west", "_sky_west_error")}
+
+    def telluric_transmissions(self, lsf=None, telluric_corrector=None, airmass_keys=("SCIAM", "SKYEAM", "SKYWAM")):
+        """Telluric transmissions divided into the 'MOD' sensitivity by the flux calibration
+
+        Computed as in :func:`~lvmdrp.functions.fluxCalMethod.apply_fluxcal`:
+        with the median PWV in the header (or the default PWV if missing or
+        invalid), the median LSF across fibers and the airmass of each telescope.
+
+        Parameters
+        ----------
+        lsf : numpy.ndarray, optional
+            LSF in Angstroms on the wavelength grid, by default the median of the LSF of this RSS across fibers
+        telluric_corrector : lvmdrp.core.fluxcal.TelluricCalculator, optional
+            telluric model, by default the one used by the flux calibration
+        airmass_keys : tuple[str], optional
+            header keywords of the airmasses, by default those of the science and sky telescopes
+
+        Returns
+        -------
+        dict[str, numpy.ndarray]
+            transmission for each airmass keyword
+        """
+        from lvmdrp.core import fluxcal
+        from lvmdrp.functions.fluxCalMethod import DEFAULT_PWV
+
+        pwv = self._header.get("PWV_MED", -999.9)
+        if not (numpy.isfinite(pwv) and pwv > 0):
+            warnings.warn(f"PWV_MED not found or invalid ({pwv}), using default PWV={DEFAULT_PWV} mm")
+            pwv = DEFAULT_PWV
+        if lsf is None:
+            lsf = self._lsf if self._lsf.ndim == 1 else numpy.nanmedian(self._lsf, axis=0)
+        telluric_corrector = telluric_corrector or fluxcal.TelluricCalculator()
+        return {key: telluric_corrector.match_to_data(self._wave, lsf, pwv, airmass=self._header[key], lsf_in_wavelength=True)
+                for key in airmass_keys}
+
+    def swap_fluxcal(self, method, inplace=True, lsf=None, telluric_corrector=None):
         """Swaps the applied flux calibration for another method
 
         The flux calibration multiplies the spectra by the mean sensitivity
-        curve of the applied method (see
-        :func:`~lvmdrp.functions.fluxCalMethod.apply_fluxcal`), so swapping
-        divides by the mean curve of the applied method and multiplies by the
-        mean curve of the new one. The sky spectra are swapped as well. The
-        telluric correction applied with the 'MOD' method is not undone nor
-        applied.
+        curve of the applied method, divided by the telluric transmission for
+        the 'MOD' method (see :func:`~lvmdrp.functions.fluxCalMethod.apply_fluxcal`).
+        Swapping divides by the curve of the applied method and multiplies by
+        the curve of the new one, with the telluric transmission of each
+        telescope's airmass computed as in the flux calibration (see
+        :meth:`telluric_transmissions`). The sky spectra are swapped as well.
 
         Parameters
         ----------
@@ -3558,6 +3597,10 @@ class RSS(FiberRows):
             new flux calibration method: 'STD', 'SCI', 'MOD' or 'NONE'
         inplace : bool, optional
             swap in this object instead of a copy, by default True
+        lsf : numpy.ndarray, optional
+            LSF of the telluric transmission, see :meth:`telluric_transmissions`
+        telluric_corrector : lvmdrp.core.fluxcal.TelluricCalculator, optional
+            telluric model, see :meth:`telluric_transmissions`
 
         Returns
         -------
@@ -3577,21 +3620,32 @@ class RSS(FiberRows):
             warnings.warn(f"Flux calibration method is the same that is applied. No need to swap to {method = }")
             return rss
 
-        # undo the applied flux calibration and apply the new one
-        factor = 1.0
-        for name, power in ((current_method, -1), (method, 1)):
+        sensitivities = {}
+        for name in (current_method, method):
             if name == "NONE":
                 continue
             sens = rss.get_fluxcal(source=name.lower())
             if sens is None:
                 raise ValueError(f"No flux calibration table found for method: {name}")
-            factor = factor * numpy.asarray(sens["mean"], dtype=float)**power
-        factor = numpy.asarray(factor, dtype="float32")
+            sensitivities[name] = numpy.asarray(sens["mean"], dtype=float)
 
-        for attr in ("_data", "_error", "_sky", "_sky_error", "_sky_east", "_sky_east_error", "_sky_west", "_sky_west_error"):
-            values = getattr(rss, attr, None)
-            if values is not None:
-                setattr(rss, attr, values * factor)
+        groups = {key: [attr for attr in attrs if getattr(rss, attr, None) is not None] for key, attrs in self._FLUXCAL_GROUPS.items()}
+        groups = {key: attrs for key, attrs in groups.items() if attrs}
+        transmissions = {}
+        if "MOD" in sensitivities:
+            transmissions = rss.telluric_transmissions(lsf=lsf, telluric_corrector=telluric_corrector, airmass_keys=tuple(groups))
+
+        # undo the applied flux calibration and apply the new one
+        for key, attrs in groups.items():
+            factor = 1.0
+            for name, power in ((current_method, -1), (method, 1)):
+                if name == "NONE":
+                    continue
+                sens = sensitivities[name] / transmissions[key] if name == "MOD" else sensitivities[name]
+                factor = factor * sens**power
+            factor = numpy.asarray(factor, dtype="float32")
+            for attr in attrs:
+                setattr(rss, attr, getattr(rss, attr) * factor)
 
         rss.setHdrValue("FLUXCAL", method, "flux calibration method")
         if method == "NONE":

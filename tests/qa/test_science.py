@@ -162,19 +162,29 @@ def test_thermal_shifts_from_slitmaps():
     assert np.allclose(sci.thermal_shifts(frame, master, "b2"), [0.5, 0.5], atol=1e-5)
 
 
-def test_calibrate_with_methods():
+class _FakeTelluric:
+    """telluric model with a transmission of 0.5 at every wavelength"""
+
+    def match_to_data(self, wave, lsf, pwv, airmass=None, lsf_in_wavelength=False):
+        return np.full(wave.size, 0.5)
+
+
+def test_calibrate_with_methods(monkeypatch):
+    monkeypatch.setattr(sci.fluxcal, "TelluricCalculator", _FakeTelluric)
     npix = 20
     counts = np.full((2, npix), 10.0)
     curves = {"mod": np.full(npix, 2.0), "std": np.full(npix, 3.0), "sci": np.full(npix, np.nan)}
     tables = {key: Table({"STD1SEN": value, "mean": value, "rms": 0 * value}) for key, value in curves.items()}
-    cframe = sci.lvmCFrame(data=counts * 2.0, error=np.ones_like(counts), mask=np.zeros_like(counts, dtype=bool),
-                           header=fits.Header({"FLUXCAL": "MOD", "BUNIT": "erg / (Angstrom s cm2)"}), wave=np.arange(npix, dtype=float),
+    # MOD applied: sensitivity divided by the telluric transmission
+    header = fits.Header({"FLUXCAL": "MOD", "BUNIT": "erg / (Angstrom s cm2)", "PWV_MED": 2.0, "SCIAM": 1.2, "SKYEAM": 1.3, "SKYWAM": 1.1})
+    cframe = sci.lvmCFrame(data=counts * 2.0 / 0.5, error=np.ones_like(counts), mask=np.zeros_like(counts, dtype=bool),
+                           header=header, wave=np.arange(npix, dtype=float), lsf=np.ones((2, npix)),
                            fluxcal_std=tables["std"], fluxcal_sci=tables["sci"], fluxcal_mod=tables["mod"])
-    spectra, unavailable = sci.calibrate_with_methods(cframe)
+    spectra, unavailable = sci.calibrate_with_methods(cframe, lsf=np.ones(npix))
     assert set(spectra) == {"MOD", "STD"} and set(unavailable) == {"SCI"}
-    assert np.allclose(spectra["MOD"], 20.0) and np.allclose(spectra["STD"], 30.0)
+    assert np.allclose(spectra["MOD"], 40.0) and np.allclose(spectra["STD"], 30.0)
     # the frame keeps its calibration
-    assert cframe._header["FLUXCAL"] == "MOD" and np.allclose(cframe._data, 20.0)
+    assert cframe._header["FLUXCAL"] == "MOD" and np.allclose(cframe._data, 40.0)
 
 
 def test_fig_sensitivity_divides_by_mod():
