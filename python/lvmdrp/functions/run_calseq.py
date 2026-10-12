@@ -39,7 +39,6 @@ from copy import deepcopy as copy
 from datetime import datetime
 from shutil import copy2, copytree
 from astropy.io import fits
-from astropy.table import Table
 from astropy.stats import biweight_location
 from typing import Union, List, Dict
 from collections.abc import Callable
@@ -53,7 +52,6 @@ from lvmdrp.utils.convert import tileid_grp
 from lvmdrp.utils.paths import get_calib_paths, group_calib_paths, get_master_mjd
 from lvmdrp.utils import pixshifts
 from lvmdrp.core.plot import save_fig, slit
-from lvmdrp.core import dataproducts as dp
 from lvmdrp.core.constants import (
     LVM_NFIBERS,
     LVM_NCOLS,
@@ -73,7 +71,7 @@ from lvmdrp.core.constants import (
     PIXELSHIFTS_PATH)
 from lvmdrp.core.tracemask import TraceMask
 from lvmdrp.core.image import loadImage
-from lvmdrp.core.rss import RSS, lvmFrame
+from lvmdrp.core.rss import RSS
 from lvmdrp.core.fit_profile import gaussians, IFUGradient
 
 from lvmdrp.functions import imageMethod as image_tasks
@@ -266,51 +264,54 @@ def measure_fiberflat_factors(mjd, drpver, channel, expnums=None, sky_cwaves=SKY
         mflat = RSS.from_file(mflat_paths[channel])
 
         fig = plt.figure(figsize=(14,3*2))
-        fig.suptitle(f"Fiber flatfield correction for {expnum = } {channel = } around sky line @ {sky_cwave:.2f} Angstroms", fontsize="xx-large")
-        gs_gra = GridSpec(2, 5, hspace=0.01, wspace=0.01, left=0.07, right=0.99, figure=fig)
-        gs_cor = GridSpec(2, 5, hspace=0.5, wspace=0.01, left=0.07, right=0.99, figure=fig)
-        axs = [fig.add_subplot(gs_gra[0, j]) for j in range(5)]
-        x, y, skyline_slit, coeffs, factor, _ = rss.measure_skyline_flatfield(
-            mflat=mflat,
-            sky_cwave=sky_cwave,
-            cont_cwave=cont_cwave,
-            dwave=dwave,
-            fiber_radius=fiber_radius,
-            oversampling_factor=oversampling_factor,
-            coadd_method=coadd_method,
-            norm_method=norm_stat,
-            quantiles=quantiles,
-            guess_coeffs=[1,0,0,0],
-            fixed_coeffs=[3] if fit_gradient else [0, 1, 2, 3],
-            groupby=groupby, axs=axs, labels=True)
+        try:
+            fig.suptitle(f"Fiber flatfield correction for {expnum = } {channel = } around sky line @ {sky_cwave:.2f} Angstroms", fontsize="xx-large")
+            gs_gra = GridSpec(2, 5, hspace=0.01, wspace=0.01, left=0.07, right=0.99, figure=fig)
+            gs_cor = GridSpec(2, 5, hspace=0.5, wspace=0.01, left=0.07, right=0.99, figure=fig)
+            axs = [fig.add_subplot(gs_gra[0, j]) for j in range(5)]
+            x, y, skyline_slit, coeffs, factor, _ = rss.measure_skyline_flatfield(
+                mflat=mflat,
+                sky_cwave=sky_cwave,
+                cont_cwave=cont_cwave,
+                dwave=dwave,
+                fiber_radius=fiber_radius,
+                oversampling_factor=oversampling_factor,
+                coadd_method=coadd_method,
+                norm_method=norm_stat,
+                quantiles=quantiles,
+                guess_coeffs=[1,0,0,0],
+                fixed_coeffs=[3] if fit_gradient else [0, 1, 2, 3],
+                groupby=groupby, axs=axs, labels=True)
 
-        log.info("applying flatfield correction")
-        fiber_groups = mflat._get_fiber_groups(by="spec")
-        flatfield_corr = IFUGradient.ifu_factors(factor, fiber_groups)
-        mflat *= flatfield_corr[:, None]
-        rss /= mflat
-        skyline_slit /= flatfield_corr
+            log.info("applying flatfield correction")
+            fiber_groups = mflat._get_fiber_groups(by="spec")
+            flatfield_corr = IFUGradient.ifu_factors(factor, fiber_groups)
+            mflat *= flatfield_corr[:, None]
+            rss /= mflat
+            skyline_slit /= flatfield_corr
 
-        ax_cor = fig.add_subplot(gs_cor[-1, :])
-        ax_cor.set_title(f"Flatfielded skyline @ {sky_cwave:.2f}+/-{dwave:.2f} Angstroms", loc="left")
-        ax_cor.set_xlabel("Fiber ID", fontsize="large")
-        ax_cor.set_ylabel("Normalized counts", fontsize="large")
-        ax_cor.set_ylim(0.92, 1.08)
-        slit(x=rss._slitmap["fiberid"].data, y=skyline_slit, data=rss._data, ax=ax_cor)
-        save_fig(fig, product_path=wframe_path, figure_path="qa", label="fiberflat_correction", to_display=display_plots)
+            ax_cor = fig.add_subplot(gs_cor[-1, :])
+            ax_cor.set_title(f"Flatfielded skyline @ {sky_cwave:.2f}+/-{dwave:.2f} Angstroms", loc="left")
+            ax_cor.set_xlabel("Fiber ID", fontsize="large")
+            ax_cor.set_ylabel("Normalized counts", fontsize="large")
+            ax_cor.set_ylim(0.92, 1.08)
+            slit(x=rss._slitmap["fiberid"].data, y=skyline_slit, data=rss._data, ax=ax_cor)
+            save_fig(fig, product_path=wframe_path, figure_path="qa", label="fiberflat_correction", to_display=display_plots)
 
-        rss.setHdrValue(f"HIERARCH {channel} FIBERFLAT CWAVE", sky_cwave, "norm. wavelength [Angstrom]")
-        rss.setHdrValue(f"HIERARCH {channel} FIBERFLAT DWAVE", dwave, "norm. window width [Angstrom]")
-        rss.setHdrValue(f"HIERARCH {channel} FIBERFLAT COADD", coadd_method, "coadding method")
-        rss.setHdrValue(f"HIERARCH {channel} FIBERFLAT SKYCORR", True, "fiberflat skyline-corrected?")
-        rss.setHdrValue(f"HIERARCH {channel} FIBERFLAT GROUPBY", groupby, "fiber grouping")
-        for i, f in enumerate(factor):
-            rss.setHdrValue(f"HIERARCH {channel} FIBERFLAT FACTOR{i+1}", np.round(f, 5), f"fiberflat factor {groupby}{i+1}")
-        for i, c in enumerate(coeffs):
-            rss.setHdrValue(f"HIERARCH {channel} FIBERFLAT GCOEFF{i+1}", np.round(c, 5), f"IFU gradient coeff #{i+1}")
+            rss.setHdrValue(f"HIERARCH {channel} FIBERFLAT CWAVE", sky_cwave, "norm. wavelength [Angstrom]")
+            rss.setHdrValue(f"HIERARCH {channel} FIBERFLAT DWAVE", dwave, "norm. window width [Angstrom]")
+            rss.setHdrValue(f"HIERARCH {channel} FIBERFLAT COADD", coadd_method, "coadding method")
+            rss.setHdrValue(f"HIERARCH {channel} FIBERFLAT SKYCORR", True, "fiberflat skyline-corrected?")
+            rss.setHdrValue(f"HIERARCH {channel} FIBERFLAT GROUPBY", groupby, "fiber grouping")
+            for i, f in enumerate(factor):
+                rss.setHdrValue(f"HIERARCH {channel} FIBERFLAT FACTOR{i+1}", np.round(f, 5), f"fiberflat factor {groupby}{i+1}")
+            for i, c in enumerate(coeffs):
+                rss.setHdrValue(f"HIERARCH {channel} FIBERFLAT GCOEFF{i+1}", np.round(c, 5), f"IFU gradient coeff #{i+1}")
 
-        # extract flat field factors and additional information
-        metadata.append(_extract_ffactors(rss._header))
+            # extract flat field factors and additional information
+            metadata.append(_extract_ffactors(rss._header))
+        finally:
+            plt.close(fig)
 
     metadata = pd.DataFrame(metadata)
     metadata.sort_values("exposure", inplace=True)
@@ -771,10 +772,9 @@ def create_lamps_on_hdrfix(mjd, lamps_on, expnum):
         raise ValueError(f"Invalid value(s) in `lamps_on`: {lamps_on}. Expected a subset of {lamps_all}")
     lamps_status.update(dict.fromkeys(lamps_, "ON"))
 
-    frames = [md.get_calibrations_metadata(mjds=mjd, expnums=[expnum], calibration=calibration) for calibration in CALIBRATION_TYPES]
-    frames = pd.concat(frames, ignore_index=True)
+    frames = md.get_frames_metadata(mjd=mjd).query("expnum == @expnum")
     if frames.empty:
-        log.info(f"no need to apply header fixes for lamps status on MJD = {mjd}, {expnum = }")
+        log.info(f"no frames found for MJD = {mjd}, {expnum = }")
         return
     log.info(f"going to write header fixes for lamps status on MJD = {mjd}, {expnum = }: {lamps_on = }")
 
@@ -1187,74 +1187,62 @@ def _create_wavelengths_60177(use_longterm_cals=True, skip_done=True, dry_run=Fa
     reduce_2d(mjd, calibrations=calibs, expnums=expnums, assume_imagetyp="arc", reject_cr=False,
               add_astro=False, sub_straylight=False, skip_done=skip_done)
 
+    # extract individual arcs, accounting for fiber thermal shifts in each exposure
     lamps = [lamp.lower() for lamp in ARC_LAMPS]
-    xarc_paths = {"b1": [], "b2": [], "b3": [], "r1": [], "r2": [], "r3": [], "z1": [], "z2": [], "z3": []}
-    for lamp in lamps:
-        arc_analogs = frames.loc[frames[lamp]].groupby(["camera",])
-        for camera in arc_analogs.groups:
-            arcs = arc_analogs.get_group((camera,))
-            expnum_str = f"{arcs.expnum.min():>08}_{arcs.expnum.max():>08}"
+    frames = frames.loc[frames[lamps].any(axis=1)]
+    xarc_paths = {camera: [] for camera in np.sort(frames.camera.unique())}
+    for arc in frames.to_dict("records"):
+        camera = arc["camera"]
+        darc_path = path.full("lvm_anc", drpver=drpver, kind="d", imagetype="arc", **arc)
+        xarc_paths[camera].append(path.full("lvm_anc", drpver=drpver, kind="x", imagetype="arc", **arc))
+        if skip_done and os.path.isfile(xarc_paths[camera][-1]):
+            log.info(f"skipping extracted arc {xarc_paths[camera][-1]}, file already exists")
+            continue
+        image_tasks.extract_spectra(in_image=darc_path, out_rss=xarc_paths[camera][-1],
+                                    in_trace=calibs["centroids"][camera],
+                                    in_sigma=calibs["sigmas"][camera],
+                                    in_model=calibs["model"][camera])
 
-            # define master frame path
-            carc_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="c", imagetype=f"arc_{lamp}", camera=camera, expnum=expnum_str)
-            xarc_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="x", imagetype=f"arc_{lamp}", camera=camera, expnum=expnum_str)
-            os.makedirs(os.path.dirname(carc_path), exist_ok=True)
-            darc_paths = [path.full("lvm_anc", drpver=drpver, kind="d", imagetype="arc", **arc) for arc in arcs.to_dict("records")]
-            xarc_paths[camera].append(xarc_path)
-
-            # create master arc (2D image)
-            if skip_done and os.path.exists(carc_path):
-                log.info(f"skipping {carc_path}, file already exists")
-            else:
-                image_tasks.create_master_frame(in_images=darc_paths, out_image=carc_path)
-
-            # extract combined (master) arc
-            if skip_done and os.path.exists(xarc_path):
-                log.info(f"skipping {xarc_path}, file already exists")
-            else:
-                image_tasks.extract_spectra(in_image=carc_path, out_rss=xarc_path,
-                                            in_trace=calibs["centroids"][camera],
-                                            in_sigma=calibs["sigmas"][camera],
-                                            in_model=calibs["model"][camera])
-
-    expnum_str = f"{frames.expnum.min():>08}_{frames.expnum.max():>08}"
-    for camera in np.sort(frames.camera.unique()):
-        xarc_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="x", imagetype="arc", camera=camera, expnum=expnum_str)
-
-        # coadd arcs
-        if skip_done and os.path.isfile(xarc_path):
-            log.info(f"skipping {xarc_path}, file already exists")
-        else:
-            rss_tasks.combine_rsss(in_rsss=xarc_paths[camera], out_rss=xarc_path, method="sum")
-
-        # fit wavelength solution
-        mwave_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, camera=camera, kind="mwave")
-        mlsf_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, camera=camera, kind="mlsf")
+    for camera in xarc_paths:
+        arcs = frames.loc[frames.camera == camera]
         pixels = pixwav[camera][:, 0] if camera in pixwav else []
         waves = pixwav[camera][:, 1] if camera in pixwav else []
         use_lines = pixwav[camera][:, 2].astype(bool) if camera in pixwav else []
-        ref_lines, _, cent_wave, _, rss, wave_trace, fwhm_trace = rss_tasks.determine_wavelength_solution(in_arcs=xarc_paths[camera], out_wave=mwave_path, out_lsf=mlsf_path,
-                                                                                                          pixel=pixels, ref_lines=waves, use_line=use_lines,
-                                                                                                          flux_range=[800, np.inf], cent_range=[-1.5, 1.5], fwhm_range=[2.0, 4.5])
 
-        lvmarc = lvmArc(data=rss._data, error=rss._error, mask=rss._mask, header=rss._header,
-                        ref_wave=ref_lines, cent_line=cent_wave,
-                        wave_trace=wave_trace, lsf_trace=fwhm_trace)
-        lvmarc.writeFitsData(path.full("lvm_frame", mjd=mjd, tileid=11111, drpver=drpver, expnum=expnum_str, kind=f'Arc-{camera}'))
+        # measure lines and fit individual wavelength/LSF solutions in each arc
+        larc_paths = []
+        for arc, xarc_path in zip(arcs.to_dict("records"), xarc_paths[camera]):
+            larc_paths.append(path.full("lvm_frame", drpver=drpver, tileid=arc["tileid"], mjd=arc["mjd"], expnum=arc["expnum"], kind=f"Arc-{camera}"))
+            if skip_done and os.path.isfile(larc_paths[-1]):
+                log.info(f"skipping arc lines measurements {larc_paths[-1]}, file already exists")
+                continue
+            rss_tasks.measure_arc_lines(in_arc=xarc_path, out_arc=larc_paths[-1],
+                                        pixel=pixels, ref_lines=waves, use_line=use_lines,
+                                        flux_range=[800, np.inf], cent_range=[-1.5, 1.5], fwhm_range=[2.0, 4.5])
+
+        # combine line measurements of all arcs into master wavelength/LSF solutions
+        mwave_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, camera=camera, kind="mwave")
+        mlsf_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, camera=camera, kind="mlsf")
+        rss_tasks.fit_wavelength_solution(in_arcs=larc_paths, out_wave=mwave_path, out_lsf=mlsf_path, flux_range=[800, np.inf])
 
     for channel in "brz":
-        xarc_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="x", imagetype="arc", camera=channel, expnum=expnum_str)
-        harc_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="h", imagetype="arc", camera=channel, expnum=expnum_str)
         mwave_paths = [path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, camera=f"{channel}{spec+1}", kind="mwave") for spec in range(3)]
         mlsf_paths = [path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, camera=f"{channel}{spec+1}", kind="mlsf") for spec in range(3)]
 
-        # stack spectragraphs
-        xarc_paths = sorted(path.expand("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="x", imagetype="arc", camera=f"{channel}?", expnum=expnum_str))
-        rss_tasks.stack_spectrographs(in_rsss=xarc_paths, out_rss=xarc_path)
+        # rectify individual arcs
+        for arc in frames.drop_duplicates(subset=["expnum"]).to_dict("records"):
+            xarc_paths_ = sorted(path.expand("lvm_anc", drpver=drpver, kind="x", imagetype="arc", **{**arc, "camera": f"{channel}[123]"}))
+            xarc_path = path.full("lvm_anc", drpver=drpver, kind="x", imagetype="arc", **{**arc, "camera": channel})
+            harc_path = path.full("lvm_anc", drpver=drpver, kind="h", imagetype="arc", **{**arc, "camera": channel})
+            if skip_done and os.path.isfile(harc_path):
+                log.info(f"skipping rectified arc {harc_path}, file already exists")
+                continue
 
-        # apply wavelength solution to arcs and rectify
-        rss_tasks.create_pixel_table(in_rss=xarc_path, out_rss=harc_path, in_waves=mwave_paths, in_lsfs=mlsf_paths)
-        rss_tasks.resample_wavelength(in_rss=harc_path, out_rss=harc_path, method="linear", wave_range=SPEC_CHANNELS[channel], wave_disp=0.5)
+            # stack spectragraphs
+            rss_tasks.stack_spectrographs(in_rsss=xarc_paths_, out_rss=xarc_path)
+            # apply wavelength solution to arcs and rectify
+            rss_tasks.create_pixel_table(in_rss=xarc_path, out_rss=harc_path, in_waves=mwave_paths, in_lsfs=mlsf_paths)
+            rss_tasks.resample_wavelength(in_rss=harc_path, out_rss=harc_path, method="linear", wave_range=SPEC_CHANNELS[channel], wave_disp=0.5)
 
 
 def tag_longterm_calibrations(mjd, version, flavors=None, dry_run=False):
@@ -2272,7 +2260,7 @@ def create_fiberflats_corrections(
     # determine the range of calibration epochs to be corrected
     mjds = list(ffactor_epochs.keys())
     i = mjds.index(mjd)
-    calibration_mjds = list(filter(lambda mjd: mjds[i] <= mjd < mjds[i+1], calibration_epochs.keys()))
+    calibration_mjds = list(filter(lambda m: mjds[i] <= m < mjds[i+1] if i+1 < len(mjds) else mjds[i] <= m, calibration_epochs.keys()))
     mflat_paths = {mjd_cal: get_calib_paths(mjd=mjd_cal, version=drpver, from_sandbox=False, only_existing=True).get("fiberflat_twilight", {}).get(channel) for mjd_cal in calibration_mjds}
 
     # determine exposures to be used for factors fitting
@@ -2359,6 +2347,67 @@ def create_illumination_corrections(mjd, use_longterm_cals=True, expnums=None):
     raise NotImplementedError("create_illumination_corrections")
 
 
+def get_arc_sequence(mjd, epochs=None, kind="longterm"):
+    """Returns the arc exposures used to create the wavelength calibrations of an epoch
+
+    Parameters
+    ----------
+    mjd : int
+        MJD of the calibration epoch
+    epochs : dict, optional
+        Calibration epochs as returned by `load_epochs_file`. If None, the arcs are taken from `mjd` alone
+    kind : str, optional
+        Calibration sequence length, either 'nightly' or 'longterm', by default 'longterm'
+
+    Returns
+    -------
+    mjds : list[int]
+        MJDs from which the arcs are sourced
+    frames : pd.DataFrame
+        Metadata of the chosen arc frames, one row per exposure and camera
+    expnums : array_like
+        Chosen exposure numbers
+    """
+    epoch = get_epoch(mjd=mjd, epochs=epochs or {}, epochs_kind="calibration", error_on_missing_mjd=False)
+    mjds = epoch["wave"]
+
+    frames = md.get_calibrations_metadata(mjds=mjds, calibration="wave")
+    frames, expnums = choose_sequence(frames, calibration="wave", kind=kind)
+    return mjds, frames, expnums
+
+
+def extract_arcs(arcs, calibs, skip_done=True):
+    """Extracts individual detrended arc exposures of a camera
+
+    Parameters
+    ----------
+    arcs : pd.DataFrame
+        Metadata of the arc frames of a single camera
+    calibs : dict
+        Calibration paths, including 'centroids', 'sigmas' and 'model'
+    skip_done : bool, optional
+        Skip arcs already extracted, by default True
+
+    Returns
+    -------
+    list[str]
+        Paths to the extracted arcs, in the same order as `arcs`
+    """
+    xarc_paths = []
+    for arc in arcs.to_dict("records"):
+        camera = arc["camera"]
+        darc_path = path.full("lvm_anc", drpver=drpver, kind="d", imagetype="arc", **arc)
+        xarc_paths.append(path.full("lvm_anc", drpver=drpver, kind="x", imagetype="arc", **arc))
+        if skip_done and os.path.isfile(xarc_paths[-1]):
+            log.info(f"skipping extracted arc {xarc_paths[-1]}, file already exists")
+            continue
+        image_tasks.extract_spectra(in_image=darc_path, out_rss=xarc_paths[-1],
+                                    in_trace=calibs["centroids"][camera],
+                                    in_sigma=calibs["sigmas"][camera],
+                                    in_model=calibs["model"][camera])
+    return xarc_paths
+
+
 def create_wavelengths(mjd, epochs=None, use_longterm_cals=True, kind="longterm", skip_done=True, dry_run=False):
     """Reduces an arc sequence to create master wavelength solutions
 
@@ -2391,11 +2440,7 @@ def create_wavelengths(mjd, epochs=None, use_longterm_cals=True, kind="longterm"
         _create_wavelengths_60177(use_longterm_cals=use_longterm_cals, skip_done=skip_done, dry_run=dry_run)
         return
 
-    epoch = get_epoch(mjd=mjd, epochs=epochs or {}, epochs_kind="calibration", error_on_missing_mjd=False)
-    mjds = epoch["wave"]
-
-    frames = md.get_calibrations_metadata(mjds=mjds, calibration="wave")
-    frames, expnums = choose_sequence(frames, calibration="wave", kind=kind)
+    mjds, frames, expnums = get_arc_sequence(mjd=mjd, epochs=epochs, kind=kind)
     if frames.empty:
         log.error("no arc frames found, skipping production of wavelength calibrations")
         return
@@ -2410,53 +2455,34 @@ def create_wavelengths(mjd, epochs=None, use_longterm_cals=True, kind="longterm"
     reduce_2d(mjds, calibrations=calibs, expnums=expnums, assume_imagetyp="arc", reject_cr=False,
               add_astro=False, sub_straylight=False, skip_done=skip_done)
 
-    if frames.expnum.min() != frames.expnum.max():
-        expnum_str = f"{frames.expnum.min():>08}_{frames.expnum.max():>08}"
-    else:
-        expnum_str = frames.expnum.min()
     arc_analogs = frames.groupby(["camera",])
     for camera in arc_analogs.groups:
         arcs = arc_analogs.get_group((camera,))
 
         # define product paths
-        carc_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="c", imagetype="arc", camera=camera, expnum=expnum_str)
-        xarc_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="x", imagetype="arc", camera=camera, expnum=expnum_str)
         if kind == "longterm":
             mwave_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, camera=camera, kind="mwave")
             mlsf_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, camera=camera, kind="mlsf")
         else:
             mwave_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, camera=camera, kind="nwave")
             mlsf_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, camera=camera, kind="nlsf")
-        os.makedirs(os.path.dirname(carc_path), exist_ok=True)
 
-        # combine individual arcs into master arc
-        if skip_done and os.path.isfile(carc_path):
-            log.info(f"skipping combined arc {carc_path}, file already exists")
-        else:
-            darc_paths = [path.full("lvm_anc", drpver=drpver, kind="d", imagetype="arc", **arc) for arc in arcs.to_dict("records")]
-            image_tasks.create_master_frame(in_images=darc_paths, out_image=carc_path, batch_size=48)
+        # extract individual arcs, accounting for fiber thermal shifts in each exposure
+        xarc_paths = extract_arcs(arcs, calibs=calibs, skip_done=skip_done)
 
         # TODO: maybe subtract stray light?
 
-        # extract arc
-        if skip_done and os.path.isfile(xarc_path):
-            log.info(f"skipping extracted arc {xarc_path}, file already exists")
-        else:
-            image_tasks.extract_spectra(in_image=carc_path, out_rss=xarc_path,
-                                        in_trace=calibs["centroids"][camera],
-                                        in_sigma=calibs["sigmas"][camera],
-                                        in_model=calibs["model"][camera])
+        # measure lines and fit individual wavelength/LSF solutions in each arc
+        larc_paths = []
+        for arc, xarc_path in zip(arcs.to_dict("records"), xarc_paths):
+            larc_paths.append(path.full("lvm_frame", drpver=drpver, tileid=arc["tileid"], mjd=arc["mjd"], expnum=arc["expnum"], kind=f"Arc-{camera}"))
+            if skip_done and os.path.isfile(larc_paths[-1]):
+                log.info(f"skipping arc lines measurements {larc_paths[-1]}, file already exists")
+                continue
+            rss_tasks.measure_arc_lines(in_arc=xarc_path, out_arc=larc_paths[-1])
 
-        # fit wavelength solution
-        ref_lines, _, cent_wave, _, rss, wave_trace, fwhm_trace = rss_tasks.determine_wavelength_solution(
-            in_arcs=xarc_path,
-            out_wave=mwave_path,
-            out_lsf=mlsf_path)
-
-        lvmarc = lvmArc(data=rss._data, error=rss._error, mask=rss._mask, header=rss._header,
-                        ref_wave=ref_lines, cent_line=cent_wave,
-                        wave_trace=wave_trace, lsf_trace=fwhm_trace)
-        lvmarc.writeFitsData(path.full("lvm_frame", mjd=mjd, tileid=11111, drpver=drpver, expnum=expnum_str, kind=f'Arc-{camera}'))
+        # combine line measurements of all arcs into master wavelength/LSF solutions
+        rss_tasks.fit_wavelength_solution(in_arcs=larc_paths, out_wave=mwave_path, out_lsf=mlsf_path)
 
     for channel in "brz":
         if kind == "longterm":
@@ -2466,15 +2492,20 @@ def create_wavelengths(mjd, epochs=None, use_longterm_cals=True, kind="longterm"
             mwave_paths = sorted(path.expand("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, camera=f"{channel}?", kind="nwave"))
             mlsf_paths = sorted(path.expand("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, camera=f"{channel}?", kind="nlsf"))
 
-        xarc_paths = sorted(path.expand("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="x", imagetype="arc", camera=f"{channel}?", expnum=expnum_str))
-        xarc_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="x", imagetype="arc", camera=channel, expnum=expnum_str)
-        harc_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="h", imagetype="arc", camera=channel, expnum=expnum_str)
+        # rectify individual arcs
+        for arc in frames.drop_duplicates(subset=["expnum"]).to_dict("records"):
+            xarc_paths = sorted(path.expand("lvm_anc", drpver=drpver, kind="x", imagetype="arc", **{**arc, "camera": f"{channel}[123]"}))
+            xarc_path = path.full("lvm_anc", drpver=drpver, kind="x", imagetype="arc", **{**arc, "camera": channel})
+            harc_path = path.full("lvm_anc", drpver=drpver, kind="h", imagetype="arc", **{**arc, "camera": channel})
+            if skip_done and os.path.isfile(harc_path):
+                log.info(f"skipping rectified arc {harc_path}, file already exists")
+                continue
 
-        # stack spectragraphs
-        rss_tasks.stack_spectrographs(in_rsss=xarc_paths, out_rss=xarc_path)
-        # apply wavelength solution to arcs and rectify
-        rss_tasks.create_pixel_table(in_rss=xarc_path, out_rss=harc_path, in_waves=mwave_paths, in_lsfs=mlsf_paths)
-        rss_tasks.resample_wavelength(in_rss=harc_path, out_rss=harc_path, method="linear", wave_range=SPEC_CHANNELS[channel], wave_disp=0.5)
+            # stack spectragraphs
+            rss_tasks.stack_spectrographs(in_rsss=xarc_paths, out_rss=xarc_path)
+            # apply wavelength solution to arcs and rectify
+            rss_tasks.create_pixel_table(in_rss=xarc_path, out_rss=harc_path, in_waves=mwave_paths, in_lsfs=mlsf_paths)
+            rss_tasks.resample_wavelength(in_rss=harc_path, out_rss=harc_path, method="linear", wave_range=SPEC_CHANNELS[channel], wave_disp=0.5)
 
 
 def detrend_calibrations(mjd, calibration, dry_run=False, skip_done=True):
@@ -2666,65 +2697,4 @@ def reduce_longterm_sequence(mjd, epochs=None, use_longterm_cals=True,
     # if not keep_ancillary:
     #     _clean_ancillary(mjd)
 
-
-class lvmArc(lvmFrame):
-    """LvmArc class"""
-
-    @classmethod
-    def from_hdulist(cls, hdulist):
-        header = cls.header_from_hdulist(hdulist)
-
-        data = hdulist["FLUX"].data
-        error = np.divide(1, hdulist["IVAR"].data, where=hdulist["IVAR"].data != 0, out=np.zeros_like(hdulist["IVAR"].data))
-        error = np.sqrt(error)
-        mask = hdulist["MASK"].data.astype("bool")
-        lxpeak = Table(hdulist["LXPEAK"].data)
-        wave_trace = Table(hdulist["WAVE_TRACE"].data)
-        lsf_trace = Table(hdulist["LSF_TRACE"].data)
-        return cls(data=data, error=error, mask=mask, header=header, lxpeak=lxpeak,
-                   wave_trace=wave_trace, lsf_trace=lsf_trace)
-
-    def __init__(self, data=None, error=None, mask=None, ref_wave=None, cent_line=None, lxpeak=None, wave_trace=None, lsf_trace=None, header=None):
-        lvmFrame.__init__(self, data=data, error=error, mask=mask, wave_trace=wave_trace, lsf_trace=lsf_trace, header=header)
-
-        self.set_lxpeak(ref_wave, cent_line, lxpeak=lxpeak)
-
-        self._blueprint = dp.load_blueprint(name="lvmArc")
-        self._template = dp.dump_template(dataproduct_bp=self._blueprint, save=False)
-
-    def set_lxpeak(self, ref_wave=None, lin_pixel=None, lxpeak=None):
-        """Sets a table with the wavelength of identified lamp lines & the corresponding X position in each fiber"""
-        # early return in case incomplete data is given
-        if lxpeak is None and (ref_wave is None or lin_pixel is None):
-            self._lxpeak = None
-            return self._lxpeak
-
-        # set the given lxpeak and return
-        if lxpeak is not None:
-            self._lxpeak = lxpeak
-            return self._lxpeak
-
-        self._lxpeak = Table(dtype=[(f"{wave:.4f}", "f4") for wave in ref_wave])
-        for ifiber in range(self._fibers):
-            self._lxpeak.add_row(lin_pixel[ifiber])
-
-    def writeFitsData(self, out_file, replace_masked=True):
-        # replace masked pixels
-        if replace_masked:
-            self.apply_pixelmask()
-
-        # update headers
-        self.update_header()
-        # fill in rest of the template
-        self._template["FLUX"].data = self._data
-        self._template["IVAR"].data = np.divide(1, self._error**2, where=self._error != 0, out=np.zeros_like(self._error))
-        self._template["MASK"].data = self._mask.astype("uint8")
-        self._template["LXPEAK"] = fits.BinTableHDU(data=self._lxpeak, name="LXPEAK")
-        self._template["WAVE_TRACE"] = fits.BinTableHDU(data=self._wave_trace, name="WAVE_TRACE")
-        self._template["LSF_TRACE"] = fits.BinTableHDU(data=self._lsf_trace, name="LSF_TRACE")
-        self._template.verify("silentfix")
-
-        os.makedirs(os.path.dirname(out_file), exist_ok=True)
-        self._template[0].header["FILENAME"] = os.path.basename(out_file)
-        self._template.writeto(out_file, overwrite=True)
 

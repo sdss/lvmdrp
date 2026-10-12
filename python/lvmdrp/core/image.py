@@ -27,7 +27,7 @@ from lvmdrp.core.constants import CON_LAMPS, ARC_LAMPS, LVM_NBLOCKS, LVM_BLOCKSI
 from lvmdrp.core.plot import plt, plot_fiber_residuals, plot_exposed_std
 from lvmdrp.core.fit_profile import gaussians, PROFILES
 from lvmdrp.core.apertures import Apertures
-from lvmdrp.core.header import Header
+from lvmdrp.core.header import Header, individual_frames_table
 from lvmdrp.core.tracemask import TraceMask
 from lvmdrp.core.fiberrows import FiberRows
 from lvmdrp.core.spectrum1d import Spectrum1D, _fiber_cc_match, _cross_match, _spec_from_lines, _align_fiber_blocks
@@ -737,6 +737,9 @@ class Image(Header):
                 warnings.warn(comstr)
                 self.add_header_comment(comstr)
                 shifts[j] = numpy.nan
+                matches["lags"].append(numpy.full(10, fill_value=numpy.nan))
+                matches["cc"].append(numpy.full(10, fill_value=numpy.nan))
+                matches["model"].append(lambda x: x)
                 continue
 
             _, shifts[j], _, y_data, y_model, lag, cc, cc_model = _fiber_cc_match(s1, s2, guess_shift, shift_range, gauss_window=[-3,3], min_peak_dist=5.0, ax=axs_cc[j])
@@ -937,6 +940,19 @@ class Image(Header):
         """
         return self._error
 
+    def get_ivar(self):
+        """Returns the inverse variance of the image, zero where the error is not positive and finite
+
+        Returns
+        -------
+        numpy.ndarray or None
+            inverse variance, None if the image has no error
+        """
+        if self._error is None:
+            return None
+        valid = numpy.isfinite(self._error) & (self._error > 0)
+        return numpy.divide(1.0, self._error**2, out=numpy.zeros_like(self._error, dtype=float), where=valid)
+
     def getPixel(self, y, x):
         """
         Returns the information for a single pixel of the image.
@@ -1049,6 +1065,41 @@ class Image(Header):
                 new_image.setHeader(header)  # set header
 
         return new_image
+
+    def apply_per_quadrant(self, func, *args, **kwargs):
+        """Applies a function to each quadrant of the image separately
+
+        The quadrants are the '* AMP? TRIMSEC' sections in the header.
+
+        Parameters
+        ----------
+        func : callable
+            function taking the quadrant image as first argument and returning
+            the processed quadrant image
+        *args, **kwargs
+            additional arguments passed to `func`
+
+        Returns
+        -------
+        Image
+            copy of the image with each quadrant replaced by the output of `func`
+
+        Raises
+        ------
+        ValueError
+            if no quadrant section is found in the header
+        """
+        sections = list(self.getHdrValue("*AMP? TRIMSEC*").values())
+        if len(sections) == 0:
+            raise ValueError("No quadrant section found in primary header")
+
+        f_image = copy(self)
+        for sec in sections:
+            quad = self.getSection(sec)
+            quad = func(quad, *args, **kwargs)
+            f_image.setSection(sec, quad)
+
+        return f_image
 
     def convertUnit(self, to, assume="adu", gain_field="GAIN", inplace=False):
         """converts the unit of the image
@@ -3478,16 +3529,7 @@ class Image(Header):
         return self._individual_frames
 
     def setIndividualFrames(self, images):
-        self._individual_frames = Table(names=["TILEID", "MJD", "EXPNUM", "SPEC", "CAMERA", "EXPTIME"], dtype=(int, int, int, str, str, float))
-        for img in images:
-            self._individual_frames.add_row([
-                img._header.get("TILEID", 11111),
-                img._header.get("MJD"),
-                img._header.get("EXPOSURE"),
-                img._header.get("SPEC"),
-                img._header.get("CCD"),
-                img._header.get("EXPTIME"),
-            ])
+        self._individual_frames = individual_frames_table([img._header for img in images])
 
     def getSlitmap(self):
         return self._slitmap

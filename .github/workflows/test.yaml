@@ -50,8 +50,8 @@ jobs:
 
     - name: Lint with ruff
       run: |
-        pip install ruff
-        ruff check . --extend-exclude "examples/**" --extend-exclude "docs/nb/**"
+        pip install ruff==0.16.4
+        ruff check .
 
     - name: Test with pytest
       run: |

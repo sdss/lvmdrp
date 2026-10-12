@@ -18,6 +18,7 @@ from lvmdrp import log
 from lvmdrp.core.constants import LVM_ELEVATION, LVM_LAT, LVM_LON, CONFIG_PATH, CON_LAMPS, ARC_LAMPS
 from lvmdrp.core.apertures import Aperture
 from lvmdrp.core.cube import Cube
+from lvmdrp.core.image import _percentile_normalize
 from lvmdrp.core.fiberrows import FiberRows
 from lvmdrp.core.tracemask import TraceMask
 from lvmdrp.core.header import Header
@@ -1393,7 +1394,22 @@ class RSS(FiberRows):
 
         return self
 
-    def combineRSS(self, rsss, method="mean", quantile=50):
+    def combineRSS(self, rsss, method="mean", quantile=50, normalize=False, normalize_percentile=75):
+        """Combines a list of RSS objects into this RSS using the given statistic
+
+        Parameters
+        ----------
+        rsss : list[RSS]
+            RSS objects to combine
+        method : str, optional
+            Statistic used to combine, by default "mean"
+        quantile : float, optional
+            Quantile used when `method='quantile'`, by default 50
+        normalize : bool, optional
+            Scale each RSS to a common level before combining, by default False
+        normalize_percentile : float, optional
+            Percentile of each RSS used to compute the normalization factor, by default 75
+        """
         dim = rsss[0]._data.shape
         data = numpy.zeros((len(rsss), dim[0], dim[1]), dtype=numpy.float32)
         if rsss[0]._mask is not None:
@@ -1419,6 +1435,14 @@ class RSS(FiberRows):
                 error[i, :, :] = rss._error
             if sky is not None:
                 sky[i, :, :] = rss._sky
+
+        if normalize:
+            data, norm = _percentile_normalize(data, normalize_percentile)
+            log.info(f"normalizing RSSs at {normalize_percentile = } with factors: {numpy.round(norm, 4).tolist()}")
+            if error is not None:
+                error = norm[:, None, None] * error
+            if sky is not None:
+                sky = norm[:, None, None] * sky
 
         weights = numpy.ones_like(data)
         if error is not None:
@@ -3776,6 +3800,139 @@ class lvmFrame(lvmBaseProduct):
         self._template[0].header["FILENAME"] = os.path.basename(out_file)
         self._template[0].header['DRPVER'] = drpver
         self._template[0].scale(bzero=0, bscale=1)
+        self._template.writeto(out_file, overwrite=True)
+
+
+class lvmArc(lvmFrame):
+    """lvmArc class
+
+    Continuum subtracted extracted arc exposure along with the measured arc
+    lines (centroids, FWHMs, fluxes and rejection mask) and the wavelength and
+    LSF solutions.
+    """
+
+    # line measurement extensions and their data types
+    LINES_EXTENSIONS = {"LINE_CENT": "f4", "LINE_FWHM": "f4", "LINE_FLUX": "f4", "LINE_MASK": "?", "LINE_BKG": "f4"}
+    # extension names used in previous versions of this product
+    LEGACY_EXTENSIONS = {"LXPEAK": "LINE_CENT", "LXFWHM": "LINE_FWHM", "LXFLUX": "LINE_FLUX", "LXMASK": "LINE_MASK"}
+
+    @classmethod
+    def from_hdulist(cls, hdulist):
+        header = cls.header_from_hdulist(hdulist)
+
+        data = hdulist["FLUX"].data
+        error = numpy.divide(1, hdulist["IVAR"].data, where=hdulist["IVAR"].data != 0, out=numpy.zeros_like(hdulist["IVAR"].data))
+        error = numpy.sqrt(error)
+        mask = hdulist["MASK"].data.astype("bool")
+        def _table(extname):
+            # tables written empty (e.g., traces of an exposure whose individual fit failed) are missing
+            if extname not in hdulist:
+                return None
+            hdu = hdulist[extname]
+            if hdu.data is None or len(hdu.columns) == 0 or len(hdu.data) == 0:
+                return None
+            return Table(hdu.data)
+
+        lines = {}
+        for extname in list(cls.LINES_EXTENSIONS) + list(cls.LEGACY_EXTENSIONS):
+            table = _table(extname)
+            if table is not None:
+                lines.setdefault(cls.LEGACY_EXTENSIONS.get(extname, extname), table)
+        wave_trace = _table("WAVE_TRACE")
+        lsf_trace = _table("LSF_TRACE")
+        slitmap = Table.read(hdulist["SLITMAP"]) if _table("SLITMAP") is not None else None
+        return cls(data=data, error=error, mask=mask, header=header, lines=lines,
+                   wave_trace=wave_trace, lsf_trace=lsf_trace, slitmap=slitmap)
+
+    def __init__(self, data=None, error=None, mask=None, ref_wave=None,
+                 cent_line=None, fwhm_line=None, flux_line=None, mask_line=None, bkg_line=None, lines=None,
+                 wave_trace=None, lsf_trace=None, header=None, slitmap=None):
+        """
+        Parameters
+        ----------
+        ref_wave : array_like, optional
+            Reference wavelengths of the measured lines, shape (nlines,)
+        cent_line, fwhm_line, flux_line, mask_line, bkg_line : array_like, optional
+            Line centroids, FWHMs (pixels), fluxes, rejection mask and fitted local backgrounds, shape (nfibers, nlines)
+        lines : dict[str, astropy.table.Table], optional
+            Line measurement tables keyed by extension name (e.g., as read from a file),
+            taking precedence over the arrays above
+        """
+        lvmFrame.__init__(self, data=data, error=error, mask=mask, wave_trace=wave_trace, lsf_trace=lsf_trace, header=header, slitmap=slitmap)
+
+        lines = lines or {}
+        values = dict(zip(self.LINES_EXTENSIONS, [cent_line, fwhm_line, flux_line, mask_line, bkg_line]))
+        self._lines = {extname: lines.get(extname, self._lines_table(ref_wave, values[extname], extname))
+                       for extname in self.LINES_EXTENSIONS}
+
+        self._blueprint = dp.load_blueprint(name="lvmArc")
+        self._template = dp.dump_template(dataproduct_bp=self._blueprint, save=False)
+
+    def _lines_table(self, ref_wave, values, extname):
+        """Returns a table with one column per reference wavelength and one row per fiber"""
+        if ref_wave is None or values is None:
+            return None
+        names = [f"{wave:.4f}" for wave in ref_wave]
+        return Table(data=numpy.asarray(values, dtype=self.LINES_EXTENSIONS[extname]), names=names)
+
+    def get_line_table(self, extname):
+        """Returns one line measurement table as an array of shape (nfibers, nlines), NaN (False for LINE_MASK) if not stored"""
+        table, dtype = self._lines.get(extname), self.LINES_EXTENSIONS[extname]
+        if table is None:
+            nlines = len(self._lines["LINE_CENT"].colnames) if self._lines["LINE_CENT"] is not None else 0
+            return numpy.zeros((self._fibers, nlines), dtype=bool) if dtype == "?" else numpy.full((self._fibers, nlines), numpy.nan, dtype=dtype)
+        return numpy.asarray([table[name] for name in table.colnames], dtype=dtype).T
+
+    def get_lines(self):
+        """Returns the measured arc lines
+
+        Returns
+        -------
+        ref_wave : numpy.ndarray
+            Reference wavelengths of the lines, shape (nlines,)
+        cent, fwhm, flux : numpy.ndarray
+            Centroids, FWHMs (in pixels) and integrated fluxes, shape (nfibers, nlines)
+        mask : numpy.ndarray
+            Rejected lines, shape (nfibers, nlines). If no mask is stored, lines with
+            invalid measurements are rejected
+        """
+        if self._lines["LINE_CENT"] is None:
+            raise ValueError("no arc lines stored in this lvmArc")
+        ref_wave = numpy.asarray([float(name) for name in self._lines["LINE_CENT"].colnames])
+
+        def _as_array(extname):
+            table, dtype = self._lines[extname], self.LINES_EXTENSIONS[extname]
+            if table is None:
+                return numpy.full((self._fibers, ref_wave.size), numpy.nan, dtype=dtype)
+            return numpy.asarray([table[name] for name in table.colnames], dtype=dtype).T
+
+        cent, fwhm, flux = _as_array("LINE_CENT"), _as_array("LINE_FWHM"), _as_array("LINE_FLUX")
+        if self._lines["LINE_MASK"] is not None:
+            mask = _as_array("LINE_MASK")
+        else:
+            mask = numpy.isnan(cent) | numpy.isnan(fwhm) | numpy.isnan(flux)
+        return ref_wave, cent, fwhm, flux, mask
+
+    def writeFitsData(self, out_file, replace_masked=True):
+        # replace masked pixels
+        if replace_masked:
+            self.apply_pixelmask()
+
+        # update headers
+        self.update_header()
+        # fill in rest of the template
+        self._template["FLUX"].data = self._data
+        self._template["IVAR"].data = numpy.divide(1, self._error**2, where=self._error != 0, out=numpy.zeros_like(self._error))
+        self._template["MASK"].data = self._mask.astype("uint8")
+        for extname, table in self._lines.items():
+            self._template[extname] = pyfits.BinTableHDU(data=table, name=extname)
+        self._template["WAVE_TRACE"] = pyfits.BinTableHDU(data=self._wave_trace, name="WAVE_TRACE")
+        self._template["LSF_TRACE"] = pyfits.BinTableHDU(data=self._lsf_trace, name="LSF_TRACE")
+        self._template["SLITMAP"] = pyfits.BinTableHDU(data=self._slitmap, name="SLITMAP")
+        self._template.verify("silentfix")
+
+        os.makedirs(os.path.dirname(out_file), exist_ok=True)
+        self._template[0].header["FILENAME"] = os.path.basename(out_file)
         self._template.writeto(out_file, overwrite=True)
 
 

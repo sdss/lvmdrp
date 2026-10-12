@@ -8,7 +8,8 @@ from tree import Tree
 from sdss_access.path import Path
 import subprocess
 
-import gaiaxpy
+# imported before resetting the matplotlib settings it overwrites (below)
+import gaiaxpy  # noqa: F401
 import matplotlib as mpl
 
 

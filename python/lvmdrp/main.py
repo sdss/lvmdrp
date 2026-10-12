@@ -387,7 +387,7 @@ def reduce_frame(filename: str, camera: str = None, mjd: int = None,
         kwargs = get_config_options('reduction_steps.determine_wavesol')
         log.info('--- Determining wavelength solution ---')
         log.info(f'custom configuration parameters for determine_wave_solution: {repr(kwargs)}')
-        determine_wavelength_solution(in_arc=xout_file, out_wave=wave_file, out_lsf=lsf_file,
+        determine_wavelength_solution(in_arcs=xout_file, out_wave=wave_file, out_lsf=lsf_file,
                                       **kwargs)
         log.info(f'Output wave peak traceset file: {wave_file}')
         log.info(f'Output lsf traceset file: {lsf_file}')
@@ -1531,6 +1531,7 @@ def science_reduction(expnum: int,
                       skip_2d: bool = False,
                       skip_1d: bool = False,
                       skip_wavecal: bool = False,
+                      skip_waveres: bool = False,
                       skip_fluxcal: bool = False,
                       skip_skysub: bool = False,
                       skip_drpall: bool = False,
@@ -1667,10 +1668,6 @@ def science_reduction(expnum: int,
             mflat_path = calibs["fiberflat_twilight"][channel]
 
             frame_path = path.full('lvm_frame', mjd=sci_mjd, tileid=sci_tileid, drpver=drpver, expnum=sci_expnum, kind=f'Frame-{channel}')
-            ssci_path = path.full('lvm_anc', mjd=sci_mjd, tileid=sci_tileid, drpver=drpver,
-                                kind='s', camera=channel, imagetype=sci_imagetyp, expnum=expnum)
-            hsci_path = path.full('lvm_anc', mjd=sci_mjd, tileid=sci_tileid, drpver=drpver,
-                                kind='h', camera=channel, imagetype=sci_imagetyp, expnum=expnum)
 
             # stack spectrographs
             with Timer(name='Stack Spectrographs '+xsci_path, logger=log.info):
@@ -1690,6 +1687,16 @@ def science_reduction(expnum: int,
             # correct thermal shift in wavelength direction
             with Timer(name='Thermal Shifts '+frame_path, logger=log.info):
                 shift_wave_skylines(in_frame=frame_path, out_frame=frame_path)
+
+    if skip_waveres:
+            log.info("skipping wavelength resampling and spline sky extrapolation")
+    else:
+        for channel in "brz":
+            frame_path = path.full('lvm_frame', mjd=sci_mjd, tileid=sci_tileid, drpver=drpver, expnum=sci_expnum, kind=f'Frame-{channel}')
+            ssci_path = path.full('lvm_anc', mjd=sci_mjd, tileid=sci_tileid, drpver=drpver,
+                                kind='s', camera=channel, imagetype=sci_imagetyp, expnum=expnum)
+            hsci_path = path.full('lvm_anc', mjd=sci_mjd, tileid=sci_tileid, drpver=drpver,
+                                kind='h', camera=channel, imagetype=sci_imagetyp, expnum=expnum)
 
             # interpolate sky fibers
             with Timer(name='Interpolate Sky '+ssci_path, logger=log.info):
@@ -1712,7 +1719,6 @@ def science_reduction(expnum: int,
 
         # #The model stellar atmosphere spectra selection
         model_selection(hsci_all_bands, GAIA_CACHE_DIR=MASTERS_DIR + '/gaia_cache')
-        #
 
         for channel in "brz":
             hsci_path = path.full('lvm_anc', mjd=sci_mjd, tileid=sci_tileid, drpver=drpver,
@@ -1755,39 +1761,35 @@ def science_reduction(expnum: int,
     # clean ancillary folder
     if clean_ancillary:
         ancillary_dir = os.path.dirname(dsci_path)
-        qa_dir = os.path.join(ancillary_dir, "qa")
-        log.info(f"removing ancillary files at {qa_dir}")
+        log.info(f"removing ancillary files for expnum={sci_expnum} from {ancillary_dir}")
+
         if os.path.isdir(ancillary_dir):
-            ancillary_paths = [os.path.join(ancillary_dir,p) for p in os.listdir(ancillary_dir) if str(sci_expnum) in p]
-            qa_paths = [os.path.join(qa_dir,p) for p in os.listdir(qa_dir) if str(sci_expnum) in p]
+            ancillary_paths = [
+                os.path.join(ancillary_dir, p)
+                for p in os.listdir(ancillary_dir)
+                if str(sci_expnum) in p and os.path.isfile(os.path.join(ancillary_dir, p))
+            ]
             for ancillary_path in ancillary_paths:
                 try:
                     os.remove(ancillary_path)
+                    log.info(f"removed ancillary file {ancillary_path}")
                 except Exception as e:
                     log.warning(f"error while removing {ancillary_path}: {e}")
-            for qa_path in qa_paths:
-                try:
-                    os.remove(qa_path)
-                except Exception as e:
-                    log.warning(f"error while removing {qa_path}: {e}")
-            if len(os.listdir(qa_dir)) == 0:
-                try:
-                    shutil.rmtree(qa_dir)
-                except Exception as e:
-                    log.warning(f"error while removing {qa_dir}: {e}")
-            if len(os.listdir(ancillary_dir)) == 0:
-                try:
-                    shutil.rmtree(ancillary_dir)
-                except Exception as e:
-                    log.warning(f"error while removing {ancillary_dir}: {e}")
+
+        if os.path.isdir(ancillary_dir) and len(os.listdir(ancillary_dir)) == 0:
+            try:
+                shutil.rmtree(ancillary_dir)
+                log.info(f"removed empty ancillary directory {ancillary_dir}")
+            except Exception as e:
+                log.warning(f"error while removing {ancillary_dir}: {e}")
 
 
 def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
             with_cals: bool = False, no_sci: bool = False,
             fluxcal_method: str = 'MOD',
             skip_2d: bool = False, skip_1d: bool = False, skip_wavecal: bool = False,
-            skip_fluxcal: bool = False, skip_skysub: bool = False, skip_drpall: bool = False,
-            use_nightly_cals: bool = False, use_untagged_cals: bool = False,
+            skip_waveres: bool = False, skip_fluxcal: bool = False, skip_skysub: bool = False,
+            skip_drpall: bool = False, use_nightly_cals: bool = False, use_untagged_cals: bool = False,
             clean_ancillary: bool = False, debug_mode: bool = False, force_run: bool = False,
             force_excluded: bool = False):
     """ Run the quick DRP
@@ -1856,6 +1858,7 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
                     skip_2d=skip_2d,
                     skip_1d=skip_1d,
                     skip_wavecal=skip_wavecal,
+                    skip_waveres=skip_waveres,
                     skip_fluxcal=skip_fluxcal,
                     skip_skysub=skip_skysub,
                     skip_drpall=skip_drpall,
@@ -1966,6 +1969,7 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
                                         skip_2d=skip_2d,
                                         skip_1d=skip_1d,
                                         skip_wavecal=skip_wavecal,
+                                        skip_waveres=skip_waveres,
                                         skip_fluxcal=skip_fluxcal,
                                         skip_skysub=skip_skysub,
                                         skip_drpall=skip_drpall,
@@ -1987,17 +1991,27 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
             create_status_file(tileid, mjd, status='done')
 
 
-def create_drpall(drp_version: str = None, overwrite: bool = False) -> None:
+def create_drpall(drp_version: str = None, overwrite: bool = False, output_dir: str = None) -> None:
     """Create drpall summary file for a given DRP version
 
     Parameters
     ----------
     drp_version: str, optional
         Version of the DRP, by default None (current version)
+    overwrite : bool, optional
+        Overwrite any existing drpall file before creating a new one, by default False
+    output_dir : str, optional
+        Write the drpall summary file to this directory instead of the standard
+        SAS redux location, by default None (use the standard location). Useful
+        when the caller does not have write access to the redux tree, e.g. for
+        rebuilding/testing a drpall summary from lvmSFrames already on disk.
     """
     drp_version = drp_version or drpver
 
     drpall = path.full('lvm_drpall', drpver=drp_version)
+    if output_dir is not None:
+        os.makedirs(output_dir, exist_ok=True)
+        drpall = os.path.join(output_dir, os.path.basename(drpall))
     drpall_h5 = drpall.replace('.fits', '.h5')
     if overwrite:
         if os.path.isfile(drpall_h5):
@@ -2026,7 +2040,8 @@ def create_drpall(drp_version: str = None, overwrite: bool = False) -> None:
         tileid, mjd, expnum = int(pars[-3]), int(pars[-2]), int(pars[-1].split("-")[-1])
         cals_mjd = get_master_mjd(mjd)
         try:
-            update_summary_file(sframe_path, tileid=tileid, mjd=mjd, expnum=expnum, master_mjd=cals_mjd, drpver=drp_version)
+            update_summary_file(sframe_path, tileid=tileid, mjd=mjd, expnum=expnum, master_mjd=cals_mjd,
+                                drpver=drp_version, output_dir=output_dir)
         except Exception as e:
             log.error(f"while updating drpall for {tileid = }, {mjd = }, {expnum = }: {e}")
             nfailed += 1
