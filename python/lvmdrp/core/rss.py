@@ -1152,22 +1152,21 @@ class RSS(FiberRows):
 
         return waves, supersky_spline, supersky_error_spline
 
-    def eval_master_sky(self, sky_east=None, sky_east_error=None, sky_west=None, sky_west_error=None, weights=None):
-        w_e, w_w = weights or (self._header.get("SKYEW"), self._header.get("SKYWW"))
-        if w_e is None or w_w is None:
+    def eval_master_sky(self, sky=None, sky_error=None):
+        """Returns the flux-calibration sky as an RSS object
+
+        This is the sky computed independently by `combine_skies` for flux
+        calibration (`self._sky`/`self._sky_error`, e.g. the SCIMED Sci-fiber
+        median) -- distinct from `self._sky_east`/`self._sky_west`, which hold the
+        genuine per-telescope sky model written to the lvmCFrame's SKY_EAST/
+        SKY_WEST extensions.
+        """
+        sky = sky if sky is not None else self._sky
+        sky_error = sky_error if sky_error is not None else self._sky_error
+        if sky is None:
             return None
 
-        sky_east = sky_east or self._sky_east
-        sky_east_error = sky_east_error or self._sky_east_error
-        sky_west = sky_west or self._sky_west
-        sky_west_error = sky_west_error or self._sky_west_error
-
-        if sky_east is not None or sky_west is not None:
-            sky_e = RSS(data=sky_east, error=sky_east_error, wave=self._wave)
-            sky_w = RSS(data=sky_west, error=sky_west_error, wave=self._wave)
-            return sky_e * w_e + sky_w * w_w
-
-        return None
+        return RSS(data=sky, error=sky_error, wave=self._wave)
 
     def tck_to_table(self, wave, knots, coeffs, degree, telescope):
         # pack arguments for validation
@@ -1729,13 +1728,28 @@ class RSS(FiberRows):
         else:
             raise ValueError(f"Invalid interpolation {method = }. Expected either 'linear' or 'spline'")
 
+        def _interp1d_finite(x, y, sel, kind, fill_value):
+            # restrict to points that are both unmasked AND actually finite in this
+            # specific array: a global fit like cubic spline has zero tolerance for a
+            # single stray NaN anywhere in its input -- one bad point silently poisons
+            # every output point, even ones far away. `sel` (the general per-fiber
+            # mask) doesn't guarantee that for every array it's applied to, since it
+            # need not have been derived from this particular array's own NaN pattern
+            # (e.g. a freshly computed sky spectrum broadcast across fibers and only
+            # masked afterwards using the target fiber's own, unrelated bad-pixel mask).
+            sel = sel & numpy.isfinite(y)
+            if sel.sum() == 0:
+                return numpy.full(len(x), numpy.nan)
+            f = interpolate.interp1d(x[sel], y[sel], kind=kind, bounds_error=False, fill_value=fill_value, assume_sorted=True)
+            return f
+
         for ifiber in range(rss._fibers):
             sel = ~rss._mask[ifiber]
             if sel.sum() == 0:
                 continue
-            f = interpolate.interp1d(rss._wave[ifiber][sel], rss._data[ifiber][sel], kind=method, bounds_error=False, fill_value=numpy.nan, assume_sorted=True)
+            f = _interp1d_finite(rss._wave[ifiber], rss._data[ifiber], sel, method, numpy.nan)
             new_rss._data[ifiber] = f(wave).astype("float32")
-            f = interpolate.interp1d(rss._wave[ifiber][sel], rss._error[ifiber][sel], kind=method, bounds_error=False, fill_value=numpy.nan, assume_sorted=True)
+            f = _interp1d_finite(rss._wave[ifiber], rss._error[ifiber], sel, method, numpy.nan)
             new_rss._error[ifiber] = f(wave).astype("float32")
             f = interpolate.interp1d(rss._wave[ifiber], rss._mask[ifiber], kind="nearest", bounds_error=False, fill_value=1, assume_sorted=True)
             new_rss._mask[ifiber] = f(wave).astype("bool")
@@ -1743,22 +1757,22 @@ class RSS(FiberRows):
                 f = numpy.interp(wave, rss._wave[ifiber], rss._lsf[ifiber])
                 new_rss._lsf[ifiber] = f.astype("float32")
             if rss._sky is not None:
-                f = interpolate.interp1d(rss._wave[ifiber][sel], rss._sky[ifiber][sel], kind=method, bounds_error=False, fill_value=numpy.nan, assume_sorted=True)
+                f = _interp1d_finite(rss._wave[ifiber], rss._sky[ifiber], sel, method, numpy.nan)
                 new_rss._sky[ifiber] = f(wave).astype("float32")
             if rss._sky_error is not None:
-                f = interpolate.interp1d(rss._wave[ifiber][sel], rss._sky_error[ifiber][sel], kind=method, bounds_error=False, fill_value=numpy.nan, assume_sorted=True)
+                f = _interp1d_finite(rss._wave[ifiber], rss._sky_error[ifiber], sel, method, numpy.nan)
                 new_rss._sky_error[ifiber] = f(wave).astype("float32")
             if rss._sky_east is not None:
-                f = interpolate.interp1d(rss._wave[ifiber][sel], rss._sky_east[ifiber][sel], kind=method, bounds_error=False, fill_value=numpy.nan, assume_sorted=True)
+                f = _interp1d_finite(rss._wave[ifiber], rss._sky_east[ifiber], sel, method, numpy.nan)
                 new_rss._sky_east[ifiber] = f(wave).astype("float32")
             if rss._sky_east_error is not None:
-                f = interpolate.interp1d(rss._wave[ifiber][sel], rss._sky_east_error[ifiber][sel], kind=method, bounds_error=False, fill_value=numpy.nan, assume_sorted=True)
+                f = _interp1d_finite(rss._wave[ifiber], rss._sky_east_error[ifiber], sel, method, numpy.nan)
                 new_rss._sky_east_error[ifiber] = f(wave).astype("float32")
             if rss._sky_west is not None:
-                f = interpolate.interp1d(rss._wave[ifiber][sel], rss._sky_west[ifiber][sel], kind=method, bounds_error=False, fill_value=numpy.nan, assume_sorted=True)
+                f = _interp1d_finite(rss._wave[ifiber], rss._sky_west[ifiber], sel, method, numpy.nan)
                 new_rss._sky_west[ifiber] = f(wave).astype("float32")
             if rss._sky_west_error is not None:
-                f = interpolate.interp1d(rss._wave[ifiber][sel], rss._sky_west_error[ifiber][sel], kind=method, bounds_error=False, fill_value=numpy.nan, assume_sorted=True)
+                f = _interp1d_finite(rss._wave[ifiber], rss._sky_west_error[ifiber], sel, method, numpy.nan)
                 new_rss._sky_west_error[ifiber] = f(wave).astype("float32")
 
         if not return_density:
