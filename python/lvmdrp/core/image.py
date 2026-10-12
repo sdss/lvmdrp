@@ -27,7 +27,7 @@ from lvmdrp.core.constants import CON_LAMPS, ARC_LAMPS, LVM_NBLOCKS, LVM_BLOCKSI
 from lvmdrp.core.plot import plt, plot_fiber_residuals, plot_exposed_std
 from lvmdrp.core.fit_profile import gaussians, PROFILES
 from lvmdrp.core.apertures import Apertures
-from lvmdrp.core.header import Header
+from lvmdrp.core.header import Header, individual_frames_table
 from lvmdrp.core.tracemask import TraceMask
 from lvmdrp.core.fiberrows import FiberRows
 from lvmdrp.core.spectrum1d import Spectrum1D, _fiber_cc_match, _cross_match, _spec_from_lines, _align_fiber_blocks
@@ -3529,16 +3529,7 @@ class Image(Header):
         return self._individual_frames
 
     def setIndividualFrames(self, images):
-        self._individual_frames = Table(names=["TILEID", "MJD", "EXPNUM", "SPEC", "CAMERA", "EXPTIME"], dtype=(int, int, int, str, str, float))
-        for img in images:
-            self._individual_frames.add_row([
-                img._header.get("TILEID", 11111),
-                img._header.get("MJD"),
-                img._header.get("EXPOSURE"),
-                img._header.get("SPEC"),
-                img._header.get("CCD"),
-                img._header.get("EXPTIME"),
-            ])
+        self._individual_frames = individual_frames_table([img._header for img in images])
 
     def getSlitmap(self):
         return self._slitmap

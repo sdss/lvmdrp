@@ -771,6 +771,7 @@ class FiberRows(Header, PositionTable):
         fwhm_range=[0, 7],
         bg_range=[0, numpy.inf],
         axs=None,
+        return_bg=False,
     ):
         nlines = len(ref_cent)
         flux = numpy.ones((self._fibers, nlines), dtype=numpy.float32) * numpy.nan
@@ -879,6 +880,8 @@ class FiberRows(Header, PositionTable):
             last_cent = fillin_gap(cent_wave[i], distances=lines_dist, inplace=False)
 
         fibers = numpy.arange(self._fibers)
+        if return_bg:
+            return fibers, flux, cent_wave, fwhm, masked, bg
         return fibers, flux, cent_wave, fwhm, masked
 
     def append(self, rows, append_hdr=False):

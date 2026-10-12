@@ -6,6 +6,7 @@ import numpy
 from astropy.io import fits as pyfits
 from astropy.table import Table
 from lvmdrp.core.fiberrows import FiberRows
+from lvmdrp.core.header import individual_frames_table
 
 
 class TraceMask(FiberRows):
@@ -30,6 +31,7 @@ class TraceMask(FiberRows):
         samples = None
         samples_error = None
         slitmap = None
+        individual_frames = None
         with pyfits.open(in_tracemask, uint=True, do_not_scale_image_data=True, memmap=False) as hdus:
             header = hdus["PRIMARY"].header
             for hdu in hdus:
@@ -48,6 +50,8 @@ class TraceMask(FiberRows):
                     smoothing_kind = header.get("SMOOKIND")
                 if hdu.name == "SLITMAP":
                     slitmap = hdu
+                if hdu.name == "FRAMES":
+                    individual_frames = Table(hdu.data)
 
             trace = cls(
                 data=data,
@@ -58,7 +62,8 @@ class TraceMask(FiberRows):
                 samples=samples,
                 samples_error=samples_error,
                 coeffs=coeffs,
-                smoothing_kind=smoothing_kind
+                smoothing_kind=smoothing_kind,
+                individual_frames=individual_frames
             )
 
         return trace
@@ -80,7 +85,8 @@ class TraceMask(FiberRows):
         good_fibers=None,
         fiber_type=None,
         coeffs=None,
-        smoothing_kind=None
+        smoothing_kind=None,
+        individual_frames=None
     ):
         FiberRows.__init__(
             self,
@@ -101,6 +107,16 @@ class TraceMask(FiberRows):
             coeffs=coeffs,
             smoothing_kind=smoothing_kind
         )
+        self._individual_frames = individual_frames
+
+    def getIndividualFrames(self):
+        """Returns the FRAMES table listing the individual exposures combined in this trace, if any"""
+        return self._individual_frames
+
+    def setIndividualFrames(self, headers):
+        """Sets the FRAMES table from the headers of the individual exposures combined in this trace"""
+        self._individual_frames = individual_frames_table(headers)
+        return self._individual_frames
 
     def getRound(self):
         """
@@ -151,6 +167,8 @@ class TraceMask(FiberRows):
             hdus[0].update_header()
         if self._slitmap is not None:
             hdus.append(pyfits.BinTableHDU(self._slitmap, name="SLITMAP"))
+        if getattr(self, "_individual_frames", None) is not None:
+            hdus.append(pyfits.BinTableHDU(self._individual_frames, name="FRAMES"))
 
         os.makedirs(os.path.dirname(out_trace), exist_ok=True)
         hdus.writeto(out_trace, output_verify="silentfix", overwrite=True)

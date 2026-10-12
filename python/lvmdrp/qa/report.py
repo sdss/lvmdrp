@@ -103,6 +103,9 @@ DARK_COLORS = {"#fcfcfb": "#1a1a19", "#0b0b0b": "#ffffff", "#52514e": "#c3c2b7",
                "#2a78d6": "#3987e5", "#eb6834": "#d95926", "#1baf7a": "#199e70"}
 SEQUENTIAL = [[0.0, "#cde2fb"], [0.25, "#86b6ef"], [0.5, "#3987e5"], [0.75, "#1c5cab"], [1.0, "#0d366b"]]
 SEQUENTIAL_DARK = [[0.0, "#104281"], [0.25, "#1c5cab"], [0.5, "#3987e5"], [0.75, "#86b6ef"], [1.0, "#cde2fb"]]
+# diverging blue <-> red around a neutral gray midpoint; traces using it set meta="div"
+DIVERGING = [[0.0, "#1c5cab"], [0.25, "#86b6ef"], [0.5, "#f0efec"], [0.75, "#ef9a99"], [1.0, "#c8372d"]]
+DIVERGING_DARK = [[0.0, "#3987e5"], [0.25, "#1c5cab"], [0.5, "#383835"], [0.75, "#a63a39"], [1.0, "#e66767"]]
 PLOT_FONT = "IBM Plex Sans, system-ui, -apple-system, Segoe UI, sans-serif"
 MONO_FONT = "IBM Plex Mono, ui-monospace, Menlo, monospace"
 
@@ -267,6 +270,7 @@ def write_dashboard(out_html, title, eyebrow, intro, meta, tiles, body, figures,
         "TITLE": escape(title), "EYEBROW": escape(eyebrow), "INTRO": intro, "META": meta_html(meta),
         "TILES": tiles_html(tiles), "BODY": body, "GENERATOR": escape(generator),
         "PLOTLY_VERSION": get_plotlyjs_version(), "DARK_MAP": json.dumps(DARK_MAP), "SEQ_DARK": json.dumps(SEQUENTIAL_DARK),
+        "DIV_DARK": json.dumps(DIVERGING_DARK),
         "FIGURES": figures_json(figures),
     }.items():
         html = html.replace(f"@@{token}@@", value)
@@ -387,6 +391,7 @@ window.MathJax = { tex: { inlineMath: [["\\\\(", "\\\\)"]], displayMath: [["\\\\
   const FIGURES = @@FIGURES@@;
   const DARK = @@DARK_MAP@@;
   const SEQ_DARK = @@SEQ_DARK@@;
+  const DIV_DARK = @@DIV_DARK@@;
   const pattern = new RegExp(Object.keys(DARK).join("|"), "gi");
   const media = window.matchMedia("(prefers-color-scheme: dark)");
   const config = { responsive: true, displaylogo: false, modeBarButtonsToRemove: ["lasso2d", "select2d"] };
@@ -409,7 +414,10 @@ window.MathJax = { tex: { inlineMath: [["\\\\(", "\\\\)"]], displayMath: [["\\\\
     let text = JSON.stringify(figure);
     if (dark) text = text.replace(pattern, (m) => DARK[m.toLowerCase()]);
     const fig = JSON.parse(text);
-    if (dark) fig.data.forEach((trace) => { if (trace.meta === "seq") trace.colorscale = SEQ_DARK; });
+    if (dark) fig.data.forEach((trace) => {
+      if (trace.meta === "seq") trace.colorscale = SEQ_DARK;
+      if (trace.meta === "div") trace.colorscale = DIV_DARK;
+    });
     Plotly.react(el, fig.data, fig.layout, config);
   }
 
