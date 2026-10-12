@@ -1252,7 +1252,8 @@ def _create_wavelengths_60177(use_longterm_cals=True, skip_done=True, remeasure_
             xarc_paths_ = sorted(path.expand("lvm_anc", drpver=drpver, kind="x", imagetype="arc", **{**arc, "camera": f"{channel}[123]"}))
             xarc_path = path.full("lvm_anc", drpver=drpver, kind="x", imagetype="arc", **{**arc, "camera": channel})
             harc_path = path.full("lvm_anc", drpver=drpver, kind="h", imagetype="arc", **{**arc, "camera": channel})
-            if skip_done and os.path.isfile(harc_path):
+            # rectified with the master solutions, so redone when the arc lines are measured again
+            if skip_done and not remeasure_arcs and os.path.isfile(harc_path):
                 log.info(f"skipping rectified arc {harc_path}, file already exists")
                 continue
 
@@ -2450,8 +2451,8 @@ def create_wavelengths(mjd, epochs=None, use_longterm_cals=True, kind="longterm"
     skip_done : bool
         Skip pipeline steps that have already been done
     remeasure_arcs : bool, optional
-        Measure the arc lines again (and refit the wavelength/LSF solutions) even with `skip_done`;
-        the detrended and extracted arcs are still reused, by default False
+        Measure the arc lines again, refit the wavelength/LSF solutions and rectify the arcs again even
+        with `skip_done`; the detrended and extracted arcs are still reused, by default False
     dry_run : bool, optional
         Logs useful information abaut the current setup without actually reducing, by default False
     """
@@ -2518,7 +2519,8 @@ def create_wavelengths(mjd, epochs=None, use_longterm_cals=True, kind="longterm"
             xarc_paths = sorted(path.expand("lvm_anc", drpver=drpver, kind="x", imagetype="arc", **{**arc, "camera": f"{channel}[123]"}))
             xarc_path = path.full("lvm_anc", drpver=drpver, kind="x", imagetype="arc", **{**arc, "camera": channel})
             harc_path = path.full("lvm_anc", drpver=drpver, kind="h", imagetype="arc", **{**arc, "camera": channel})
-            if skip_done and os.path.isfile(harc_path):
+            # rectified with the master solutions, so redone when the arc lines are measured again
+            if skip_done and not remeasure_arcs and os.path.isfile(harc_path):
                 log.info(f"skipping rectified arc {harc_path}, file already exists")
                 continue
 
@@ -2579,8 +2581,8 @@ def reduce_nightly_sequence(mjd, use_longterm_cals=False, reject_cr=True, only_c
     keep_ancillary : bool
         Keep ancillary files, by default False
     remeasure_arcs : bool, optional
-        Measure the arc lines again (and refit the wavelength/LSF solutions) even with `skip_done`;
-        the detrended and extracted arcs are still reused, by default False
+        Measure the arc lines again, refit the wavelength/LSF solutions and rectify the arcs again even
+        with `skip_done`; the detrended and extracted arcs are still reused, by default False
     fflats_from : int, optional
         Copy twilight fiberflats from given MJD, by default None (no copy)
     link_pixelmasks : bool, optional
@@ -2671,8 +2673,8 @@ def reduce_longterm_sequence(mjd, epochs=None, use_longterm_cals=True,
     keep_ancillary : bool
         Keep ancillary files, by default False
     remeasure_arcs : bool, optional
-        Measure the arc lines again (and refit the wavelength/LSF solutions) even with `skip_done`;
-        the detrended and extracted arcs are still reused, by default False
+        Measure the arc lines again, refit the wavelength/LSF solutions and rectify the arcs again even
+        with `skip_done`; the detrended and extracted arcs are still reused, by default False
     link_pixelmasks : bool, optional
         Create a symbolic link of current version of pixel mask and pixel flats to current version, by default True
     dry_run : bool, optional
