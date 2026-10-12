@@ -117,6 +117,27 @@ def test_dashboard_with_sum(products, masters, tmp_path, make_arc):
     assert '<option value="ref">Reference fiber</option>' in html and "Fiber 40" in html
 
 
+def test_exposure_trends(products, masters, tmp_path):
+    """ line widths of each exposure relative to all exposures, and their trend with time and temperature """
+    metrics = qw.camera_metrics(qw.compare_camera("b1", ARCS, masters, str(tmp_path)))
+    dfwhm, good = metrics["dfwhm"], metrics["good"]
+    assert dfwhm.shape == (2, good.size)
+    # both synthetic exposures have the same line widths
+    assert np.isfinite(dfwhm[:, good]).mean() > 0.9
+    assert np.abs(np.nanmedian(dfwhm[:, good])) < 0.05
+    assert list(metrics["exposure_info"].expnum) == ["1", "2"]
+    # line by line flux and width changes, one row per exposure
+    assert metrics["line_dflux"].shape == metrics["line_dfwhm"].shape == (2, metrics["ref_lines"].size)
+    assert np.isfinite(metrics["line_dflux"]).mean() > 0.9 and np.isfinite(metrics["exposure_dflux"]).all()
+    report = str(tmp_path / "wave-qa.html")
+    qw.write_report([metrics], report, 61000, "longterm", [61000])
+    html = open(report).read()
+    nights = sorted(set(metrics["exposure_info"].night))
+    keys = ["fwhms|b1", "fluxwidths|b1"] + [f"trends|{quantity}|{night}" for quantity in ("fwhm", "flux", "offset") for night in nights + ["all"]]
+    for key in keys:
+        assert f'"{key}"' in html
+
+
 def test_dashboard_without_sum(products, masters, tmp_path):
     """ without the sum, the dashboard measures nothing and shows only the per-arc solutions """
     paths = qw.compare_camera("b1", ARCS, masters, str(tmp_path))

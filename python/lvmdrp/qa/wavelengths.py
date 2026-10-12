@@ -472,6 +472,9 @@ def camera_metrics(paths, fibers=None):
         wsum = weights.sum(axis=0)
         mean_offset = np.divide((weights * offsets).sum(axis=0), wsum, where=wsum > 0, out=np.full(nfibers, np.nan))
         var_offset = np.divide((weights * (offsets - mean_offset[None]) ** 2).sum(axis=0), wsum, where=wsum > 0, out=np.full(nfibers, np.nan))
+        # line width of each exposure relative to the median of the exposures, per fiber (median over lines), where it has offsets
+        fwhm_k = np.where(masked, np.nan, fwhm)
+        dfwhm = np.where(weights > 0, bn.nanmedian(fwhm_k - bn.nanmedian(fwhm_k, axis=0)[None], axis=2), np.nan)
         predicted = np.where(multi, FWHM_FACTOR * var_offset, np.nan)
         observed = np.where(multi, bn.nanmedian(fwhm_s**2 - fwhm_c**2, axis=1), np.nan)
         lsf = {method: traces[method]["lsf"]._data.astype(float) for method in methods}
@@ -483,8 +486,23 @@ def camera_metrics(paths, fibers=None):
             good &= ~fits[method][kind]["masked"]
     good &= np.isfinite(width_single).sum(axis=1) > 0
 
+    # flux and width of each line in each exposure relative to all exposures, median over good fibers, to tell brightness from focus
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", category=RuntimeWarning)
+        lit = ((weights > 0) & good[None])[..., None]
+        ratio = np.where(lit, flux_k / bn.nanmedian(flux_k, axis=0)[None], np.nan)
+        line_dflux = 100 * (bn.nanmedian(ratio, axis=1) - 1)
+        line_dfwhm = bn.nanmedian(np.where(lit, fwhm_k - bn.nanmedian(fwhm_k, axis=0)[None], np.nan), axis=1)
+        exposure_dflux = 100 * (bn.nanmedian(ratio.reshape(ratio.shape[0], -1), axis=1) - 1)
+
     # residuals of the line profile fits, per exposure, all exposures together and in the sum
     exposures = [str(larc._header.get("EXPOSURE")) for larc in lvmarcs]
+    exposure_info = pd.DataFrame({
+        "expnum": exposures, "obstime": [larc._header.get("OBSTIME") for larc in lvmarcs],
+        "night": [int(larc._header.get("SMJD", larc._header.get("MJD", -1))) for larc in lvmarcs],
+        "labtemp": [float(larc._header.get("LABTEMP", np.nan)) for larc in lvmarcs],
+        "ccdtemp": [float(larc._header.get("CCDTEMP1", np.nan)) for larc in lvmarcs],
+    })
     half_width = max(_half_width(larc) for larc in lvmarcs + ([sum_arc] if sum_arc is not None else []))
     edges = np.arange(-half_width, half_width + PROFILE_STEP / 2, PROFILE_STEP)
     points = [_profile_points(larc, line_index) for larc in lvmarcs]
@@ -530,7 +548,8 @@ def camera_metrics(paths, fibers=None):
     return {
         "camera": paths["camera"], "methods": methods, "narcs": len(lvmarcs), "expnums": exposures, "ref_lines": ref_lines,
         "profile_edges": edges, "products": paths, "spectra": spectra,
-        "wave_lines": wave_lines, "width_single": width_single, "bias": bias, "offsets": offsets, "weights": weights,
+        "wave_lines": wave_lines, "width_single": width_single, "bias": bias, "offsets": offsets, "weights": weights, "dfwhm": dfwhm,
+        "line_dflux": line_dflux, "line_dfwhm": line_dfwhm, "exposure_dflux": exposure_dflux, "exposure_info": exposure_info,
         "fits": fits, "profiles": profiles, "good": good, "fibers": fibers_table, "labels": labels, "telescopes": telescopes,
         "spectrum_fibers": spectrum_fibers, "user_fibers": fibers is not None,
     }
@@ -847,22 +866,125 @@ def fig_bias(metrics):
     return _layout(fig, 380, "Line wavelength (&#8491;)", "LSF &#8722; single-exposure FWHM (m&#8491;)")
 
 
-def fig_shifts(metrics):
-    """Line position offset of each exposure relative to the median of the exposures, per fiber"""
+def _fig_per_exposure(metrics, values, ytitle):
+    """One line per exposure across the slit, lighter for earlier exposures"""
     fig = go.Figure()
     fig.add_hline(y=0, line=dict(color=THEME["axis"], width=1))
-    offsets = np.where(metrics["weights"] > 0, metrics["offsets"], np.nan)
-    narcs = offsets.shape[0]
+    narcs = values.shape[0]
     ramp = [EXPOSURE_RAMP[int(round(i * (len(EXPOSURE_RAMP) - 1) / max(narcs - 1, 1)))] for i in range(narcs)]
-    fibers = np.arange(offsets.shape[1])
+    fibers = np.arange(values.shape[1])
     for k in range(narcs):
-        fig.add_trace(go.Scatter(x=fibers, y=_r(offsets[k]), mode="lines", line=dict(color=ramp[k], width=1.5), name=metrics["expnums"][k],
+        fig.add_trace(go.Scatter(x=fibers, y=_r(values[k]), mode="lines", line=dict(color=ramp[k], width=1.5), name=metrics["expnums"][k],
                                  customdata=metrics["labels"],
                                  hovertemplate="fiber %{x} (%{customdata})<br>%{y:+.3f} pix<extra>exposure " + metrics["expnums"][k] + "</extra>"))
-    return _layout(fig, 400, "Fiber", "Offset along dispersion (pix)", legend=dict(title=dict(text="Exposure", font=dict(color=THEME["ink2"])),
-                                                                                   orientation="v", x=1.01, y=1, xanchor="left", yanchor="top",
-                                                                                   font=dict(color=THEME["ink2"]), bgcolor="rgba(0,0,0,0)"),
+    return _layout(fig, 400, "Fiber", ytitle, legend=dict(title=dict(text="Exposure", font=dict(color=THEME["ink2"])),
+                                                          orientation="v", x=1.01, y=1, xanchor="left", yanchor="top",
+                                                          font=dict(color=THEME["ink2"]), bgcolor="rgba(0,0,0,0)"),
                    margin=dict(l=64, r=120, t=24, b=52))
+
+
+def fig_shifts(metrics):
+    """Line position offset of each exposure relative to the median of the exposures, per fiber"""
+    return _fig_per_exposure(metrics, np.where(metrics["weights"] > 0, metrics["offsets"], np.nan), "Offset along dispersion (pix)")
+
+
+def fig_fwhm_changes(metrics):
+    """Line FWHM of each exposure relative to the median of the exposures, per fiber"""
+    fig = _fig_per_exposure(metrics, metrics["dfwhm"], "FWHM &#8722; median of exposures (pix)")
+    fig.update_yaxes(exponentformat="none")
+    return fig
+
+
+TREND_QUANTITIES = {"fwhm": ("FWHM change", "FWHM &#8722; median of exposures (pix)", "%{y:+.3f} pix"),
+                     "flux": ("Line flux change", "Flux / median of exposures &#8722; 1 (%)", "%{y:+.1f}%"),
+                     "offset": ("Line offset", "Offset along dispersion (pix)", "%{y:+.3f} pix")}
+
+
+def _exposure_values(metrics, quantity):
+    """Median over good fibers of the FWHM change, flux change (%) or line offset of each exposure"""
+    if quantity == "flux":
+        return metrics["exposure_dflux"]
+    values = metrics["dfwhm"] if quantity == "fwhm" else np.where(metrics["weights"] > 0, metrics["offsets"], np.nan)
+    good = metrics["good"]
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", category=RuntimeWarning)
+        return np.nanmedian(values[:, good], axis=1) if good.any() else np.full(values.shape[0], np.nan)
+
+
+def fig_trends(all_metrics, quantity, night="all"):
+    """Median over fibers of the FWHM, flux or position change of each exposure against time, with the lab temperature
+
+    Parameters
+    ----------
+    all_metrics : list[dict]
+        Metrics of each camera
+    quantity : str
+        One of :data:`TREND_QUANTITIES`: "fwhm", "flux" or "offset"
+    night : int or str
+        SJD of the night to show, or "all"
+
+    Returns
+    -------
+    plotly.graph_objects.Figure
+    """
+    fig = make_subplots(specs=[[{"secondary_y": True}]])
+    dashes = {"1": "solid", "2": "dash", "3": "dot"}
+    _, ytitle, yhover = TREND_QUANTITIES[quantity]
+    info = None
+    for metrics in all_metrics:
+        camera, info = metrics["camera"], metrics["exposure_info"]
+        select = np.ones(len(info), dtype=bool) if night == "all" else (info.night == int(night)).to_numpy()
+        info, median = info[select], _exposure_values(metrics, quantity)[select]
+        x = info.obstime if info.obstime.notna().all() else info.expnum
+        fig.add_trace(go.Scatter(x=x, y=_r(median), mode="lines+markers", name=camera, legendgroup=camera[0],
+                                 line=dict(color=CHANNEL_COLORS[camera[0]], width=1.5, dash=dashes.get(camera[1], "solid")), marker=dict(size=6),
+                                 customdata=np.stack([info.expnum, info.ccdtemp], axis=1),
+                                 hovertemplate="exposure %{customdata[0]}<br>" + yhover + "<br>sensor %{customdata[1]:.1f} &#176;C<extra>" + camera + "</extra>"),
+                      secondary_y=False)
+    if info is not None and np.isfinite(info.labtemp).any():
+        x = info.obstime if info.obstime.notna().all() else info.expnum
+        fig.add_trace(go.Scatter(x=x, y=_r(info.labtemp, 2), mode="lines+markers", name="lab temperature",
+                                 line=dict(color=THEME["muted"], width=1.5, dash="dash"), marker=dict(size=5, symbol="square"),
+                                 hovertemplate="%{y:.2f} &#176;C<extra>lab temperature</extra>"), secondary_y=True)
+    fig.add_hline(y=0, line=dict(color=THEME["axis"], width=1), secondary_y=False)
+    fig = _layout(fig, 420, "Exposure time (UTC)", ytitle, margin=dict(l=84, r=64, t=40, b=52))
+    fig.update_yaxes(title_text="Lab temperature (&#176;C)", secondary_y=True, showgrid=False)
+    fig.update_yaxes(exponentformat="none")
+    return fig
+
+
+def fig_flux_widths(metrics):
+    """FWHM change against flux change of each line in each exposure, with a straight line fitted to all of them
+
+    A brightness effect moves the points along a common slope, line by line; a focus change shifts all the lines of an
+    exposure together, whatever their flux.
+    """
+    fig = go.Figure()
+    fig.add_hline(y=0, line=dict(color=THEME["axis"], width=1))
+    fig.add_vline(x=0, line=dict(color=THEME["axis"], width=1))
+    dflux, dfwhm = metrics["line_dflux"], metrics["line_dfwhm"]
+    narcs = dflux.shape[0]
+    ramp = [EXPOSURE_RAMP[int(round(i * (len(EXPOSURE_RAMP) - 1) / max(narcs - 1, 1)))] for i in range(narcs)]
+    waves = np.round(np.asarray(metrics["ref_lines"], dtype=float), 2)
+    for k in range(narcs):
+        ok = np.isfinite(dflux[k]) & np.isfinite(dfwhm[k])
+        fig.add_trace(go.Scatter(x=_r(dflux[k][ok], 3), y=_r(dfwhm[k][ok]), mode="markers", name=metrics["expnums"][k],
+                                 marker=dict(color=ramp[k], size=7, line=dict(color=THEME["surface"], width=1)), customdata=waves[ok],
+                                 hovertemplate="%{customdata:.2f} &#8491;<br>flux %{x:+.1f}%<br>FWHM %{y:+.4f} pix<extra>exposure "
+                                               + metrics["expnums"][k] + "</extra>"))
+    # a slope needs flux changes well above the noise of the fluxes
+    ok = np.isfinite(dflux) & np.isfinite(dfwhm)
+    if ok.sum() >= 3 and np.ptp(dflux[ok]) >= 1:
+        slope, intercept = np.polyfit(dflux[ok], dfwhm[ok], 1)
+        x = np.array([dflux[ok].min(), dflux[ok].max()])
+        fig.add_trace(go.Scatter(x=_r(x, 2), y=_r(intercept + slope * x), mode="lines", line=dict(color=THEME["muted"], width=1.5, dash="dash"),
+                                 name=f"fit: {10 * slope:+.4f} pix per 10% flux", hoverinfo="skip"))
+    fig = _layout(fig, 420, "Flux / median of exposures &#8722; 1 (%)", "FWHM &#8722; median of exposures (pix)",
+                  legend=dict(title=dict(text="Exposure", font=dict(color=THEME["ink2"])), orientation="v", x=1.01, y=1, xanchor="left",
+                              yanchor="top", font=dict(color=THEME["ink2"]), bgcolor="rgba(0,0,0,0)"),
+                  margin=dict(l=64, r=200, t=24, b=52))
+    fig.update_yaxes(exponentformat="none")
+    return fig
 
 
 def fig_explained(all_metrics):
@@ -931,10 +1053,16 @@ def write_report(all_metrics, report_path, mjd_epoch, kind, mjds, problems=None)
 
     has_sum = any("pixels" in metrics["methods"] for metrics in all_metrics)
     figures = {"fig-explained": fig_explained(all_metrics)} if has_sum else {}
+    nights = sorted({int(night) for metrics in all_metrics for night in metrics["exposure_info"].night})
+    for quantity in TREND_QUANTITIES if all_metrics else []:
+        for night in nights + ["all"]:
+            figures[f"trends|{quantity}|{night}"] = fig_trends(all_metrics, quantity, night)
     for metrics in all_metrics:
         camera = metrics["camera"]
         figures[f"bias|{camera}"] = fig_bias(metrics)
         figures[f"shifts|{camera}"] = fig_shifts(metrics)
+        figures[f"fwhms|{camera}"] = fig_fwhm_changes(metrics)
+        figures[f"fluxwidths|{camera}"] = fig_flux_widths(metrics)
         for solution in ("wave", "lsf"):
             for method in metrics["methods"]:
                 for view in ("residuals", "linear"):
@@ -1079,6 +1207,20 @@ def write_report(all_metrics, report_path, mjd_epoch, kind, mjds, problems=None)
     (median over lines). The per-arc combination removes these before combining the line positions{"; the sum is blurred by them" if has_sum else ""}.
     Lighter lines are earlier exposures.</p>
     {picker("fig-shifts", "shifts", [camera_dim], 400)}
+    <p>Line FWHM of each exposure minus the median of all exposures, per fiber (median over lines). Changes common to the whole
+    slit follow the spectrograph (e.g. focus with temperature); changes along the slit follow the fibers. Lighter lines are
+    earlier exposures.</p>
+    {picker("fig-fwhms", "fwhms", [camera_dim], 400)}
+    <p>The lamp brightness changes between exposures too, and brighter lines can be wider. Each point is one line in one
+    exposure: its FWHM change against its flux change, both relative to the median of the exposures and median over fibers.
+    A brightness effect lines the points up along the fitted slope, across lines and exposures; a focus change moves all the
+    lines of an exposure up or down together, whatever their flux. The slope is fitted when the fluxes change by at least 1%.</p>
+    {picker("fig-fluxwidths", "fluxwidths", [camera_dim], 420)}
+    <p>Median over fibers of the FWHM change, flux change or line offset of each exposure, against the time of the exposure,
+    with the lab temperature (right axis), one night at a time. Line styles tell the spectrographs apart: solid, dashed and
+    dotted for 1, 2 and 3; hover for the sensor temperature.</p>
+    {picker("fig-trends", "trends", [("Quantity", [(key, label) for key, (label, _, _) in TREND_QUANTITIES.items()]),
+                                     ("Night", [(str(night), str(night)) for night in nights] + [("all", "All nights")])], 420)}
     {EXPLAINED_HTML if has_sum else ""}
   </section>""",
         f"""<section>
@@ -1284,6 +1426,12 @@ DEFINITIONS = r"""<section id="definitions">
         <p>Master LSF of each combination at the line position, minus the line width in single exposures (median over
         exposures).</p>
         <div class="eq">\[ b_{ij} = \mathrm{LSF}_i(\bar x_{ij}) - D_i(\bar x_{ij})\, \mathrm{med}_k\, w_{kij} \]</div>
+      </div>
+      <div class="def">
+        <h3>FWHM change</h3>
+        <p>FWHM of each exposure minus the median FWHM of all exposures, median over lines. The trend is its median over
+        good fibers, per exposure.</p>
+        <div class="eq">\[ \Delta w_{ki} = \mathrm{med}_j\left(w_{kij} - \mathrm{med}_k\, w_{kij}\right) \]</div>
       </div>
       <div class="def">
         <h3>Broadening of the sum</h3>
