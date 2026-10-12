@@ -1812,6 +1812,9 @@ def science_sensitivity(rss, res_sci, ext, GAIA_CACHE_DIR, NSCI_MAX=15, r_spaxel
     # get GAIA data, potentially cached
     gwave, calibrated_spectra, r = fluxcal.get_xp_spectra_from_tile(expnum, ra, dec, lim_mag=13.5, n_spectra=NSCI_MAX,
                                                                return_table=True, convert_to_cgs=True, cache_dir=GAIA_CACHE_DIR)
+    if len(calibrated_spectra) == 0:
+        log.warning(f"no Gaia stars with XP spectra found in the science IFU for {expnum = }, skipping science field calibration")
+        return rss, res_sci
 
     # read the mean sensitivity curve
     mean_sens = fluxcal.get_mean_sens_curves(os.getenv("LVMCORE_DIR") + "/sensitivity")

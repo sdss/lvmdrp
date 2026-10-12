@@ -262,6 +262,13 @@ class GaiaXPSpectra(object):
         """
 
         if isinstance(source_ids, (list, tuple, set, np.ndarray)):
+            # no sources (e.g. no bright Gaia stars in the field): return the sampling grid and no spectra
+            if len(source_ids) == 0:
+                wave_xp, spectra_xp = self._wave_sampling.astype(float), np.empty((0, self._wave_sampling.size))
+                if convert_to_cgs:
+                    return self._convert_to_csg(wave_xp, spectra_xp)
+                return wave_xp, spectra_xp
+
             spectra_xp = []
             for source_id in source_ids:
                 wave_xp, spectrum = self.load_xp_spectra(source_ids=source_id, convert_to_cgs=False)
