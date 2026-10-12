@@ -51,6 +51,37 @@ def epoch_qa_dir(drpver: str, mjd: int, kind: str, name: str, redux_dir: str = N
     return os.path.join(redux_dir, drpver, tileid_grp(CALIB_TILEID), str(CALIB_TILEID), str(mjd), "ancillary", f"{kind}_qa", name)
 
 
+def exposure_qa_dir(drpver: str, tileid: int, mjd: int, kind: str, name: str, redux_dir: str = None) -> str:
+    """Directory of a QA report about an exposure, next to its reduced products
+
+    The report sits in the night directory of the tile, outside the ancillary
+    directory so it survives the cleaning of the ancillary products:
+    ``{redux_dir}/{drpver}/{tilegrp}/{tileid}/{mjd}/qa/{kind}_qa/{name}``.
+
+    Parameters
+    ----------
+    drpver : str
+        pipeline version of the reductions
+    tileid : int
+        tile ID of the exposure
+    mjd : int
+        MJD of the exposure
+    kind : str
+        kind of QA, e.g. 'science'
+    name : str
+        name of the report directory, e.g. '00027873'
+    redux_dir : str, optional
+        reductions root directory, by default $LVM_SPECTRO_REDUX
+
+    Returns
+    -------
+    str
+        path of the directory
+    """
+    redux_dir = redux_dir or os.getenv("LVM_SPECTRO_REDUX", ".")
+    return os.path.join(redux_dir, drpver, tileid_grp(tileid), str(tileid), str(mjd), "qa", f"{kind}_qa", name)
+
+
 def version_qa_dir(drpver: str, kind: str, name: str, redux_dir: str = None) -> str:
     """Directory of a QA report about a whole pipeline version: ``{redux_dir}/{drpver}/qa/{kind}/{name}``
 

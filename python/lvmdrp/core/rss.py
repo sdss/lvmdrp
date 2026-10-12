@@ -3542,6 +3542,28 @@ class RSS(FiberRows):
         return x, y, z, coeffs, factor, science_g
 
     def swap_fluxcal(self, method, inplace=True):
+        """Swaps the applied flux calibration for another method
+
+        The flux calibration multiplies the spectra by the mean sensitivity
+        curve of the applied method (see
+        :func:`~lvmdrp.functions.fluxCalMethod.apply_fluxcal`), so swapping
+        divides by the mean curve of the applied method and multiplies by the
+        mean curve of the new one. The sky spectra are swapped as well. The
+        telluric correction applied with the 'MOD' method is not undone nor
+        applied.
+
+        Parameters
+        ----------
+        method : str
+            new flux calibration method: 'STD', 'SCI', 'MOD' or 'NONE'
+        inplace : bool, optional
+            swap in this object instead of a copy, by default True
+
+        Returns
+        -------
+        RSS
+            flux calibrated with the new method
+        """
         VALID_FLUXCAL_METHODS = ["SCI", "STD", "MOD", "NONE"]
         if method not in VALID_FLUXCAL_METHODS:
             raise ValueError(f"Invalid value for 'method': {method}. Expected one of: {VALID_FLUXCAL_METHODS}")
@@ -3555,22 +3577,27 @@ class RSS(FiberRows):
             warnings.warn(f"Flux calibration method is the same that is applied. No need to swap to {method = }")
             return rss
 
-        # handle undoing flux calibration
-        sens_old = rss.get_fluxcal(source=current_method.lower())
-        rss *= sens_old["mean"]
+        # undo the applied flux calibration and apply the new one
+        factor = 1.0
+        for name, power in ((current_method, -1), (method, 1)):
+            if name == "NONE":
+                continue
+            sens = rss.get_fluxcal(source=name.lower())
+            if sens is None:
+                raise ValueError(f"No flux calibration table found for method: {name}")
+            factor = factor * numpy.asarray(sens["mean"], dtype=float)**power
+        factor = numpy.asarray(factor, dtype="float32")
+
+        for attr in ("_data", "_error", "_sky", "_sky_error", "_sky_east", "_sky_east_error", "_sky_west", "_sky_west_error"):
+            values = getattr(rss, attr, None)
+            if values is not None:
+                setattr(rss, attr, values * factor)
+
+        rss.setHdrValue("FLUXCAL", method, "flux calibration method")
         if method == "NONE":
-            return rss
-
-        # handle swapping flux calibration method
-        sens_new = rss.get_fluxcal(source=method.lower())
-        if sens_old is None:
-            raise ValueError(f"No flux calibration table found for currently applied method: {current_method}")
-        if sens_new is None:
-            raise ValueError(f"No flux calibration table found for new method: {method}")
-
-        rss /= sens_new["mean"]
-
-        rss.setHdrValue("FLUXCAL", method)
+            rss.setHdrValue("BUNIT", "electron / (Angstrom s)", "physical units of the array values")
+        else:
+            rss.setHdrValue("BUNIT", "erg / (Angstrom s cm2)", "physical units of the array values")
 
         return rss
 

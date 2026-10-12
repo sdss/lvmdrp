@@ -190,6 +190,16 @@ pixelflats
    :undoc-members:
    :show-inheritance:
 
+.. _api-qa-science:
+
+science
+^^^^^^^
+
+.. automodule:: lvmdrp.qa.science
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 .. _api-qa-report:
 
 report

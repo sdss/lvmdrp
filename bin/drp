@@ -51,6 +51,7 @@ from lvmdrp.qa.fiberflats import (
     find_frames, run_flatfield_qa_batch, report_flatfield_qa, qa_fiberflat_epochs, load_calibration_epochs,
     flatfield_qa_name, default_flatfield_qa_dir, TELESCOPES as QA_TELESCOPES,
 )
+from lvmdrp.qa.science import qa_science_exposure, QA_PARTS as SCIENCE_QA_PARTS
 
 
 from sdss_access import Access
@@ -1057,6 +1058,41 @@ calibrations.add_command(fiberflats)
 calibrations.add_command(pixelflats)
 calibrations.add_command(super_pixelflats)
 calibrations.add_command(qa_pixelflats_cli)
+@cli.command('qa-science', short_help='Run the QA of the reduction of a science exposure and write an HTML dashboard', context_settings=dict(show_default=True))
+@click.option('-e', '--expnum', type=int, required=True, help='Exposure number of the science exposure')
+@click.option('-d', '--drpver', type=str, default=drpver, help='Pipeline version of the reductions')
+@click.option('--cameras', type=StrListType(), default=",".join(CAMERAS), help="Cameras of the detrended frames, stray light and fiber shifts parts")
+@click.option('--parts', type=StrListType(), default=",".join(SCIENCE_QA_PARTS), help=f"Parts of the dashboard, any of {','.join(SCIENCE_QA_PARTS)}")
+@click.option('--sky-lines', type=str, default=None, help="Comma-separated sky lines (Angstroms) of the sky subtraction residual maps. Defaults to the isolated sky lines of the flat-field QA")
+@click.option('-o', '--output-dir', type=str, default=None, help="Directory of the dashboard. Defaults to qa/science_qa/{expnum} in the night directory of the tile")
+@click.option('--remeasure', is_flag=True, default=False, help="Produce the ancillary products (detrended, stray light subtracted and rectified frames) again in the output directory, with the routines and parameters of the reduction, instead of reusing them")
+@click.option('--fetch-xp', is_flag=True, default=False, help="Download the Gaia XP spectra of standard stars missing from the Gaia cache")
+@click.option('--use-nightly-cals', is_flag=True, default=False, help='The reduction used nightly calibrations. This option implies --use-untagged-cals')
+@click.option('--use-untagged-cals', is_flag=True, default=False, help='The reduction used calibrations from the untagged (not sandbox) directory')
+@click.option("--dry-run", is_flag=True, default=False, help="Show the products found and the output paths without measuring anything")
+def qa_science_cli(expnum, drpver, cameras, parts, sky_lines, output_dir, remeasure, fetch_xp, use_nightly_cals, use_untagged_cals, dry_run):
+    """Check the reduction of a science exposure step by step and write an HTML dashboard.
+
+    Measurements stored in the reduced products are reused. Missing ancillary products are logged and their parts
+    skipped, unless --remeasure is given.
+    """
+    unknown = set(parts).difference(SCIENCE_QA_PARTS)
+    if unknown:
+        raise click.BadParameter(f"unknown parts {sorted(unknown)}, expected any of {', '.join(SCIENCE_QA_PARTS)}", param_hint="--parts")
+    try:
+        lines = [float(line) for line in sky_lines.split(",")] if sky_lines else None
+    except ValueError:
+        raise click.BadParameter(f"expected comma-separated wavelengths, got {sky_lines!r}", param_hint="--sky-lines")
+    try:
+        result = qa_science_exposure(expnum, cameras=cameras, parts=parts, sky_lines=lines, output_dir=output_dir, remeasure=remeasure,
+                                     fetch_xp=fetch_xp, use_nightly_cals=use_nightly_cals, use_untagged_cals=use_untagged_cals,
+                                     drpver=drpver, dry_run=dry_run)
+    except ValueError as e:
+        raise click.UsageError(str(e))
+    if result["report"]:
+        click.echo(f"dashboard written to {result['report']}")
+
+
 calibrations.add_command(qa_raw_pixelflats_cli)
 calibrations.add_command(qa_fiberflats_cli)
 calibrations.add_command(qa_wavelengths_cli)
