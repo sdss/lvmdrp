@@ -50,6 +50,7 @@ from tqdm import tqdm
 
 from lvmdrp import log
 from lvmdrp.core.plot import plt, save_fig
+from lvmdrp.core.fit_profile import IFUGradient
 from lvmdrp.core.rss import RSS, lvmFrame
 from lvmdrp.qa.report import (
     THEME, SERIES, DARK_COLORS, SEQUENTIAL, SEQUENTIAL_DARK, MONO_FONT,
@@ -521,43 +522,37 @@ def measure_continuum(frame: RSS, windows: List[Tuple[float, float]], min_covera
     return table
 
 
-def _ifu_coordinates(frame: RSS) -> Tuple[np.ndarray, np.ndarray]:
-    """Fiber positions relative to the center of their IFU, in units of the IFU radius"""
-    slitmap = frame._slitmap
-    telescope = _telescopes(frame)
-    if "xpmm" not in slitmap.colnames or "ypmm" not in slitmap.colnames:
-        return np.zeros(len(slitmap)), np.zeros(len(slitmap))
-    x, y = np.asarray(slitmap["xpmm"], dtype=float), np.asarray(slitmap["ypmm"], dtype=float)
-    xn, yn = np.full_like(x, np.nan), np.full_like(y, np.nan)
-    for tel in np.unique(telescope):
-        in_tel = telescope == tel
-        dx, dy = x[in_tel] - np.nanmean(x[in_tel]), y[in_tel] - np.nanmean(y[in_tel])
-        radius = np.nanmax(np.hypot(dx, dy))
-        if radius > 0:
-            xn[in_tel], yn[in_tel] = dx / radius, dy / radius
-    return xn, yn
+def _gradient_terms(deg: int):
+    """Polynomial terms, initial guess and fixed coefficients of the pipeline IFU gradient model
+
+    :class:`~lvmdrp.core.fit_profile.IFUGradient` multiplies coefficient k by
+    ``x**i * y**j`` for ``(i, j)`` in ``product(range(order), repeat=2)``.
+    Terms of total degree above ``deg`` are fixed to zero, so ``deg=1`` is the
+    plane used by the pipeline (``1, y, x`` free and ``xy`` fixed).
+    """
+    terms = list(product(range(deg + 1), repeat=2))
+    guess = [1.0] + [0.0] * (len(terms) - 1)
+    fixed = [k for k, (i, j) in enumerate(terms) if i + j > deg]
+    return terms, guess, fixed
 
 
 def fit_sky_gradient(frame: RSS, norm: np.ndarray, deg: int = 1, telescopes: Tuple[str] = TELESCOPES,
                      min_fibers: int = 20, clip: float = 4.0, niter: int = 10) -> Dict:
-    """Jointly fits a sky gradient across each IFU and the spectrograph offsets
+    """Fits the pipeline model of the gradient across the science IFU and the spectrograph factors
 
-    The normalized fluxes of the fibers are modeled as
+    Uses :class:`lvmdrp.core.fit_profile.IFUGradient`, set up as in
+    :meth:`lvmdrp.core.rss.RSS.fit_ifu_gradient`: the normalized fluxes of the
+    science IFU fibers are modeled as
 
-        norm - 1 = a_tel + P_tel(x, y) + o_spec
+        norm = G(x, y) * f_spec / <G * f_spec>
 
-    where a_tel is an intercept per telescope, P_tel a polynomial of degree
-    `deg` (no constant term) in the fiber positions relative to the IFU center
-    in units of the IFU radius, and o_spec an offset per spectrograph shared by
-    all telescopes. The spectrograph offsets capture flat field errors at the
-    spectrograph level, while the polynomial captures the sky gradient. Fitting
-    them jointly avoids that a sky gradient across the science IFU, whose fibers
-    are split between the spectrographs in three wedges, is mistaken for
-    spectrograph offsets. The sky IFUs, which have fibers from all
-    spectrographs on a small patch of sky, help to break this degeneracy.
+    with G a polynomial in the fiber positions (``xpmm``, ``ypmm``) and f_spec
+    a factor per spectrograph. The fit is repeated with the fibers beyond
+    `clip` times the robust scatter of the residuals removed (e.g., stars or
+    nebular emission), until the selection doesn't change.
 
-    The fit is a linear least squares with iterative clipping of outliers
-    beyond `clip` times the robust scatter (e.g., stars or nebular emission).
+    The sky IFUs are not part of the pipeline fit; their fibers get the
+    spectrograph factors times their own median level, and no gradient.
 
     Parameters
     ----------
@@ -566,12 +561,13 @@ def fit_sky_gradient(frame: RSS, norm: np.ndarray, deg: int = 1, telescopes: Tup
     norm : np.ndarray
         per fiber normalized fluxes, NaN for fibers not to use
     deg : int, optional
-        polynomial degree of the sky gradient: 0 (none), 1 (plane) or 2
-        (quadratic), by default 1
+        polynomial degree of the gradient: 0 (factors only), 1 (plane, as in
+        the pipeline) or 2 (quadratic), by default 1
     telescopes : tuple[str], optional
-        telescopes to fit, by default ('Sci', 'SkyE', 'SkyW')
+        telescopes whose fibers get a model, by default ('Sci', 'SkyE', 'SkyW');
+        the fit itself only uses the science IFU
     min_fibers : int, optional
-        minimum number of valid fibers to fit a gradient in a telescope, by default 20
+        minimum number of valid science fibers to fit, by default 20
     clip : float, optional
         clipping threshold in units of the robust scatter, by default 4.0
     niter : int, optional
@@ -580,90 +576,75 @@ def fit_sky_gradient(frame: RSS, norm: np.ndarray, deg: int = 1, telescopes: Tup
     Returns
     -------
     dict
-        sky: per fiber multiplicative sky model, 1 + a_tel + P_tel (NaN for
-        fibers outside the fitted telescopes); offsets: dict of spectrograph
-        offsets with zero mean over the used fibers; gradients: dict per
-        telescope with the linear gradient components at the IFU edge (gx, gy)
-        and the half peak-to-valley amplitude of the sky model (amp), all
-        relative to the telescope mean; used: boolean array of fibers kept in
-        the final fit
+        sky: per fiber gradient model with mean 1 over the used science fibers
+        (1 for the sky IFUs, NaN for other fibers); model: per fiber joint model
+        of gradient and spectrograph factors; offsets: spectrograph factors
+        relative to their mean over the used fibers, minus 1; gradients: per
+        telescope gradient at the IFU edge along x and y (gx, gy), half
+        peak-to-valley amplitude (amp), all relative to the mean, and for the
+        science IFU the IFUGradient coefficients divided by the mean gradient
+        (coeffs); used: boolean array of the fibers kept in the final fit
     """
     slitmap = frame._slitmap
     telescope = _telescopes(frame)
-    specid = np.asarray(slitmap["spectrographid"].data)
-    xn, yn = _ifu_coordinates(frame)
-    if deg > 0 and ("xpmm" not in slitmap.colnames or "ypmm" not in slitmap.colnames):
-        log.warning("no fiber positions (xpmm, ypmm) in the slitmap, fitting spectrograph offsets only")
-        deg = 0
-
-    valid = np.isfinite(norm) & np.isfinite(xn) & np.isfinite(yn)
-    fit_tels = [tel for tel in telescopes if (valid & (telescope == tel)).sum() >= max(min_fibers, 3)]
-    result = {"sky": np.full(norm.shape, np.nan), "offsets": {i: np.nan for i in (1, 2, 3)},
+    specid = np.asarray(slitmap["spectrographid"]).astype(int)
+    result = {"sky": np.full(norm.shape, np.nan), "model": np.full(norm.shape, np.nan), "offsets": {i: np.nan for i in (1, 2, 3)},
               "gradients": {tel: {"gx": np.nan, "gy": np.nan, "amp": np.nan} for tel in telescopes},
               "used": np.zeros(norm.shape, dtype=bool)}
-    if not fit_tels:
+
+    has_positions = "xpmm" in slitmap.colnames and "ypmm" in slitmap.colnames
+    if deg > 0 and not has_positions:
+        log.warning("no fiber positions (xpmm, ypmm) in the slitmap, fitting spectrograph factors only")
+        deg = 0
+    x = np.asarray(slitmap["xpmm"], dtype=float) if has_positions else np.zeros(norm.shape)
+    y = np.asarray(slitmap["ypmm"], dtype=float) if has_positions else np.zeros(norm.shape)
+    terms, guess, fixed = _gradient_terms(deg)
+
+    sci = telescope == "Sci"
+    valid = sci & np.isfinite(norm) & np.isfinite(x) & np.isfinite(y) & np.isin(specid, (1, 2, 3))
+    min_used = max(min_fibers, len(guess) + 3)
+    if "Sci" not in telescopes or valid.sum() < min_used:
         return result
-    valid &= np.isin(telescope, fit_tels)
 
-    terms = [(1, 0), (0, 1)] if deg >= 1 else []
-    terms += [(2, 0), (1, 1), (0, 2)] if deg >= 2 else []
-    columns, labels = [], []
-    for tel in fit_tels:
-        in_tel = (telescope == tel).astype(float)
-        columns.append(in_tel)
-        labels.append((tel, None))
-        for px, py in terms:
-            columns.append(in_tel * np.nan_to_num(xn)**px * np.nan_to_num(yn)**py)
-            labels.append((tel, (px, py)))
-    specs = [i for i in (1, 2, 3) if (valid & (specid == i)).any()]
-    for i in specs[1:]:
-        columns.append((specid == i).astype(float))
-        labels.append(("spec", i))
-    design = np.column_stack(columns)
-
-    target = np.nan_to_num(norm - 1)
     used = valid.copy()
     for _ in range(niter):
-        coeffs, *_ = np.linalg.lstsq(design[used], target[used], rcond=None)
-        resid = target - design @ coeffs
+        ifu_model = IFUGradient(guess, [1.0, 1.0, 1.0], fixed_coeffs=fixed)
+        ifu_model.fit(x[used], y[used], norm[used], specid[used])
+        coeffs, factors = np.asarray(ifu_model._coeffs, dtype=float), np.asarray(ifu_model._factors, dtype=float)
+        gradient = IFUGradient.ifu_gradient(coeffs, x, y, normalize=False)
+        spec_factors = IFUGradient.ifu_factors(factors, specid, normalize=False)
+        # same normalization as IFUGradient.ifu_joint_model over the fitted fibers
+        model = gradient * spec_factors / np.nanmean(gradient[used] * spec_factors[used])
+
+        resid = norm - model
         scale = 1.4826 * np.nanmedian(np.abs(resid[used] - np.nanmedian(resid[used])))
         new_used = valid & (np.abs(resid) <= clip * scale) if scale > 0 else used
-        if np.array_equal(new_used, used):
+        if np.array_equal(new_used, used) or new_used.sum() < min_used:
             break
         used = new_used
 
-    # spectrograph offsets with zero mean over the used fibers
-    offsets = {i: 0.0 for i in specs}
-    for (kind, value), coeff in zip(labels, coeffs):
-        if kind == "spec":
-            offsets[value] = coeff
-    mean_offset = np.mean([offsets[i] for i in specid[used]]) if used.any() else 0.0
-    offsets = {i: offsets[i] - mean_offset for i in specs}
-
-    sky = np.full(norm.shape, np.nan)
-    for tel in fit_tels:
+    gradient_mean, factors_mean = np.nanmean(gradient[used]), np.nanmean(spec_factors[used])
+    norm_factors = spec_factors / factors_mean
+    sky = np.where(sci, gradient / gradient_mean, np.nan)
+    joint = np.where(sci, model, np.nan)
+    for tel in telescopes:
         in_tel = telescope == tel
-        model = np.full(in_tel.sum(), mean_offset)
-        gx = gy = 0.0
-        for (kind, value), coeff in zip(labels, coeffs):
-            if kind != tel:
-                continue
-            if value is None:
-                model = model + coeff
-            else:
-                px, py = value
-                model = model + coeff * xn[in_tel]**px * yn[in_tel]**py
-                if value == (1, 0):
-                    gx = coeff
-                elif value == (0, 1):
-                    gy = coeff
-        sky[in_tel] = 1 + model
-        level = np.nanmean(sky[in_tel & used]) if (in_tel & used).any() else np.nanmean(sky[in_tel])
-        result["gradients"][tel] = {"gx": gx / level, "gy": gy / level,
-                                    "amp": 0.5 * (np.nanmax(sky[in_tel]) - np.nanmin(sky[in_tel])) / level}
+        if tel == "Sci" or not in_tel.any():
+            continue
+        sky[in_tel] = 1.0
+        ok = in_tel & np.isfinite(norm)
+        if ok.any():
+            joint[in_tel] = np.nanmedian(norm[ok] / norm_factors[ok]) * norm_factors[in_tel]
 
+    sci_sky = sky[sci & np.isfinite(sky)]
+    radius = np.nanmax(np.hypot(x[sci] - np.nanmean(x[sci]), y[sci] - np.nanmean(y[sci]))) if has_positions else 0.0
+    slopes = {term: coeffs[terms.index(term)] / gradient_mean if term in terms else 0.0 for term in ((1, 0), (0, 1))}
+    result["gradients"]["Sci"] = {"gx": slopes[(1, 0)] * radius, "gy": slopes[(0, 1)] * radius,
+                                  "amp": 0.5 * (np.nanmax(sci_sky) - np.nanmin(sci_sky)) if sci_sky.size else np.nan,
+                                  "coeffs": (coeffs / gradient_mean).tolist()}
     result["sky"] = sky
-    result["offsets"].update(offsets)
+    result["model"] = joint
+    result["offsets"].update({i: float(factors[i - 1] / factors_mean - 1) for i in sorted(set(specid[used]))})
     result["used"] = used
     return result
 
@@ -686,7 +667,7 @@ def correct_sky_gradient(frame: RSS, measurements: Table, deg: int = 1, telescop
     deg : int, optional
         polynomial degree of the sky gradient, by default 1
     telescopes : tuple[str], optional
-        telescopes to fit, by default ('Sci', 'SkyE', 'SkyW')
+        telescopes whose fibers get a model (the fit uses the science IFU), by default ('Sci', 'SkyE', 'SkyW')
     **fit_kwargs
         additional keyword arguments passed to `fit_sky_gradient`
 
@@ -747,9 +728,13 @@ def summarize_flatfield_qa(frame: RSS, measurements: Table, max_deviation: float
           - noise: median expected fractional scatter from the errors
           - excess: scatter in excess of the noise, sqrt(scatter**2 - noise**2)
           - scatter_{telescope}: biweight scale per telescope
-          - offset_sp{1,2,3}: spectrograph offsets, from the joint fit with the
-            sky gradient if available, otherwise robust mean normalized flux
-            per spectrograph minus 1
+          - offset_sp{1,2,3}: spectrograph offsets, from the pipeline fit of the
+            gradient and spectrograph factors (see `fit_sky_gradient`) if
+            available, otherwise robust mean normalized flux per spectrograph minus 1
+          - gcoeff{k}_Sci: coefficients of the pipeline gradient model across the
+            science IFU (see `fit_sky_gradient`) divided by the mean gradient,
+            in the order of the FIBERFLAT GCOEFF keywords; only if the gradient
+            was fitted
           - grad_x_{telescope}, grad_y_{telescope}, grad_amp_{telescope}: sky
             gradient components at the IFU edge and half peak-to-valley
             amplitude, relative to the telescope mean (NaN if not fitted)
@@ -786,6 +771,12 @@ def summarize_flatfield_qa(frame: RSS, measurements: Table, max_deviation: float
         for tel in TELESCOPES:
             for column, key in (("x", "gx"), ("y", "gy"), ("amp", "amp")):
                 row[f"grad_{column}_{tel}"] = float(gradients.get(tel, {}).get(key, np.nan))
+        if meta.get("gradient_deg") is not None:
+            # IFUGradient coefficients divided by the mean gradient, in the order of the FIBERFLAT GCOEFF keywords
+            coeffs = list(gradients.get("Sci", {}).get("coeffs", []))
+            ncoeffs = len(_gradient_terms(meta["gradient_deg"])[0])
+            coeffs = (coeffs + [np.nan] * ncoeffs)[:ncoeffs]
+            row.update({f"gcoeff{k}_Sci": float(c) for k, c in enumerate(coeffs, start=1)})
 
         with np.errstate(invalid="ignore", divide="ignore"):
             # S/N over all attempted fibers for fitted lines, over valid fibers otherwise
@@ -980,9 +971,10 @@ def measure_flatfield_qa(in_frame: Union[str, RSS],
     min_contrast : float, optional
         minimum median line peak over continuum for a sky line to be reliable, by default 1.0
     gradient_deg : int, optional
-        polynomial degree of the sky gradient fitted across each IFU jointly
-        with the spectrograph offsets (see `fit_sky_gradient`): 0 (offsets
-        only), 1 (plane) or 2 (quadratic); None skips the correction, by default 1
+        polynomial degree of the gradient fitted across the science IFU together
+        with the spectrograph factors, with the pipeline model (see
+        `fit_sky_gradient`): 0 (factors only), 1 (plane, as in the pipeline) or
+        2 (quadratic); None skips the correction, by default 1
     out_table : str, optional
         if given, path to a FITS file where the per fiber measurements and
         summaries are written, by default None
@@ -1888,17 +1880,17 @@ DEFINITIONS_TEMPLATE = r"""<section id="definitions">
         <div class="eq">\[ \tilde F_i = \frac{F_i}{\mathrm{BL}_{\,j \in T(i)}\left(F_j\right)} \]</div>
       </div>
       <div class="def">
-        <h3>Sky gradient and spectrograph offsets</h3>
-        <p>Fitted jointly over all fibers by least squares with iterative 4&sigma; clipping. \(\hat x_i, \hat y_i\) are the
-        fiber positions from the IFU center in units of the IFU radius. The offsets \(o_s\) are shared by all telescopes and
-        add up to zero over the fibers.</p>
-        <div class="eq">\[ \tilde F_i - 1 = a_{T(i)} + g^{x}_{T(i)}\,\hat x_i + g^{y}_{T(i)}\,\hat y_i + o_{s(i)}, \qquad \sum_i o_{s(i)} = 0 \]</div>
+        <h3>Sky gradient and spectrograph factors</h3>
+        <p>The pipeline model (IFUGradient, as in RSS.fit_ifu_gradient), fitted on the science IFU fibers by least squares
+        with iterative 4&sigma; clipping: a plane \(G\) in the fiber positions \(x_i, y_i\) (mm) times a factor \(f_s\) per
+        spectrograph. The sky IFUs are not part of the fit. The spectrograph offsets are \(o_s\).</p>
+        <div class="eq">\[ \tilde F_i \simeq \frac{G(x_i, y_i)\, f_{s(i)}}{\langle G\, f \rangle}, \qquad G(x, y) = c_0 + c_1\, y + c_2\, x, \qquad o_s = \frac{f_s}{\langle f \rangle} - 1 \]</div>
       </div>
       <div class="def">
         <h3>Gradient-corrected flux</h3>
         <p>The sky model \(S_i\) is divided out. What is left contains the spectrograph offsets and the fiber-to-fiber
         flat-field errors.</p>
-        <div class="eq">\[ r_i = \frac{\tilde F_i}{S_i}, \qquad S_i = 1 + a_{T(i)} + g^{x}_{T(i)}\,\hat x_i + g^{y}_{T(i)}\,\hat y_i \]</div>
+        <div class="eq">\[ r_i = \frac{\tilde F_i}{S_i}, \qquad S_i = \frac{G(x_i, y_i)}{\langle G \rangle} \ \text{(science IFU)}, \qquad S_i = 1 \ \text{(sky IFUs)} \]</div>
       </div>
       <div class="def">
         <h3>Scatter, noise and excess scatter</h3>
@@ -1908,9 +1900,10 @@ DEFINITIONS_TEMPLATE = r"""<section id="definitions">
       </div>
       <div class="def">
         <h3>Sky gradient vector and amplitude</h3>
-        <p>Gradient at the IFU edge and half peak-to-valley of the sky model across the IFU, relative to the telescope mean
-        \(\langle S \rangle_T\). Across frames, the persistent gradient is the length of the median vector.</p>
-        <div class="eq">\[ \vec g_T = \frac{\left(g^{x}_{T},\ g^{y}_{T}\right)}{\langle S \rangle_T}, \qquad A_T = \frac{\max_{i \in T} S_i - \min_{i \in T} S_i}{2\,\langle S \rangle_T} \]</div>
+        <p>Change of the sky model across the science IFU from its center to its edge, at the IFU radius \(R\), along
+        \(x\) and \(y\), and half its peak-to-valley. Across frames, the persistent gradient is the length of the median
+        vector.</p>
+        <div class="eq">\[ \vec g = \frac{R\,\left(c_2,\ c_1\right)}{\langle G \rangle}, \qquad A = \frac{\max_{i} S_i - \min_{i} S_i}{2} \]</div>
       </div>
       <div class="def">
         <h3>Persistent gradient and trends</h3>
@@ -1975,10 +1968,10 @@ REPORT_TEMPLATE = """{head}
 
   <section>
     <h2>Spectrograph offsets</h2>
-    <p>Flux offset of each spectrograph, fitted jointly with the sky gradient. The science IFU is split between the
-    spectrographs in three wedges, so a sky gradient would otherwise show up as spectrograph offsets; the sky IFUs, with
-    fibers from all three spectrographs on a small patch of sky, help separate the two. A spectrograph that sits away from
-    zero across many frames points to an error in the spectrograph-to-spectrograph flat-field factors.</p>
+    <p>Flux offset of each spectrograph, from the pipeline fit of a gradient across the science IFU times a factor per
+    spectrograph. The science IFU is split between the spectrographs in three wedges, so both are fitted together;
+    otherwise a sky gradient would show up as spectrograph offsets. A spectrograph that sits away from zero across many
+    frames points to an error in the spectrograph-to-spectrograph flat-field factors.</p>
     <div class="chart" id="fig-offsets" role="img" aria-label="Spectrograph offsets versus wavelength"></div>
   </section>
 
@@ -2392,11 +2385,11 @@ def decompose_ratio(slitmap, fiber_ratio: np.ndarray, good: np.ndarray, deg: int
     """Split the per-fiber ratio of two flats into large-scale components and a fiber-level residual.
 
     The per-fiber ratio, normalized by its median, is fitted with
-    :func:`fit_sky_gradient`: an offset per spectrograph
-    (shared by all telescopes) plus an intercept and a polynomial gradient of
-    degree ``deg`` across each IFU. These capture changes in the spectrograph
-    normalization factors and in the illumination pattern across the IFUs;
-    what remains is the change of the fiber-to-fiber flat field.
+    :func:`fit_sky_gradient`, the pipeline model of a polynomial gradient of
+    degree ``deg`` across the science IFU times a factor per spectrograph. These
+    capture changes in the spectrograph normalization factors and in the
+    illumination pattern across the IFU; what remains is the change of the
+    fiber-to-fiber flat field.
 
     Parameters
     ----------
@@ -2415,29 +2408,54 @@ def decompose_ratio(slitmap, fiber_ratio: np.ndarray, good: np.ndarray, deg: int
     -------
     dict
         level: median ratio; model: per fiber large-scale model relative to
-        ``level`` (NaN outside the fitted fibers); offsets: spectrograph
-        offsets; gradients: per telescope gradient (gx, gy, amp), see
+        ``level`` (NaN for fibers without a model); offsets: spectrograph
+        offsets; gradients: science IFU gradient (gx, gy, amp, coeffs), see
         :func:`fit_sky_gradient`.
     """
     level = float(np.nanmedian(fiber_ratio[good])) if np.isfinite(fiber_ratio[good]).any() else np.nan
     norm = np.where(good, fiber_ratio / level, np.nan)
     fit = fit_sky_gradient(SimpleNamespace(_slitmap=slitmap), norm, deg=deg, telescopes=telescopes)
-    specid = np.asarray(slitmap["spectrographid"]).astype(int)
-    offsets = np.array([fit["offsets"].get(i, 0.0) for i in specid])
-    return {"level": level, "model": fit["sky"] + np.nan_to_num(offsets), "offsets": fit["offsets"], "gradients": fit["gradients"]}
+    return {"level": level, "model": fit["model"], "offsets": fit["offsets"], "gradients": fit["gradients"]}
 
 
-def _header_factors(header, channel) -> Dict[str, float]:
-    """Spectrograph factors applied to a fiber flat, from its header (NaN if missing)."""
-    factors = {}
-    for i in (1, 2, 3):
-        value = None
-        for key in (f"{channel.upper()} FIBERFLAT FACTOR{i}", f"{channel} FIBERFLAT FACTOR{i}"):
+def _header_corrections(header, channel, slitmap) -> Dict[str, float]:
+    """Spectrograph factors and IFU gradient applied to a fiber flat, from its header (NaN if missing).
+
+    Besides the raw keyword values (``hdr_factor{1,2,3}``, ``hdr_gcoeff{1,2,3,4}``),
+    they are given in the normalization of :func:`fit_sky_gradient`, so they can
+    be compared with the measured offsets and gradient: ``hdr_offset_sp{1,2,3}``
+    are the factors relative to their mean over the good science IFU fibers,
+    minus 1, and ``hdr_grad_x``, ``hdr_grad_y`` the gradient at the science IFU
+    radius relative to the mean gradient model. A flat without these
+    corrections differs from one with them by their inverse.
+    """
+    def keyword(name):
+        for key in (f"{channel.upper()} FIBERFLAT {name}", f"{channel} FIBERFLAT {name}"):
             if header is not None and key in header:
-                value = header[key]
-                break
-        factors[f"hdr_factor{i}"] = float(value) if value is not None else np.nan
-    return factors
+                return float(header[key])
+        return np.nan
+
+    factors = np.array([keyword(f"FACTOR{i}") for i in (1, 2, 3)])
+    coeffs = np.array([keyword(f"GCOEFF{k}") for k in (1, 2, 3, 4)])
+    result = {f"hdr_factor{i}": factors[i - 1] for i in (1, 2, 3)}
+    result.update({f"hdr_gcoeff{k}": coeffs[k - 1] for k in (1, 2, 3, 4)})
+    result.update({f"hdr_offset_sp{i}": np.nan for i in (1, 2, 3)})
+    result.update({"hdr_grad_x": np.nan, "hdr_grad_y": np.nan})
+
+    sci = _decode(slitmap["telescope"]) == "Sci"
+    good = sci & (np.asarray(slitmap["fibstatus"]) == 0 if "fibstatus" in slitmap.colnames else sci)
+    specid = np.asarray(slitmap["spectrographid"]).astype(int)
+    if np.isfinite(factors).all() and good.any():
+        mean_factor = np.mean(factors[specid[good] - 1])
+        result.update({f"hdr_offset_sp{i}": factors[i - 1] / mean_factor - 1 for i in (1, 2, 3)})
+    if np.isfinite(coeffs).all() and good.any() and "xpmm" in slitmap.colnames and "ypmm" in slitmap.colnames:
+        x, y = np.asarray(slitmap["xpmm"], dtype=float), np.asarray(slitmap["ypmm"], dtype=float)
+        gradient_mean = np.mean(IFUGradient.ifu_gradient(coeffs, x[good], y[good], normalize=False))
+        radius = np.nanmax(np.hypot(x[sci] - np.nanmean(x[sci]), y[sci] - np.nanmean(y[sci])))
+        terms = _gradient_terms(1)[0]
+        result["hdr_grad_x"] = coeffs[terms.index((1, 0))] * radius / gradient_mean
+        result["hdr_grad_y"] = coeffs[terms.index((0, 1))] * radius / gradient_mean
+    return result
 
 
 def _decode(column) -> np.ndarray:
@@ -2744,8 +2762,11 @@ def qa_fiberflat_epochs(mjd_ref: int = None, channels: str = "brz", kind: str = 
           the epoch trigger and comment, the flat path, whether it exists, the
           ratio statistics, the decomposition (median level, spectrograph
           offsets, science IFU gradient), the ratio statistics after removing
-          them (``corr_*``) and the spectrograph factors from the flat header
-          (``hdr_factor*``). None in a dry run.
+          them (``corr_*``), and the spectrograph factors and IFU gradient
+          applied to the flat according to its header, raw (``hdr_factor*``,
+          ``hdr_gcoeff*``) and in the normalization of the measured ones
+          (``hdr_offset_sp*``, ``hdr_grad_x``, ``hdr_grad_y``, see
+          :func:`_header_corrections`). None in a dry run.
         - ``"figures"`` : dict, the Plotly figures of the dashboard.
         - ``"report"`` : str, path of the dashboard, None in a dry run.
         - ``"output_dir"`` : str, directory of the dashboard and summary table.
@@ -2810,7 +2831,7 @@ def qa_fiberflat_epochs(mjd_ref: int = None, channels: str = "brz", kind: str = 
                     level[fibstatus != 0], fiber_ratio[(fibstatus != 0) | (ref_fibstatus != 0)] = np.nan, np.nan
                     # the reference ratio to itself is 1 by definition (NaN for flagged fibers)
                     fiber_corr = np.where(np.isfinite(fiber_ratio), 1.0, np.nan) if mjd == mjd_ref else np.full_like(fiber_ratio, np.nan)
-                    row.update(_header_factors(getattr(flat, "_header", None), channel))
+                    row.update(_header_corrections(getattr(flat, "_header", None), channel, flat._slitmap))
                     if mjd != mjd_ref:
                         stats = ratio_stats(ratio[good], max_deviation=max_deviation)
                         parts = decompose_ratio(flat._slitmap, fiber_ratio, good, deg=gradient_deg, telescopes=telescopes)
@@ -2832,8 +2853,10 @@ def qa_fiberflat_epochs(mjd_ref: int = None, channels: str = "brz", kind: str = 
             rows.append(row)
 
     summary = pd.DataFrame(rows)
-    for column in ["error", "level", "offset_sp1", "offset_sp2", "offset_sp3", "grad_x", "grad_y", "grad_amp",
-                   "hdr_factor1", "hdr_factor2", "hdr_factor3"] + [f"corr_{key}" for key in ratio_stats(np.array([]))]:
+    columns = ["error", "level", "offset_sp1", "offset_sp2", "offset_sp3", "grad_x", "grad_y", "grad_amp",
+               "hdr_factor1", "hdr_factor2", "hdr_factor3", "hdr_gcoeff1", "hdr_gcoeff2", "hdr_gcoeff3", "hdr_gcoeff4",
+               "hdr_offset_sp1", "hdr_offset_sp2", "hdr_offset_sp3", "hdr_grad_x", "hdr_grad_y"]
+    for column in columns + [f"corr_{key}" for key in ratio_stats(np.array([]))]:
         if column not in summary.columns:
             summary[column] = None if column == "error" else np.nan
     os.makedirs(output_dir, exist_ok=True)
@@ -2908,7 +2931,9 @@ def _write_fiberflat_dashboard(report_path, summary, figures, epochs, geometry, 
             f'{_num(r["p25"], ".4f")} &ndash; {_num(r["p75"], ".4f")}', f'{_num(r["p2.5"], ".4f")} &ndash; {_num(r["p97.5"], ".4f")}',
             _num(100 * r["sigma"], ".2f"), _num(100 * r["frac_off"], ".1f"), _num(100 * r["corr_sigma"], ".2f"),
             _num(100 * r["corr_frac_off"], ".1f"), " / ".join(_num(100 * r[f"offset_sp{i}"], "+.2f") for i in (1, 2, 3)),
-            _num(100 * r["grad_amp"], ".2f"), " / ".join(_num(r[f"hdr_factor{i}"], ".4f") for i in (1, 2, 3)),
+            " / ".join(_num(100 * r[f"hdr_offset_sp{i}"], "+.2f") for i in (1, 2, 3)),
+            f'{_num(100 * r["grad_x"], "+.2f")} / {_num(100 * r["grad_y"], "+.2f")}',
+            f'{_num(100 * r["hdr_grad_x"], "+.2f")} / {_num(100 * r["hdr_grad_y"], "+.2f")}',
             f'<span class="range">{escape(str(r["comment"])) if isinstance(r["comment"], str) else ""}</span>'])
     table = html_table(
         [("Epoch", "MJD of the calibration epoch"), ("Trigger", ""), ("Ch", "channel"), ("Status", ""),
@@ -2918,10 +2943,11 @@ def _write_fiberflat_dashboard(report_path, summary, figures, epochs, geometry, 
          ("Fiber-level σ (%)", "robust sigma after removing spectrograph offsets and IFU gradients"),
          (f"Fiber-level off >{100 * max_deviation:g}% (%)", ""),
          ("sp1 / sp2 / sp3 (%)", "spectrograph offsets relative to the reference"),
-         ("Sci gradient (%)", "half peak-to-valley of the gradient across the science IFU"),
-         ("Header factors sp1 / sp2 / sp3", "spectrograph factors applied to this flat (FIBERFLAT FACTOR keywords)"),
+         ("Header sp1 / sp2 / sp3 (%)", "spectrograph factors applied to this flat (FIBERFLAT FACTOR keywords), as offsets"),
+         ("Gradient x / y (%)", "gradient across the science IFU relative to the reference, at the IFU edge"),
+         ("Header gradient x / y (%)", "gradient applied to this flat (FIBERFLAT GCOEFF keywords), at the IFU edge"),
          ("Comment", "from the calibration epochs file")],
-        table_rows, numeric=[True, False, False, False, True, True, True, True, True, True, True, True, True, True, True, False])
+        table_rows, numeric=[True, False, False, False, True, True, True, True, True, True, True, True, True, True, True, True, False])
 
     payload = json.dumps(_ifu_payload(epochs, geometry, ifu_values, mjd_ref, channels, kind)).replace("</", "<\\/")
     channel_options = "".join(f'<option value="{c}">{c}</option>' for c in channels)
@@ -3018,10 +3044,12 @@ BODY_TEMPLATE = r"""
     </div>
     <div class="def">
       <h3>Large-scale components</h3>
-      <p>The per-fiber ratio \(\bar R^{e}_{i}\), divided by its median \(m_e\), is fitted with an offset \(o_s\) per
-      spectrograph and an intercept and gradient per telescope \(T\), with \(\hat x_i, \hat y_i\) the fiber positions in
-      units of the IFU radius (iterative 4&sigma; clipping).</p>
-      <div class="eq">\[ \frac{\bar R^{e}_{i}}{m_e} - 1 = a_{T(i)} + g^{x}_{T(i)}\,\hat x_i + g^{y}_{T(i)}\,\hat y_i + o_{s(i)} \]</div>
+      <p>The per-fiber ratio \(\bar R^{e}_{i}\), divided by its median \(m_e\), is fitted on the science IFU with the
+      pipeline model (IFUGradient): a plane \(G_e\) in the fiber positions \(x_i, y_i\) (mm) times a factor \(f^{e}_s\) per
+      spectrograph, with iterative 4&sigma; clipping. The sky IFU fibers get the factors times their median level. The
+      offsets are \(o_s = f^{e}_s/\langle f^{e} \rangle - 1\) and the gradient at the IFU radius \(R\) is
+      \(g^{x}_{\mathrm{Sci}} = R\,c_2/\langle G_e \rangle\), \(g^{y}_{\mathrm{Sci}} = R\,c_1/\langle G_e \rangle\).</p>
+      <div class="eq">\[ \frac{\bar R^{e}_{i}}{m_e} \simeq M_i = \frac{G_e(x_i, y_i)\, f^{e}_{s(i)}}{\langle G_e\, f^{e} \rangle}, \qquad G_e(x, y) = c_0 + c_1\, y + c_2\, x \]</div>
     </div>
     <div class="def">
       <h3>Gradient direction</h3>
@@ -3031,8 +3059,7 @@ BODY_TEMPLATE = r"""
     </div>
     <div class="def">
       <h3>Fiber-level ratio</h3>
-      <p>The ratio with the large-scale model \(M_i = 1 + a_{T(i)} + g^{x}_{T(i)}\hat x_i + g^{y}_{T(i)}\hat y_i + o_{s(i)}\)
-      divided out: what changed in the fiber-to-fiber flat field.</p>
+      <p>The ratio with the large-scale model \(M_i\) divided out: what changed in the fiber-to-fiber flat field.</p>
       <div class="eq">\[ \tilde R^{e}_{i,k} = \frac{R^{e}_{i,k}}{m_e\, M_i} \]</div>
     </div>
     <div class="def">

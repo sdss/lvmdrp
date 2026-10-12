@@ -289,6 +289,7 @@ def test_sky_gradient():
     _, lines_summary, _, _ = measure_flatfield_qa(frame, gradient_deg=None, **kwargs)
     assert np.all(lines_summary["excess"] > 0.01)
     assert np.all(np.nanmax(np.abs([lines_summary[f"offset_sp{i}"] for i in (1, 2, 3)]), axis=0) > 0.005)
+    assert "gcoeff1_Sci" not in lines_summary.colnames
 
     _, lines_summary, _, cont_summary = measure_flatfield_qa(frame, gradient_deg=1, **kwargs)
     for summary in (lines_summary, cont_summary):
@@ -296,6 +297,11 @@ def test_sky_gradient():
         assert np.all(np.abs([summary[f"offset_sp{i}"] for i in (1, 2, 3)]) < 0.003)
         assert np.allclose(summary["grad_x_Sci"], 0.04, atol=0.004)
         assert np.allclose(summary["grad_y_Sci"], -0.03, atol=0.004)
+        # pipeline coefficients over the mean gradient, in the GCOEFF order (1, y, x, xy), per mm
+        assert np.allclose(summary["gcoeff1_Sci"], 1.0, atol=0.01)
+        assert np.allclose(summary["gcoeff2_Sci"], -0.03 / 8, atol=5e-4)
+        assert np.allclose(summary["gcoeff3_Sci"], 0.04 / 8, atol=5e-4)
+        assert np.all(summary["gcoeff4_Sci"] == 0)
 
 
 def test_gradient_does_not_absorb_flat_errors():
@@ -363,6 +369,27 @@ def test_load_calibration_epochs(tmp_path):
     assert epochs[60255]["trigger"] == "Survey start"
 
 
+def test_header_corrections():
+    slitmap = make_flat()._slitmap
+    header = {"B FIBERFLAT FACTOR1": 0.95, "B FIBERFLAT FACTOR2": 1.0, "B FIBERFLAT FACTOR3": 1.05,
+              "B FIBERFLAT GCOEFF1": 2.5, "B FIBERFLAT GCOEFF2": 0.025, "B FIBERFLAT GCOEFF3": 0.0125, "B FIBERFLAT GCOEFF4": 0.0}
+    corrections = ff._header_corrections(header, "b", slitmap)
+    assert corrections["hdr_factor3"] == 1.05 and corrections["hdr_gcoeff2"] == 0.025
+
+    # factors relative to their mean over the science fibers (40, 40 and 20 fibers per spectrograph)
+    mean = (0.95 * 40 + 1.0 * 40 + 1.05 * 20) / 100
+    assert [corrections[f"hdr_offset_sp{i}"] for i in (1, 2, 3)] == pytest.approx([0.95 / mean - 1, 1 / mean - 1, 1.05 / mean - 1])
+    # gradient at the science IFU radius over the mean gradient; GCOEFF2 multiplies y and GCOEFF3 x
+    sci = np.asarray(slitmap["telescope"]) == "Sci"
+    x, y = np.asarray(slitmap["xpmm"])[sci], np.asarray(slitmap["ypmm"])[sci]
+    radius, gradient_mean = np.max(np.hypot(x - x.mean(), y - y.mean())), np.mean(2.5 + 0.025 * y + 0.0125 * x)
+    assert corrections["hdr_grad_x"] == pytest.approx(0.0125 * radius / gradient_mean)
+    assert corrections["hdr_grad_y"] == pytest.approx(0.025 * radius / gradient_mean)
+
+    missing = ff._header_corrections({}, "b", slitmap)
+    assert np.isnan(missing["hdr_offset_sp1"]) and np.isnan(missing["hdr_grad_x"])
+
+
 def test_qa_fiberflat_epochs(tmp_path, monkeypatch):
     epochs = {60255: {"trigger": "Survey start"}, 60321: {"trigger": "Normal operations"},
               60339: {"trigger": "Instrument intervention", "comment": "replaced a motor"}, 60355: {"trigger": "Normal operations"}}
@@ -371,6 +398,10 @@ def test_qa_fiberflat_epochs(tmp_path, monkeypatch):
     spec_offsets = np.repeat([1.02, 1.0, 0.99], 40)
     scale = np.where(np.arange(120) < 60, 1.02, 1.0)
     flats = {60255: make_flat(), 60321: make_flat(shift=0.5, scale=spec_offsets), 60339: make_flat(shift=-0.4, scale=scale)}
+    # the flat of epoch 60321 records the spectrograph factors and gradient applied to it
+    flats[60321]._header = {f"{c} FIBERFLAT {key}": value for c in "BR" for key, value in
+                            [("FACTOR1", 1.02), ("FACTOR2", 1.0), ("FACTOR3", 0.99),
+                             ("GCOEFF1", 1.0), ("GCOEFF2", 0.0), ("GCOEFF3", 0.0), ("GCOEFF4", 0.0)]}
     loaded = {}
     for mjd, flat in flats.items():
         for channel in "br":
@@ -393,13 +424,17 @@ def test_qa_fiberflat_epochs(tmp_path, monkeypatch):
     assert summary.loc[(60339, "r"), "frac_off"] == pytest.approx(0.5, abs=0.05)
     assert not summary.loc[(60355, "b"), "exists"] and summary.loc[(60355, "b"), "nvalues"] == 0
     assert summary.loc[(60255, "b"), "reference"]
+    # the header factors in the normalization of the measured offsets, which they explain here
+    header_offsets = [summary.loc[(60321, "b"), f"hdr_offset_sp{i}"] for i in (1, 2, 3)]
+    assert np.allclose(np.diff(header_offsets), np.diff(offsets), atol=2e-3)
+    assert summary.loc[(60321, "r"), "hdr_grad_x"] == 0 and np.isnan(summary.loc[(60339, "b"), "hdr_offset_sp1"])
 
     html = open(result["report"], encoding="utf-8").read()
     assert html.isascii()
     assert 'data-fig="ratios|corr"' in html and 'data-fig="offsets"' in html and 'id="ifu-grid"' in html
     assert 'data-fig="gradient_directions"' in html
     assert set(result["figures"]) == {"ratios|raw", "ratios|corr", "offsets", "gradients", "gradient_directions"}
-    assert "replaced a motor" in html
+    assert "replaced a motor" in html and "Header gradient x / y (%)" in html
     assert os.path.isfile(result["report"].replace(".html", ".csv"))
 
 
