@@ -47,6 +47,7 @@ from lvmdrp.functions.pixelflats import (
 )
 from lvmdrp.qa.pixelflats import qa_pixelflats, qa_raw_pixelflats, QA_PARTS
 from lvmdrp.qa.wavelengths import qa_arc_combinations
+from lvmdrp.qa.arc_sky import qa_arc_sky
 from lvmdrp.qa.fiberflats import (
     find_frames, run_flatfield_qa_batch, report_flatfield_qa, qa_fiberflat_epochs, load_calibration_epochs,
     flatfield_qa_name, default_flatfield_qa_dir, TELESCOPES as QA_TELESCOPES,
@@ -760,6 +761,32 @@ def qa_wavelengths_cli(mjd_epoch, kind, cameras, epochs_file, output_dir, with_s
                         extract=extract, nprocs=nprocs, skip_done=not remeasure, dry_run=dry_run)
 
 
+def _at_most_two_versions(ctx, param, value):
+    if value is not None and len(value) > 2:
+        raise click.BadParameter(f"at most 2 versions, got {len(value)}")
+    return value
+
+
+@cli.command('qa-arc-sky', short_help='Compare the arc LSF of an epoch with sky line widths in a science exposure', context_settings=dict(show_default=True))
+@click.option('-m', '--mjd-epoch', type=int, required=True, help='MJD of the calibration epoch whose arcs and master solutions are compared')
+@click.option('-x', '--expnum', type=int, required=True, help='Science exposure whose sky lines are measured')
+@click.option('--versions', type=StrListType(), default=drpver, callback=_at_most_two_versions, help="One or two comma-separated pipeline versions to compare, e.g. the previous and the current arc combination")
+@click.option('--science-version', type=str, default=None, help="Version holding the extracted science frame. Defaults to the first of --versions")
+@click.option('--mjd', type=int, default=None, help="MJD of the science exposure. Found from its raw frames if not given")
+@click.option('--tileid', type=int, default=None, help="Tile of the science exposure. Found in the metadata if not given")
+@click.option('--cameras', type=StrListType(), default=",".join(CAMERAS), help="Spectrograph cameras to compare")
+@click.option('--sky-fibers', type=IntListType(), default=None, callback=_max_four_fibers, help="Up to four comma-separated sky telescope fibers (rows of each camera's frame) whose line profiles are shown. Defaults to fibers spread along the slit")
+@click.option('--sci-fibers', type=IntListType(), default=None, callback=_max_four_fibers, help="As --sky-fibers, for the science telescope")
+@click.option('--max-dx', type=float, default=40, help="Largest separation along X in pixels of a sky line and the arc line it is compared with")
+@click.option('-r', '--reduce', is_flag=True, default=False, help="Detrend, extract and measure the arcs and science exposure missing for the current pipeline version")
+@click.option('-n', '--nprocs', type=int, default=1, help="Number of processes measuring and extracting arcs")
+@click.option('-o', '--output-dir', type=str, default=None, help="Directory of the dashboard and of anything measured for it. Defaults to a wave_qa directory in the epoch's ancillary directory")
+def qa_arc_sky_cli(mjd_epoch, expnum, versions, science_version, mjd, tileid, cameras, sky_fibers, sci_fibers, max_dx, reduce, nprocs, output_dir):
+    """Compare the LSF and arc lines of a calibration epoch with sky lines in a science exposure, fitted alike, and write an HTML dashboard."""
+    qa_arc_sky(epoch=mjd_epoch, expnum=expnum, cameras=cameras, versions=versions, science_version=science_version, mjd=mjd, tileid=tileid,
+               output_dir=output_dir, sky_fibers=sky_fibers, sci_fibers=sci_fibers, max_dx=max_dx, reduce=reduce, nprocs=nprocs)
+
+
 @cloup.command('qa-pixelflats', short_help='Run the QA of the pixel flats of an epoch against a reference epoch', show_constraints=True, context_settings=dict(show_default=True))
 @click.option('-t', '--mjd-tar', type=int, required=True, help='MJD of the target pixel-flat epoch, the one being checked')
 @click.option('-r', '--mjd-ref', type=int, required=True, help='MJD of the reference pixel-flat epoch, the one to compare against')
@@ -1096,6 +1123,7 @@ def qa_science_cli(expnum, drpver, cameras, parts, sky_lines, output_dir, remeas
 calibrations.add_command(qa_raw_pixelflats_cli)
 calibrations.add_command(qa_fiberflats_cli)
 calibrations.add_command(qa_wavelengths_cli)
+calibrations.add_command(qa_arc_sky_cli)
 calibrations.add_command(fiberflat_corrections)
 calibrations.add_command(ffactors_experiment)
 calibrations.add_command(cluster_calibs)
