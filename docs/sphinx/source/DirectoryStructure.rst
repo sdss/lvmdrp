@@ -100,7 +100,7 @@ The lvmcore repository contains essential configuration files:
 
     $LVMCORE_DIR/
     ├── etc/
-    │   ├── exclude_mjds.txt            # MJDs to skip during reduction
+    │   ├── exclude-exposures.yaml      # Exposures (MJD/tile/expnum) to skip during reduction
     │   ├── pixel_shifts.parquet        # Pixel shift corrections
     │   └── ...
     └── pixelshifts/                    # Validated electronic pixel shifts

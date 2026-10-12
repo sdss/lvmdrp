@@ -39,6 +39,7 @@ from lvmdrp.functions.fluxCalMethod import fluxcal_standard_stars, fluxcal_sci_i
 from lvmdrp.utils.metadata import (get_frames_metadata, update_metadata, get_master_metadata, extract_metadata,
                                    get_analog_groups, match_master_metadata, create_master_path,
                                    update_summary_file, convert_h5_to_fits)
+from lvmdrp.utils.excludes import load_excludes, remove_excluded_frames
 from lvmdrp.utils.convert import tileid_grp
 from lvmdrp.utils.paths import get_master_mjd, mjd_from_expnum, get_calib_paths, group_calib_paths
 from lvmdrp.utils.timer import Timer
@@ -1789,7 +1790,8 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
             skip_2d: bool = False, skip_1d: bool = False, skip_wavecal: bool = False,
             skip_waveres: bool = False, skip_fluxcal: bool = False, skip_skysub: bool = False,
             skip_drpall: bool = False, use_nightly_cals: bool = False, use_untagged_cals: bool = False,
-            clean_ancillary: bool = False, debug_mode: bool = False, force_run: bool = False):
+            clean_ancillary: bool = False, debug_mode: bool = False, force_run: bool = False,
+            force_excluded: bool = False):
     """ Run the quick DRP
 
     Run the quick DRP for an MJD, or a range of MJDs. Reduces
@@ -1832,6 +1834,8 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
         Flag to run in debug mode, by default False
     force_run : bool, optional
         Flag to force reductions even if the data was flagged as BAD by the QC pipeline, by default False
+    force_excluded : bool, optional
+        Flag to force reductions of exposures listed in $LVMCORE_DIR/etc/exclude-exposures.yaml, by default False
     """
     # # write the drp parameter configuration
     # write_config_file()
@@ -1862,7 +1866,8 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
                     use_nightly_cals=use_nightly_cals,
                     use_untagged_cals=use_untagged_cals,
                     debug_mode=debug_mode,
-                    force_run=force_run)
+                    force_run=force_run,
+                    force_excluded=force_excluded)
         return
 
     log.info(f'Processing MJD {mjd}')
@@ -1874,20 +1879,31 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
         log.warning(f'{mjd = } is not valid raw data directory.')
         return
 
-    # skip this reduction if the MJD is in a list of excluded (bad, engineering...) MJDs
-    exclude_file = os.getenv('LVMCORE_DIR') + '/etc/exclude_mjds.txt'
-    with open(exclude_file) as exclude_mjd_file:
-        exclude = [tuple(map(int, line.split(','))) for line in exclude_mjd_file]
-    if any([m[0] <= mjd <= m[1] for m in exclude]):
-        log.info(f"MJD {mjd} falls within excluded period in {exclude_file}, skipping ...")
-        return
-
     # update metadata if there are new paths to cache
     update_metadata(mjd=mjd)
 
     # generate the MJD metadata
     frames = get_frames_metadata(mjd=mjd)
     sub = frames.copy()
+
+    # filter on exposure number
+    if expnum:
+        log.info(f'Filtering on exposure number {expnum}.')
+        sub = filter_expnum(sub, expnum)
+        if sub.empty:
+            log.error(f"exposure {expnum = } not found in metadata for MJD = {mjd}")
+            return
+
+    # remove excluded exposures
+    if force_excluded:
+        log.warning("forcing reduction of exposures listed in the exclude list, if any")
+    else:
+        excludes = load_excludes()
+        sub = remove_excluded_frames(sub, excludes)
+        if sub.empty:
+            log.error(f"no frames found for MJD {mjd} after removing excluded exposures")
+            log.error("use `force_excluded=True` (`--force-excluded` in the CLI) to reduce them anyway")
+            return
 
     # remove bad or test quality frames
     if force_run and (sub.qaqual == "BAD").all():
@@ -1904,14 +1920,6 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
             return
         if sub.empty:
             log.error(f"exposure {expnum = } was flagged as 'BAD' by the raw data quality pipeline")
-            return
-
-    # filter on exposure number
-    if expnum:
-        log.info(f'Filtering on exposure number {expnum}.')
-        sub = filter_expnum(sub, expnum)
-        if sub.empty:
-            log.error(f"exposure {expnum = } not found in metadata for MJD = {mjd}")
             return
 
     # sort the frames

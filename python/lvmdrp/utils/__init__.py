@@ -109,3 +109,47 @@ def get_env_lib_directory():
             )
 
     return None
+
+
+def parse_list(items_str):
+    """Parse a string representation of a list or range into a list of integers.
+
+    Handles three formats:
+    - Comma-separated values: "1,2,3" -> [1, 2, 3]
+    - Range: "1-5" -> [1, 2, 3, 4, 5]
+    - Single value: "42" -> [42]
+
+    Parameters
+    ----------
+    items_str : str or int
+        String representation of items to parse, or already an integer.
+
+    Returns
+    -------
+    list of int
+        List of parsed integer values.
+
+    Examples
+    --------
+    >>> parse_list("1,3,5")
+    [1, 3, 5]
+    >>> parse_list("10-15")
+    [10, 11, 12, 13, 14, 15]
+    >>> parse_list("42")
+    [42]
+    """
+    # handle list
+    if isinstance(items_str, str) and "," in items_str:
+        items = [int(i) for i in items_str.split(",") if i]
+    # handle range
+    elif isinstance(items_str, str) and "-" in items_str:
+        item_i, item_f = items_str.split("-")
+        if not item_i or not item_f:
+            items = []
+        else:
+            items = list(range(int(item_i), int(item_f)+1))
+    # handle rest
+    else:
+        items = [int(items_str)]
+
+    return items

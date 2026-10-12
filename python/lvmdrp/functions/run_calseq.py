@@ -47,7 +47,7 @@ import matplotlib.pyplot as plt
 
 from lvmdrp import log, path, __version__ as drpver
 from lvmdrp.utils import metadata as md
-from lvmdrp.utils import hdrfix
+from lvmdrp.utils import hdrfix, parse_list
 from lvmdrp.utils.convert import tileid_grp
 from lvmdrp.utils.paths import get_calib_paths, group_calib_paths, get_master_mjd
 from lvmdrp.utils import pixshifts
@@ -782,24 +782,6 @@ def create_lamps_on_hdrfix(mjd, lamps_on, expnum):
         hdrfix.write_hdrfix_file(mjd=mjd, fileroot=f"sdR-*-*-{expnum:>08d}", keyword=lamp, value=status)
 
 
-def _parse_list(items_str):
-    # handle list
-    if isinstance(items_str, str) and "," in items_str:
-        items = [int(i) for i in items_str.split(",") if i]
-    # handle range
-    elif isinstance(items_str, str) and "-" in items_str:
-        item_i, item_f = items_str.split("-")
-        if not item_i or not item_f:
-            items = []
-        else:
-            items = list(range(int(item_i), int(item_f)+1))
-    # handle rest
-    else:
-        items = [int(items_str)]
-
-    return items
-
-
 def update_fflat_epochs(ffactor_epoch_path=None, calibration_epoch_path=None, n_nights=None, max_mjd=62000):
     """Update the fiber flat factor epoch definitions from calibration epochs.
 
@@ -971,9 +953,9 @@ def get_epoch(mjd, epochs, epochs_kind, error_on_missing_mjd=True):
 
     flavors = epoch.get("flavors")
     if flavors is None:
-        return {flavor: _parse_list(mjd) for flavor in _FLAVORS[epochs_kind]}
+        return {flavor: parse_list(mjd) for flavor in _FLAVORS[epochs_kind]}
 
-    calibs_mjds = {flavor: _parse_list(source_mjd) for flavor, source_mjd in flavors.items()}
+    calibs_mjds = {flavor: parse_list(source_mjd) for flavor, source_mjd in flavors.items()}
     return calibs_mjds
 
 
