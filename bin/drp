@@ -147,6 +147,7 @@ def cli():
 @click.option('-c', '--clean-ancillary', is_flag=True, default=False, help='Remove ancillary paths after run')
 @click.option('-d', '--debug-mode', is_flag=True, default=False, help='Set debug mode on to run using aperture extraction and skip CR rejection')
 @click.option('--force-run', is_flag=True, default=False, help='force reduction even if the exposure was flagged as BAD by the QC pipeline')
+@click.option('--force-excluded', is_flag=True, default=False, help='force reduction of exposures listed in $LVMCORE_DIR/etc/exclude-exposures.yaml')
 @click.option('--use-nightly-cals', is_flag=True, default=False, help='Use nightly calibrations from same MJD as science frame(s). This option implies --use-untagged-cals')
 @click.option('--use-untagged-cals', is_flag=True, default=False, help='Use calibrations from the untagged (not sandbox) directory')
 @cloup.constraint(mutually_exclusive, ['mjd', 'mjd_list', 'mjd_range'])
@@ -154,7 +155,7 @@ def cli():
 @cloup.constraint(mutually_exclusive, ['expnum', 'exp_list', 'exp_range'])
 def run(mjd, mjd_list, mjd_range, with_cals, no_sci, expnum, exp_list, exp_range, exp_file, fluxcal_method,
         skip_2d, skip_1d, skip_wavecal, skip_fluxcal, skip_skysub, skip_drpall, clean_ancillary, debug_mode, force_run,
-        use_nightly_cals, use_untagged_cals):
+        force_excluded, use_nightly_cals, use_untagged_cals):
     """ Run the DRP reduction for a given MJD or range of MJDs
 
     Run the DRP for an MJD or range of MJDs.  Various flags and options are available
@@ -185,7 +186,8 @@ def run(mjd, mjd_list, mjd_range, with_cals, no_sci, expnum, exp_list, exp_range
             use_nightly_cals=use_nightly_cals,
             use_untagged_cals=use_untagged_cals,
             debug_mode=debug_mode,
-            force_run=force_run)
+            force_run=force_run,
+            force_excluded=force_excluded)
 
 
 # register full DRP command

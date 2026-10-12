@@ -131,11 +131,11 @@ def parse_list(items_str):
 
     Examples
     --------
-    >>> _parse_list("1,3,5")
+    >>> parse_list("1,3,5")
     [1, 3, 5]
-    >>> _parse_list("10-15")
+    >>> parse_list("10-15")
     [10, 11, 12, 13, 14, 15]
-    >>> _parse_list("42")
+    >>> parse_list("42")
     [42]
     """
     # handle list

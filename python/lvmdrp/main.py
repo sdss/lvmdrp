@@ -1788,7 +1788,8 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
             skip_2d: bool = False, skip_1d: bool = False, skip_wavecal: bool = False,
             skip_fluxcal: bool = False, skip_skysub: bool = False, skip_drpall: bool = False,
             use_nightly_cals: bool = False, use_untagged_cals: bool = False,
-            clean_ancillary: bool = False, debug_mode: bool = False, force_run: bool = False):
+            clean_ancillary: bool = False, debug_mode: bool = False, force_run: bool = False,
+            force_excluded: bool = False):
     """ Run the quick DRP
 
     Run the quick DRP for an MJD, or a range of MJDs. Reduces
@@ -1831,6 +1832,8 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
         Flag to run in debug mode, by default False
     force_run : bool, optional
         Flag to force reductions even if the data was flagged as BAD by the QC pipeline, by default False
+    force_excluded : bool, optional
+        Flag to force reductions of exposures listed in $LVMCORE_DIR/etc/exclude-exposures.yaml, by default False
     """
     # # write the drp parameter configuration
     # write_config_file()
@@ -1860,7 +1863,8 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
                     use_nightly_cals=use_nightly_cals,
                     use_untagged_cals=use_untagged_cals,
                     debug_mode=debug_mode,
-                    force_run=force_run)
+                    force_run=force_run,
+                    force_excluded=force_excluded)
         return
 
     log.info(f'Processing MJD {mjd}')
@@ -1888,11 +1892,15 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
             return
 
     # remove excluded exposures
-    excludes = load_excludes()
-    sub = remove_excluded_frames(sub, excludes)
-    if sub.empty:
-        log.error(f"no frames found for MJD {mjd} after removing excluded exposures")
-        return
+    if force_excluded:
+        log.warning("forcing reduction of exposures listed in the exclude list, if any")
+    else:
+        excludes = load_excludes()
+        sub = remove_excluded_frames(sub, excludes)
+        if sub.empty:
+            log.error(f"no frames found for MJD {mjd} after removing excluded exposures")
+            log.error("use `force_excluded=True` (`--force-excluded` in the CLI) to reduce them anyway")
+            return
 
     # remove bad or test quality frames
     if force_run and (sub.qaqual == "BAD").all():

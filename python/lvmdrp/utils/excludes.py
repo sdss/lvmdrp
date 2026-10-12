@@ -21,7 +21,7 @@ def load_excludes(excludes_path=EXCLUDES_PATH):
     ----------
     excludes_path : str, optional
         Path to the YAML file containing exclusion rules. Defaults to the standard
-        location in $LVMCORE_DIR/etc/exclude-mjds.yaml.
+        location in $LVMCORE_DIR/etc/exclude-exposures.yaml.
 
     Returns
     -------
@@ -52,6 +52,36 @@ def load_excludes(excludes_path=EXCLUDES_PATH):
     return excludes
 
 
+def match_values(values, spec):
+    """Return a boolean mask of `values` matching an exclusion value specification.
+
+    Supports the conventions x; xi-xf; xi-; -xf; x1,...,xn. Ranges are inclusive.
+
+    Parameters
+    ----------
+    values : array-like
+        Values to test (e.g., MJDs, tile IDs or exposure numbers).
+    spec : str
+        Value specification.
+
+    Returns
+    -------
+    numpy.ndarray
+        Boolean mask, True where `values` match `spec`.
+    """
+    values = np.asarray(values)
+    spec = str(spec).strip()
+    if "," not in spec and "-" in spec:
+        item_i, item_f = spec.split("-")
+        mask = np.ones(values.shape, dtype="bool")
+        if item_i:
+            mask &= values >= int(item_i)
+        if item_f:
+            mask &= values <= int(item_f)
+        return mask
+    return np.isin(values, parse_list(spec))
+
+
 def remove_excluded_frames(frames, excludes):
     """Remove frames that match exclusion criteria from a DataFrame.
 
@@ -78,20 +108,12 @@ def remove_excluded_frames(frames, excludes):
     """
     to_exclude = np.zeros(frames.shape[0], dtype="bool")
     for idx, exclude in excludes.iterrows():
+        to_exclude |= match_values(frames[exclude.keyword].values, exclude.value)
+        log.debug(f"{idx}: excluding exposures with {exclude.keyword} in {exclude.value}.")
 
-        # map each keyword to a list of exposure numbers
-        items = parse_list(exclude.value)
-        if exclude.keyword == "mjd":
-            to_exclude |= np.isin(frames.mjd.values, items)
-            log.debug(f"{idx}: excluding exposures with {exclude.keyword} in {items}.")
-        elif exclude.keyword == "tileid":
-            to_exclude |= np.isin(frames.tileid.values, items)
-            log.debug(f"{idx}: excluding exposures with {exclude.keyword} in {items}.")
-        elif exclude.keyword == "expnum":
-            to_exclude |= np.isin(frames.expnum.values, items)
-            log.debug(f"{idx}: excluding exposures with {exclude.keyword} in {items}.")
-
-    log.info(f"excluding {to_exclude.sum()//9} exposure(s):")
-    log.info(f"  {frames[to_exclude].expnum.unique()}")
+    if to_exclude.any():
+        expnums = frames[to_exclude].expnum.unique()
+        log.info(f"excluding {expnums.size} exposure(s):")
+        log.info(f"  {expnums}")
 
     return frames[~to_exclude].reset_index(drop=True)
