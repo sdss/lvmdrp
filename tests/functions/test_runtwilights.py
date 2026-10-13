@@ -110,3 +110,82 @@ def test_fit_continuum():
 #     assert new_rss[1]._data == pytest.approx(np.ones_like(new_rss[1]._data), abs=1e-10)
 #     assert new_rss[2]._data == pytest.approx(np.ones_like(new_rss[2]._data), abs=1e-10)
 
+
+
+def make_fake_mflat(path, nfibers=30, npix=50, channel="r"):
+    """ write a flat (unit) master fiberflat with a slitmap of three spectrograph groups """
+    from astropy.table import Table
+    rng = np.random.default_rng(1)
+    telescope = np.array(["Sci"] * nfibers, dtype="<U4")
+    telescope[[0, 10, 20]] = "Spec"
+    telescope[[5, 15]] = "SkyE"
+    telescope[[9, 25]] = "SkyW"
+    slitmap = Table({"fiberid": np.arange(1, nfibers + 1),
+                     "spectrographid": np.repeat([1, 2, 3], nfibers // 3),
+                     "telescope": telescope,
+                     "xpmm": rng.uniform(-15, 15, nfibers),
+                     "ypmm": rng.uniform(-15, 15, nfibers)})
+    data = np.ones((nfibers, npix), dtype=np.float32)
+    header = fits.Header({"CCD": channel, "IMAGETYP": "flat"})
+    header[f"HIERARCH {channel.upper()} FIBERFLAT SKYCORR"] = False
+    header[f"HIERARCH {channel.upper()} FIBERFLAT GROUPBY"] = "spec"
+    rss = RSS(data=data, error=0.01 * data, mask=np.zeros(data.shape, dtype=bool), header=header,
+              slitmap=slitmap, wave=np.linspace(6000, 7000, npix))
+    rss.writeFitsData(str(path))
+    return slitmap
+
+
+def test_ffactor_correction_applies_gradient_to_sci_only(tmp_path):
+    """ the IFU gradient is applied to Sci fibers only and undone exactly """
+    from lvmdrp.core.fit_profile import IFUGradient
+    from lvmdrp.functions.run_twilights import do_ffactor_correction, undo_ffactor_correction
+
+    path = tmp_path / "lvm-mfiberflat_twilight-r.fits"
+    slitmap = make_fake_mflat(path)
+    coeffs, factors = [2.5, 0.024, 0.012, 0.0], [0.95, 1.01, 1.04]
+
+    do_ffactor_correction(path, coeffs=coeffs, factor=factors, sky_cwave=6363.78, dwave=10.0, coadd_method="fit", write_output=True)
+    mflat = RSS.from_file(path)
+    assert mflat._header["R FIBERFLAT GRADAPP"] is True
+
+    groups = np.repeat([1, 2, 3], 10)
+    sci = np.asarray(slitmap["telescope"] == "Sci")
+    x, y = slitmap["xpmm"].data, slitmap["ypmm"].data
+    gradient = coeffs[0] + coeffs[1] * y + coeffs[2] * x + coeffs[3] * x * y
+    expected = IFUGradient.ifu_factors(factors, groups)
+    expected[sci] *= gradient[sci] / gradient[sci].mean()
+    assert mflat._data[:, 0] == pytest.approx(expected, rel=1e-6)
+    assert np.all(mflat._data == mflat._data[:, :1])
+
+    undo_ffactor_correction(path, write_output=True)
+    mflat = RSS.from_file(path)
+    assert mflat._data == pytest.approx(np.ones_like(mflat._data), rel=1e-6)
+    assert "R FIBERFLAT GRADAPP" not in mflat._header
+    assert "R FIBERFLAT GCOEFF1" not in mflat._header
+    assert mflat._header["R FIBERFLAT SKYCORR"] is False
+
+
+def test_undo_ffactor_correction_legacy_flat(tmp_path):
+    """ flats corrected without the gradient (no GRADAPP) are undone with the factors only """
+    from lvmdrp.core.fit_profile import IFUGradient
+    from lvmdrp.functions.run_twilights import undo_ffactor_correction
+
+    path = tmp_path / "lvm-mfiberflat_twilight-r.fits"
+    make_fake_mflat(path)
+    factors = [0.95, 1.01, 1.04]
+    legacy = RSS.from_file(path)
+    legacy *= IFUGradient.ifu_factors(factors, np.repeat([1, 2, 3], 10))[:, None]
+    legacy.setHdrValue("HIERARCH R FIBERFLAT SKYCORR", True)
+    legacy.setHdrValue("HIERARCH R FIBERFLAT CWAVE", 6363.78)
+    legacy.setHdrValue("HIERARCH R FIBERFLAT DWAVE", 10.0)
+    legacy.setHdrValue("HIERARCH R FIBERFLAT COADD", "fit")
+    for i, f in enumerate(factors):
+        legacy.setHdrValue(f"HIERARCH R FIBERFLAT FACTOR{i+1}", f)
+    for i, c in enumerate([2.5, 0.024, 0.012, 0.0]):
+        legacy.setHdrValue(f"HIERARCH R FIBERFLAT GCOEFF{i+1}", c)
+    legacy.writeFitsData(str(path))
+
+    undo_ffactor_correction(path, write_output=True)
+    mflat = RSS.from_file(path)
+    assert mflat._data == pytest.approx(np.ones_like(mflat._data), rel=1e-6)
+    assert mflat._header["R FIBERFLAT SKYCORR"] is False
