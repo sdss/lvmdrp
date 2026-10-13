@@ -1,6 +1,7 @@
 # encoding: utf-8
 #
 
+import collections
 import os
 from types import SimpleNamespace
 
@@ -334,7 +335,7 @@ def make_flat(nfibers=120, npix=1500, shift=0.0, scale=None, seed=0):
                      "spectrographid": np.repeat([1, 2, 3], nfibers // 3),
                      "xpmm": radius * np.cos(angle), "ypmm": radius * np.sin(angle),
                      "orig_ifulabel": [f"F{i}" for i in range(nfibers)]})
-    return SimpleNamespace(_data=data, _wave=wave, _mask=mask, _slitmap=slitmap)
+    return ff.RSS(data=data, mask=mask, wave=wave, slitmap=slitmap)
 
 
 def test_bin_fiberflat_aligns_wavelengths():
@@ -367,6 +368,73 @@ def test_load_calibration_epochs(tmp_path):
     epochs = ff.load_calibration_epochs(str(path))
     assert sorted(epochs) == [60255, 60321]
     assert epochs[60255]["trigger"] == "Survey start"
+
+
+def test_measure_pipeline_gradient():
+    # flat with a gradient along x across the science IFU and different spectrograph throughputs
+    flat = make_flat()
+    sci = np.asarray(flat._slitmap["telescope"]) == "Sci"
+    x = np.asarray(flat._slitmap["xpmm"], dtype=float)
+    radius = np.max(np.hypot(x[sci] - x[sci].mean(), np.asarray(flat._slitmap["ypmm"])[sci] - np.asarray(flat._slitmap["ypmm"])[sci].mean()))
+    factors = np.repeat([1.0, 1.03, 0.98], 40)
+    flat._data = flat._data / (1 + 0.05 * np.sin(np.arange(120)))[:, None] * (1 + 0.04 * x / radius)[:, None] * factors[:, None]
+
+    result = ff.measure_pipeline_gradient(flat, "r", cwave=6000.0)
+    assert result["grad_x"] == pytest.approx(0.04, abs=0.003)
+    assert result["grad_y"] == pytest.approx(0.0, abs=0.003)
+    assert np.mean(result["factors"]) == pytest.approx(1.0)
+    assert result["factors"][1] / result["factors"][0] == pytest.approx(1.03, abs=2e-3)
+    assert result["factors"][2] / result["factors"][0] == pytest.approx(0.98, abs=2e-3)
+    assert result["coeffs"][3] == 0
+    assert np.isnan(result["gradient"][~sci]).all() and np.nanmean(result["gradient"][sci]) == pytest.approx(1.0, abs=1e-3)
+
+
+def test_measure_pipeline_gradient_outside_window():
+    with pytest.raises(ValueError, match="does not cover"):
+        ff.measure_pipeline_gradient(make_flat(), "b")
+
+
+def test_ifu_outlines():
+    # ideal hexagonal IFU of 7 rings split in three 120 deg wedges, one per spectrograph
+    pitch, rings = 1.0, 7
+    points = [(pitch * (i + j / 2), pitch * j * np.sqrt(3) / 2)
+              for i in range(-rings, rings + 1) for j in range(-rings, rings + 1) if abs(i + j) <= rings]
+    x, y = np.array(points).T
+    angle = np.degrees(np.arctan2(y, x)) % 360
+    specid = np.where(np.hypot(x, y) < 1e-9, 1, 1 + (angle // 120).astype(int))
+    spec_edges, ifu_edge = ff._ifu_outlines(x, y, specid, pitch, 0.0)
+
+    def vertex_degrees(segments):
+        ends = [tuple(np.round(end, 6)) for seg in segments for end in (seg[:2], seg[2:])]
+        return collections.Counter(collections.Counter(ends).values())
+
+    # closed outline: 6 sides per ring step around the IFU, every corner shared by two sides
+    assert len(ifu_edge) == 6 * (2 * rings + 1)
+    assert set(vertex_degrees(ifu_edge)) == {2}
+    # three boundaries from a junction near the center to the IFU edge
+    degrees = vertex_degrees(spec_edges)
+    assert degrees[3] == 1 and degrees[1] == 3
+
+
+def test_epoch_gradients():
+    import pandas as pd
+    summary = pd.DataFrame({
+        "epoch": [60255, 60321, 60339, 60339], "channel": ["r", "r", "r", "b"], "nvalues": [0, 100, 100, 100],
+        "trigger": ["Survey start", "Normal operations", "Seismic event", "Seismic event"],
+        "grad_x": [np.nan, 0.03, 0.0, 0.01], "grad_y": [np.nan, 0.04, -0.02, 0.0],
+        "pipe_grad_x": [0.01, 0.02, np.nan, 0.0], "pipe_grad_y": [0.0, 0.0, np.nan, 0.01]})
+
+    # ratio to the reference (60255): the reference is left out
+    ratio = ff.epoch_gradients(summary, mjd_ref=60255, source="ratio")
+    assert list(ratio["mjd"]) == [60321, 60339, 60339]
+    r = ratio[(ratio["channel"] == "r") & (ratio["mjd"] == 60321)][0]
+    assert r["strength"] == pytest.approx(0.05) and r["direction"] == pytest.approx(np.degrees(np.arctan2(0.04, 0.03)))
+    assert r["symbol"] == "circle" and ratio[(ratio["channel"] == "r") & (ratio["mjd"] == 60339)][0]["symbol"] == "diamond"
+
+    # each flat on its own: the reference is included, flats without a measurement are left out
+    flat = ff.epoch_gradients(summary, mjd_ref=60255, source="flat")
+    assert sorted(zip(flat["channel"], flat["mjd"])) == [("b", 60339), ("r", 60255), ("r", 60321)]
+    assert ff.gradient_trends(flat)[0]["nights"] >= 1
 
 
 def test_header_corrections():
@@ -411,8 +479,9 @@ def test_qa_fiberflat_epochs(tmp_path, monkeypatch):
             loaded[path] = flat
     monkeypatch.setattr(ff.RSS, "from_file", staticmethod(lambda path: loaded[path]))
 
+    # windows of the pipeline measurement within the wavelength range of the fake flats
     result = ff.qa_fiberflat_epochs(mjd_ref=60255, channels="br", epochs=epochs, flats_dir=str(tmp_path / "calib"),
-                                    output_dir=str(tmp_path / "qa"))
+                                    output_dir=str(tmp_path / "qa"), pipeline_cwaves={"b": 6000.0, "r": 6100.0})
     summary = result["summary"].set_index(["epoch", "channel"])
     # as measured the spectrograph factors spread the ratios; the decomposition removes them
     assert summary.loc[(60321, "b"), "sigma"] > 0.005
@@ -428,13 +497,20 @@ def test_qa_fiberflat_epochs(tmp_path, monkeypatch):
     header_offsets = [summary.loc[(60321, "b"), f"hdr_offset_sp{i}"] for i in (1, 2, 3)]
     assert np.allclose(np.diff(header_offsets), np.diff(offsets), atol=2e-3)
     assert summary.loc[(60321, "r"), "hdr_grad_x"] == 0 and np.isnan(summary.loc[(60339, "b"), "hdr_offset_sp1"])
+    # each flat on its own, measured as in the pipeline: the factors follow the spectrograph changes of 60321
+    pipe = {mjd: np.array([summary.loc[(mjd, "b"), f"pipe_factor{i}"] for i in (1, 2, 3)]) for mjd in (60255, 60321)}
+    change = pipe[60321] / pipe[60255]
+    assert change[0] / change[1] == pytest.approx(1.02, abs=2e-3) and change[2] / change[1] == pytest.approx(0.99, abs=2e-3)
+    assert np.isfinite(summary.loc[(60255, "b"), "pipe_grad_x"])
 
     html = open(result["report"], encoding="utf-8").read()
     assert html.isascii()
     assert 'data-fig="ratios|corr"' in html and 'data-fig="offsets"' in html and 'id="ifu-grid"' in html
-    assert 'data-fig="gradient_directions"' in html
-    assert set(result["figures"]) == {"ratios|raw", "ratios|corr", "offsets", "gradients", "gradient_directions"}
+    assert 'data-fig="gradient_time|ratio"' in html and "Table view: persistent gradient and trends" in html
+    assert set(result["figures"]) == {"ratios|raw", "ratios|corr", "offsets", "gradients", "gradient_time|ratio", "gradient_time|flat"}
     assert "replaced a motor" in html and "Header gradient x / y (%)" in html
+    assert 'value="pgrad"' in html and 'value="factors"' in html and '"numbers"' in html
+    assert '"specEdges"' in html and '"ifuEdge"' in html and '"specCenters"' in html
     assert os.path.isfile(result["report"].replace(".html", ".csv"))
 
 

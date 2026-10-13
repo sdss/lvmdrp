@@ -25,6 +25,7 @@ Two parts, each with its own dashboard and CLI (``drp qa-flatfield`` and
 import os
 import re
 import json
+from copy import copy
 from datetime import datetime, timezone
 from glob import glob
 from html import escape
@@ -50,6 +51,7 @@ from tqdm import tqdm
 
 from lvmdrp import log
 from lvmdrp.core.plot import plt, save_fig
+from lvmdrp.core.constants import SKYLINES_FIBERFLAT
 from lvmdrp.core.fit_profile import IFUGradient
 from lvmdrp.core.rss import RSS, lvmFrame
 from lvmdrp.qa.report import (
@@ -1593,15 +1595,35 @@ def gradient_trends(nightly: Table) -> List[Dict]:
     return trends
 
 
-def figure_gradient_timeline(nightly: Table, trends: List[Dict]):
+def figure_gradient_timeline(nightly: Table, trends: List[Dict], strength_title: str = "Strength of the nightly median gradient",
+                             count_label: str = "frames", reference_mjd: int = None):
     """Nightly strength and direction of the science IFU gradient versus MJD, per channel
 
     The direction is shown relative to the channel's persistent (median)
     direction, wrapped to [-180, 180) degrees, so a constant direction is a flat
     band at zero whatever its absolute value.
+
+    Parameters
+    ----------
+    nightly : Table
+        gradients versus MJD, as returned by `nightly_gradients` (or
+        `epoch_gradients`); optional ``label`` (shown on hover) and ``symbol``
+        (marker symbol) columns
+    trends : list[dict]
+        as returned by `gradient_trends`
+    strength_title : str, optional
+        title of the strength panel
+    count_label : str, optional
+        what ``nframes`` counts, shown on hover; None to leave it out
+    reference_mjd : int, optional
+        MJD marked with a vertical line, e.g. a reference epoch
+
+    Returns
+    -------
+    plotly.graph_objects.Figure
     """
     fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.08,
-                        subplot_titles=["Strength of the nightly median gradient", "Direction relative to the persistent gradient"])
+                        subplot_titles=[strength_title, "Direction relative to the persistent gradient"])
     persistent = {row["channel"]: row for row in trends}
     lines = []
     for i, channel in enumerate("brz"):
@@ -1613,11 +1635,15 @@ def figure_gradient_timeline(nightly: Table, trends: List[Dict]):
         strength = 100 * np.asarray(sel["strength"], dtype=float)
         reference = persistent[channel]["direction"]
         offset = (np.asarray(sel["direction"], dtype=float) - reference + 180) % 360 - 180
+        labels = np.asarray(sel["label"]) if "label" in sel.colnames else np.full(len(sel), "")
         customdata = np.stack([sel["nframes"], _fmt_array(100 * np.asarray(sel["grad_x"]), "+.2f"),
-                               _fmt_array(100 * np.asarray(sel["grad_y"]), "+.2f"), _fmt_array(sel["direction"], ".0f")], axis=-1)
+                               _fmt_array(100 * np.asarray(sel["grad_y"]), "+.2f"), _fmt_array(sel["direction"], ".0f"), labels], axis=-1)
         marker = dict(size=7, color=color, opacity=0.7, line=dict(width=1, color=THEME["surface"]))
-        hover = (f"<b>MJD %{{x}}</b> \u00b7 {channel}<br>%{{customdata[0]}} frames<br>gradient (%{{customdata[1]}}, %{{customdata[2]}})%"
-                 "<br>direction %{customdata[3]}\u00b0")
+        if "symbol" in sel.colnames:
+            marker.update(size=9, symbol=np.asarray(sel["symbol"]).tolist())
+        hover = (f"<b>MJD %{{x}}</b> \u00b7 {channel}<br>" + ("%{customdata[4]}<br>" if "label" in sel.colnames else "")
+                 + (f"%{{customdata[0]}} {count_label}<br>" if count_label else "")
+                 + "gradient (%{customdata[1]}, %{customdata[2]})%<br>direction %{customdata[3]}\u00b0")
         fig.add_trace(go.Scatter(x=mjd, y=strength, mode="markers", name=channel, legendgroup=channel, marker=marker,
                                  customdata=customdata, hovertemplate=hover + "<br>strength %{y:.2f}%<extra></extra>"), row=1, col=1)
         fig.add_trace(go.Scatter(x=mjd, y=offset, mode="markers", name=channel, legendgroup=channel, showlegend=False, marker=marker,
@@ -1636,6 +1662,9 @@ def figure_gradient_timeline(nightly: Table, trends: List[Dict]):
     for line in lines:
         fig.add_trace(line, row=1, col=1)
     fig.add_hline(y=0, line=dict(color=THEME["axis"], width=1), row=2, col=1)
+    if reference_mjd is not None:
+        for row in (1, 2):
+            fig.add_vline(x=reference_mjd, line=dict(color=THEME["ink2"], width=1.5), row=row, col=1)
     fig.update_yaxes(title_text="Strength (%)", rangemode="tozero", row=1, col=1)
     fig.update_yaxes(title_text="Direction (\u00b0)", range=[-180, 180], tickvals=[-180, -90, 0, 90, 180], row=2, col=1)
     fig.update_xaxes(title_text="MJD", tickformat="d", row=2, col=1)
@@ -1645,6 +1674,45 @@ def figure_gradient_timeline(nightly: Table, trends: List[Dict]):
     style_axes(fig)
     fig.update_xaxes(tickformat="d")
     return fig
+
+
+def gradient_trends_table(trends: List[Dict], unit: str = "night", count_label: str = "frames") -> str:
+    """HTML table of the persistent gradient and its trends, as returned by `gradient_trends`
+
+    Parameters
+    ----------
+    trends : list[dict]
+        as returned by `gradient_trends`
+    unit : str, optional
+        what each measurement is, e.g. 'night' or 'epoch'
+    count_label : str, optional
+        what is counted in parentheses next to the number of measurements; None to leave it out
+
+    Returns
+    -------
+    str
+    """
+    def _trend(row, column):
+        value, low, high = (row[f"trend_{column}{suffix}"] for suffix in ("", "_lo", "_hi"))
+        return f'{_fmt(value, sign=True)} <span class="range">[{_fmt(low, sign=True)}, {_fmt(high, sign=True)}]</span>'
+
+    count = (lambda r: f'{r["nights"]} <span class="range">({r["frames"]})</span>') if count_label else (lambda r: str(r["nights"]))
+    rows = [[escape(r["channel"]), count(r), f'{r["mjd_min"]}&ndash;{r["mjd_max"]}',
+             f'{_fmt(r["grad_x"], sign=True)} &plusmn; {_fmt(r["grad_x_err"])}', f'{_fmt(r["grad_y"], sign=True)} &plusmn; {_fmt(r["grad_y_err"])}',
+             _fmt(r["strength"]), _fmt(r["significance"], ".1f", scale=1), _fmt(r["direction"], ".0f", scale=1),
+             _fmt(r["consistency"], ".2f", scale=1), _fmt(r["rayleigh_p"], ".1e", scale=1),
+             _trend(r, "grad_x"), _trend(r, "grad_y"), _trend(r, "strength")] for r in trends]
+    units = f"{unit.capitalize()}s" + (f" ({count_label})" if count_label else "")
+    return html_table(
+        [("Ch", "channel"), (units, ""), ("MJD", "range"), ("Persistent x (%)", f"median over {unit}s, with its standard error"),
+         ("Persistent y (%)", f"median over {unit}s, with its standard error"), ("Strength (%)", "length of the persistent gradient"),
+         ("Significance (\u03c3)", "strength over its standard error"), ("Direction (\u00b0)", "from the IFU +x axis towards +y"),
+         ("Consistency", f"mean resultant length of the {unit} directions: 0 random, 1 aligned"),
+         ("Rayleigh p", "probability of this consistency if the directions were random"),
+         ("Trend x (%/yr) [95%]", f"Theil-Sen slope of the {unit} values versus MJD"),
+         ("Trend y (%/yr) [95%]", f"Theil-Sen slope of the {unit} values versus MJD"),
+         ("Trend strength (%/yr) [95%]", f"Theil-Sen slope of the {unit} strength versus MJD")],
+        rows, numeric=[False, True, True, True, True, True, True, True, True, True, True, True, True])
 
 
 def frame_ranking(summary: Table) -> Table:
@@ -1787,25 +1855,7 @@ def write_flatfield_qa_report(summary: Table, aggregate: Table, out_html: str, r
          ("Typical amplitude (%)", "median gradient amplitude per frame")],
         gradient_rows, numeric=[False, True, True, True, True, True])
 
-    def _trend(row, column):
-        value, low, high = (row[f"trend_{column}{suffix}"] for suffix in ("", "_lo", "_hi"))
-        return f'{_fmt(value, sign=True)} <span class="range">[{_fmt(low, sign=True)}, {_fmt(high, sign=True)}]</span>'
-
-    trend_rows = [[escape(r["channel"]), f'{r["nights"]} <span class="range">({r["frames"]})</span>', f'{r["mjd_min"]}&ndash;{r["mjd_max"]}',
-                   f'{_fmt(r["grad_x"], sign=True)} &plusmn; {_fmt(r["grad_x_err"])}', f'{_fmt(r["grad_y"], sign=True)} &plusmn; {_fmt(r["grad_y_err"])}',
-                   _fmt(r["strength"]), _fmt(r["significance"], ".1f", scale=1), _fmt(r["direction"], ".0f", scale=1),
-                   _fmt(r["consistency"], ".2f", scale=1), _fmt(r["rayleigh_p"], ".1e", scale=1),
-                   _trend(r, "grad_x"), _trend(r, "grad_y"), _trend(r, "strength")] for r in trends]
-    gradient_trend_table = html_table(
-        [("Ch", "channel"), ("Nights (frames)", ""), ("MJD", "range"), ("Persistent x (%)", "median over nights, with its standard error"),
-         ("Persistent y (%)", "median over nights, with its standard error"), ("Strength (%)", "length of the persistent gradient"),
-         ("Significance (\u03c3)", "strength over its standard error"), ("Direction (\u00b0)", "from the IFU +x axis towards +y"),
-         ("Consistency", "mean resultant length of the nightly directions: 0 random, 1 aligned"),
-         ("Rayleigh p", "probability of this consistency if the directions were random"),
-         ("Trend x (%/yr) [95%]", "Theil-Sen slope of the nightly median versus MJD"),
-         ("Trend y (%/yr) [95%]", "Theil-Sen slope of the nightly median versus MJD"),
-         ("Trend strength (%/yr) [95%]", "Theil-Sen slope of the nightly strength versus MJD")],
-        trend_rows, numeric=[False, True, True, True, True, True, True, True, True, True, True, True, True])
+    gradient_trend_table = gradient_trends_table(trends)
 
     worst_rows = [[f'<span class="mono">{escape(r["filename"])}</span>', str(r["expnum"]), str(r["mjd"]), str(r["tileid"]),
                    escape(r["channel"]), str(r["nfeatures"]), _fmt(r["excess"]), _fmt(r["excess_max"]),
@@ -2443,19 +2493,112 @@ def _header_corrections(header, channel, slitmap) -> Dict[str, float]:
     result.update({"hdr_grad_x": np.nan, "hdr_grad_y": np.nan})
 
     sci = _decode(slitmap["telescope"]) == "Sci"
-    good = sci & (np.asarray(slitmap["fibstatus"]) == 0 if "fibstatus" in slitmap.colnames else sci)
+    good = sci & (np.asarray(slitmap["fibstatus"]) == 0) if "fibstatus" in slitmap.colnames else sci
     specid = np.asarray(slitmap["spectrographid"]).astype(int)
     if np.isfinite(factors).all() and good.any():
         mean_factor = np.mean(factors[specid[good] - 1])
         result.update({f"hdr_offset_sp{i}": factors[i - 1] / mean_factor - 1 for i in (1, 2, 3)})
-    if np.isfinite(coeffs).all() and good.any() and "xpmm" in slitmap.colnames and "ypmm" in slitmap.colnames:
-        x, y = np.asarray(slitmap["xpmm"], dtype=float), np.asarray(slitmap["ypmm"], dtype=float)
-        gradient_mean = np.mean(IFUGradient.ifu_gradient(coeffs, x[good], y[good], normalize=False))
-        radius = np.nanmax(np.hypot(x[sci] - np.nanmean(x[sci]), y[sci] - np.nanmean(y[sci])))
-        terms = _gradient_terms(1)[0]
-        result["hdr_grad_x"] = coeffs[terms.index((1, 0))] * radius / gradient_mean
-        result["hdr_grad_y"] = coeffs[terms.index((0, 1))] * radius / gradient_mean
+    if np.isfinite(coeffs).all():
+        result["hdr_grad_x"], result["hdr_grad_y"], _ = _gradient_at_edge(coeffs, slitmap)
     return result
+
+
+def _pipeline_measurement(flat, channel, cwave, dwave) -> Dict:
+    """Columns of :func:`measure_pipeline_gradient` for the summary, NaN if the fit fails."""
+    try:
+        result = measure_pipeline_gradient(flat, channel, cwave=cwave, dwave=dwave)
+    except Exception as e:
+        log.warning(f"pipeline gradient fit failed for a {channel} flat: {type(e).__name__}: {e}")
+        result = {"cwave": cwave, "coeffs": np.full(4, np.nan), "factors": np.full(3, np.nan), "grad_x": np.nan,
+                  "grad_y": np.nan, "gradient": np.full(len(flat._slitmap), np.nan)}
+    columns = {"pipe_cwave": result["cwave"], "pipe_grad_x": result["grad_x"], "pipe_grad_y": result["grad_y"],
+               "gradient": result["gradient"]}
+    columns.update({f"pipe_factor{i}": result["factors"][i - 1] for i in (1, 2, 3)})
+    columns.update({f"pipe_gcoeff{k}": result["coeffs"][k - 1] for k in (1, 2, 3, 4)})
+    return columns
+
+
+def _gradient_at_edge(coeffs, slitmap) -> Tuple[float, float, np.ndarray]:
+    """Gradient of a pipeline IFU gradient model at the science IFU radius, relative to its mean.
+
+    Parameters
+    ----------
+    coeffs : array_like
+        :class:`~lvmdrp.core.fit_profile.IFUGradient` coefficients in the order
+        of the FIBERFLAT GCOEFF keywords (1, y, x, xy for a plane).
+    slitmap : astropy.table.Table
+        Slitmap with the fiber positions.
+
+    Returns
+    -------
+    tuple[float, float, np.ndarray]
+        Change from the IFU center to its edge along x and y, relative to the
+        mean of the model over the good science fibers, and the model divided
+        by that mean for each fiber (NaN outside the science IFU).
+    """
+    coeffs = np.asarray(coeffs, dtype=float)
+    sci = _decode(slitmap["telescope"]) == "Sci"
+    good = sci & (np.asarray(slitmap["fibstatus"]) == 0) if "fibstatus" in slitmap.colnames else sci
+    if not good.any() or "xpmm" not in slitmap.colnames or "ypmm" not in slitmap.colnames:
+        return np.nan, np.nan, np.full(len(slitmap), np.nan)
+    x, y = np.asarray(slitmap["xpmm"], dtype=float), np.asarray(slitmap["ypmm"], dtype=float)
+    gradient = IFUGradient.ifu_gradient(coeffs, x, y, normalize=False)
+    gradient_mean = np.mean(gradient[good])
+    radius = np.nanmax(np.hypot(x[sci] - np.nanmean(x[sci]), y[sci] - np.nanmean(y[sci])))
+    terms = _gradient_terms(int(round(np.sqrt(coeffs.size))) - 1)[0]
+    slope = {term: coeffs[terms.index(term)] if term in terms else 0.0 for term in ((1, 0), (0, 1))}
+    return (slope[(1, 0)] * radius / gradient_mean, slope[(0, 1)] * radius / gradient_mean,
+            np.where(sci, gradient / gradient_mean, np.nan))
+
+
+def measure_pipeline_gradient(flat: RSS, channel: str, cwave: float = None, dwave: float = 20.0) -> Dict:
+    """Gradient across the science IFU and spectrograph factors of a fiber flat, measured as in the pipeline.
+
+    Runs :meth:`lvmdrp.core.rss.RSS.fit_ifu_gradient` on the flat itself, with the
+    setup of :func:`lvmdrp.functions.run_calseq.measure_fiberflat_factors`: the
+    mean flat in ``cwave +/- dwave/2`` of the science IFU fibers, normalized by
+    its biweight location, fitted with a plane in ``xpmm``, ``ypmm`` (``xy``
+    term fixed) times a factor per spectrograph. Masked pixels and fibers
+    flagged in the slitmap are excluded first.
+
+    Parameters
+    ----------
+    flat : RSS
+        Fiber flat.
+    channel : str
+        Channel of the flat.
+    cwave : float, optional
+        Central wavelength of the window. Default is the pipeline's
+        :data:`~lvmdrp.core.constants.SKYLINES_FIBERFLAT` of the channel.
+    dwave : float, optional
+        Width of the window in Angstroms. Default is 20, as in the pipeline.
+
+    Returns
+    -------
+    dict
+        cwave, dwave; coeffs: IFUGradient coefficients (GCOEFF order); factors:
+        spectrograph factors with mean 1 (FACTOR order); grad_x, grad_y:
+        gradient at the science IFU edge relative to its mean (see
+        :func:`_gradient_at_edge`); gradient: per fiber gradient model divided
+        by its mean (NaN outside the science IFU).
+    """
+    cwave = SKYLINES_FIBERFLAT[channel] if cwave is None else cwave
+    hw = dwave // 2  # as in RSS.coadd_flux
+    if not ((cwave - hw < np.asarray(flat._wave)) & (np.asarray(flat._wave) < cwave + hw)).any():
+        raise ValueError(f"the flat does not cover the window {cwave:.2f} +/- {hw:g} Angstroms")
+    data = np.array(flat._data, dtype=float)
+    if flat._mask is not None:
+        data[np.asarray(flat._mask, dtype=bool)] = np.nan
+    if "fibstatus" in flat._slitmap.colnames:
+        data[np.asarray(flat._slitmap["fibstatus"]) != 0] = np.nan
+    measured = copy(flat)
+    measured._data = data
+    _, _, _, coeffs, factors = measured.fit_ifu_gradient(cwave=cwave, dwave=dwave, guess_coeffs=[1, 0, 0, 0], fixed_coeffs=[3],
+                                                         groupby="spec", coadd_method="average")
+    coeffs, factors = np.asarray(coeffs, dtype=float), np.asarray(factors, dtype=float)
+    grad_x, grad_y, gradient = _gradient_at_edge(coeffs, flat._slitmap)
+    return {"cwave": cwave, "dwave": dwave, "coeffs": coeffs, "factors": factors,
+            "grad_x": grad_x, "grad_y": grad_y, "gradient": gradient}
 
 
 def _decode(column) -> np.ndarray:
@@ -2478,9 +2621,66 @@ def _ifu_geometry(slitmap) -> Dict:
     rotation = float(np.median(angles)) + 30
 
     labels = _decode(slitmap["orig_ifulabel"] if "orig_ifulabel" in slitmap.colnames else slitmap["fiberid"])[sci]
+    specid = np.asarray(slitmap["spectrographid"]).astype(int)[sci] if "spectrographid" in slitmap.colnames else np.zeros(x.size, dtype=int)
+    spec_edges, ifu_edge = _ifu_outlines(x, y, specid, pitch, rotation - 30)
+    centers = [[round(float(np.mean(x[specid == i])), 4), round(float(np.mean(y[specid == i])), 4)] if (specid == i).any() else None
+               for i in (1, 2, 3)]
     return {"select": sci, "x": np.round(x, 5).tolist(), "y": np.round(y, 5).tolist(),
             "fiberid": np.asarray(slitmap["fiberid"])[sci].astype(int).tolist(), "label": labels.tolist(),
-            "hex_radius": pitch / np.sqrt(3), "hex_rotation": rotation}
+            "specid": specid.tolist(), "hex_radius": pitch / np.sqrt(3), "hex_rotation": rotation,
+            "spec_edges": spec_edges, "ifu_edge": ifu_edge, "spec_centers": centers}
+
+
+def _ifu_outlines(x, y, specid, pitch, neighbor_angle):
+    """Line segments of the spectrograph boundaries and the edge of a hexagonally packed IFU.
+
+    The boundaries are the hexagon sides shared by neighboring fibers of
+    different spectrographs, and the edge is made of the hexagon sides of the
+    fibers without a neighbor in that direction.
+
+    Parameters
+    ----------
+    x, y : np.ndarray
+        Fiber positions.
+    specid : np.ndarray
+        Spectrograph of each fiber.
+    pitch : float
+        Distance between neighboring fibers.
+    neighbor_angle : float
+        Direction of one of the neighbors in degrees; the others are 60 degrees apart.
+
+    Returns
+    -------
+    tuple[list, list]
+        Spectrograph boundaries and IFU edge, as lists of [x1, y1, x2, y2].
+    """
+    points = np.column_stack([x, y])
+    tree = cKDTree(points)
+    half_side = pitch / np.sqrt(3) / 2
+
+    def side(center, direction):
+        # hexagon side facing `direction`, at half the pitch from the fiber center
+        mid = center + 0.5 * pitch * direction
+        along = np.array([-direction[1], direction[0]]) * half_side
+        return [round(float(v), 4) for v in (*(mid - along), *(mid + along))]
+
+    spec_edges = []
+    for i, j in tree.query_pairs(r=1.3 * pitch):
+        if specid[i] != specid[j]:
+            direction = (points[j] - points[i]) / np.hypot(*(points[j] - points[i]))
+            spec_edges.append(side(points[i], direction))
+
+    ifu_edge = []
+    directions = [np.array([np.cos(a), np.sin(a)]) for a in np.radians(neighbor_angle + 60 * np.arange(6))]
+    for i, center in enumerate(points):
+        for direction in directions:
+            if tree.query(center + pitch * direction)[0] > 0.5 * pitch:
+                ifu_edge.append(side(center, direction))
+    return spec_edges, ifu_edge
+
+
+def _finite_or_none(value):
+    return float(value) if value is not None and np.isfinite(value) else None
 
 
 def _encode(values: np.ndarray) -> list:
@@ -2590,73 +2790,45 @@ def figure_gradients(summary: pd.DataFrame, mjd_ref: int, channels: str) -> go.F
     return _finish_epoch_figure(fig, channels)
 
 
-def figure_gradient_directions(summary: pd.DataFrame, mjd_ref: int, channels: str) -> go.Figure:
-    """Direction and strength of the gradient across the science IFU of each epoch, one polar panel per channel.
+def _epoch_gradient_figure(summary, mjd_ref, source):
+    gradients = epoch_gradients(summary, mjd_ref, source=source)
+    title = {"ratio": "Strength of the gradient of the ratio to the reference", "flat": "Strength of the gradient of each flat"}[source]
+    return figure_gradient_timeline(gradients, gradient_trends(gradients), strength_title=title, count_label=None,
+                                    reference_mjd=mjd_ref)
 
-    Each epoch relative to the reference is an arrow from the center to its
-    gradient vector at the IFU edge, (g_x, g_y): the angle is the direction in
-    which the ratio increases, measured from the IFU +x axis towards +y, and
-    the length its change from the center to the edge. Markers are colored by
-    epoch MJD; diamonds are epochs triggered by something other than normal
-    operations. The bold arrow is the median vector over the epochs.
+
+def epoch_gradients(summary: pd.DataFrame, mjd_ref: int, source: str = "ratio") -> Table:
+    """Science IFU gradient of each epoch and channel, in the format of `nightly_gradients`
+
+    Parameters
+    ----------
+    summary : pandas.DataFrame
+        summary of :func:`qa_fiberflat_epochs`
+    mjd_ref : int
+        reference epoch
+    source : str, optional
+        'ratio' for the gradient of the ratio to the reference flat (the
+        reference is left out), or 'flat' for the gradient of each flat on its
+        own, measured as in the pipeline. Default is 'ratio'.
+
+    Returns
+    -------
+    Table
+        channel, mjd (epoch), nframes (1), grad_x, grad_y, strength, direction
+        (degrees from the IFU +x axis towards +y), label (trigger) and symbol
+        (circle for normal operations, diamond otherwise)
     """
-    data = summary[(summary["epoch"] != mjd_ref) & (summary["nvalues"] > 0)
-                   & np.isfinite(summary["grad_x"].astype(float)) & np.isfinite(summary["grad_y"].astype(float))]
-    gx, gy = 100 * data["grad_x"].astype(float), 100 * data["grad_y"].astype(float)
-    rmax = max(0.5, 1.1 * float(np.nanmax(np.hypot(gx, gy)))) if len(data) else 1.0
-    epochs = data["epoch"].astype(float)
-    cmin, cmax = (float(epochs.min()), float(epochs.max())) if len(data) else (0.0, 1.0)
-    # radial tick labels along the horizontal axis, on the side away from the typical gradient
-    label_angle = 180.0 if len(data) and np.median(gx) >= 0 else 0.0
-
-    fig = make_subplots(rows=1, cols=len(channels), specs=[[{"type": "polar"}] * len(channels)],
-                        subplot_titles=[f"{channel} channel" for channel in channels], horizontal_spacing=0.08)
-    for col, channel in enumerate(channels, start=1):
-        sel = data[data["channel"] == channel].sort_values("epoch")
-        x, y = 100 * sel["grad_x"].astype(float).to_numpy(), 100 * sel["grad_y"].astype(float).to_numpy()
-        r, theta = np.hypot(x, y), np.degrees(np.arctan2(y, x)) % 360
-        fig.add_trace(go.Scatterpolar(
-            r=[v for value in r for v in (0, value, None)], theta=[v for angle in theta for v in (angle, angle, None)],
-            mode="lines", line=dict(width=1.5, color=THEME["axis"]), hoverinfo="skip", showlegend=False), row=1, col=col)
-        routine = (sel["trigger"] == ROUTINE_TRIGGER).to_numpy()
-        fig.add_trace(go.Scatterpolar(
-            r=r, theta=theta, mode="markers", name="Epochs", legendgroup="epochs", showlegend=False,
-            marker=dict(size=10, color=sel["epoch"], colorscale=SEQUENTIAL, cmin=cmin, cmax=cmax,
-                        symbol=np.where(routine, "circle", "diamond"), line=dict(width=1.5, color=THEME["surface"]),
-                        showscale=col == len(channels),
-                        colorbar=dict(title=dict(text="Epoch MJD", side="right"), thickness=12, len=0.8, outlinewidth=0,
-                                      tickformat="d", tickfont=dict(color=THEME["muted"]))),
-            customdata=np.stack([sel["epoch"], [_short_trigger(t) for t in sel["trigger"]], x, y], axis=-1),
-            hovertemplate=(f"<b>MJD %{{customdata[0]}}</b> \u00b7 {channel}<br>%{{customdata[1]}}<br>"
-                           "direction %{theta:.0f}\u00b0, %{r:.2f}% at the edge<br>"
-                           "(%{customdata[2]:+.2f}, %{customdata[3]:+.2f})%<extra></extra>")), row=1, col=col)
-        if len(sel):
-            mx, my = float(np.median(x)), float(np.median(y))
-            mr, mtheta = float(np.hypot(mx, my)), float(np.degrees(np.arctan2(my, mx)) % 360)
-            fig.add_trace(go.Scatterpolar(
-                r=[0, mr], theta=[mtheta, mtheta], mode="lines+markers", name="Median", legendgroup="median", showlegend=col == 1,
-                line=dict(width=3, color=THEME["ink"]), marker=dict(size=[0, 9], color=THEME["ink"]),
-                hovertemplate=f"<b>median</b> \u00b7 {channel}<br>direction %{{theta:.0f}}\u00b0, %{{r:.2f}}% at the edge<extra></extra>"),
-                row=1, col=col)
-
-    # legend entries for the marker symbols
-    for symbol, label in (("circle", ROUTINE_TRIGGER), ("diamond", "Other trigger")):
-        fig.add_trace(go.Scatterpolar(r=[None], theta=[None], mode="markers", name=label, showlegend=True,
-                                      marker=dict(size=10, symbol=symbol, color=THEME["muted"])), row=1, col=1)
-
-    polar = dict(
-        bgcolor=THEME["surface"],
-        radialaxis=dict(range=[0, rmax], ticksuffix="%", angle=label_angle, tickangle=label_angle, gridcolor=THEME["grid"], linecolor=THEME["axis"],
-                        tickfont=dict(color=THEME["muted"], size=11)),
-        angularaxis=dict(rotation=0, direction="counterclockwise", tickmode="array", tickvals=[0, 90, 180, 270],
-                         ticktext=["+x", "+y", "\u2212x", "\u2212y"], gridcolor=THEME["grid"], linecolor=THEME["axis"],
-                         tickfont=dict(color=THEME["ink2"])),
-    )
-    fig.update_layout(base_layout(400, margin=dict(l=40, r=40, t=64, b=32)))
-    fig.update_layout(**{f"polar{'' if col == 1 else col}": polar for col in range(1, len(channels) + 1)})
-    fig.update_layout(legend=dict(x=0, xanchor="left", y=1.12))
-    fig.update_annotations(font=dict(color=THEME["ink2"], size=13), yshift=16)
-    return fig
+    columns = {"ratio": ("grad_x", "grad_y"), "flat": ("pipe_grad_x", "pipe_grad_y")}[source]
+    rows = []
+    for _, r in summary.sort_values("epoch").iterrows():
+        gx, gy = (float(r[c]) if c in r and r[c] is not None else np.nan for c in columns)
+        if not (r.get("nvalues", 0) > 0 or (source == "flat" and r["epoch"] == mjd_ref)) or not (np.isfinite(gx) and np.isfinite(gy)):
+            continue
+        rows.append({"channel": r["channel"], "mjd": int(r["epoch"]), "nframes": 1, "grad_x": gx, "grad_y": gy,
+                     "strength": float(np.hypot(gx, gy)), "direction": float(np.degrees(np.arctan2(gy, gx))),
+                     "label": _short_trigger(r["trigger"]), "symbol": "circle" if r["trigger"] == ROUTINE_TRIGGER else "diamond"})
+    names = ["channel", "mjd", "nframes", "grad_x", "grad_y", "strength", "direction", "label", "symbol"]
+    return Table(rows=rows, names=names) if rows else Table(names=names, dtype=[str, int, int, float, float, float, float, str, str])
 
 
 def _finish_epoch_figure(fig, channels):
@@ -2694,7 +2866,8 @@ def qa_fiberflat_epochs(mjd_ref: int = None, channels: str = "brz", kind: str = 
                         flats_dir: str = None, drpver: str = None, redux_dir: str = None,
                         output_dir: str = None, bin_width: float = 50.0,
                         telescopes: Tuple[str] = TELESCOPES, max_deviation: float = 0.01,
-                        gradient_deg: int = 1, dry_run: bool = False) -> Dict:
+                        gradient_deg: int = 1, pipeline_cwaves: Dict[str, float] = None, pipeline_dwave: float = 20.0,
+                        dry_run: bool = False) -> Dict:
     """Compare the fiber flats of all calibration epochs against a reference epoch and write a dashboard.
 
     For each epoch of the calibration epochs file and each channel with a
@@ -2751,6 +2924,13 @@ def qa_fiberflat_epochs(mjd_ref: int = None, channels: str = "brz", kind: str = 
     gradient_deg : int, optional
         Polynomial degree of the gradient across each IFU in the decomposition
         of the ratios (see :func:`decompose_ratio`). Default is 1.
+    pipeline_cwaves : dict[str, float], optional
+        Central wavelength per channel of the window where the gradient and
+        spectrograph factors of each flat are measured as in the pipeline (see
+        :func:`measure_pipeline_gradient`). Default is
+        :data:`~lvmdrp.core.constants.SKYLINES_FIBERFLAT`.
+    pipeline_dwave : float, optional
+        Width in Angstroms of that window. Default is 20, as in the pipeline.
     dry_run : bool, optional
         If True, log the flats found and the output paths without reading
         flats or writing files. Default is False.
@@ -2766,7 +2946,11 @@ def qa_fiberflat_epochs(mjd_ref: int = None, channels: str = "brz", kind: str = 
           applied to the flat according to its header, raw (``hdr_factor*``,
           ``hdr_gcoeff*``) and in the normalization of the measured ones
           (``hdr_offset_sp*``, ``hdr_grad_x``, ``hdr_grad_y``, see
-          :func:`_header_corrections`). None in a dry run.
+          :func:`_header_corrections`), and the gradient and spectrograph
+          factors of each flat on its own (not relative to the reference),
+          measured as in the pipeline (``pipe_factor*``, ``pipe_gcoeff*``,
+          ``pipe_grad_x``, ``pipe_grad_y``, see :func:`measure_pipeline_gradient`).
+          None in a dry run.
         - ``"figures"`` : dict, the Plotly figures of the dashboard.
         - ``"report"`` : str, path of the dashboard, None in a dry run.
         - ``"output_dir"`` : str, directory of the dashboard and summary table.
@@ -2832,6 +3016,8 @@ def qa_fiberflat_epochs(mjd_ref: int = None, channels: str = "brz", kind: str = 
                     # the reference ratio to itself is 1 by definition (NaN for flagged fibers)
                     fiber_corr = np.where(np.isfinite(fiber_ratio), 1.0, np.nan) if mjd == mjd_ref else np.full_like(fiber_ratio, np.nan)
                     row.update(_header_corrections(getattr(flat, "_header", None), channel, flat._slitmap))
+                    pipeline = _pipeline_measurement(flat, channel, (pipeline_cwaves or SKYLINES_FIBERFLAT).get(channel), pipeline_dwave)
+                    row.update({key: value for key, value in pipeline.items() if key != "gradient"})
                     if mjd != mjd_ref:
                         stats = ratio_stats(ratio[good], max_deviation=max_deviation)
                         parts = decompose_ratio(flat._slitmap, fiber_ratio, good, deg=gradient_deg, telescopes=telescopes)
@@ -2844,8 +3030,12 @@ def qa_fiberflat_epochs(mjd_ref: int = None, channels: str = "brz", kind: str = 
                         row.update({f"offset_sp{i}": parts["offsets"].get(i, np.nan) for i in (1, 2, 3)})
                         sci = parts["gradients"].get("Sci", {})
                         row.update({"grad_x": sci.get("gx", np.nan), "grad_y": sci.get("gy", np.nan), "grad_amp": sci.get("amp", np.nan)})
-                    ifu_values[channel][mjd] = {"flat": level[geometry["select"]], "ratio": fiber_ratio[geometry["select"]],
-                                                "corr": fiber_corr[geometry["select"]]}
+                    ifu_values[channel][mjd] = {
+                        "flat": level[geometry["select"]], "ratio": fiber_ratio[geometry["select"]],
+                        "corr": fiber_corr[geometry["select"]], "pgrad": pipeline["gradient"][geometry["select"]],
+                        "numbers": {"factors": [row[f"pipe_factor{i}"] for i in (1, 2, 3)],
+                                    "hdr_factors": [row[f"hdr_factor{i}"] for i in (1, 2, 3)],
+                                    "grad": [row["pipe_grad_x"], row["pipe_grad_y"]], "hdr_grad": [row["hdr_grad_x"], row["hdr_grad_y"]]}}
                 except Exception as e:
                     log.error(f"failed to compare {paths[mjd][channel]}: {type(e).__name__}: {e}")
                     row["error"] = f"{type(e).__name__}: {e}"
@@ -2855,7 +3045,9 @@ def qa_fiberflat_epochs(mjd_ref: int = None, channels: str = "brz", kind: str = 
     summary = pd.DataFrame(rows)
     columns = ["error", "level", "offset_sp1", "offset_sp2", "offset_sp3", "grad_x", "grad_y", "grad_amp",
                "hdr_factor1", "hdr_factor2", "hdr_factor3", "hdr_gcoeff1", "hdr_gcoeff2", "hdr_gcoeff3", "hdr_gcoeff4",
-               "hdr_offset_sp1", "hdr_offset_sp2", "hdr_offset_sp3", "hdr_grad_x", "hdr_grad_y"]
+               "hdr_offset_sp1", "hdr_offset_sp2", "hdr_offset_sp3", "hdr_grad_x", "hdr_grad_y",
+               "pipe_cwave", "pipe_factor1", "pipe_factor2", "pipe_factor3", "pipe_gcoeff1", "pipe_gcoeff2", "pipe_gcoeff3",
+               "pipe_gcoeff4", "pipe_grad_x", "pipe_grad_y"]
     for column in columns + [f"corr_{key}" for key in ratio_stats(np.array([]))]:
         if column not in summary.columns:
             summary[column] = None if column == "error" else np.nan
@@ -2865,9 +3057,9 @@ def qa_fiberflat_epochs(mjd_ref: int = None, channels: str = "brz", kind: str = 
     figures = {"ratios|raw": figure_ratio_boxes(summary, mjd_ref, channels, missing, max_deviation=max_deviation),
                "ratios|corr": figure_ratio_boxes(summary, mjd_ref, channels, missing, max_deviation=max_deviation, prefix="corr_"),
                "offsets": figure_offsets(summary, mjd_ref, channels), "gradients": figure_gradients(summary, mjd_ref, channels),
-               "gradient_directions": figure_gradient_directions(summary, mjd_ref, channels)}
+               **{f"gradient_time|{source}": _epoch_gradient_figure(summary, mjd_ref, source) for source in ("ratio", "flat")}}
     _write_fiberflat_dashboard(report_path, summary, figures, epochs, geometry, ifu_values, mjd_ref, channels, kind,
-                               missing, bin_width, telescopes, max_deviation, flats_dir, drpver)
+                               missing, bin_width, telescopes, max_deviation, flats_dir, drpver, pipeline_cwaves, pipeline_dwave)
     log.info(f"written fiber flat epochs dashboard to {report_path}")
     return {"summary": summary, "figures": figures, "report": report_path, "output_dir": output_dir}
 
@@ -2876,25 +3068,29 @@ def _ifu_payload(epochs, geometry, ifu_values, mjd_ref, channels, kind):
     """Data of the IFU small multiples, as a JSON-serializable dictionary."""
     scales = {}
     for channel in channels:
-        for mode, floor in (("flat", 0.02), ("ratio", 0.005), ("corr", 0.002)):
-            values = np.concatenate([v[mode] for mjd, v in ifu_values[channel].items() if not (mode != "flat" and mjd == mjd_ref)] or [np.array([np.nan])])
+        for mode, floor in (("flat", 0.02), ("ratio", 0.005), ("corr", 0.002), ("pgrad", 0.01)):
+            values = np.concatenate([v[mode] for mjd, v in ifu_values[channel].items() if not (mode in ("ratio", "corr") and mjd == mjd_ref)]
+                                    or [np.array([np.nan])])
             values = values[np.isfinite(values)]
             half = float(np.percentile(np.abs(values - 1), 98)) if values.size else floor
             scales[f"{channel}|{mode}"] = max(round(half, 4), floor)
     return {
         "x": geometry["x"], "y": geometry["y"], "fiberid": geometry["fiberid"], "label": geometry["label"],
-        "hexRadius": geometry["hex_radius"], "hexRotation": geometry["hex_rotation"],
+        "hexRadius": geometry["hex_radius"], "hexRotation": geometry["hex_rotation"], "specid": geometry["specid"],
+        "specEdges": geometry["spec_edges"], "ifuEdge": geometry["ifu_edge"], "specCenters": geometry["spec_centers"],
         "reference": mjd_ref, "kind": kind,
         "epochs": [{"mjd": mjd, "trigger": _short_trigger(epochs[mjd].get("trigger")),
                     "routine": epochs[mjd].get("trigger") == ROUTINE_TRIGGER} for mjd in sorted(epochs)],
-        "values": {channel: {str(mjd): {mode: _encode(v[mode]) for mode in ("flat", "ratio", "corr")} for mjd, v in ifu_values[channel].items()}
+        "values": {channel: {str(mjd): {mode: _encode(v[mode]) for mode in ("flat", "ratio", "corr", "pgrad")} for mjd, v in ifu_values[channel].items()}
                    for channel in channels},
+        "numbers": {channel: {str(mjd): {key: [_finite_or_none(value) for value in values] for key, values in v["numbers"].items()}
+                              for mjd, v in ifu_values[channel].items()} for channel in channels},
         "scales": scales, "diverging": DIVERGING, "divergingDark": DIVERGING_DARK,
     }
 
 
 def _write_fiberflat_dashboard(report_path, summary, figures, epochs, geometry, ifu_values, mjd_ref, channels, kind,
-                               missing, bin_width, telescopes, max_deviation, flats_dir, drpver):
+                               missing, bin_width, telescopes, max_deviation, flats_dir, drpver, pipeline_cwaves=None, pipeline_dwave=20.0):
     compared = summary[(summary["nvalues"] > 0)]
     nflats = len(set(summary.loc[summary["exists"], "epoch"]))
     ref_trigger = _short_trigger(epochs[mjd_ref].get("trigger"))
@@ -2955,6 +3151,14 @@ def _write_fiberflat_dashboard(report_path, summary, figures, epochs, geometry, 
             .replace("@@REF@@", str(mjd_ref)).replace("@@KIND@@", escape(kind)).replace("@@TABLE@@", table)
             .replace("@@CHANNEL_OPTIONS@@", channel_options).replace("@@MAXDEV@@", f"{max_deviation:g}")
             .replace("@@BINWIDTH@@", f"{bin_width:g}").replace("@@PAYLOAD@@", payload)
+            .replace("@@GRADIENT_PICKER@@", picker("gradient-time-chart", "gradient_time", [("Gradient of", [
+                ("ratio", "the ratio to the reference"), ("flat", "each flat, as in the pipeline")])], 560))
+            .replace("@@GRADIENT_TRENDS@@", "".join(
+                f'<p class="note">{title}</p>' + gradient_trends_table(gradient_trends(epoch_gradients(summary, mjd_ref, source)),
+                                                                       unit="epoch", count_label=None)
+                for source, title in (("ratio", "Gradient of the ratio to the reference"), ("flat", "Gradient of each flat, as in the pipeline"))))
+            .replace("@@PIPE_HW@@", f"{pipeline_dwave / 2:g}")
+            .replace("@@PIPE_WAVES@@", ", ".join(f"{(pipeline_cwaves or SKYLINES_FIBERFLAT)[c]:.0f} &Aring; ({c})" for c in channels))
             .replace("@@RATIOS_PICKER@@", picker("ratios-chart", "ratios", [("Ratios", [
                 ("corr", "fiber level: spectrograph factors and IFU gradients removed"), ("raw", "as measured")])], 260 * len(channels) + 110)))
     write_dashboard(report_path, title="LVM Fiber Flat Epochs", eyebrow=f"LVM DRP · fiber flats · {kind}",
@@ -2999,22 +3203,34 @@ BODY_TEMPLATE = r"""
   <p>The other large-scale part: the change of the ratio from the center of the science IFU to its edge, along the IFU
   axes. A gradient that appears in every epoch belongs to the reference flat.</p>
   <div class="chart" data-fig="gradients" role="img" aria-label="Gradient across the science IFU versus epoch MJD"></div>
-  <p>The same gradients as directions on the science IFU: each arrow points where the ratio increases and its length is
-  the change from the center to the edge. Arrows that cluster around one direction, and a long median arrow (bold),
-  point to an illumination pattern in the reference flat; arrows scattered in all directions are changes of the
-  individual epochs.</p>
-  <div class="chart" data-fig="gradient_directions" role="img" aria-label="Direction of the gradient across the science IFU per epoch"></div>
+  <p>The same gradients over time, as in the flat-field QA dashboard: the strength of each epoch's gradient and its
+  direction relative to the persistent (median) direction. Show the gradient of the ratio to the reference, or the
+  gradient of each flat on its own, measured as in the pipeline. Directions that stay near zero mean a gradient fixed in
+  IFU coordinates; directions spread over the whole range are changes of the individual epochs. Dashed lines are the
+  Theil-Sen trends of the strength with MJD, the vertical line is the reference epoch, and diamonds are epochs
+  triggered by something other than normal operations.</p>
+  @@GRADIENT_PICKER@@
+  <details><summary>Table view: persistent gradient and trends</summary>@@GRADIENT_TRENDS@@</details>
 </section>
 
 <section>
   <h2>Fiber flats on the science IFU</h2>
-  <p>Each map is one epoch's fiber flat on the science IFU, as the median over wavelength of every fiber, or its ratio to
-  the reference flat. The color scale is centered on 1. Gray fibers are flagged in the slitmap or have no valid
-  pixels. Hover a fiber for its value.</p>
+  <p>One tile per epoch, on the science IFU. The ratio to the reference as measured is the median over wavelength of each
+  fiber's flat divided by the reference flat: it holds every change between the two flats. The fiber-level ratio divides
+  out the spectrograph factors and IFU gradient fitted to that ratio, so only the fiber-to-fiber changes remain. The
+  fiber flat is the median over wavelength of each fiber.</p>
+  <p>The pipeline views look at each flat on its own, without the reference: the gradient across the science IFU and the
+  spectrograph factors, measured as the pipeline does (RSS.fit_ifu_gradient on the mean flat within &plusmn;@@PIPE_HW@@ &Aring;
+  of @@PIPE_WAVES@@), next to the corrections recorded in the flat header (FIBERFLAT GCOEFF and FACTOR). The factors
+  view draws the IFU edge and the boundaries between the spectrographs, with the fitted and header factor of each
+  spectrograph inside its region, both normalized to a mean of 1.</p>
+  <p>Maps share a color scale centered on 1. Gray fibers are flagged in the slitmap or have no valid pixels. Hover a
+  fiber for its value.</p>
   <div class="ifu-controls">
     <label>Channel <select id="ifu-channel">@@CHANNEL_OPTIONS@@</select></label>
-    <label>Show <select id="ifu-mode"><option value="corr">Fiber-level ratio to @@REF@@</option><option value="ratio">Ratio to @@REF@@ as measured</option><option value="flat">Fiber flat</option></select></label>
-    <div class="ifu-legend" aria-hidden="true"><span id="ifu-lo"></span><canvas id="ifu-bar" width="160" height="10"></canvas><span id="ifu-hi"></span></div>
+    <label>Show <select id="ifu-mode"><option value="corr">Fiber-level ratio to @@REF@@</option><option value="ratio">Ratio to @@REF@@ as measured</option><option value="flat">Fiber flat</option><option value="pgrad">Pipeline gradient of each flat</option><option value="factors">Pipeline factors of each flat</option></select></label>
+    <div class="ifu-legend" id="ifu-legend" aria-hidden="true"><span id="ifu-lo"></span><canvas id="ifu-bar" width="160" height="10"></canvas><span id="ifu-hi"></span></div>
+    <div class="ifu-key" id="ifu-key" hidden>In each spectrograph: <b>fitted factor</b>, <span>header factor</span></div>
   </div>
   <div class="ifu-wrap">
     <div class="ifu-grid" id="ifu-grid"></div>
@@ -3052,15 +3268,25 @@ BODY_TEMPLATE = r"""
       <div class="eq">\[ \frac{\bar R^{e}_{i}}{m_e} \simeq M_i = \frac{G_e(x_i, y_i)\, f^{e}_{s(i)}}{\langle G_e\, f^{e} \rangle}, \qquad G_e(x, y) = c_0 + c_1\, y + c_2\, x \]</div>
     </div>
     <div class="def">
-      <h3>Gradient direction</h3>
-      <p>Direction in which the ratio increases across the science IFU, measured from the IFU \(+x\) axis towards
-      \(+y\), and the change of the ratio from the center to the edge in that direction.</p>
+      <h3>Gradient strength and direction</h3>
+      <p>Direction in which the ratio (or the flat) increases across the science IFU, measured from the IFU \(+x\) axis
+      towards \(+y\), and the change from the center to the edge in that direction. Over time it is shown relative to
+      the persistent direction, the direction of the median gradient over the epochs; the persistent gradient, the
+      consistency of the directions and the trends are computed as in the flat-field QA, with epochs in place of nights.</p>
       <div class="eq">\[ \theta_e = \operatorname{atan2}\left(g^{y}_{\mathrm{Sci}},\ g^{x}_{\mathrm{Sci}}\right), \qquad |g_e| = \sqrt{\left(g^{x}_{\mathrm{Sci}}\right)^2 + \left(g^{y}_{\mathrm{Sci}}\right)^2} \]</div>
     </div>
     <div class="def">
       <h3>Fiber-level ratio</h3>
       <p>The ratio with the large-scale model \(M_i\) divided out: what changed in the fiber-to-fiber flat field.</p>
       <div class="eq">\[ \tilde R^{e}_{i,k} = \frac{R^{e}_{i,k}}{m_e\, M_i} \]</div>
+    </div>
+    <div class="def">
+      <h3>Pipeline gradient and factors of a flat</h3>
+      <p>Measured on each flat by itself, as in the pipeline: the mean flat \(z_i\) of the science IFU fibers within
+      \(\lambda_c \pm \Delta\lambda/2\), divided by its biweight location, is fitted with IFUGradient, a plane in the fiber
+      positions times a factor per spectrograph; the factors are normalized to a mean of 1. They are compared with the
+      header factors \(F_s\), normalized the same way, and the header gradient, both at the IFU radius \(R\).</p>
+      <div class="eq">\[ \frac{z_i}{\mathrm{BL}(z)} \simeq \frac{G(x_i, y_i)\, f_{s(i)}}{\langle G\, f \rangle}, \qquad \vec g = \frac{R\,(c_2,\ c_1)}{\langle G \rangle}, \qquad \Delta_s = f_s - \frac{F_s}{\langle F \rangle} \]</div>
     </div>
     <div class="def">
       <h3>IFU maps</h3>
@@ -3085,6 +3311,9 @@ BODY_TEMPLATE = r"""
 .ifu-cap { display: grid; gap: 0; font-size: 12px; line-height: 1.35; }
 .ifu-cap b { font: 500 13px var(--mono); color: var(--ink); }
 .ifu-cap span { color: var(--muted); }
+.ifu-key { font: 12px var(--mono); color: var(--ink-2); }
+.ifu-key b { color: var(--ink); font-weight: 500; }
+.ifu-key span { color: var(--muted); }
 .ifu-tip { position: absolute; z-index: 5; pointer-events: none; background: var(--surface); color: var(--ink); border: 1px solid var(--axis);
   border-radius: 6px; padding: 6px 8px; font: 12px/1.4 var(--mono); white-space: nowrap; box-shadow: 0 2px 8px rgba(0,0,0,0.12); }
 </style>
@@ -3097,6 +3326,8 @@ BODY_TEMPLATE = r"""
   const channelSelect = document.getElementById("ifu-channel");
   const modeSelect = document.getElementById("ifu-mode");
   const bar = document.getElementById("ifu-bar");
+  const legend = document.getElementById("ifu-legend");
+  const factorKey = document.getElementById("ifu-key");
   const media = window.matchMedia("(prefers-color-scheme: dark)");
   const n = D.x.length;
 
@@ -3164,9 +3395,75 @@ BODY_TEMPLATE = r"""
     }
   }
 
+  function signedPercent(value) {
+    return value === null || value === undefined ? "-" : (value >= 0 ? "+" : "") + (100 * value).toFixed(2);
+  }
+
+  // spectrograph factors fitted on the flat and from its header, both normalized to a mean of 1
+  function factorPairs(numbers) {
+    const fit = numbers.factors || [], header = numbers.hdr_factors || [];
+    const known = header.filter((v) => v !== null);
+    const headerMean = known.length === 3 ? (known[0] + known[1] + known[2]) / 3 : null;
+    return [0, 1, 2].map((i) => ({
+      fit: fit[i] === undefined ? null : fit[i],
+      header: headerMean && header[i] !== null ? header[i] / headerMean : null,
+    }));
+  }
+
+  function segments(ctx, list, toPx) {
+    ctx.beginPath();
+    list.forEach((seg) => {
+      const a = toPx(seg[0], seg[1]), b = toPx(seg[2], seg[3]);
+      ctx.moveTo(a[0], a[1]);
+      ctx.lineTo(b[0], b[1]);
+    });
+    ctx.stroke();
+  }
+
+  // IFU edge, spectrograph boundaries and, in each spectrograph, the fitted and header factor
+  function drawFactorsTile(canvas, pairs) {
+    const dpr = window.devicePixelRatio || 1;
+    const size = canvas.clientWidth;
+    canvas.width = Math.round(size * dpr);
+    canvas.height = Math.round(size * dpr);
+    const ctx = canvas.getContext("2d");
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, size, size);
+    const scale = (size / 2 - 2) / (1 + D.hexRadius);
+    canvas._scale = scale;
+    const toPx = (x, y) => [size / 2 + x * scale, size / 2 - y * scale];
+    ctx.lineCap = "round";
+    ctx.strokeStyle = css("--muted");
+    ctx.lineWidth = 1;
+    segments(ctx, D.specEdges, toPx);
+    ctx.strokeStyle = css("--ink-2");
+    ctx.lineWidth = 1.5;
+    segments(ctx, D.ifuEdge, toPx);
+
+    const font = Math.max(9, Math.round(size * 0.068));
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    pairs.forEach((pair, i) => {
+      const center = D.specCenters[i];
+      if (!center) return;
+      // a bit further out than the centroid, where the wedge is wider
+      const [cx, cy] = toPx(1.15 * center[0], 1.15 * center[1]);
+      const lines = [["sp" + (i + 1), "--ink", "600 "], [pair.fit === null ? "-" : pair.fit.toFixed(4), "--ink", ""],
+        [pair.header === null ? "-" : pair.header.toFixed(4), "--muted", ""]];
+      lines.forEach((line, k) => {
+        ctx.fillStyle = css(line[1]);
+        ctx.font = line[2] + font + "px " + css("--mono");
+        ctx.fillText(line[0], cx, cy + (k - 1) * font * 1.25);
+      });
+    });
+  }
+
   function render() {
     const s = state();
-    drawLegend(s);
+    const numbersMode = s.mode === "factors";
+    legend.hidden = numbersMode;
+    factorKey.hidden = !numbersMode;
+    if (!numbersMode) drawLegend(s);
     grid.innerHTML = "";
     D.epochs.forEach((epoch) => {
       const data = s.values[String(epoch.mjd)];
@@ -3174,6 +3471,29 @@ BODY_TEMPLATE = r"""
       const tile = document.createElement("div");
       const isRef = epoch.mjd === D.reference;
       tile.className = "ifu-tile" + (isRef ? " ref" : "");
+      const numbers = ((D.numbers || {})[s.channel] || {})[String(epoch.mjd)] || {};
+      if (numbersMode) {
+        const pairs = factorPairs(numbers);
+        const canvas = document.createElement("canvas");
+        canvas.setAttribute("role", "img");
+        canvas.setAttribute("aria-label", "MJD " + epoch.mjd + ", " + s.channel + " channel, spectrograph factors: " + pairs.map((pair, i) =>
+          "sp" + (i + 1) + " fit " + (pair.fit === null ? "none" : pair.fit.toFixed(4)) + ", header " + (pair.header === null ? "none" : pair.header.toFixed(4))).join("; "));
+        canvas._pairs = pairs;
+        canvas._mjd = epoch.mjd;
+        const title = document.createElement("b");
+        title.textContent = epoch.mjd + (isRef ? " \u00b7 reference" : "");
+        const note = document.createElement("span");
+        note.textContent = epoch.trigger + (pairs.some((pair) => pair.header !== null) ? "" : " \u00b7 no header factors");
+        const cap = document.createElement("div");
+        cap.className = "ifu-cap";
+        cap.appendChild(title);
+        cap.appendChild(note);
+        tile.appendChild(canvas);
+        tile.appendChild(cap);
+        grid.appendChild(tile);
+        drawFactorsTile(canvas, pairs);
+        return;
+      }
       const canvas = document.createElement("canvas");
       canvas.setAttribute("role", "img");
       const encoded = data[s.mode];
@@ -3187,9 +3507,22 @@ BODY_TEMPLATE = r"""
       const title = document.createElement("b");
       title.textContent = epoch.mjd + (isRef ? " \u00b7 reference" : "");
       const note = document.createElement("span");
-      note.textContent = epoch.trigger + " \u00b7 med " + (isFinite(median) ? median.toFixed(3) : "-");
       cap.appendChild(title);
       cap.appendChild(note);
+      if (s.mode === "pgrad") {
+        // gradient at the IFU edge along x and y, fitted on this flat and recorded in its header
+        const grad = numbers.grad || [], header = numbers.hdr_grad || [];
+        note.textContent = epoch.trigger;
+        const fit = document.createElement("span");
+        fit.textContent = "fit x, y " + signedPercent(grad[0]) + ", " + signedPercent(grad[1]) + "%";
+        const hdr = document.createElement("span");
+        hdr.textContent = header[0] === null || header[0] === undefined ? "header: none"
+          : "header " + signedPercent(header[0]) + ", " + signedPercent(header[1]) + "%";
+        cap.appendChild(fit);
+        cap.appendChild(hdr);
+      } else {
+        note.textContent = epoch.trigger + " \u00b7 med " + (isFinite(median) ? median.toFixed(3) : "-");
+      }
       tile.appendChild(canvas);
       tile.appendChild(cap);
       grid.appendChild(tile);
@@ -3199,7 +3532,7 @@ BODY_TEMPLATE = r"""
 
   grid.addEventListener("pointermove", (event) => {
     const canvas = event.target;
-    if (canvas.tagName !== "CANVAS" || !canvas._encoded) { tip.hidden = true; return; }
+    if (canvas.tagName !== "CANVAS" || !(canvas._encoded || canvas._pairs)) { tip.hidden = true; return; }
     const rect = canvas.getBoundingClientRect(), size = rect.width, scale = canvas._scale;
     const x = (event.clientX - rect.left - size / 2) / scale, y = -(event.clientY - rect.top - size / 2) / scale;
     let best = -1, bestDist = Infinity;
@@ -3208,11 +3541,19 @@ BODY_TEMPLATE = r"""
       if (d < bestDist) { bestDist = d; best = i; }
     }
     if (best < 0 || Math.sqrt(bestDist) > 1.2 * D.hexRadius) { tip.hidden = true; return; }
-    const v = canvas._encoded[best];
     tip.textContent = "";
     const line1 = document.createElement("div"), line2 = document.createElement("div");
-    line1.textContent = "MJD " + canvas._mjd + " \u00b7 " + D.label[best] + " (fiber " + D.fiberid[best] + ")";
-    line2.textContent = ({ corr: "fiber-level ratio ", ratio: "ratio ", flat: "flat " })[modeSelect.value] + (v === null ? "no data" : (v / 1e4).toFixed(4));
+    if (canvas._pairs) {
+      // factors view: the spectrograph under the pointer
+      const spec = D.specid[best], pair = canvas._pairs[spec - 1] || { fit: null, header: null };
+      line1.textContent = "MJD " + canvas._mjd + " \u00b7 sp" + spec;
+      line2.textContent = "fit " + (pair.fit === null ? "-" : pair.fit.toFixed(4)) + " \u00b7 header " + (pair.header === null ? "-" : pair.header.toFixed(4)) +
+        (pair.fit !== null && pair.header !== null ? " \u00b7 \u0394 " + signedPercent(pair.fit - pair.header) + "%" : "");
+    } else {
+      const v = canvas._encoded[best];
+      line1.textContent = "MJD " + canvas._mjd + " \u00b7 " + D.label[best] + " (fiber " + D.fiberid[best] + ")";
+      line2.textContent = ({ corr: "fiber-level ratio ", ratio: "ratio ", flat: "flat ", pgrad: "gradient model " })[modeSelect.value] + (v === null ? "no data" : (v / 1e4).toFixed(4));
+    }
     tip.appendChild(line1);
     tip.appendChild(line2);
     tip.hidden = false;
