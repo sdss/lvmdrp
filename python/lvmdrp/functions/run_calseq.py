@@ -79,7 +79,7 @@ from lvmdrp.functions import rssMethod as rss_tasks
 from lvmdrp.core import sky
 from lvmdrp.main import start_logging, get_config_options, read_fibermap, reduce_2d, reduce_1d
 from lvmdrp.functions.run_twilights import (
-    lvmFlat, to_native_wave, fit_fiberflat, combine_twilight_sequence,
+    fit_fiberflat, combine_twilight_sequence,
     do_ffactor_correction, undo_ffactor_correction)
 
 
@@ -1861,8 +1861,129 @@ def create_traces(mjd, epochs=None, cameras=CAMERAS, ring="primary",
                          skip_done=skip_done)
 
 
+def _fit_exposure_fiberflats(frames: pd.DataFrame, channel: str, mjd: int, calibs: dict, product: str,
+                             ref_kind: Union[int, Callable[[np.ndarray, int], np.ndarray]] = bn.nanmedian,
+                             groupby: str = "spec", guess_coeffs: List[int] = [1,0,0,0], fixed_coeffs: List[int] = [3],
+                             cnorm: float = SKYLINES_FIBERFLAT["b"], dwave: float = 20.0, smoothing: float = 0.07,
+                             interpolate_invalid: bool = True, skip_done: bool = False,
+                             display_plots: bool = False) -> tuple[List[str], List[str], List[str]]:
+    """Fit the fiber flat of each exposure of a twilight or dome flat sequence in one channel
+
+    For each exposure, extracts the spectrographs of `channel` from the
+    straylight-subtracted frames, stacks them, calibrates them in wavelength and
+    LSF, rectifies them and fits the fiber flat with :func:`fit_fiberflat`. The
+    per-exposure flat (``lvm-fflat-{channel}-{expnum}``) keeps the IFU gradient
+    and spectrograph factors that were removed from the exposure in its
+    FIBERFLAT GCOEFF and FACTOR keywords.
+
+    Parameters
+    ----------
+    frames : pd.DataFrame
+        Metadata of the camera frames of the sequence
+    channel : str
+        Spectrograph channel to process
+    mjd : int
+        MJD of the calibration epoch, used to name the lvmFlat products
+    calibs : dict
+        Calibration paths per camera, with at least centroids, sigmas, model, wave and lsf
+    product : str
+        Kind of the lvmFlat products, either 'TFlat' or 'DFlat'
+    ref_kind : int or callable, optional
+        Reference fiber selection method or index, by default nanmedian
+    groupby : str, optional
+        Fiber grouping of the factors, by default 'spec'
+    guess_coeffs : list[int], optional
+        Initial guess of the IFU gradient coefficients, by default [1,0,0,0]
+    fixed_coeffs : list[int], optional
+        Indices of the gradient coefficients to fix, by default [3]
+    cnorm : float, optional
+        Central wavelength of the window where the gradient and factors are measured
+    dwave : float, optional
+        Width of that window, by default 20 Angstrom
+    smoothing : float, optional
+        Smoothing of the fiber flat, by default 0.07
+    interpolate_invalid : bool, optional
+        Interpolate over invalid pixels, by default True
+    skip_done : bool, optional
+        Skip files that already exist, by default False
+    display_plots : bool, optional
+        Display diagnostic plots, by default False
+
+    Returns
+    -------
+    xflat_paths : list[str]
+        Paths of the stacked extracted exposures
+    fflat_paths : list[str]
+        Paths of the per-exposure fiber flats
+    lvmflat_paths : list[str]
+        Paths of the lvmFlat products to create when combining
+    """
+    frames = frames.loc[frames.camera.str.startswith(channel)]
+    waves, lsfs = group_calib_paths(calibs["wave"])[channel], group_calib_paths(calibs["lsf"])[channel]
+
+    # extract 1D spectra for each frame
+    for flat in frames.to_dict("records"):
+        camera = flat["camera"]
+        lflat_path = path.full("lvm_anc", drpver=drpver, kind="l", imagetype=flat["imagetyp"], **flat)
+        xflat_path = path.full("lvm_anc", drpver=drpver, kind="x", imagetype=flat["imagetyp"], **flat)
+
+        if skip_done and os.path.isfile(xflat_path):
+            log.info(f"skipping {xflat_path}, file already exist")
+        else:
+            image_tasks.extract_spectra(in_image=lflat_path, out_rss=xflat_path,
+                                        in_trace=calibs["centroids"][camera],
+                                        in_sigma=calibs["sigmas"][camera],
+                                        in_model=calibs["model"][camera])
+
+    xflat_paths, fflat_paths, lvmflat_paths = [], [], []
+    for expnum, exposure in frames.groupby("expnum"):
+        flat = exposure.iloc[0]
+
+        xflat_cams = sorted(path.expand("lvm_anc", drpver=drpver, kind="x", imagetype=flat.imagetyp, tileid=11111, mjd=flat.mjd, camera=f"{channel}?", expnum=expnum))
+        fflat_flatfielded_path = path.full("lvm_anc", drpver=drpver, kind="flatfielded_",
+                               imagetype=flat.imagetyp, tileid=11111, mjd=flat.mjd,
+                               camera=channel, expnum=expnum)
+        fflat_path = path.full("lvm_anc", drpver=drpver, kind="f", imagetype="flat", tileid=11111, mjd=flat.mjd, camera=channel, expnum=expnum)
+        xflat_path = path.full("lvm_anc", drpver=drpver, kind="x", imagetype=flat.imagetyp, tileid=11111, mjd=flat.mjd, camera=channel, expnum=expnum)
+        wflat_path = path.full("lvm_anc", drpver=drpver, kind="w", imagetype=flat.imagetyp, tileid=11111, mjd=flat.mjd, camera=channel, expnum=expnum)
+        hflat_path = path.full("lvm_anc", drpver=drpver, kind="h", imagetype=flat.imagetyp, tileid=11111, mjd=flat.mjd, camera=channel, expnum=expnum)
+        xflat_paths.append(xflat_path)
+        fflat_paths.append(fflat_path)
+        lvmflat_paths.append(path.full("lvm_frame", mjd=mjd, tileid=11111, drpver=drpver, expnum=expnum, kind=f'{product}-{channel}'))
+
+        if skip_done and os.path.isfile(hflat_path):
+            log.info(f"skipping {hflat_path}, file already exist")
+        else:
+            # spectrograph stack xflats
+            rss_tasks.stack_spectrographs(in_rsss=xflat_cams, out_rss=xflat_path)
+
+            # calibrate in wavelength
+            rss_tasks.create_pixel_table(in_rss=xflat_path, out_rss=wflat_path, in_waves=waves, in_lsfs=lsfs)
+
+            # match LSF in all fibers
+            rss_tasks.match_resolution(in_rss=wflat_path, out_rss=wflat_path, target_fwhm=4.5)
+
+            # rectify in wavelength
+            rss_tasks.resample_wavelength(in_rss=wflat_path, out_rss=hflat_path, wave_disp=0.5, wave_range=SPEC_CHANNELS[channel])
+
+        # fit fiber throughput
+        fit_fiberflat(in_rss=hflat_path, out_flat=fflat_path, out_rss=fflat_flatfielded_path,
+                      ref_kind=ref_kind, groupby=groupby, guess_coeffs=guess_coeffs, fixed_coeffs=fixed_coeffs,
+                      norm_cwave=cnorm, norm_dwave=dwave, smoothing=smoothing, interpolate_invalid=interpolate_invalid,
+                      display_plots=display_plots)
+
+    return xflat_paths, fflat_paths, lvmflat_paths
 
 
+def _combine_fiberflat_sequence(channel: str, calibs: dict, xflat_paths: List[str], fflat_paths: List[str],
+                                lvmflat_paths: List[str], mflat_path: str) -> None:
+    """Combine the per-exposure fiber flats of a channel into a master fiber flat and write the lvmFlat products"""
+    calibs_grp = {flavor: group_calib_paths(calibs[flavor]) for flavor in ("centroids", "sigmas", "wave", "lsf")}
+    combine_twilight_sequence(
+        in_twilights=xflat_paths,
+        in_fflats=fflat_paths, out_mflat=mflat_path, out_lvmflats=lvmflat_paths,
+        in_cents=calibs_grp["centroids"][channel], in_widths=calibs_grp["sigmas"][channel],
+        in_waves=calibs_grp["wave"][channel], in_lsfs=calibs_grp["lsf"][channel])
 
 
 def choose_dome_sequence(frames: pd.DataFrame, channels: str = "brz", kind: str = "longterm", ring: str = "primary") -> pd.DataFrame:
@@ -1907,104 +2028,120 @@ def choose_dome_sequence(frames: pd.DataFrame, channels: str = "brz", kind: str 
     return pd.concat(sequences, ignore_index=True)
 
 
-def create_dome_fiberflats(mjd, expnums_ldls=None, expnums_qrtz=None, cals_mjd=None, use_longterm_cals=True, kind="longterm", skip_done=True, dry_run=False):
-    """Create fiberflats from dome flats
+def create_dome_fiberflats(mjd: int, epochs: dict[int, dict] = None, cals_mjd: int = None, channels: str = "brz",
+                           kind: str = "longterm", ring: str = "primary",
+                           ref_kind: Union[int, Callable[[np.ndarray, int], np.ndarray]] = bn.nanmedian,
+                           groupby: str = "spec", guess_coeffs: List[int] = [1,0,0,0], fixed_coeffs: List[int] = [3],
+                           cnorms: Dict[str, float] = SKYLINES_FIBERFLAT, dwave: float = 20.0,
+                           smoothing: float = 0.07,
+                           interpolate_invalid: bool = True,
+                           use_longterm_cals: bool = True,
+                           skip_sequence_selection: bool = False,
+                           skip_combination: bool = False,
+                           skip_done: bool = False,
+                           display_plots: bool = False,
+                           dry_run: bool = False) -> None:
+    """Reduce a sequence of dome flat exposures and produce master dome fiberflats for each channel.
+
+    Follows the twilight fiber flat procedure (see
+    :func:`create_twilight_fiberflats`) on the dome flats of each channel lamp
+    (LDLS for b and r, quartz for z; see :func:`choose_dome_sequence`): for
+    each exposure, the IFU gradient and the spectrograph factors are measured
+    at `cnorms` and removed before fitting its fiber flat, and kept in the
+    FIBERFLAT GCOEFF and FACTOR keywords of the per-exposure flat
+    (``lvm-fflat-{channel}-{expnum}``, see ``drp calibrations qa-domes``).
+    The per-exposure flats are then combined into the master dome fiberflat
+    and an lvmDFlat product is written for each exposure.
 
     Parameters
     ----------
     mjd : int
-        MJD to reduce
-    expnums_ldls : list
-        List of exposure numbers for LDLS dome flats
-    expnums_qrtz : list
-        List of exposure numbers for quartz dome flats
-    use_longterm_cals : bool
-        Whether to use long-term calibration frames or not, defaults to True
+        MJD of the calibration epoch to reduce.
+    epochs : dict, optional
+        Calibration epochs; the dome flats are taken from the 'dome' MJDs of the `mjd` epoch. By default `mjd` only.
+    cals_mjd : int, optional
+        MJD of the calibrations to use, by default `mjd`.
+    channels : str, optional
+        Channels to process, by default 'brz'.
     kind : str, optional
-        Kind of calibration frames to produce, by default 'longterm'
-    skip_done : bool
-        Skip pipeline steps that have already been done
+        Kind of sequence and master fiberflat, 'longterm' (mfiberflat_dome) or 'nightly' (nfiberflat_dome), by default 'longterm'.
+    ring : str, optional
+        Standard fibers ring of a long-term sequence, by default 'primary'.
+    ref_kind : int or callable, optional
+        Reference fiber selection method or index. Defaults to nanmedian.
+    groupby : str, optional
+        Grouping of the spectrograph factors. Defaults to "spec".
+    guess_coeffs : list[int], optional
+        Initial guess for the IFU gradient coefficients. Defaults to [1,0,0,0].
+    fixed_coeffs : list[int], optional
+        Indices of the gradient coefficients to fix. Defaults to [3].
+    cnorms : dict, optional
+        Central wavelength per channel of the window where the gradient and factors are measured. Defaults to
+        SKYLINES_FIBERFLAT, as for the twilights, so that both kinds of flats are measured at the same wavelengths.
+    dwave : float, optional
+        Width of that window. Defaults to 20.0.
+    smoothing : float, optional
+        Smoothing parameter for fiberflat fitting. Defaults to 0.07.
+    interpolate_invalid : bool, optional
+        Interpolate over invalid/masked fibers. Defaults to True.
+    use_longterm_cals : bool, optional
+        Kept for compatibility, the calibrations of `cals_mjd` are always used.
+    skip_sequence_selection : bool, optional
+        Use all the dome flats of each lamp instead of choosing a sequence. Defaults to False.
+    skip_combination : bool, optional
+        Only make the per-exposure flats, without combining them. Defaults to False.
+    skip_done : bool, optional
+        Skip files that already exist. Defaults to False.
+    display_plots : bool, optional
+        Display diagnostic plots. Defaults to False.
     dry_run : bool, optional
         Logs useful information abaut the current setup without actually reducing, by default False
     """
-    log.error("current implementation of dome flats needs updating, skipping dome fiberflat creation")
-    return
 
-    if expnums_ldls is not None and expnums_qrtz is not None:
-        expnums = np.concatenate([expnums_ldls, expnums_qrtz])
-    else:
-        expnums = None
+    _channels = set(channels)
+    if not _channels.issubset(set("brz")):
+        raise ValueError(f"Invalid value in `channels`: {channels}. Expected a subset of 'brz'")
+    if kind not in {"longterm", "nightly"}:
+        raise ValueError(f"Invalid value for `kind`: {kind}. Expected either 'longterm' or 'nightly'")
 
-    frames = md.get_calibrations_metadata(mjd, calibration="dome", expnums=expnums)
+    epoch = get_epoch(mjd=mjd, epochs=epochs or {}, epochs_kind="calibration", error_on_missing_mjd=False)
+    mjds = epoch["dome"]
+
+    frames = md.get_calibrations_metadata(mjds=mjds, calibration="dome")
+    if not frames.empty:
+        frames = choose_dome_sequence(frames, channels=sorted(_channels), kind=None if skip_sequence_selection else kind, ring=ring)
     if frames.empty:
         log.error("no dome flat frames found, skipping production of dome fiberflats")
         return
 
-    if expnums_ldls is None or expnums_qrtz is None:
-        frames, expnums = choose_sequence(frames, flavor="dome", kind=kind)
-
     # define master paths for target frames
-    calibs = get_calib_paths(mjd=cals_mjd or mjd, version=drpver, flavors=CALIBRATION_NEEDS["dome"], from_sandbox=False)
-    calibs_grp = calibs.copy()
+    calibs = get_calib_paths(mjd=cals_mjd or mjd, version=drpver, flavors=CALIBRATION_NEEDS["dome"], nightly=kind == "nightly", from_sandbox=False)
 
     if dry_run:
         _log_dry_run(frames, calibs=calibs, settings=None, caller=create_dome_fiberflats.__name__)
         return
 
-    # run 2D reduction on flats: preprocessing, detrending
-    reduce_2d(mjd, calibrations=calibs, expnums=expnums, reject_cr=False, add_astro=False, sub_straylight=True, skip_done=skip_done)
+    for channel, sequence in frames.groupby(frames.camera.str[0]):
+        # 2D reduction of the dome flats of this channel only
+        reduce_2d(mjds=sorted(int(m) for m in sequence.mjd.unique()), calibrations=calibs,
+                  expnums=sorted(sequence.expnum.unique()), cameras=sorted(sequence.camera.unique()),
+                  reject_cr=False, add_astro=False, sub_straylight=True, skip_done=skip_done)
 
-    for channel, lamp in MASTER_CON_LAMPS.items():
-        # read original combined dome flats and run extraction
-        flats = frames.loc[(frames[lamp])&(frames["camera"].str.startswith(channel))]
-        if flats.expnum.min() != flats.expnum.max():
-            expnum_str = f"{flats.expnum.min():>08}_{flats.expnum.max():>08}"
-        else:
-            expnum_str = flats.expnum.min()
-        xflat_paths = []
-        for i, specid in enumerate("123"):
-            camera = f"{channel}{specid}"
-            cflat_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="c", imagetype="flat", camera=camera, expnum=expnum_str)
-            xflat_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="x", imagetype="flat", camera=camera, expnum=expnum_str)
-            if skip_done and os.path.isfile(xflat_path):
-                log.info(f"skipping {xflat_path}, file already exists")
-            else:
-                image_tasks.extract_spectra(in_image=cflat_path, out_rss=xflat_path,
-                                            in_trace=calibs["centroids"][camera],
-                                            in_sigma=calibs["sigmas"][camera],
-                                            in_model=calibs["model"][camera])
-            xflat_paths.append(xflat_path)
-        xflat = RSS.from_spectrographs(*[RSS.from_file(xflat_path) for xflat_path in xflat_paths])
+        xflat_paths, fflat_paths, lvmflat_paths = _fit_exposure_fiberflats(
+            sequence, channel=channel, mjd=mjd, calibs=calibs, product="DFlat",
+            ref_kind=ref_kind, groupby=groupby, guess_coeffs=guess_coeffs, fixed_coeffs=fixed_coeffs,
+            cnorm=cnorms[channel], dwave=dwave, smoothing=smoothing, interpolate_invalid=interpolate_invalid,
+            skip_done=skip_done, display_plots=display_plots)
 
-        if kind == "longterm":
-            mflat_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, kind="mfiberflat_dome", camera=channel)
-        else:
-            mflat_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, kind="nfiberflat_dome", camera=channel)
+        # skip creation of master fiberflats
+        if skip_combination:
+            log.info(f"skipping creation of master dome fiberflat for {channel = }")
+            continue
 
-        # group calibrations in channels to build lvmFlat products
-        for flavor in {"centroids", "sigmas", "wave", "lsf"}:
-            calibs_grp[flavor] = group_calib_paths(calibs[flavor])
-
-        # read calibrations
-        mcent = TraceMask.from_spectrographs(*[TraceMask.from_file(mtrace_path) for mtrace_path in calibs_grp["centroids"][channel]])
-        mwidth = TraceMask.from_spectrographs(*[TraceMask.from_file(mwidth_path) for mwidth_path in calibs_grp["sigmas"][channel]])
-        mwave = TraceMask.from_spectrographs(*[TraceMask.from_file(mwave_path) for mwave_path in calibs_grp["wave"][channel]])
-        mlsf = TraceMask.from_spectrographs(*[TraceMask.from_file(mlsf_path) for mlsf_path in calibs_grp["lsf"][channel]])
-        # normalize by median fiber
-        fflat = RSS(data=xflat._data, error=xflat._error, mask=xflat._mask, wave_trace=mwave, lsf_trace=mlsf, header=xflat._header)
-        fflat = fflat.rectify_wave(method="linear", wave_range=SPEC_CHANNELS[channel], wave_disp=0.5)
-        median_fiber = bn.nanmedian(fflat._data, axis=0)
-        fflat._data = fflat._data / median_fiber
-        fflat.set_wave_trace(mwave)
-        fflat.set_lsf_trace(mlsf)
-        fflat = to_native_wave(fflat)
-        fflat.writeFitsData(mflat_path)
-        # create lvmFlat object
-        lvmflat = lvmFlat(data=xflat._data / fflat._data, error=xflat._error, mask=xflat._mask, header=xflat._header,
-                          cent_trace=mcent, width_trace=mwidth,
-                          wave_trace=mwave, lsf_trace=mlsf,
-                          superflat=fflat._data, slitmap=SLITMAP)
-        lvmflat.writeFitsData(path.full("lvm_frame", mjd=mjd, tileid=11111, drpver=drpver, expnum=expnum_str, kind=f'DFlat-{channel}'))
+        # combine individual fiberflats into master fiberflat
+        mflat_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd,
+                               kind="mfiberflat_dome" if kind == "longterm" else "nfiberflat_dome", camera=channel)
+        _combine_fiberflat_sequence(channel, calibs, xflat_paths, fflat_paths, lvmflat_paths, mflat_path)
 
 
 def create_twilight_fiberflats(mjd: int, epochs: dict[int, dict] = None, cals_mjd: int = None, channels: str = "brz",
@@ -2074,7 +2211,7 @@ def create_twilight_fiberflats(mjd: int, epochs: dict[int, dict] = None, cals_mj
     calibs = get_calib_paths(mjd=cals_mjd or mjd, version=drpver, flavors=CALIBRATION_NEEDS["twilight"], from_sandbox=False)
 
     if dry_run:
-        _log_dry_run(frames, calibs=calibs, settings=None, caller=create_dome_fiberflats.__name__)
+        _log_dry_run(frames, calibs=calibs, settings=None, caller=create_twilight_fiberflats.__name__)
         return
 
     # 2D reduction of twilight sequence
@@ -2082,67 +2219,17 @@ def create_twilight_fiberflats(mjd: int, epochs: dict[int, dict] = None, cals_mj
               reject_cr=True, add_astro=False, sub_straylight=True,
               skip_done=skip_done, **{"lam_x": 0.1, "lam_y": 100})
 
-    for flat in frames.to_dict("records"):
-        camera = flat["camera"]
-
-        # extract 1D spectra for each frame
-        lflat_path = path.full("lvm_anc", drpver=drpver, kind="l", imagetype="flat", **flat)
-        xflat_path = path.full("lvm_anc", drpver=drpver, kind="x", imagetype="flat", **flat)
-
-        if skip_done and os.path.isfile(xflat_path):
-            log.info(f"skipping {xflat_path}, file already exist")
-        else:
-            image_tasks.extract_spectra(in_image=lflat_path, out_rss=xflat_path,
-                                        in_trace=calibs["centroids"][camera],
-                                        in_sigma=calibs["sigmas"][camera],
-                                        in_model=calibs["model"][camera])
-
-    # group calibs
-    for flavor in ["centroids", "sigmas", "wave", "lsf"]:
-        calibs[flavor] = group_calib_paths(calibs[flavor])
-
-    # decompose twilight spectra into sun continuum and twilight components
-    flat_channels = frames.groupby(frames.camera.str.__getitem__(0))
     for channel in sorted(_channels):
-        flat_expnums = flat_channels.get_group(channel).groupby("expnum")
-        xtwi_paths, fflat_paths, lvmflat_paths = [], [], []
-        for expnum in flat_expnums.groups:
-            flat = flat_expnums.get_group(expnum).iloc[0]
+        if not frames.camera.str.startswith(channel).any():
+            log.error(f"no twilight frames found for {channel = }, skipping")
+            continue
 
-            xflat_paths = sorted(path.expand("lvm_anc", drpver=drpver, kind="x", imagetype=flat.imagetyp, tileid=11111, mjd=flat.mjd, camera=f"{channel}?", expnum=expnum))
-            fflat_flatfielded_path = path.full("lvm_anc", drpver=drpver, kind="flatfielded_",
-                                   imagetype=flat.imagetyp, tileid=11111, mjd=flat.mjd,
-                                   camera=channel, expnum=expnum)
-            fflat_path = path.full("lvm_anc", drpver=drpver, kind="f", imagetype="flat", tileid=11111, mjd=flat.mjd, camera=channel, expnum=expnum)
-            fflat_paths.append(fflat_path)
-            xflat_path = path.full("lvm_anc", drpver=drpver, kind="x", imagetype=flat.imagetyp, tileid=11111, mjd=flat.mjd, camera=channel, expnum=expnum)
-            wflat_path = path.full("lvm_anc", drpver=drpver, kind="w", imagetype=flat.imagetyp, tileid=11111, mjd=flat.mjd, camera=channel, expnum=expnum)
-            hflat_path = path.full("lvm_anc", drpver=drpver, kind="h", imagetype=flat.imagetyp, tileid=11111, mjd=flat.mjd, camera=channel, expnum=expnum)
-            xtwi_paths.append(xflat_path)
-            lvmflat_paths.append(path.full("lvm_frame", mjd=mjd, tileid=11111, drpver=drpver, expnum=expnum, kind=f'TFlat-{channel}'))
-
-            if skip_done and os.path.isfile(hflat_path):
-                log.info(f"skipping {hflat_path}, file already exist")
-            else:
-                # spectrograph stack xflats
-                rss_tasks.stack_spectrographs(in_rsss=xflat_paths, out_rss=xflat_path)
-
-                # calibrate in wavelength
-                rss_tasks.create_pixel_table(in_rss=xflat_path, out_rss=wflat_path, in_waves=calibs["wave"][channel], in_lsfs=calibs["lsf"][channel])
-
-                # match LSF in all fibers
-                rss_tasks.match_resolution(in_rss=wflat_path, out_rss=wflat_path, target_fwhm=4.5)
-
-                # rectify in wavelength
-                rss_tasks.resample_wavelength(in_rss=wflat_path, out_rss=hflat_path, wave_disp=0.5, wave_range=SPEC_CHANNELS[channel])
-
-
-            # fit fiber throughput
-            fit_fiberflat(in_rss=hflat_path, out_flat=fflat_path, out_rss=fflat_flatfielded_path,
-                          ref_kind=ref_kind, groupby=groupby, guess_coeffs=guess_coeffs, fixed_coeffs=fixed_coeffs,
-                          norm_cwave=cnorms[channel], norm_dwave=dwave, smoothing=smoothing, interpolate_invalid=interpolate_invalid,
-                          display_plots=display_plots)
-
+        # extract, rectify and fit the fiber flat of each exposure
+        xtwi_paths, fflat_paths, lvmflat_paths = _fit_exposure_fiberflats(
+            frames, channel=channel, mjd=mjd, calibs=calibs, product="TFlat",
+            ref_kind=ref_kind, groupby=groupby, guess_coeffs=guess_coeffs, fixed_coeffs=fixed_coeffs,
+            cnorm=cnorms[channel], dwave=dwave, smoothing=smoothing, interpolate_invalid=interpolate_invalid,
+            skip_done=skip_done, display_plots=display_plots)
 
         # skip creation of master fiberflats
         if skip_combination:
@@ -2151,11 +2238,7 @@ def create_twilight_fiberflats(mjd: int, epochs: dict[int, dict] = None, cals_mj
 
         # combine individual fiberflats into master fiberflat
         mflat_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, kind="mfiberflat_twilight", camera=channel)
-        combine_twilight_sequence(
-            in_twilights=xtwi_paths,
-            in_fflats=fflat_paths, out_mflat=mflat_path, out_lvmflats=lvmflat_paths,
-            in_cents=calibs["centroids"][channel], in_widths=calibs["sigmas"][channel],
-            in_waves=calibs["wave"][channel], in_lsfs=calibs["lsf"][channel])
+        _combine_fiberflat_sequence(channel, calibs, xtwi_paths, fflat_paths, lvmflat_paths, mflat_path)
 
 
 def create_fiberflats_corrections(
@@ -2587,7 +2670,7 @@ def reduce_nightly_sequence(mjd, use_longterm_cals=False, reject_cr=True, only_c
                            remeasure_arcs=remeasure_arcs, dry_run=dry_run)
 
     if "dome" in only_cals:
-        create_dome_fiberflats(mjd=mjd, use_longterm_cals=use_longterm_cals, kind="nightly", skip_done=skip_done, dry_run=dry_run)
+        create_dome_fiberflats(mjd=mjd, kind="nightly", skip_done=skip_done, dry_run=dry_run)
 
     if "twilight" in only_cals:
         create_twilight_fiberflats(mjd=mjd, skip_done=skip_done, dry_run=dry_run)
@@ -2680,7 +2763,15 @@ def reduce_longterm_sequence(mjd, epochs=None, use_longterm_cals=True,
                            remeasure_arcs=remeasure_arcs, dry_run=dry_run)
 
     if "dome" in only_cals:
-        create_dome_fiberflats(mjd=mjd, cals_mjd=mjd, use_longterm_cals=use_longterm_cals, kind="longterm", skip_done=skip_done, dry_run=dry_run)
+        create_dome_fiberflats(
+            mjd=mjd,
+            epochs=epochs,
+            cals_mjd=mjd,
+            kind="longterm",
+            skip_sequence_selection=skip_sequence_selection,
+            skip_combination=skip_combination,
+            skip_done=skip_done,
+            dry_run=dry_run)
 
     if "twilight" in only_cals:
         create_twilight_fiberflats(

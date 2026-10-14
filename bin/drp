@@ -26,6 +26,7 @@ from lvmdrp.functions.run_calseq import (
     CALIBRATION_EPOCHS_PATH,
     COUNTS_THRESHOLDS,
     load_epochs_file,
+    get_epoch,
     validate_calibration_epochs,
     detrend_calibrations,
     reduce_nightly_sequence,
@@ -36,6 +37,7 @@ from lvmdrp.functions.run_calseq import (
     create_qaqual_bad_hdrfix,
     tag_longterm_calibrations,
     create_twilight_fiberflats,
+    create_dome_fiberflats,
     create_fiberflats_corrections,
     measure_fiberflat_factors)
 from lvmdrp.functions.pixelflats import (
@@ -50,7 +52,7 @@ from lvmdrp.qa.wavelengths import qa_arc_combinations
 from lvmdrp.qa.arc_sky import qa_arc_sky
 from lvmdrp.qa.fiberflats import (
     find_frames, run_flatfield_qa_batch, report_flatfield_qa, qa_fiberflat_epochs, load_calibration_epochs,
-    flatfield_qa_name, default_flatfield_qa_dir, TELESCOPES as QA_TELESCOPES,
+    flatfield_qa_name, default_flatfield_qa_dir, qa_twilight_sequence, qa_dome_sequence, TELESCOPES as QA_TELESCOPES,
 )
 from lvmdrp.qa.science import qa_science_exposure, QA_PARTS as SCIENCE_QA_PARTS
 
@@ -543,10 +545,11 @@ def ffactors_experiment(mjd, mjd_list, mjd_range, drpver, channel, b_skyline, r_
                                   dry_run=dry_run)
 
 
-@cli.command('fiberflats', short_help='Run twilight fiberflat reductions', context_settings=dict(show_default=True))
+@cli.command('fiberflats', short_help='Run twilight or dome fiberflat reductions', context_settings=dict(show_default=True))
 @click.option('-m', '--mjd', type=int, help='an MJD to reduce')
 @click.option('-l', '--mjd-list', type=IntListType(), help='a list of specific MJDs to reduce')
 @click.option('-r', '--mjd-range', type=str, help='a range of MJDs to reduce')
+@click.option('-k', '--kind', type=click.Choice(["twilight", "dome"]), default="twilight", help='Kind of fiber flats to reduce')
 @click.option('--epochs-file', type=str, default=None, help="Path to a calibrations epoch file")
 @click.option('--channels', type=str, default="brz", help="Spectrograph channels that will be analysed")
 @click.option('--skip-sequence-selection', is_flag=True, default=False, help='skip selection of calibration sequence, select all matching flavor instead')
@@ -555,7 +558,7 @@ def ffactors_experiment(mjd, mjd_list, mjd_range, drpver, channel, b_skyline, r_
 @click.option("--dry-run", is_flag=True, default=False, help="Shows useful information about the current setup without actually running reductions")
 @cloup.constraint(mutually_exclusive, ['mjd', 'mjd_list', 'mjd_range'])
 @cloup.constraint(RequireExactly(1), ['mjd', 'mjd_list', 'mjd_range'])
-def fiberflats(mjd, mjd_list, mjd_range, epochs_file, channels, skip_sequence_selection, skip_combination, skip_done, dry_run):
+def fiberflats(mjd, mjd_list, mjd_range, kind, epochs_file, channels, skip_sequence_selection, skip_combination, skip_done, dry_run):
 
     # parse MJDs
     mjds = parse_mjds(mjd=mjd or mjd_list or mjd_range or None)
@@ -572,8 +575,9 @@ def fiberflats(mjd, mjd_list, mjd_range, epochs_file, channels, skip_sequence_se
     cals_mjd = {mjd: mjd_epochs[i] for mjd in mjds for i in range(len(mjd_epochs) - 1) if mjd >= mjd_epochs[i] and mjd < mjd_epochs[i+1]}
 
     # run reduction sequence
+    create_fiberflats = create_twilight_fiberflats if kind == "twilight" else create_dome_fiberflats
     for mjd in mjds:
-        create_twilight_fiberflats(
+        create_fiberflats(
             mjd=mjd,
             cals_mjd=cals_mjd[mjd],
             channels=channels,
@@ -912,6 +916,67 @@ def qa_flatfield_cli(drpver, redux_dir, mjd, mjd_list, mjd_range, tileid_list, f
     click.echo(f"report written to {html_path}")
 
 
+@cloup.command('qa-twilights', short_help='Check the gradient removed from a twilight sequence against the sky geometry', show_constraints=True, context_settings=dict(show_default=True))
+@click.option('-m', '--mjd', type=int, help='an MJD of twilight exposures')
+@click.option('-l', '--mjd-list', type=IntListType(), help='a list of MJDs of twilight exposures')
+@click.option('-r', '--mjd-range', type=str, help="a range of MJDs of twilight exposures, as 'MJD1-MJD2'")
+@click.option('-c', '--channels', type=str, default="brz", help='Channels to check')
+@click.option('-d', '--drpver', type=str, default=drpver, help='Pipeline version of the per-exposure twilight flats')
+@click.option('--no-raw', is_flag=True, default=False, help='Leave out the twilight exposures without a per-exposure flat, instead of showing their sky geometry from the raw headers')
+@click.option('-o', '--output-dir', type=str, default=None, help="Directory of the dashboard and table. Defaults to fiberflat_qa/twilights_{mjds} in the ancillary directory of the first MJD")
+@click.option('--dry-run', is_flag=True, default=False, help='Show the per-exposure flats found and the output paths without reading them')
+@cloup.constraint(mutually_exclusive, ['mjd', 'mjd_list', 'mjd_range'])
+@cloup.constraint(RequireExactly(1), ['mjd', 'mjd_list', 'mjd_range'])
+def qa_twilights_cli(mjd, mjd_list, mjd_range, channels, drpver, no_raw, output_dir, dry_run):
+    """Compare the gradient and spectrograph factors removed from each twilight exposure with its sky geometry and write an HTML dashboard.
+
+    Uses the per-exposure flats of the twilight fiber flat procedure; make them with
+    'drp calibrations fiberflats --skip-combination'.
+    """
+    mjds = parse_mjds(mjd=mjd or mjd_list or mjd_range or None)
+    mjds = [int(m) for m in (mjds if isinstance(mjds, (list, tuple)) else [mjds])]
+    try:
+        result = qa_twilight_sequence(mjds, channels=channels, drpver=drpver, include_raw=not no_raw,
+                                      output_dir=output_dir, dry_run=dry_run)
+    except FileNotFoundError as e:
+        raise click.UsageError(str(e))
+    if result["report"]:
+        click.echo(f"dashboard written to {result['report']}")
+
+
+@cloup.command('qa-domes', short_help='Check the gradient and spectrograph factors removed from a dome flat sequence', show_constraints=True, context_settings=dict(show_default=True))
+@click.option('-e', '--epoch', type=int, help="a calibration epoch MJD; uses its 'dome' MJDs from the epochs file")
+@click.option('-m', '--mjd', type=int, help='an MJD of dome flat exposures')
+@click.option('-l', '--mjd-list', type=IntListType(), help='a list of MJDs of dome flat exposures')
+@click.option('-r', '--mjd-range', type=str, help="a range of MJDs of dome flat exposures, as 'MJD1-MJD2'")
+@click.option('--epochs-file', type=str, default=None, help='Path to a calibrations epoch file. Defaults to the one in lvmcore')
+@click.option('-c', '--channels', type=str, default="brz", help='Channels to check')
+@click.option('-d', '--drpver', type=str, default=drpver, help='Pipeline version of the per-exposure dome flats')
+@click.option('-o', '--output-dir', type=str, default=None, help="Directory of the dashboard and table. Defaults to fiberflat_qa/domes_{epoch} in the ancillary directory of the epoch, or of the first MJD")
+@click.option('--dry-run', is_flag=True, default=False, help='Show the per-exposure flats found and the output paths without reading them')
+@cloup.constraint(RequireExactly(1), ['epoch', 'mjd', 'mjd_list', 'mjd_range'])
+def qa_domes_cli(epoch, mjd, mjd_list, mjd_range, epochs_file, channels, drpver, output_dir, dry_run):
+    """Show the gradient and spectrograph factors removed from each dome flat exposure and write an HTML dashboard.
+
+    Uses the per-exposure flats of the dome fiber flat procedure; the long-term calibrations
+    make them, or 'drp calibrations fiberflats --kind dome --skip-combination'.
+    """
+    if epoch is not None:
+        epochs = load_epochs_file(epochs_kind="calibration", epochs_path=epochs_file, verbose=False)
+        if epoch not in epochs:
+            raise click.UsageError(f"no calibration epoch {epoch} in the epochs file")
+        mjds = get_epoch(mjd=epoch, epochs=epochs, epochs_kind="calibration")["dome"]
+    else:
+        mjds = parse_mjds(mjd=mjd or mjd_list or mjd_range or None)
+    mjds = [int(m) for m in (mjds if isinstance(mjds, (list, tuple)) else [mjds])]
+    try:
+        result = qa_dome_sequence(mjds, channels=channels, drpver=drpver, epoch_mjd=epoch, output_dir=output_dir, dry_run=dry_run)
+    except FileNotFoundError as e:
+        raise click.UsageError(str(e))
+    if result["report"]:
+        click.echo(f"dashboard written to {result['report']}")
+
+
 @cloup.command('qa-fiberflats', short_help='Compare the master fiber flats of all calibration epochs against a reference epoch', show_constraints=True, context_settings=dict(show_default=True))
 @click.option('-r', '--mjd-ref', type=int, default=None, help='MJD of the reference calibration epoch. Defaults to the latest epoch with flats in all channels')
 @click.option('-c', '--channels', type=str, default="brz", help='Channels to compare')
@@ -1122,6 +1187,8 @@ def qa_science_cli(expnum, drpver, cameras, parts, sky_lines, output_dir, remeas
 
 calibrations.add_command(qa_raw_pixelflats_cli)
 calibrations.add_command(qa_fiberflats_cli)
+calibrations.add_command(qa_twilights_cli)
+calibrations.add_command(qa_domes_cli)
 calibrations.add_command(qa_wavelengths_cli)
 calibrations.add_command(qa_arc_sky_cli)
 calibrations.add_command(fiberflat_corrections)

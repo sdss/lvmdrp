@@ -20,11 +20,18 @@ Two parts, each with its own dashboard and CLI (``drp qa-flatfield`` and
   of a reference epoch, on a common wavelength grid, and splits the ratios
   into spectrograph offsets, a gradient across each IFU and the fiber-level
   change.
+
+The gradient and spectrograph factors removed from each exposure of a twilight
+or dome flat sequence have their own dashboards too: :func:`qa_twilight_sequence`
+(``drp calibrations qa-twilights``) and :func:`qa_dome_sequence`
+(``drp calibrations qa-domes``).
 """
 
 import os
 import re
 import json
+import warnings
+from functools import lru_cache
 from copy import copy
 from datetime import datetime, timezone
 from glob import glob
@@ -39,7 +46,10 @@ import bottleneck as bn
 import pandas as pd
 import plotly.graph_objects as go
 import yaml
+from astropy import units as u
+from astropy.coordinates import AltAz, EarthLocation, SkyCoord
 from astropy.io import fits
+from astropy.time import Time
 from astropy.stats import biweight_location, biweight_scale
 from astropy.table import Table, hstack, vstack
 from plotly.offline import get_plotlyjs_version
@@ -47,11 +57,16 @@ from plotly.subplots import make_subplots
 from scipy.spatial import cKDTree
 from scipy.stats import theilslopes
 from scipy.special import erf
+from skyfield.almanac import fraction_illuminated
+from skyfield.api import Loader, wgs84
 from tqdm import tqdm
 
 from lvmdrp import log
 from lvmdrp.core.plot import plt, save_fig
-from lvmdrp.core.constants import SKYLINES_FIBERFLAT
+from lvmdrp.core.astrometry import set_fibers_astrometry, set_telescope_astrometry
+from lvmdrp.core.constants import (
+    ARC_LAMPS, CON_LAMPS, EPHEMERIS_DIR, FIDUCIAL_PLATESCALE, LVM_ELEVATION, LVM_LAT, LVM_LON, SKYLINES_FIBERFLAT,
+)
 from lvmdrp.core.fit_profile import IFUGradient
 from lvmdrp.core.rss import RSS, lvmFrame
 from lvmdrp.qa.report import (
@@ -3159,6 +3174,7 @@ def _write_fiberflat_dashboard(report_path, summary, figures, epochs, geometry, 
                 for source, title in (("ratio", "Gradient of the ratio to the reference"), ("flat", "Gradient of each flat, as in the pipeline"))))
             .replace("@@PIPE_HW@@", f"{pipeline_dwave / 2:g}")
             .replace("@@PIPE_WAVES@@", ", ".join(f"{(pipeline_cwaves or SKYLINES_FIBERFLAT)[c]:.0f} &Aring; ({c})" for c in channels))
+            .replace("@@IFU_STYLE@@", IFU_STYLE)
             .replace("@@RATIOS_PICKER@@", picker("ratios-chart", "ratios", [("Ratios", [
                 ("corr", "fiber level: spectrograph factors and IFU gradients removed"), ("raw", "as measured")])], 260 * len(channels) + 110)))
     write_dashboard(report_path, title="LVM Fiber Flat Epochs", eyebrow=f"LVM DRP · fiber flats · {kind}",
@@ -3176,6 +3192,30 @@ def _num(value, fmt):
 
 # sections of the dashboard; @@TOKENS@@ are filled in by _write_fiberflat_dashboard. The
 # script must stay ASCII: the page writer turns other characters into HTML entities
+# stylesheet of the IFU small multiples, shared by the fiber flat epochs and twilight dashboards
+IFU_STYLE = r"""<style>
+.ifu-controls { display: flex; flex-wrap: wrap; gap: 8px 20px; align-items: center; font-size: 13px; color: var(--ink-2); }
+.ifu-controls label { display: inline-flex; gap: 8px; align-items: center; }
+.ifu-controls select { font: 13px var(--sans); color: var(--ink); background: var(--surface); border: 1px solid var(--axis); border-radius: 6px; padding: 4px 8px; }
+.ifu-controls select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ifu-legend { display: inline-flex; gap: 8px; align-items: center; font: 12px var(--mono); color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.ifu-legend canvas { width: 160px; height: 10px; border-radius: 2px; }
+.ifu-wrap { position: relative; }
+.ifu-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+.ifu-tile { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 8px; display: grid; gap: 6px; align-content: start; min-width: 0; }
+.ifu-tile.ref { border-color: var(--ink-2); }
+.ifu-tile canvas { width: 100%; aspect-ratio: 1; display: block; cursor: crosshair; }
+.ifu-cap { display: grid; gap: 0; font-size: 12px; line-height: 1.35; }
+.ifu-cap b { font: 500 13px var(--mono); color: var(--ink); }
+.ifu-cap span { color: var(--muted); }
+.ifu-key { font: 12px var(--mono); color: var(--ink-2); }
+.ifu-key b { color: var(--ink); font-weight: 500; }
+.ifu-key span { color: var(--muted); }
+.ifu-tip { position: absolute; z-index: 5; pointer-events: none; background: var(--surface); color: var(--ink); border: 1px solid var(--axis);
+  border-radius: 6px; padding: 6px 8px; font: 12px/1.4 var(--mono); white-space: nowrap; box-shadow: 0 2px 8px rgba(0,0,0,0.12); }
+</style>
+"""
+
 BODY_TEMPLATE = r"""
 <section>
   <h2>Flat-field ratios across epochs</h2>
@@ -3296,27 +3336,7 @@ BODY_TEMPLATE = r"""
   </div>
 </section>
 
-<style>
-.ifu-controls { display: flex; flex-wrap: wrap; gap: 8px 20px; align-items: center; font-size: 13px; color: var(--ink-2); }
-.ifu-controls label { display: inline-flex; gap: 8px; align-items: center; }
-.ifu-controls select { font: 13px var(--sans); color: var(--ink); background: var(--surface); border: 1px solid var(--axis); border-radius: 6px; padding: 4px 8px; }
-.ifu-controls select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.ifu-legend { display: inline-flex; gap: 8px; align-items: center; font: 12px var(--mono); color: var(--ink-2); font-variant-numeric: tabular-nums; }
-.ifu-legend canvas { width: 160px; height: 10px; border-radius: 2px; }
-.ifu-wrap { position: relative; }
-.ifu-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
-.ifu-tile { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 8px; display: grid; gap: 6px; align-content: start; min-width: 0; }
-.ifu-tile.ref { border-color: var(--ink-2); }
-.ifu-tile canvas { width: 100%; aspect-ratio: 1; display: block; cursor: crosshair; }
-.ifu-cap { display: grid; gap: 0; font-size: 12px; line-height: 1.35; }
-.ifu-cap b { font: 500 13px var(--mono); color: var(--ink); }
-.ifu-cap span { color: var(--muted); }
-.ifu-key { font: 12px var(--mono); color: var(--ink-2); }
-.ifu-key b { color: var(--ink); font-weight: 500; }
-.ifu-key span { color: var(--muted); }
-.ifu-tip { position: absolute; z-index: 5; pointer-events: none; background: var(--surface); color: var(--ink); border: 1px solid var(--axis);
-  border-radius: 6px; padding: 6px 8px; font: 12px/1.4 var(--mono); white-space: nowrap; box-shadow: 0 2px 8px rgba(0,0,0,0.12); }
-</style>
+@@IFU_STYLE@@
 
 <script>
 (function () {
@@ -3574,4 +3594,1141 @@ BODY_TEMPLATE = r"""
   render();
 })();
 </script>
+"""
+
+
+# ---------------------------------------------------------------------------
+# twilight sequences
+# ---------------------------------------------------------------------------
+
+# colors of the bodies and directions in the twilight dashboard
+TWILIGHT_COLORS = {"Sun": SERIES[1], "Moon": SERIES[0], "Pointing": SERIES[2], "Measured": THEME["ink2"]}
+
+
+class _PointingFrame:
+    """Header and slitmap holder with the interface used by :mod:`lvmdrp.core.astrometry`"""
+
+    def __init__(self, header, slitmap):
+        self._header = fits.Header(header)
+        self._slitmap = Table(slitmap, copy=True)
+        # the astrometry selects fibers comparing the plain arrays with str, and keeps existing fiber coordinates
+        self._slitmap.convert_bytestring_to_unicode()
+        self._slitmap.remove_columns([name for name in ("ra", "dec") if name in self._slitmap.colnames])
+
+    def getHeader(self):
+        return self._header
+
+    def getSlitmap(self):
+        return self._slitmap
+
+    def setHdrValue(self, keyword, value, comment=None):
+        self._header[keyword] = (value, comment) if comment is not None else value
+
+    def add_header_comment(self, comstr):
+        pass
+
+
+@lru_cache(maxsize=1)
+def _ephemeris():
+    """Ephemeris, timescale and observer at LCO, as in examples/lco_com/ffactors_experiments.ipynb"""
+    loader = Loader(EPHEMERIS_DIR, verbose=False)
+    eph = loader("de421.bsp")
+    location = EarthLocation(lat=LVM_LAT, lon=LVM_LON, height=LVM_ELEVATION * u.m)
+    observer = eph["earth"] + wgs84.latlon(location.lat.deg, location.lon.deg, elevation_m=LVM_ELEVATION)
+    return eph, loader.timescale(builtin=True), observer, location
+
+
+def _angular_distance(alt1, az1, alt2, az2):
+    """Angular distance in degrees between horizontal coordinates"""
+    alt1, az1, alt2, az2 = (np.radians(np.asarray(v, dtype=float)) for v in (alt1, az1, alt2, az2))
+    cos = np.sin(alt1) * np.sin(alt2) + np.cos(alt1) * np.cos(alt2) * np.cos(az1 - az2)
+    return np.degrees(np.arccos(np.clip(cos, -1, 1)))
+
+
+def _plane_direction(x, y, values):
+    """Direction (degrees from +x towards +y) in which a plane fitted to `values` increases, and its slope"""
+    design = np.column_stack([np.ones_like(x), x, y])
+    good = np.isfinite(values)
+    (_, slope_x, slope_y), *_ = np.linalg.lstsq(design[good], values[good], rcond=None)
+    return float(np.degrees(np.arctan2(slope_y, slope_x))), float(np.hypot(slope_x, slope_y))
+
+
+def twilight_geometry(header, slitmap) -> Dict:
+    """Sky geometry of a twilight exposure and the directions of the Sun and the horizon across the science IFU
+
+    At the middle of the exposure (``OBSTIME + EXPTIME/2``), computes the
+    horizontal coordinates of the science IFU pointing, the Sun and the Moon
+    (skyfield and the DE421 ephemeris), their separations and the illuminated
+    fraction of the Moon. The science IFU fibers are placed on the sky with the
+    pipeline astrometry (:func:`lvmdrp.core.astrometry.set_telescope_astrometry`
+    with the commanded ``POSCIRA``, ``POSCIDE``, ``POSCIPA`` and
+    :func:`~lvmdrp.core.astrometry.set_fibers_astrometry`), so the directions
+    across the IFU use the same orientation as the rest of the pipeline. The
+    direction towards the Sun is where the angular distance to the Sun decreases
+    fastest across the IFU, and the direction towards the horizon where the
+    altitude of the fibers decreases fastest; both are measured from the IFU +x
+    axis towards +y, like the gradients.
+
+    Parameters
+    ----------
+    header : astropy.io.fits.Header
+        Header of the exposure, with ``OBSTIME``, ``EXPTIME`` and the commanded
+        science telescope position (``POSCIRA``, ``POSCIDE``, ``POSCIPA``).
+    slitmap : astropy.table.Table
+        Slitmap with the fiber positions (``xpmm``, ``ypmm``).
+
+    Returns
+    -------
+    dict
+        time (middle of the exposure, ISO), exptime, ra, dec, pa (commanded),
+        point_alt, point_az, sun_alt, sun_az, sun_sep, moon_alt, moon_az,
+        moon_sep, moon_illum, dir_sun, dir_horizon (degrees), alt_change and
+        sun_change (change of the altitude and of the distance to the Sun from
+        the IFU center to its edge along those directions, degrees). The
+        pointing-dependent values are NaN if the header has no commanded position.
+    """
+    exptime = float(header.get("EXPTIME", 0.0) or 0.0)
+    time = Time(header["OBSTIME"], scale="utc") + exptime / 2 * u.s
+    eph, timescale, observer, location = _ephemeris()
+    t = timescale.from_astropy(time)
+
+    def altaz(body):
+        alt, az, _ = observer.at(t).observe(eph[body]).apparent().altaz()
+        return float(alt.degrees), float(az.degrees)
+
+    sun_alt, sun_az = altaz("sun")
+    moon_alt, moon_az = altaz("moon")
+    result = {"time": time.isot[:19], "exptime": exptime, "sun_alt": sun_alt, "sun_az": sun_az,
+              "moon_alt": moon_alt, "moon_az": moon_az, "moon_illum": float(fraction_illuminated(eph, "moon", t))}
+    result.update({key: np.nan for key in ("ra", "dec", "pa", "point_alt", "point_az", "sun_sep", "moon_sep",
+                                           "dir_sun", "dir_horizon", "alt_change", "sun_change")})
+
+    frame = _PointingFrame(header, slitmap)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        pointing = set_telescope_astrometry("Sci", None, frame)
+    if pointing is None or (pointing[0] == 0 and pointing[1] == 0):
+        log.warning(f"no commanded position of the science telescope for exposure {header.get('EXPOSURE')}, skipping its pointing geometry")
+        return result
+    ra, dec, pa = (float(v) for v in pointing)
+    set_fibers_astrometry(frame, "Sci", platescale=FIDUCIAL_PLATESCALE)
+
+    fibers = frame.getSlitmap()
+    sci = _decode(fibers["telescope"]) == "Sci"
+    x, y = np.asarray(fibers["xpmm"], dtype=float)[sci], np.asarray(fibers["ypmm"], dtype=float)[sci]
+    radius = np.max(np.hypot(x - x.mean(), y - y.mean()))
+    horizontal = AltAz(obstime=time, location=location)
+    fiber_altaz = SkyCoord(np.asarray(fibers["ra"], dtype=float)[sci], np.asarray(fibers["dec"], dtype=float)[sci],
+                           unit="deg").transform_to(horizontal)
+    center = SkyCoord(ra, dec, unit="deg").transform_to(horizontal)
+    fiber_alt, fiber_az = fiber_altaz.alt.deg, fiber_altaz.az.deg
+
+    dir_horizon, alt_slope = _plane_direction(x, y, -fiber_alt)
+    dir_sun, sun_slope = _plane_direction(x, y, -_angular_distance(fiber_alt, fiber_az, sun_alt, sun_az))
+    result.update({"ra": ra, "dec": dec, "pa": pa, "point_alt": float(center.alt.deg), "point_az": float(center.az.deg),
+                   "sun_sep": float(_angular_distance(center.alt.deg, center.az.deg, sun_alt, sun_az)),
+                   "moon_sep": float(_angular_distance(center.alt.deg, center.az.deg, moon_alt, moon_az)),
+                   "dir_sun": dir_sun, "dir_horizon": dir_horizon,
+                   "alt_change": alt_slope * radius, "sun_change": sun_slope * radius})
+    return result
+
+
+def _lamp_on(header, lamp) -> bool:
+    return str(header.get(lamp, "OFF")).strip().upper() in ("ON", "TRUE", "T", "1")
+
+
+def _is_twilight(header) -> bool:
+    """A flat with all the calibration lamps off"""
+    return not any(_lamp_on(header, lamp) for lamp in ARC_LAMPS + CON_LAMPS)
+
+
+def _is_dome(header) -> bool:
+    """A flat with a continuum lamp on and the arc lamps off"""
+    return any(_lamp_on(header, lamp) for lamp in CON_LAMPS) and not any(_lamp_on(header, lamp) for lamp in ARC_LAMPS)
+
+
+def _removed_corrections(header, channel, slitmap, layout=None):
+    """Gradient and spectrograph factors that fit_fiberflat removed from an exposure, from its per-exposure flat
+
+    Returns the row of the summary table (grad_x, grad_y, strength, direction,
+    factor1-3 with mean 1, gcoeff1-4), the IFU layout and the gradient model
+    on the science IFU divided by its mean (None without gradient coefficients).
+    """
+    corrections = _header_corrections(header, channel, slitmap)
+    gx, gy = corrections["hdr_grad_x"], corrections["hdr_grad_y"]
+    coeffs = [corrections[f"hdr_gcoeff{k}"] for k in (1, 2, 3, 4)]
+    model = None
+    if np.isfinite(coeffs).all():
+        layout = layout or _ifu_geometry(slitmap)
+        model = _gradient_at_edge(coeffs, slitmap)[2][layout["select"]]
+    factors = np.array([corrections[f"hdr_factor{i}"] for i in (1, 2, 3)])
+    row = {"grad_x": gx, "grad_y": gy, "strength": float(np.hypot(gx, gy)), "direction": float(np.degrees(np.arctan2(gy, gx))),
+           **{f"factor{i}": factors[i - 1] / np.mean(factors) for i in (1, 2, 3)},
+           **{f"gcoeff{k}": corrections[f"hdr_gcoeff{k}"] for k in (1, 2, 3, 4)}}
+    return row, layout, model
+
+
+def find_twilight_flats(mjds, channels: str = "brz", drpver: str = None) -> List[str]:
+    """Paths of the per-exposure flats made by :func:`lvmdrp.functions.run_twilights.fit_fiberflat`
+
+    They are the ``lvm-fflat-{channel}-{expnum}.fits`` files in the ancillary
+    directory of each MJD under the calibration tile. Dome flats have the same
+    name; they are told apart when reading the headers (see :func:`qa_twilight_sequence`).
+
+    Parameters
+    ----------
+    mjds : int or list[int]
+        MJDs of the twilight exposures.
+    channels : str, optional
+        Channels to search for. Default is 'brz'.
+    drpver : str, optional
+        Pipeline version of the reductions. Default is the installed version.
+
+    Returns
+    -------
+    list[str]
+        Sorted paths of the flats found.
+    """
+    from lvmdrp import path, __version__
+
+    paths = []
+    for mjd, channel in product(np.atleast_1d(mjds), channels):
+        paths.extend(path.expand("lvm_anc", drpver=drpver or __version__, kind="f", imagetype="flat", tileid=11111,
+                                 mjd=int(mjd), camera=channel, expnum="????????"))
+    return sorted(set(paths))
+
+
+def _raw_twilight_headers(mjds, known_expnums, channels):
+    """Headers of the raw twilight exposures without a per-exposure flat, from the frames metadata"""
+    from lvmdrp import path
+    from lvmdrp.utils import metadata as md
+
+    try:
+        frames = md.get_calibrations_metadata(mjds=list(np.atleast_1d(mjds)), calibration="twilight")
+    except Exception as e:
+        log.warning(f"could not get the twilight frames metadata ({type(e).__name__}: {e}), using the per-exposure flats only")
+        return {}
+    headers = {}
+    for (mjd, expnum), group in frames.groupby(["mjd", "expnum"]):
+        if int(expnum) in known_expnums:
+            continue
+        for camera in sorted(group["camera"]):
+            if camera[0] not in channels:
+                continue
+            raw_path = path.full("lvm_raw", hemi="s", camspec=camera, mjd=int(mjd), expnum=int(expnum))
+            if os.path.isfile(raw_path):
+                headers[int(expnum)] = fits.getheader(raw_path, 0)
+                break
+    return headers
+
+
+def qa_twilight_sequence(mjds, channels: str = "brz", drpver: str = None, flat_paths: List[str] = None,
+                         include_raw: bool = True, output_dir: str = None, dry_run: bool = False) -> Dict:
+    """Check the gradient across the science IFU of a twilight sequence against the sky geometry, and write a dashboard.
+
+    Two checks, for one or more nights of twilight exposures:
+
+    1. The gradient and spectrograph factors that
+       :func:`lvmdrp.functions.run_twilights.fit_fiberflat` removed from each
+       twilight exposure, from the ``FIBERFLAT GCOEFF`` and ``FACTOR`` keywords
+       of its per-exposure flat (``drp calibrations fiberflats
+       --skip-combination`` makes them). The gradient is given at the science
+       IFU edge relative to its mean (see :func:`_gradient_at_edge`), as in the
+       other fiber flat dashboards.
+    2. The sky geometry of each exposure (:func:`twilight_geometry`): pointing,
+       Sun and Moon in horizontal coordinates and the directions of the Sun and
+       of the horizon across the science IFU.
+
+    A twilight sky gradient follows the Sun and the horizon, and changes as the
+    Sun sets; a gradient of the instrument stays fixed in IFU coordinates.
+
+    Parameters
+    ----------
+    mjds : int or list[int]
+        MJDs of the twilight exposures.
+    channels : str, optional
+        Channels to check. Default is 'brz'.
+    drpver : str, optional
+        Pipeline version of the reductions. Default is the installed version.
+    flat_paths : list[str], optional
+        Per-exposure flats to use instead of searching for them (see :func:`find_twilight_flats`).
+    include_raw : bool, optional
+        Also show the geometry of the twilight exposures without a
+        per-exposure flat, from their raw headers. Default is True.
+    output_dir : str, optional
+        Directory of the dashboard and table. Default is
+        ``fiberflat_qa/twilights_{mjds}`` in the ancillary directory of the
+        first MJD (see :func:`lvmdrp.qa.report.epoch_qa_dir`).
+    dry_run : bool, optional
+        If True, log the flats found and the output paths without reading
+        them. Default is False.
+
+    Returns
+    -------
+    dict
+        - ``"summary"`` : pandas.DataFrame, one row per exposure and channel
+          (channel empty for exposures without a per-exposure flat), with the
+          geometry, the measured gradient (grad_x, grad_y, strength, direction),
+          the angles between the measured direction and the directions of the
+          Sun and of the horizon (dtheta_sun, dtheta_horizon), and the
+          spectrograph factors with mean 1 (factor1-3). None in a dry run.
+        - ``"figures"`` : dict, the Plotly figures of the dashboard.
+        - ``"report"`` : str, path of the dashboard, None in a dry run.
+    """
+    from lvmdrp import __version__
+
+    mjds = sorted(int(mjd) for mjd in np.atleast_1d(mjds))
+    drpver = drpver or __version__
+    name = f"twilights_{mjds[0]}" if len(mjds) == 1 else f"twilights_{mjds[0]}-{mjds[-1]}"
+    output_dir = output_dir or epoch_qa_dir(drpver, mjds[0], "fiberflat", name)
+    report_path = os.path.join(output_dir, f"{name}.html")
+    table_path = os.path.join(output_dir, f"{name}.csv")
+
+    flat_paths = flat_paths if flat_paths is not None else find_twilight_flats(mjds, channels=channels, drpver=drpver)
+    log.info(f"found {len(flat_paths)} per-exposure flats for MJDs {mjds}")
+    if dry_run:
+        for flat_path in flat_paths:
+            log.info(f"  {flat_path}")
+        log.info(f"dry run: dashboard would be written to {report_path}")
+        return {"summary": None, "figures": {}, "report": None}
+
+    geometry, rows, layout, maps = {}, [], None, {}
+    for flat_path in tqdm(flat_paths, desc="twilight flats", unit="flat", ascii=True):
+        header = fits.getheader(flat_path, 0)
+        channel = str(header.get("CCD", " "))[0]
+        if channel not in channels or not _is_twilight(header):
+            continue
+        slitmap = Table.read(flat_path, hdu="SLITMAP")
+        expnum = int(header["EXPOSURE"])
+        if expnum not in geometry:
+            geometry[expnum] = {"mjd": int(header.get("MJD", 0)), "expnum": expnum, **twilight_geometry(header, slitmap)}
+        row, layout, model = _removed_corrections(header, channel, slitmap, layout)
+        if model is not None:
+            maps.setdefault(channel, {})[expnum] = model
+        rows.append({"expnum": expnum, "channel": channel, "path": flat_path, **row})
+
+    if include_raw:
+        from lvmdrp.main import read_fibermap
+        raw_headers = _raw_twilight_headers(mjds, set(geometry), channels)
+        if raw_headers:
+            fibermap = read_fibermap(as_table=True)
+            for expnum, header in raw_headers.items():
+                geometry[expnum] = {"mjd": int(header.get("MJD", 0)), "expnum": expnum, **twilight_geometry(header, fibermap)}
+                rows.append({"expnum": expnum, "channel": ""})
+    if not geometry:
+        raise FileNotFoundError(f"no twilight exposures found for MJDs {mjds}; run 'drp calibrations fiberflats --skip-combination' first")
+
+    summary = pd.DataFrame(rows).merge(pd.DataFrame(list(geometry.values())), on="expnum", how="left")
+    for column in ("grad_x", "grad_y", "strength", "direction", "factor1", "factor2", "factor3"):
+        if column not in summary.columns:
+            summary[column] = np.nan
+    summary["dtheta_sun"] = _wrap_angle(summary["direction"] - summary["dir_sun"])
+    summary["dtheta_horizon"] = _wrap_angle(summary["direction"] - summary["dir_horizon"])
+    summary = summary.sort_values(["time", "channel"]).reset_index(drop=True)
+    os.makedirs(output_dir, exist_ok=True)
+    summary.to_csv(table_path, index=False)
+
+    figures = _twilight_figures(summary)
+    _write_twilight_dashboard(report_path, summary, figures, mjds, drpver, layout, maps)
+    log.info(f"written twilight sequence dashboard to {report_path}")
+    return {"summary": summary, "figures": figures, "report": report_path}
+
+
+def _wrap_angle(angle):
+    """Angle wrapped to [-180, 180) degrees"""
+    return (np.asarray(angle, dtype=float) + 180) % 360 - 180
+
+
+def _exposure_geometry(summary: pd.DataFrame) -> pd.DataFrame:
+    return summary.drop_duplicates("expnum").sort_values("time")
+
+
+def figure_twilight_sky(geometry: pd.DataFrame) -> go.Figure:
+    """Pointing, Sun and Moon in horizontal coordinates along a twilight sequence
+
+    The radius is the zenith distance, so bodies below the horizon fall
+    outside of the horizon circle. Each track starts at the first exposure
+    (open marker) and follows the exposures in time.
+    """
+    fig = go.Figure()
+    max_zd = 90.0
+    for name, alt, az, symbol in (("Pointing", "point_alt", "point_az", "x"), ("Sun", "sun_alt", "sun_az", "star"),
+                                  ("Moon", "moon_alt", "moon_az", "circle")):
+        data = geometry[np.isfinite(geometry[alt].astype(float))]
+        if data.empty:
+            continue
+        zd = 90 - data[alt].astype(float).to_numpy()
+        max_zd = max(max_zd, float(np.max(zd)))
+        color = TWILIGHT_COLORS[name]
+        fig.add_trace(go.Scatterpolar(
+            r=zd, theta=data[az], mode="lines+markers", name=name,
+            line=dict(width=1.5, color=color), marker=dict(size=9, symbol=symbol, color=color, line=dict(width=1.5, color=THEME["surface"])),
+            customdata=np.stack([data["time"].str[11:16], data["expnum"], data[alt].astype(float), data[az].astype(float)], axis=-1),
+            hovertemplate=(f"<b>{name}</b> · %{{customdata[0]}} UTC<br>exposure %{{customdata[1]}}<br>"
+                           "alt %{customdata[2]:.1f}°, az %{customdata[3]:.1f}°<extra></extra>")))
+        fig.add_trace(go.Scatterpolar(r=[zd[0]], theta=[data[az].iloc[0]], mode="markers", showlegend=False, hoverinfo="skip",
+                                      marker=dict(size=16, symbol="circle-open", color=color, line=dict(width=1.5))))
+    theta = np.linspace(0, 360, 181)
+    fig.add_trace(go.Scatterpolar(r=np.full(theta.size, 90.0), theta=theta, mode="lines", name="Horizon",
+                                  line=dict(width=1.5, color=THEME["ink2"]), hoverinfo="skip"))
+    rmax = 10 * np.ceil((max_zd + 3) / 10)
+    ticks = list(range(0, int(rmax) + 1, 30))
+    fig.update_layout(base_layout(520, margin=dict(l=40, r=40, t=56, b=40)), polar=dict(
+        bgcolor=THEME["surface"],
+        radialaxis=dict(range=[0, rmax], tickvals=ticks, ticktext=[f"{90 - v}°" for v in ticks], angle=90, tickangle=90,
+                        gridcolor=THEME["grid"], linecolor=THEME["axis"], tickfont=dict(color=THEME["muted"], size=11)),
+        angularaxis=dict(rotation=90, direction="clockwise", tickmode="array", tickvals=[0, 90, 180, 270], ticktext=["N", "E", "S", "W"],
+                         gridcolor=THEME["grid"], linecolor=THEME["axis"], tickfont=dict(color=THEME["ink2"]))))
+    return fig
+
+
+def figure_twilight_geometry(geometry: pd.DataFrame) -> go.Figure:
+    """Altitudes of the pointing, Sun and Moon and their separations from the pointing versus time"""
+    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.1,
+                        subplot_titles=["Altitude", "Separation from the pointing"])
+    for row, columns in ((1, (("Pointing", "point_alt"), ("Sun", "sun_alt"), ("Moon", "moon_alt"))),
+                         (2, (("Sun", "sun_sep"), ("Moon", "moon_sep")))):
+        for name, column in columns:
+            color = TWILIGHT_COLORS[name]
+            fig.add_trace(go.Scatter(
+                x=geometry["time"], y=geometry[column].astype(float), mode="lines+markers", name=name, legendgroup=name,
+                showlegend=row == 1, line=dict(width=2, color=color), marker=dict(size=8, color=color, line=dict(width=1.5, color=THEME["surface"])),
+                customdata=geometry["expnum"],
+                hovertemplate=f"<b>{name}</b> · exposure %{{customdata}}<br>%{{x|%H:%M}} UTC<br>%{{y:.1f}}°<extra></extra>"),
+                row=row, col=1)
+    fig.add_hline(y=0, line=dict(color=THEME["axis"], width=1), row=1, col=1)
+    fig.update_yaxes(title_text="Altitude (°)", row=1, col=1)
+    fig.update_yaxes(title_text="Separation (°)", rangemode="tozero", row=2, col=1)
+    fig.update_xaxes(title_text="Time (UTC)", tickformat="%H:%M", row=2, col=1)
+    return _finish_twilight_figure(fig, 480)
+
+
+def figure_twilight_gradient(data: pd.DataFrame, channel: str) -> go.Figure:
+    """Gradient strength and direction of a channel versus time, with the directions of the Sun and the horizon"""
+    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.1,
+                        subplot_titles=[f"Strength of the gradient removed from each exposure ({channel})",
+                                        "Direction across the science IFU, from +x towards +y"])
+    measured = data[data["channel"] == channel]
+    color = TWILIGHT_COLORS["Measured"]
+    fig.add_trace(go.Scatter(
+        x=measured["time"], y=100 * measured["strength"].astype(float), mode="lines+markers", name="Measured gradient",
+        legendgroup="measured", line=dict(width=2, color=color), marker=dict(size=8, color=color, line=dict(width=1.5, color=THEME["surface"])),
+        customdata=np.stack([measured["expnum"], _fmt_list(100 * measured["grad_x"].astype(float), "+.2f"),
+                             _fmt_list(100 * measured["grad_y"].astype(float), "+.2f")], axis=-1),
+        hovertemplate="exposure %{customdata[0]}<br>%{x|%H:%M} UTC<br>strength %{y:.2f}%<br>(%{customdata[1]}, %{customdata[2]})%<extra></extra>"),
+        row=1, col=1)
+    geometry = _exposure_geometry(data)
+    for name, frame, column, label in (("Measured", measured, "direction", "Measured gradient"),
+                                       ("Sun", geometry, "dir_sun", "Towards the Sun"),
+                                       ("Pointing", geometry, "dir_horizon", "Towards the horizon")):
+        fig.add_trace(go.Scatter(
+            x=frame["time"], y=_wrap_angle(frame[column]), mode="markers", name=label, legendgroup="measured" if name == "Measured" else label,
+            showlegend=name != "Measured", marker=dict(size=9, symbol="circle" if name == "Measured" else "diamond",
+                                                         color=TWILIGHT_COLORS[name], line=dict(width=1.5, color=THEME["surface"])),
+            customdata=frame["expnum"], hovertemplate=f"<b>{label}</b> · exposure %{{customdata}}<br>%{{x|%H:%M}} UTC<br>%{{y:.0f}}°<extra></extra>"),
+            row=2, col=1)
+    fig.update_yaxes(title_text="Strength (%)", rangemode="tozero", row=1, col=1)
+    fig.update_yaxes(title_text="Direction (°)", range=[-180, 180], tickvals=[-180, -90, 0, 90, 180], row=2, col=1)
+    fig.update_xaxes(title_text="Time (UTC)", tickformat="%H:%M", row=2, col=1)
+    return _finish_twilight_figure(fig, 520)
+
+
+def figure_twilight_factors(data: pd.DataFrame, channel: str) -> go.Figure:
+    """Spectrograph factors removed from each twilight exposure of a channel versus time"""
+    fig = go.Figure()
+    measured = data[data["channel"] == channel]
+    for i in (1, 2, 3):
+        color = SERIES[i - 1]
+        fig.add_trace(go.Scatter(
+            x=measured["time"], y=measured[f"factor{i}"].astype(float), mode="lines+markers", name=f"sp{i}",
+            line=dict(width=2, color=color), marker=dict(size=8, color=color, line=dict(width=1.5, color=THEME["surface"])),
+            customdata=measured["expnum"], hovertemplate=f"<b>sp{i}</b> · exposure %{{customdata}}<br>%{{x|%H:%M}} UTC<br>factor %{{y:.4f}}<extra></extra>"))
+    fig.add_hline(y=1, line=dict(color=THEME["axis"], width=1))
+    fig.update_yaxes(title_text="Factor (mean 1)")
+    fig.update_xaxes(title_text="Time (UTC)", tickformat="%H:%M")
+    return _finish_twilight_figure(fig, 320)
+
+
+def _finish_twilight_figure(fig, height):
+    fig.update_layout(base_layout(height, margin=dict(l=64, r=16, t=56, b=52)))
+    fig.update_layout(legend=dict(x=1, xanchor="right"))
+    fig.update_annotations(font=dict(color=THEME["ink2"], size=13), x=0, xanchor="left")
+    return style_axes(fig)
+
+
+def _twilight_figures(summary: pd.DataFrame) -> Dict[str, go.Figure]:
+    figures = {}
+    nights = sorted(summary["mjd"].dropna().astype(int).unique())
+    channels = [c for c in "brz" if c in set(summary["channel"])]
+    for mjd in nights:
+        night = summary[summary["mjd"] == mjd]
+        geometry = _exposure_geometry(night)
+        figures[f"sky|{mjd}"] = figure_twilight_sky(geometry)
+        figures[f"geometry|{mjd}"] = figure_twilight_geometry(geometry)
+        for channel in channels:
+            figures[f"gradient|{channel}|{mjd}"] = figure_twilight_gradient(night, channel)
+            figures[f"factors|{channel}|{mjd}"] = figure_twilight_factors(night, channel)
+    return figures
+
+
+def _twilight_ifu_payload(summary, layout, maps):
+    """Data of the twilight IFU small multiples, as a JSON-serializable dictionary"""
+    exposures = [{"expnum": int(r["expnum"]), "time": str(r["time"])[11:16],
+                  "subtitle": f"MJD {int(r['mjd'])} \u00b7 Sun " + ("-" if not np.isfinite(r["sun_alt"]) else f"{r['sun_alt']:.0f}\u00b0"),
+                  "dirSun": _finite_or_none(r["dir_sun"]), "dirHorizon": _finite_or_none(r["dir_horizon"])}
+                 for _, r in summary.drop_duplicates("expnum").sort_values("time").iterrows()]
+    return _exposures_ifu_payload(exposures, summary[summary["channel"] != ""], layout, maps)
+
+
+def _exposures_ifu_payload(exposures, measured, layout, maps):
+    """Data of the IFU small multiples of the per-exposure gradient models, as a JSON-serializable dictionary
+
+    `exposures` are the tiles in order, each with expnum, time, subtitle and
+    the directions of the arrows (dirSun, dirHorizon, or None for no arrow);
+    `measured` the summary rows with the gradient strength and direction of
+    each exposure and channel.
+    """
+    scales = {}
+    for channel, channel_maps in maps.items():
+        values = np.concatenate(list(channel_maps.values()))
+        values = values[np.isfinite(values)]
+        scales[channel] = max(round(float(np.percentile(np.abs(values - 1), 98)), 4), 0.005) if values.size else 0.01
+    return {
+        "x": layout["x"], "y": layout["y"], "fiberid": layout["fiberid"], "label": layout["label"],
+        "hexRadius": layout["hex_radius"], "hexRotation": layout["hex_rotation"], "ifuEdge": layout["ifu_edge"],
+        "exposures": exposures,
+        "values": {channel: {str(expnum): _encode(values) for expnum, values in channel_maps.items()} for channel, channel_maps in maps.items()},
+        "measured": {channel: {str(int(r["expnum"])): [_finite_or_none(r["strength"]), _finite_or_none(r["direction"])]
+                               for _, r in measured[measured["channel"] == channel].iterrows()} for channel in maps},
+        "scales": scales, "diverging": DIVERGING, "divergingDark": DIVERGING_DARK,
+    }
+
+
+def _write_twilight_dashboard(report_path, summary, figures, mjds, drpver, layout=None, maps=None):
+    nights = sorted(summary["mjd"].dropna().astype(int).unique())
+    channels = [c for c in "brz" if c in set(summary["channel"])]
+    geometry = _exposure_geometry(summary)
+    measured = summary[summary["channel"] != ""]
+
+    tiles = [("Nights", f"{len(nights)}", ", ".join(map(str, nights))),
+             ("Twilight exposures", f"{len(geometry)}", f"{measured['expnum'].nunique()} with per-exposure flats"),
+             ("Sun altitude", f"{np.nanmin(geometry['sun_alt']):.1f}° to {np.nanmax(geometry['sun_alt']):.1f}°",
+              "at the middle of the exposures")]
+    for channel in channels:
+        sel = measured[measured["channel"] == channel]
+        tiles.append((f"{channel} gradient", f"{100 * np.nanmedian(sel['strength']):.2f}%",
+                      (f"median; off the Sun direction by {np.nanmedian(np.abs(sel['dtheta_sun'])):.0f}°, "
+                       f"the horizon by {np.nanmedian(np.abs(sel['dtheta_horizon'])):.0f}°")))
+
+    meta = [("DRP version", drpver), ("MJDs", ", ".join(map(str, mjds))), ("Channels", "".join(channels) or "none"),
+            ("Ephemeris", "DE421 (skyfield)"), ("Generated", datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"))]
+    intro = ("<p>For each twilight exposure, the gradient across the science IFU and the spectrograph factors that the "
+             "twilight fiber flat procedure removed (fit_fiberflat), next to the sky geometry of the exposure. A twilight sky "
+             "gradient points towards the Sun and the horizon and changes as the Sun sets; a gradient of the instrument stays "
+             "fixed in IFU coordinates whatever the pointing, position angle and time.</p>")
+
+    table_rows = []
+    for _, r in summary.iterrows():
+        table_rows.append([str(int(r["mjd"])) if np.isfinite(r["mjd"]) else "-", str(int(r["expnum"])), escape(str(r["time"])[11:19]),
+                           escape(r["channel"] or "-"), _num(r["exptime"], ".0f"), _num(r["sun_alt"], ".1f"), _num(r["sun_az"], ".0f"),
+                           _num(r["point_alt"], ".1f"), _num(r["point_az"], ".0f"), _num(r["pa"], ".1f"), _num(r["sun_sep"], ".1f"),
+                           f'{_num(r["moon_alt"], ".1f")} / {_num(100 * r["moon_illum"], ".0f")}%',
+                           _num(100 * r["strength"], ".2f"), _num(r["direction"], ".0f"), _num(r["dir_sun"], ".0f"), _num(r["dir_horizon"], ".0f"),
+                           " / ".join(_num(r[f"factor{i}"], ".4f") for i in (1, 2, 3))])
+    table = html_table(
+        [("MJD", ""), ("Exposure", ""), ("UTC", "middle of the exposure"), ("Ch", "channel"), ("Exptime (s)", ""),
+         ("Sun alt (°)", ""), ("Sun az (°)", ""), ("Pointing alt (°)", ""), ("Pointing az (°)", ""),
+         ("PA (°)", "commanded position angle of the science IFU"), ("Sun sep (°)", "from the pointing"),
+         ("Moon alt / illum.", ""), ("Gradient (%)", "removed from the exposure, at the IFU edge"),
+         ("Direction (°)", "of the removed gradient, from IFU +x towards +y"), ("Sun dir. (°)", "towards the Sun across the IFU"),
+         ("Horizon dir. (°)", "towards the horizon across the IFU"), ("Factors sp1 / sp2 / sp3", "removed from the exposure, mean 1")],
+        table_rows, numeric=[True, True, False, False] + [True] * 13)
+
+    night_options = [(str(mjd), str(mjd)) for mjd in nights]
+    channel_options = [(c, c) for c in channels]
+    body = TWILIGHT_BODY.replace("@@TABLE@@", table)
+    body = body.replace("@@SKY@@", picker("twilight-sky", "sky", [("Night", night_options)], 520))
+    body = body.replace("@@GEOMETRY@@", picker("twilight-geometry", "geometry", [("Night", night_options)], 480))
+    if channels:
+        body = body.replace("@@GRADIENT@@", picker("twilight-gradient", "gradient", [("Channel", channel_options), ("Night", night_options)], 520))
+        body = body.replace("@@FACTORS@@", picker("twilight-factors", "factors", [("Channel", channel_options), ("Night", night_options)], 320))
+    if channels and layout is not None and maps:
+        payload = json.dumps(_twilight_ifu_payload(summary, layout, maps)).replace("</", "<\\/")
+        options = "".join(f'<option value="{c}">{c}</option>' for c in channels if c in maps)
+        body = body.replace("@@IFU@@", TWILIGHT_IFU.replace("@@CHANNEL_OPTIONS@@", options).replace("@@TWI_PAYLOAD@@", payload)
+                            .replace("@@IFU_KEY@@", TWILIGHT_IFU_KEY).replace("@@IFU_STYLE@@", IFU_STYLE))
+    else:
+        missing = '<p class="note">No per-exposure flats found: run <span class="mono">drp calibrations fiberflats --skip-combination</span> first.</p>'
+        body = body.replace("@@GRADIENT@@", missing).replace("@@FACTORS@@", missing).replace("@@IFU@@", missing)
+    write_dashboard(report_path, title="LVM Twilight Sequence", eyebrow="LVM DRP · fiber flats · twilights",
+                    intro=intro, meta=meta, tiles=tiles, body=body, figures=figures, generator="lvmdrp.qa.fiberflats.qa_twilight_sequence")
+    return report_path
+
+
+TWILIGHT_BODY = r"""
+<section>
+  <h2>Sky during the sequence</h2>
+  <p>Pointing of the science telescope, Sun and Moon in horizontal coordinates at the middle of each exposure. The radius
+  is the zenith distance: the circle is the horizon and the Sun, below it, falls outside. The open marker is the first
+  exposure of each track.</p>
+  @@SKY@@
+  @@GEOMETRY@@
+</section>
+
+<section>
+  <h2>Gradient removed from each exposure</h2>
+  <p>Strength and direction of the gradient that the twilight fiber flat procedure fitted and removed from each exposure,
+  next to the directions of the Sun and of the horizon across the science IFU at the time of the exposure. A twilight sky
+  gradient follows those directions; a gradient that keeps its direction while they change belongs to the instrument.</p>
+  @@GRADIENT@@
+  @@FACTORS@@
+</section>
+
+<section>
+  <h2>Gradient model of each exposure on the science IFU</h2>
+  <p>The gradient model removed from each exposure, divided by its mean, on the science IFU fibers, with arrows towards
+  the Sun and towards the horizon at the time of the exposure. A twilight sky gradient increases along those arrows and
+  turns with them; a gradient of the instrument keeps its pattern whatever their direction.</p>
+  @@IFU@@
+  <details><summary>Table view: all exposures</summary>@@TABLE@@</details>
+</section>
+
+<section id="definitions">
+  <h2>How the quantities are computed</h2>
+  <div class="defs">
+    <div class="def">
+      <h3>Removed gradient</h3>
+      <p>The FIBERFLAT GCOEFF coefficients \(c_k\) that fit_fiberflat fitted with IFUGradient on the twilight counts at the
+      normalization window, as the change from the science IFU center to its edge, at the radius \(R\), relative to the mean
+      of the model over the good science fibers.</p>
+      <div class="eq">\[ \begin{gathered} G(x, y) = c_0 + c_1\, y + c_2\, x \\ \vec g = \frac{R\,(c_2,\ c_1)}{\langle G \rangle}, \qquad \theta = \operatorname{atan2}(g_y,\ g_x) \end{gathered} \]</div>
+    </div>
+    <div class="def">
+      <h3>Directions of the Sun and the horizon</h3>
+      <p>The science IFU fibers are placed on the sky with the pipeline astrometry from the commanded position and
+      position angle, and transformed to horizontal coordinates at the middle of the exposure. Planes fitted over the IFU
+      to the angular distance to the Sun \(d_\odot\) and to the altitude \(h\) give the directions in which they decrease.</p>
+      <div class="eq">\[ \theta_\odot = \operatorname{atan2}\!\left(-\partial_y d_\odot,\ -\partial_x d_\odot\right), \qquad \theta_h = \operatorname{atan2}\!\left(-\partial_y h,\ -\partial_x h\right) \]</div>
+    </div>
+    <div class="def">
+      <h3>Sun and Moon</h3>
+      <p>Apparent topocentric positions at Las Campanas from the DE421 ephemeris with skyfield, without refraction; the
+      separations are angular distances from the science IFU center.</p>
+      <div class="eq">\[ \cos s = \sin h_1 \sin h_2 + \cos h_1 \cos h_2 \cos(A_1 - A_2) \]</div>
+    </div>
+    <div class="def">
+      <h3>Spectrograph factors</h3>
+      <p>The FIBERFLAT FACTOR values that fit_fiberflat removed from the exposure, normalized to a mean of 1. Changes
+      along a sequence point to differences in the spectrograph shutter timing.</p>
+      <div class="eq">\[ f_s \rightarrow \frac{f_s}{\tfrac{1}{3}\sum_{s'} f_{s'}} \]</div>
+    </div>
+  </div>
+</section>
+"""
+
+
+TWILIGHT_IFU_KEY = '<div class="twi-key"><span class="twi-sun">&rarr; towards the Sun</span><span class="twi-horizon">&rarr; towards the horizon</span></div>'
+
+# IFU small multiples of the twilight and dome dashboards; @@TOKENS@@ are filled in by _write_twilight_dashboard
+# and _write_dome_dashboard.
+# The script must stay ASCII: the page writer turns other characters into HTML entities
+TWILIGHT_IFU = r"""
+<div class="ifu-controls">
+  <label>Channel <select id="twi-channel">@@CHANNEL_OPTIONS@@</select></label>
+  <div class="ifu-legend" aria-hidden="true"><span id="twi-lo"></span><canvas id="twi-bar" width="160" height="10"></canvas><span id="twi-hi"></span></div>
+  @@IFU_KEY@@
+</div>
+<div class="ifu-wrap">
+  <div class="ifu-grid" id="twi-grid"></div>
+  <div class="ifu-tip" id="twi-tip" hidden></div>
+</div>
+
+@@IFU_STYLE@@
+<style>
+:root { --twi-sun: #eb6834; --twi-horizon: #1baf7a; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --twi-sun: #d95926; --twi-horizon: #199e70; } }
+:root[data-theme="dark"] { --twi-sun: #d95926; --twi-horizon: #199e70; }
+.twi-key { display: inline-flex; gap: 16px; font: 12px var(--mono); }
+.twi-sun { color: var(--twi-sun); font-weight: 600; }
+.twi-horizon { color: var(--twi-horizon); font-weight: 600; }
+</style>
+
+<script>
+(function () {
+  const D = @@TWI_PAYLOAD@@;
+  const grid = document.getElementById("twi-grid");
+  const tip = document.getElementById("twi-tip");
+  const select = document.getElementById("twi-channel");
+  const bar = document.getElementById("twi-bar");
+  const media = window.matchMedia("(prefers-color-scheme: dark)");
+  const n = D.x.length;
+
+  function isDark() {
+    const theme = document.documentElement.getAttribute("data-theme");
+    return theme ? theme === "dark" : media.matches;
+  }
+  function css(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+  function hexToRgb(h) { const v = parseInt(h.slice(1), 16); return [(v >> 16) & 255, (v >> 8) & 255, v & 255]; }
+
+  // diverging scale centered on 1, linear in RGB between the stops
+  function colorScale(half) {
+    const stops = (isDark() ? D.divergingDark : D.diverging).map(hexToRgb);
+    return function (value) {
+      const t = Math.max(-1, Math.min(1, (value - 1) / half));
+      const pos = (t + 1) / 2 * (stops.length - 1);
+      const i = Math.min(Math.floor(pos), stops.length - 2), f = pos - i;
+      const a = stops[i], b = stops[i + 1];
+      return "rgb(" + [0, 1, 2].map((j) => Math.round(a[j] + f * (b[j] - a[j]))).join(",") + ")";
+    };
+  }
+
+  function drawLegend(half) {
+    const ctx = bar.getContext("2d"), color = colorScale(half);
+    for (let px = 0; px < bar.width; px++) {
+      ctx.fillStyle = color(1 - half + 2 * half * px / (bar.width - 1));
+      ctx.fillRect(px, 0, 1, bar.height);
+    }
+    document.getElementById("twi-lo").textContent = (1 - half).toFixed(3);
+    document.getElementById("twi-hi").textContent = (1 + half).toFixed(3);
+  }
+
+  function hexPath(ctx, cx, cy, r) {
+    ctx.beginPath();
+    for (let k = 0; k < 6; k++) {
+      const a = (D.hexRotation + 60 * k) * Math.PI / 180;
+      const px = cx + r * Math.cos(a), py = cy - r * Math.sin(a);
+      if (k === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+  }
+
+  // arrow from the IFU center, `angle` in degrees from +x towards +y
+  function arrow(ctx, cx, cy, angle, length, color, width) {
+    const a = angle * Math.PI / 180, ex = cx + length * Math.cos(a), ey = cy - length * Math.sin(a);
+    const head = Math.max(7, 3.2 * width);
+    ctx.strokeStyle = color;
+    ctx.fillStyle = color;
+    ctx.lineWidth = width;
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(ex - 0.6 * head * Math.cos(a), ey + 0.6 * head * Math.sin(a));
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(ex, ey);
+    ctx.lineTo(ex - head * Math.cos(a - 0.42), ey + head * Math.sin(a - 0.42));
+    ctx.lineTo(ex - head * Math.cos(a + 0.42), ey + head * Math.sin(a + 0.42));
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  function drawTile(canvas, encoded, exposure, half) {
+    const dpr = window.devicePixelRatio || 1;
+    const size = canvas.clientWidth;
+    canvas.width = Math.round(size * dpr);
+    canvas.height = Math.round(size * dpr);
+    const ctx = canvas.getContext("2d");
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, size, size);
+    const scale = (size / 2 - 2) / (1 + D.hexRadius);
+    canvas._scale = scale;
+    const color = colorScale(half), missing = css("--grid"), c = size / 2;
+    for (let i = 0; i < n; i++) {
+      const v = encoded[i];
+      hexPath(ctx, c + D.x[i] * scale, c - D.y[i] * scale, D.hexRadius * scale);
+      ctx.fillStyle = v === null ? missing : color(v / 1e4);
+      ctx.fill();
+    }
+    ctx.strokeStyle = css("--ink-2");
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    D.ifuEdge.forEach((seg) => {
+      ctx.moveTo(c + seg[0] * scale, c - seg[1] * scale);
+      ctx.lineTo(c + seg[2] * scale, c - seg[3] * scale);
+    });
+    ctx.stroke();
+    // a surface-colored halo keeps the arrows readable on any fiber color
+    const surface = css("--surface");
+    [[exposure.dirHorizon, 0.78, css("--twi-horizon"), 2], [exposure.dirSun, 0.95, css("--twi-sun"), 3]].forEach((spec) => {
+      if (spec[0] === null) return;
+      arrow(ctx, c, c, spec[0], spec[1] * scale, surface, spec[3] + 3);
+      arrow(ctx, c, c, spec[0], spec[1] * scale, spec[2], spec[3]);
+    });
+  }
+
+  function percent(value) { return value === null || value === undefined ? "-" : (100 * value).toFixed(2) + "%"; }
+  function degrees(value) { return value === null || value === undefined ? "-" : value.toFixed(0) + "\u00b0"; }
+
+  function render() {
+    const channel = select.value, half = D.scales[channel] || 0.01;
+    const values = D.values[channel] || {}, measured = D.measured[channel] || {};
+    drawLegend(half);
+    grid.innerHTML = "";
+    D.exposures.forEach((exposure) => {
+      const encoded = values[String(exposure.expnum)];
+      if (!encoded) return;
+      const gradient = measured[String(exposure.expnum)] || [null, null];
+      const tile = document.createElement("div");
+      tile.className = "ifu-tile";
+      const canvas = document.createElement("canvas");
+      canvas.setAttribute("role", "img");
+      canvas.setAttribute("aria-label", "Exposure " + exposure.expnum + ", " + channel + " channel, gradient " + percent(gradient[0]) +
+        " towards " + degrees(gradient[1]) + (exposure.dirSun === null ? "" : ", Sun towards " + degrees(exposure.dirSun)) +
+        (exposure.dirHorizon === null ? "" : ", horizon towards " + degrees(exposure.dirHorizon)));
+      canvas._encoded = encoded;
+      canvas._expnum = exposure.expnum;
+      const cap = document.createElement("div");
+      cap.className = "ifu-cap";
+      const title = document.createElement("b");
+      title.textContent = exposure.expnum + " \u00b7 " + exposure.time + " UTC";
+      const sun = document.createElement("span");
+      sun.textContent = exposure.subtitle;
+      const grad = document.createElement("span");
+      grad.textContent = "gradient " + percent(gradient[0]) + " at " + degrees(gradient[1]);
+      cap.appendChild(title);
+      cap.appendChild(sun);
+      cap.appendChild(grad);
+      tile.appendChild(canvas);
+      tile.appendChild(cap);
+      grid.appendChild(tile);
+      drawTile(canvas, encoded, exposure, half);
+    });
+  }
+
+  grid.addEventListener("pointermove", (event) => {
+    const canvas = event.target;
+    if (canvas.tagName !== "CANVAS" || !canvas._encoded) { tip.hidden = true; return; }
+    const rect = canvas.getBoundingClientRect(), size = rect.width, scale = canvas._scale;
+    const x = (event.clientX - rect.left - size / 2) / scale, y = -(event.clientY - rect.top - size / 2) / scale;
+    let best = -1, bestDist = Infinity;
+    for (let i = 0; i < n; i++) {
+      const d = (D.x[i] - x) * (D.x[i] - x) + (D.y[i] - y) * (D.y[i] - y);
+      if (d < bestDist) { bestDist = d; best = i; }
+    }
+    if (best < 0 || Math.sqrt(bestDist) > 1.2 * D.hexRadius) { tip.hidden = true; return; }
+    const v = canvas._encoded[best];
+    tip.textContent = "";
+    const line1 = document.createElement("div"), line2 = document.createElement("div");
+    line1.textContent = "exposure " + canvas._expnum + " \u00b7 " + D.label[best] + " (fiber " + D.fiberid[best] + ")";
+    line2.textContent = "gradient model " + (v === null ? "no data" : (v / 1e4).toFixed(4));
+    tip.appendChild(line1);
+    tip.appendChild(line2);
+    tip.hidden = false;
+    const wrap = grid.parentElement.getBoundingClientRect();
+    let left = event.clientX - wrap.left + 12;
+    if (left + tip.offsetWidth > wrap.width) left = event.clientX - wrap.left - tip.offsetWidth - 12;
+    tip.style.left = left + "px";
+    tip.style.top = (event.clientY - wrap.top + 12) + "px";
+  });
+  grid.addEventListener("pointerleave", () => { tip.hidden = true; });
+
+  select.addEventListener("change", render);
+  media.addEventListener("change", render);
+  new MutationObserver(render).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+  let width = grid.clientWidth;
+  new ResizeObserver(() => { if (grid.clientWidth !== width) { width = grid.clientWidth; render(); } }).observe(grid);
+  render();
+})();
+</script>
+"""
+
+
+# ---------------------------------------------------------------------------
+# dome sequences
+# ---------------------------------------------------------------------------
+
+# colors of the channels in the dome dashboard
+DOME_COLORS = {"b": SERIES[0], "r": SERIES[1], "z": SERIES[2]}
+
+
+def _circular_spread(angles):
+    """Circular mean of `angles` (degrees) and the median distance from it"""
+    angles = np.asarray(angles, dtype=float)
+    angles = angles[np.isfinite(angles)]
+    if angles.size == 0:
+        return np.nan, np.nan
+    radians = np.radians(angles)
+    mean = float(np.degrees(np.arctan2(np.mean(np.sin(radians)), np.mean(np.cos(radians)))))
+    return mean, float(np.median(np.abs(_wrap_angle(angles - mean))))
+
+
+def qa_dome_sequence(mjds, channels: str = "brz", drpver: str = None, flat_paths: List[str] = None,
+                     epoch_mjd: int = None, output_dir: str = None, dry_run: bool = False) -> Dict:
+    """Check the gradient and spectrograph factors removed from the exposures of a dome flat sequence, and write a dashboard.
+
+    The dome fiber flats follow the twilight procedure
+    (:func:`lvmdrp.functions.run_calseq.create_dome_fiberflats`): for each
+    exposure, :func:`lvmdrp.functions.run_twilights.fit_fiberflat` removes an
+    IFU gradient and spectrograph factors, kept in the ``FIBERFLAT GCOEFF`` and
+    ``FACTOR`` keywords of its per-exposure flat. This dashboard shows them
+    along the sequence, as in :func:`qa_twilight_sequence`, with the lamp and
+    the exposed standard fiber of each exposure instead of the sky geometry.
+    The dome is lit the same way in all the exposures of a lamp, so its
+    gradient should keep its strength and direction; changes along the
+    sequence come from the instrument (e.g. shutter timing in the factors).
+
+    Parameters
+    ----------
+    mjds : int or list[int]
+        MJDs of the dome flat exposures.
+    channels : str, optional
+        Channels to check. Default is 'brz'.
+    drpver : str, optional
+        Pipeline version of the reductions. Default is the installed version.
+    flat_paths : list[str], optional
+        Per-exposure flats to use instead of searching for them (see :func:`find_twilight_flats`).
+    epoch_mjd : int, optional
+        MJD of the calibration epoch the sequence belongs to, used to name and
+        place the dashboard. Default is the first MJD.
+    output_dir : str, optional
+        Directory of the dashboard and table. Default is
+        ``fiberflat_qa/domes_{epoch_mjd}`` in the ancillary directory of
+        `epoch_mjd` (see :func:`lvmdrp.qa.report.epoch_qa_dir`).
+    dry_run : bool, optional
+        If True, log the flats found and the output paths without reading
+        them. Default is False.
+
+    Returns
+    -------
+    dict
+        - ``"summary"`` : pandas.DataFrame, one row per exposure and channel,
+          with the lamp, exposed standard fiber (calibfib), exposure time, the
+          removed gradient (grad_x, grad_y, strength, direction) and the
+          spectrograph factors with mean 1 (factor1-3). None in a dry run.
+        - ``"figures"`` : dict, the Plotly figures of the dashboard.
+        - ``"report"`` : str, path of the dashboard, None in a dry run.
+    """
+    from lvmdrp import __version__
+
+    mjds = sorted(int(mjd) for mjd in np.atleast_1d(mjds))
+    drpver = drpver or __version__
+    epoch_mjd = int(epoch_mjd or mjds[0])
+    name = f"domes_{epoch_mjd}"
+    output_dir = output_dir or epoch_qa_dir(drpver, epoch_mjd, "fiberflat", name)
+    report_path = os.path.join(output_dir, f"{name}.html")
+    table_path = os.path.join(output_dir, f"{name}.csv")
+
+    flat_paths = flat_paths if flat_paths is not None else find_twilight_flats(mjds, channels=channels, drpver=drpver)
+    log.info(f"found {len(flat_paths)} per-exposure flats for MJDs {mjds}")
+    if dry_run:
+        for flat_path in flat_paths:
+            log.info(f"  {flat_path}")
+        log.info(f"dry run: dashboard would be written to {report_path}")
+        return {"summary": None, "figures": {}, "report": None}
+
+    rows, layout, maps = [], None, {}
+    for flat_path in tqdm(flat_paths, desc="dome flats", unit="flat", ascii=True):
+        header = fits.getheader(flat_path, 0)
+        channel = str(header.get("CCD", " "))[0]
+        if channel not in channels or not _is_dome(header):
+            continue
+        slitmap = Table.read(flat_path, hdu="SLITMAP")
+        expnum = int(header["EXPOSURE"])
+        row, layout, model = _removed_corrections(header, channel, slitmap, layout)
+        if model is not None:
+            maps.setdefault(channel, {})[expnum] = model
+        lamps = [lamp for lamp in CON_LAMPS if _lamp_on(header, lamp)]
+        rows.append({"mjd": int(header.get("MJD", 0)), "expnum": expnum, "channel": channel, "path": flat_path,
+                     "time": str(header.get("OBSTIME", ""))[:19], "exptime": float(header.get("EXPTIME", np.nan) or np.nan),
+                     "lamp": "+".join(lamps).lower(), "calibfib": str(header.get("CALIBFIB") or "-"), **row})
+    if not rows:
+        raise FileNotFoundError(f"no per-exposure dome flats found for MJDs {mjds}; run 'drp calibrations fiberflats --kind dome --skip-combination' first")
+
+    summary = pd.DataFrame(rows).sort_values(["time", "expnum", "channel"]).reset_index(drop=True)
+    os.makedirs(output_dir, exist_ok=True)
+    summary.to_csv(table_path, index=False)
+
+    figures = _dome_figures(summary)
+    _write_dome_dashboard(report_path, summary, figures, mjds, epoch_mjd, drpver, layout, maps)
+    log.info(f"written dome sequence dashboard to {report_path}")
+    return {"summary": summary, "figures": figures, "report": report_path}
+
+
+def _exposure_axis(summary: pd.DataFrame) -> List[str]:
+    """Exposure numbers in the order of the sequence, as categories of the x axis"""
+    return [str(e) for e in summary.drop_duplicates("expnum")["expnum"]]
+
+
+def _dome_hover(data: pd.DataFrame) -> np.ndarray:
+    return np.stack([data["mjd"], data["lamp"], data["calibfib"], data["time"].str[11:16]], axis=-1)
+
+
+def figure_dome_vectors(summary: pd.DataFrame) -> go.Figure:
+    """Gradient removed from each dome exposure as a vector in IFU coordinates, one color per channel
+
+    The angle is the direction across the science IFU (from +x towards +y) and
+    the radius the strength at the IFU edge; a stable dome gradient makes a
+    tight cluster per channel.
+    """
+    fig = go.Figure()
+    for channel in [c for c in "brz" if c in set(summary["channel"])]:
+        data = summary[summary["channel"] == channel]
+        color = DOME_COLORS[channel]
+        fig.add_trace(go.Scatterpolar(
+            r=100 * data["strength"].astype(float), theta=data["direction"].astype(float), mode="markers", name=channel,
+            marker=dict(size=9, color=color, line=dict(width=1.5, color=THEME["surface"])),
+            customdata=np.column_stack([data["expnum"], _dome_hover(data)]),
+            hovertemplate=(f"<b>{channel}</b> · exposure %{{customdata[0]}}<br>MJD %{{customdata[1]}}, %{{customdata[2]}}, "
+                           "%{customdata[3]}<br>strength %{r:.2f}%<br>direction %{theta:.0f}°<extra></extra>")))
+    fig.update_layout(base_layout(440, margin=dict(l=40, r=40, t=40, b=40)), polar=dict(
+        bgcolor=THEME["surface"],
+        radialaxis=dict(rangemode="tozero", ticksuffix="%", angle=90, tickangle=90, gridcolor=THEME["grid"], linecolor=THEME["axis"],
+                        tickfont=dict(color=THEME["muted"], size=11)),
+        angularaxis=dict(rotation=0, direction="counterclockwise", tickmode="array", tickvals=[0, 90, 180, 270],
+                         ticktext=["+x", "+y", "−x", "−y"], gridcolor=THEME["grid"], linecolor=THEME["axis"],
+                         tickfont=dict(color=THEME["ink2"]))))
+    return fig
+
+
+def figure_dome_gradient(summary: pd.DataFrame) -> go.Figure:
+    """Strength and direction of the gradient removed from each dome exposure, one line per channel"""
+    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.1,
+                        subplot_titles=["Strength of the gradient removed from each exposure",
+                                        "Direction across the science IFU, from +x towards +y"])
+    for channel in [c for c in "brz" if c in set(summary["channel"])]:
+        data = summary[summary["channel"] == channel]
+        color = DOME_COLORS[channel]
+        x = data["expnum"].astype(str)
+        hover = _dome_hover(data)
+        fig.add_trace(go.Scatter(
+            x=x, y=100 * data["strength"].astype(float), mode="lines+markers", name=channel, legendgroup=channel,
+            line=dict(width=2, color=color), marker=dict(size=8, color=color, line=dict(width=1.5, color=THEME["surface"])),
+            customdata=hover, hovertemplate=(f"<b>{channel}</b> · exposure %{{x}}<br>MJD %{{customdata[0]}}, %{{customdata[1]}}, "
+                                             "%{customdata[2]}<br>strength %{y:.2f}%<extra></extra>")), row=1, col=1)
+        fig.add_trace(go.Scatter(
+            x=x, y=_wrap_angle(data["direction"]), mode="markers", name=channel, legendgroup=channel, showlegend=False,
+            marker=dict(size=9, color=color, line=dict(width=1.5, color=THEME["surface"])),
+            customdata=hover, hovertemplate=(f"<b>{channel}</b> · exposure %{{x}}<br>MJD %{{customdata[0]}}, %{{customdata[1]}}, "
+                                             "%{customdata[2]}<br>direction %{y:.0f}°<extra></extra>")), row=2, col=1)
+    fig.update_yaxes(title_text="Strength (%)", rangemode="tozero", row=1, col=1)
+    fig.update_yaxes(title_text="Direction (°)", range=[-180, 180], tickvals=[-180, -90, 0, 90, 180], row=2, col=1)
+    fig.update_xaxes(type="category", categoryorder="array", categoryarray=_exposure_axis(summary))
+    fig.update_xaxes(title_text="Exposure", row=2, col=1)
+    return _finish_twilight_figure(fig, 520)
+
+
+def figure_dome_factors(summary: pd.DataFrame, channel: str) -> go.Figure:
+    """Spectrograph factors removed from each dome exposure of a channel"""
+    fig = go.Figure()
+    data = summary[summary["channel"] == channel]
+    for i in (1, 2, 3):
+        color = SERIES[i - 1]
+        fig.add_trace(go.Scatter(
+            x=data["expnum"].astype(str), y=data[f"factor{i}"].astype(float), mode="lines+markers", name=f"sp{i}",
+            line=dict(width=2, color=color), marker=dict(size=8, color=color, line=dict(width=1.5, color=THEME["surface"])),
+            customdata=_dome_hover(data), hovertemplate=(f"<b>sp{i}</b> · exposure %{{x}}<br>MJD %{{customdata[0]}}, %{{customdata[1]}}, "
+                                                         "%{customdata[2]}<br>factor %{y:.4f}<extra></extra>")))
+    fig.add_hline(y=1, line=dict(color=THEME["axis"], width=1))
+    fig.update_yaxes(title_text="Factor (mean 1)")
+    fig.update_xaxes(title_text="Exposure", type="category", categoryorder="array", categoryarray=_exposure_axis(data))
+    return _finish_twilight_figure(fig, 320)
+
+
+def _dome_figures(summary: pd.DataFrame) -> Dict[str, go.Figure]:
+    figures = {"vectors": figure_dome_vectors(summary), "gradient": figure_dome_gradient(summary)}
+    for channel in [c for c in "brz" if c in set(summary["channel"])]:
+        figures[f"factors|{channel}"] = figure_dome_factors(summary, channel)
+    return figures
+
+
+def _write_dome_dashboard(report_path, summary, figures, mjds, epoch_mjd, drpver, layout=None, maps=None):
+    channels = [c for c in "brz" if c in set(summary["channel"])]
+    exposures = summary.drop_duplicates("expnum")
+    lamps = exposures.groupby("lamp")["expnum"].nunique()
+
+    tiles = [("Nights", f"{summary['mjd'].nunique()}", ", ".join(map(str, sorted(summary["mjd"].unique())))),
+             ("Dome exposures", f"{len(exposures)}", ", ".join(f"{n} {lamp}" for lamp, n in lamps.items()))]
+    for channel in channels:
+        sel = summary[summary["channel"] == channel]
+        direction, spread = _circular_spread(sel["direction"])
+        factors = sel[["factor1", "factor2", "factor3"]].astype(float)
+        tiles.append((f"{channel} gradient", f"{100 * np.nanmedian(sel['strength']):.2f}%",
+                      (f"median, towards {_num(direction, '.0f')}° ± {_num(spread, '.0f')}°; "
+                       f"factors vary by {100 * np.nanmax(factors.max() - factors.min()):.2f}% at most")))
+
+    meta = [("DRP version", drpver), ("Epoch", str(epoch_mjd)), ("MJDs", ", ".join(map(str, mjds))),
+            ("Channels", "".join(channels)), ("Generated", datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"))]
+    intro = ("<p>For each dome flat exposure, the gradient across the science IFU and the spectrograph factors that the "
+             "fiber flat procedure removed (fit_fiberflat), as for the twilights. Each channel uses the exposures of its lamp: "
+             "LDLS for b and r, quartz for z. The dome is lit the same way in every exposure of a lamp, so the gradient should "
+             "keep its strength and direction along the sequence; the factors follow the spectrograph shutter timing.</p>")
+
+    table_rows = []
+    for _, r in summary.iterrows():
+        table_rows.append([str(int(r["mjd"])), str(int(r["expnum"])), escape(str(r["time"])[11:19] or "-"), escape(r["channel"]),
+                           escape(r["lamp"] or "-"), escape(r["calibfib"]), _num(r["exptime"], ".0f"),
+                           _num(100 * r["strength"], ".2f"), _num(r["direction"], ".0f"),
+                           " / ".join(_num(r[f"factor{i}"], ".4f") for i in (1, 2, 3))])
+    table = html_table(
+        [("MJD", ""), ("Exposure", ""), ("UTC", "start of the exposure"), ("Ch", "channel"), ("Lamp", ""),
+         ("Std fiber", "exposed standard fiber (CALIBFIB)"), ("Exptime (s)", ""),
+         ("Gradient (%)", "removed from the exposure, at the IFU edge"), ("Direction (°)", "of the removed gradient, from IFU +x towards +y"),
+         ("Factors sp1 / sp2 / sp3", "removed from the exposure, mean 1")],
+        table_rows, numeric=[True, True, False, False, False, False, True, True, True, False])
+
+    body = DOME_BODY.replace("@@TABLE@@", table)
+    body = body.replace("@@FACTORS@@", picker("dome-factors", "factors", [("Channel", [(c, c) for c in channels])], 320))
+    if layout is not None and maps:
+        ifu_exposures = [{"expnum": int(r["expnum"]), "time": str(r["time"])[11:16],
+                          "subtitle": f"MJD {int(r['mjd'])} · {r['lamp']} · {r['calibfib']}", "dirSun": None, "dirHorizon": None}
+                         for _, r in exposures.iterrows()]
+        payload = json.dumps(_exposures_ifu_payload(ifu_exposures, summary, layout, maps)).replace("</", "<\\/")
+        options = "".join(f'<option value="{c}">{c}</option>' for c in channels if c in maps)
+        body = body.replace("@@IFU@@", TWILIGHT_IFU.replace("@@CHANNEL_OPTIONS@@", options).replace("@@TWI_PAYLOAD@@", payload)
+                            .replace("@@IFU_KEY@@", "").replace("@@IFU_STYLE@@", IFU_STYLE))
+    else:
+        body = body.replace("@@IFU@@", '<p class="note">No gradient coefficients in the per-exposure flats.</p>')
+    write_dashboard(report_path, title="LVM Dome Flat Sequence", eyebrow="LVM DRP · fiber flats · domes",
+                    intro=intro, meta=meta, tiles=tiles, body=body, figures=figures, generator="lvmdrp.qa.fiberflats.qa_dome_sequence")
+    return report_path
+
+
+DOME_BODY = r"""
+<section>
+  <h2>Gradient removed from each exposure</h2>
+  <p>Strength and direction of the gradient that the fiber flat procedure fitted and removed from each dome exposure. In
+  the first chart, each exposure is a point at the direction of its gradient across the science IFU and at its strength:
+  a stable dome illumination makes one tight cluster per channel. The second shows both along the sequence.</p>
+  <div class="chart" data-fig="vectors" role="img" aria-label="Removed gradient of each exposure in IFU coordinates" style="min-height: 440px"></div>
+  <div class="chart" data-fig="gradient" role="img" aria-label="Removed gradient strength and direction along the sequence" style="min-height: 520px"></div>
+</section>
+
+<section>
+  <h2>Spectrograph factors removed from each exposure</h2>
+  <p>The factor of each spectrograph, normalized to a mean of 1. With the same lamp and exposure time, changes along the
+  sequence come from the spectrograph shutters.</p>
+  @@FACTORS@@
+</section>
+
+<section>
+  <h2>Gradient model of each exposure on the science IFU</h2>
+  <p>The gradient model removed from each exposure, divided by its mean, on the science IFU fibers. The caption gives the
+  lamp and the exposed standard fiber; a dome gradient keeps its pattern from one exposure to the next.</p>
+  @@IFU@@
+  <details><summary>Table view: all exposures</summary>@@TABLE@@</details>
+</section>
+
+<section id="definitions">
+  <h2>How the quantities are computed</h2>
+  <div class="defs">
+    <div class="def">
+      <h3>Removed gradient</h3>
+      <p>The FIBERFLAT GCOEFF coefficients \(c_k\) that fit_fiberflat fitted with IFUGradient on the dome counts at the
+      normalization window, as the change from the science IFU center to its edge, at the radius \(R\), relative to the mean
+      of the model over the good science fibers.</p>
+      <div class="eq">\[ \begin{gathered} G(x, y) = c_0 + c_1\, y + c_2\, x \\ \vec g = \frac{R\,(c_2,\ c_1)}{\langle G \rangle}, \qquad \theta = \operatorname{atan2}(g_y,\ g_x) \end{gathered} \]</div>
+    </div>
+    <div class="def">
+      <h3>Stability of the direction</h3>
+      <p>The direction quoted for each channel is the circular mean of the directions \(\theta_i\) of its exposures, with the
+      median angular distance to it.</p>
+      <div class="eq">\[ \bar\theta = \operatorname{atan2}\!\left(\textstyle\sum_i \sin\theta_i,\ \sum_i \cos\theta_i\right), \qquad \delta = \operatorname{median}_i \left|\theta_i - \bar\theta\right| \]</div>
+    </div>
+    <div class="def">
+      <h3>Spectrograph factors</h3>
+      <p>The FIBERFLAT FACTOR values that fit_fiberflat removed from the exposure, normalized to a mean of 1.</p>
+      <div class="eq">\[ f_s \rightarrow \frac{f_s}{\tfrac{1}{3}\sum_{s'} f_{s'}} \]</div>
+    </div>
+  </div>
+</section>
 """

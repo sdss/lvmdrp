@@ -346,7 +346,7 @@ def combine_twilight_sequence(in_twilights: list[str], in_fflats: List[str], out
     mflat.writeFitsData(out_mflat, replace_masked=False)
 
     # create lvmFlat objects
-    log.info(f"creating lvmTFlat products for {len(twilights)}:")
+    log.info(f"creating lvmFlat products for {len(twilights)} exposures:")
     lvmflats = []
     for i, (fflat, twilight) in enumerate(zip(fflats, twilights)):
         # collect parameters for fitting factors in twilights
@@ -365,7 +365,7 @@ def combine_twilight_sequence(in_twilights: list[str], in_fflats: List[str], out
                           cent_trace=mcent, width_trace=mwidth,
                           wave_trace=mwave, lsf_trace=mlsf,
                           superflat=mflat._data, slitmap=twilight._slitmap)
-        log.info(f"  writing lvmTFlat to {out_lvmflats[i]}")
+        log.info(f"  writing lvmFlat to {out_lvmflats[i]}")
         lvmflat.writeFitsData(out_lvmflats[i])
         lvmflats.append(lvmflat)
 

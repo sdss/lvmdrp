@@ -2,7 +2,9 @@
 #
 
 import collections
+import json
 import os
+import re
 from types import SimpleNamespace
 
 import numpy as np
@@ -556,3 +558,199 @@ def test_default_flatfield_qa_dir(tmp_path, monkeypatch):
 def test_reference_epoch_without_flats(tmp_path):
     with pytest.raises(FileNotFoundError):
         ff.qa_fiberflat_epochs(mjd_ref=60255, channels="b", epochs={60255: {}}, flats_dir=str(tmp_path), dry_run=True)
+
+
+# twilight sequences
+
+def _twilight_header(t, alt, az, pa, expnum=1, channel="b", lamps_on=(), gcoeffs=(1.0, 0.0, 0.0, 0.0), factors=(1.0, 1.0, 1.0)):
+    from astropy.coordinates import AltAz, EarthLocation, SkyCoord
+    from astropy import units as u
+    from lvmdrp.core.constants import LVM_LAT, LVM_LON, LVM_ELEVATION
+
+    location = EarthLocation(lat=LVM_LAT, lon=LVM_LON, height=LVM_ELEVATION * u.m)
+    pointing = SkyCoord(alt=alt * u.deg, az=az * u.deg, frame=AltAz(obstime=t, location=location)).icrs
+    header = fits.Header({"OBSTIME": t.isot, "EXPTIME": 0.0, "EXPOSURE": expnum, "MJD": 61000, "CCD": channel,
+                          "POSCIRA": pointing.ra.deg, "POSCIDE": pointing.dec.deg, "POSCIPA": pa})
+    for lamp in ("NEON", "HGNE", "ARGON", "XENON", "LDLS", "QUARTZ"):
+        header[lamp] = "ON" if lamp in lamps_on else "OFF"
+    for k, c in enumerate(gcoeffs, start=1):
+        header[f"HIERARCH {channel.upper()} FIBERFLAT GCOEFF{k}"] = c
+    for i, f in enumerate(factors, start=1):
+        header[f"HIERARCH {channel.upper()} FIBERFLAT FACTOR{i}"] = f
+    return header
+
+
+def _sun_position(t):
+    from astropy.coordinates import AltAz, EarthLocation, get_body
+    from astropy import units as u
+    from lvmdrp.core.constants import LVM_LAT, LVM_LON, LVM_ELEVATION
+
+    location = EarthLocation(lat=LVM_LAT, lon=LVM_LON, height=LVM_ELEVATION * u.m)
+    return get_body("sun", t, location).transform_to(AltAz(obstime=t, location=location))
+
+
+def test_twilight_geometry():
+    from astropy.time import Time
+
+    slitmap = make_flat()._slitmap
+    t = Time("2025-06-15T23:05:00", scale="utc")
+    sun = _sun_position(t)
+    diff = lambda a, b: (a - b + 180) % 360 - 180  # noqa: E731
+
+    towards = ff.twilight_geometry(_twilight_header(t, 45, sun.az.deg, 0.0), slitmap)
+    assert towards["sun_alt"] == pytest.approx(sun.alt.deg, abs=0.05) and towards["point_alt"] == pytest.approx(45, abs=0.01)
+    # looking towards the Sun below the horizon, the Sun and the horizon are in the same direction across the IFU
+    assert diff(towards["dir_sun"], towards["dir_horizon"]) == pytest.approx(0, abs=1)
+    # looking away from the Sun, the Sun is towards the zenith
+    away = ff.twilight_geometry(_twilight_header(t, 45, sun.az.deg + 180, 0.0), slitmap)
+    assert abs(diff(away["dir_sun"], away["dir_horizon"])) == pytest.approx(180, abs=1)
+    # rotating the IFU rotates both directions by the same angle
+    pa0 = ff.twilight_geometry(_twilight_header(t, 45, sun.az.deg + 60, 0.0), slitmap)
+    pa30 = ff.twilight_geometry(_twilight_header(t, 45, sun.az.deg + 60, 30.0), slitmap)
+    assert abs(diff(pa30["dir_sun"], pa0["dir_sun"])) == pytest.approx(30, abs=0.5)
+    assert diff(pa30["dir_sun"], pa0["dir_sun"]) == pytest.approx(diff(pa30["dir_horizon"], pa0["dir_horizon"]), abs=0.5)
+
+    # bytes columns (as read from FITS) and existing fiber coordinates don't change the result
+    stale = Table(slitmap, copy=True)
+    stale["telescope"] = np.char.encode(np.asarray(stale["telescope"]).astype(str))
+    stale["ra"], stale["dec"] = 0.0, 0.0
+    assert ff.twilight_geometry(_twilight_header(t, 45, sun.az.deg + 60, 0.0), stale)["dir_sun"] == pytest.approx(pa0["dir_sun"])
+
+    # without a commanded position only the Sun and the Moon are computed
+    header = _twilight_header(t, 45, sun.az.deg, 0.0)
+    header["POSCIRA"], header["POSCIDE"] = -999.0, -999.0
+    missing = ff.twilight_geometry(header, slitmap)
+    assert np.isfinite(missing["sun_alt"]) and np.isnan(missing["dir_sun"]) and np.isnan(missing["point_alt"])
+
+
+def test_is_twilight():
+    from astropy.time import Time
+
+    t = Time("2025-06-15T23:05:00", scale="utc")
+    assert ff._is_twilight(fits.Header({"LDLS": "OFF", "QUARTZ": "OFF"}))
+    assert not ff._is_twilight(fits.Header({"LDLS": "ON", "QUARTZ": "OFF"}))
+    assert not ff._is_twilight(_twilight_header(t, 45, 0, 0, lamps_on=("QUARTZ",)))
+
+
+def test_qa_twilight_sequence(tmp_path):
+    from astropy.time import Time
+
+    slitmap = make_flat()._slitmap
+    start = Time("2025-06-15T23:00:00", scale="utc")
+    paths = []
+    # three twilight exposures with the same removed gradient in two channels, and a dome flat that is left out
+    for expnum, minutes in ((101, 0), (102, 5), (103, 10)):
+        for channel in "br":
+            header = _twilight_header(start + minutes * 60 * ff.u.s, 60, 100, 0.0, expnum=expnum, channel=channel,
+                                      gcoeffs=(2.0, 0.02, 0.01, 0.0), factors=(0.95, 1.0, 1.05))
+            path = tmp_path / f"lvm-fflat-{channel}-{expnum:08d}.fits"
+            fits.HDUList([fits.PrimaryHDU(header=header), fits.table_to_hdu(slitmap)]).writeto(path)
+            paths.append(str(path))
+    dome = _twilight_header(start, 60, 100, 0.0, expnum=104, channel="b", lamps_on=("LDLS",))
+    fits.HDUList([fits.PrimaryHDU(header=dome), fits.table_to_hdu(slitmap)]).writeto(tmp_path / "lvm-fflat-b-00000104.fits")
+    paths.append(str(tmp_path / "lvm-fflat-b-00000104.fits"))
+    for hdul_path in paths:
+        with fits.open(hdul_path, mode="update") as hdul:
+            hdul[1].name = "SLITMAP"
+
+    result = ff.qa_twilight_sequence(61000, channels="br", flat_paths=paths, include_raw=False, output_dir=str(tmp_path / "qa"))
+    summary = result["summary"]
+    assert sorted(summary["expnum"].unique()) == [101, 102, 103]
+    assert len(summary) == 6
+
+    # removed gradient as in the other dashboards
+    gx, gy, _ = ff._gradient_at_edge([2.0, 0.02, 0.01, 0.0], slitmap)
+    assert np.allclose(summary["grad_x"], gx) and np.allclose(summary["grad_y"], gy)
+    assert np.allclose(summary["factor1"], 0.95) and np.allclose(summary["factor3"], 1.05)
+    assert np.allclose(summary["dtheta_sun"], (summary["direction"] - summary["dir_sun"] + 180) % 360 - 180)
+    # the Sun sets along the sequence
+    assert np.all(np.diff(summary.drop_duplicates("expnum")["sun_alt"]) < 0)
+
+    html = open(result["report"], encoding="utf-8").read()
+    assert html.isascii() and 'data-fig="sky|61000"' in html and 'data-fig="gradient|b|61000"' in html
+    assert set(result["figures"]) == {"sky|61000", "geometry|61000", "gradient|b|61000", "gradient|r|61000",
+                                      "factors|b|61000", "factors|r|61000"}
+    # IFU tiles: the gradient model of each exposure and the directions of the Sun and the horizon
+    assert 'id="twi-grid"' in html and ".ifu-grid" in html
+    payload = json.loads(re.search(r"const D = (\{.*?\});\n", html).group(1))
+    assert set(payload["values"]) == {"b", "r"} and set(payload["values"]["b"]) == {"101", "102", "103"}
+    model = np.array(payload["values"]["b"]["101"], dtype=float) / 1e4
+    assert np.nanmean(model) == pytest.approx(1.0, abs=1e-3) and np.nanstd(model) > 0
+    assert all(e["dirSun"] is not None and e["dirHorizon"] is not None for e in payload["exposures"])
+    assert os.path.isfile(result["report"].replace(".html", ".csv"))
+
+
+def test_qa_twilight_sequence_without_flats(tmp_path):
+    with pytest.raises(FileNotFoundError, match="fiberflats --skip-combination"):
+        ff.qa_twilight_sequence(61000, flat_paths=[], include_raw=False, output_dir=str(tmp_path))
+# dome sequences
+
+def test_is_dome():
+    assert ff._is_dome(fits.Header({"LDLS": "ON", "QUARTZ": "OFF"}))
+    assert ff._is_dome(fits.Header({"LDLS": "OFF", "QUARTZ": "ON"}))
+    assert not ff._is_dome(fits.Header({"LDLS": "OFF", "QUARTZ": "OFF"}))
+    assert not ff._is_dome(fits.Header({"LDLS": "ON", "NEON": "ON"}))
+
+
+def test_circular_spread():
+    mean, spread = ff._circular_spread([179.0, -179.0, np.nan])
+    assert abs(abs(mean) - 180) < 1e-6 and spread == pytest.approx(1.0)
+    assert np.isnan(ff._circular_spread([np.nan])[0])
+
+
+def test_qa_dome_sequence(tmp_path):
+    from astropy.time import Time
+
+    slitmap = make_flat()._slitmap
+    start = Time("2025-06-15T22:00:00", scale="utc")
+    paths = []
+
+    def write(expnum, channel, lamps_on, gcoeffs, factors, calibfib):
+        header = _twilight_header(start + (expnum - 200) * 60 * ff.u.s, 60, 100, 0.0, expnum=expnum, channel=channel,
+                                  lamps_on=lamps_on, gcoeffs=gcoeffs, factors=factors)
+        header["CALIBFIB"] = calibfib
+        header["EXPTIME"] = 90.0
+        path = tmp_path / f"lvm-fflat-{channel}-{expnum:08d}.fits"
+        hdul = fits.HDUList([fits.PrimaryHDU(header=header), fits.table_to_hdu(slitmap)])
+        hdul[1].name = "SLITMAP"
+        hdul.writeto(path)
+        paths.append(str(path))
+
+    # LDLS exposures for b and r, quartz exposures for z, and a twilight that is left out
+    for i, expnum in enumerate((201, 202, 203)):
+        for channel in "br":
+            write(expnum, channel, ("LDLS",), (2.0, 0.02, 0.01, 0.0), (0.98, 1.0, 1.02 + 0.01 * i), f"P1-{i + 1}")
+    for i, expnum in enumerate((211, 212)):
+        write(expnum, "z", ("QUARTZ",), (2.0, -0.01, 0.0, 0.0), (1.0, 1.0, 1.0), f"P1-{i + 1}")
+    write(220, "b", (), (2.0, 0.0, 0.0, 0.0), (1.0, 1.0, 1.0), "P1-1")
+
+    result = ff.qa_dome_sequence(61000, channels="brz", flat_paths=paths, epoch_mjd=60999, output_dir=str(tmp_path / "qa"))
+    summary = result["summary"]
+    assert sorted(summary["expnum"].unique()) == [201, 202, 203, 211, 212]
+    assert len(summary) == 8
+    assert set(summary.loc[summary["channel"] == "z", "lamp"]) == {"quartz"}
+    assert set(summary.loc[summary["channel"] != "z", "lamp"]) == {"ldls"}
+    assert list(summary.loc[summary["channel"] == "b", "calibfib"]) == ["P1-1", "P1-2", "P1-3"]
+
+    # removed gradient and factors as in the twilight dashboard
+    gx, gy, _ = ff._gradient_at_edge([2.0, 0.02, 0.01, 0.0], slitmap)
+    b = summary[summary["channel"] == "b"]
+    assert np.allclose(b["grad_x"], gx) and np.allclose(b["grad_y"], gy)
+    assert np.allclose(b[["factor1", "factor2", "factor3"]].mean(axis=1), 1.0)
+    # the z gradient points towards -y
+    assert np.allclose(summary.loc[summary["channel"] == "z", "direction"], -90)
+
+    assert set(result["figures"]) == {"vectors", "gradient", "factors|b", "factors|r", "factors|z"}
+    assert list(result["figures"]["gradient"].layout.xaxis.categoryarray) == ["201", "202", "203", "211", "212"]
+    html = open(result["report"], encoding="utf-8").read()
+    assert html.isascii() and 'data-fig="vectors"' in html and 'data-fig="factors|b"' in html
+    assert result["report"].endswith("domes_60999.html") and os.path.isfile(result["report"].replace(".html", ".csv"))
+    # IFU tiles of each channel, without arrows
+    payload = json.loads(re.search(r"const D = (\{.*?\});\n", html).group(1))
+    assert set(payload["values"]) == {"b", "r", "z"} and set(payload["values"]["z"]) == {"211", "212"}
+    assert all(e["dirSun"] is None and e["dirHorizon"] is None for e in payload["exposures"])
+    assert payload["exposures"][0]["subtitle"].endswith("ldls · P1-1")
+    assert "towards the Sun" not in html
+
+    with pytest.raises(FileNotFoundError):
+        ff.qa_dome_sequence(61000, flat_paths=[paths[-1]], output_dir=str(tmp_path / "none"))
