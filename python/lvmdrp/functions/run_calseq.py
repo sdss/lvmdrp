@@ -85,12 +85,13 @@ from lvmdrp.functions.run_twilights import (
 
 SLITMAP = read_fibermap(as_table=True)
 MASTER_CON_LAMPS = {"b": "ldls", "r": "ldls", "z": "quartz"}
+# calibrations produced by the nightly sequence, to track the instrument and the long-term calibrations
+NIGHTLY_CALIBRATION_TYPES = {"bias", "trace", "wave", "dome"}
 MASK_BANDS = {
     "b": [(3910, 4000), (4260, 4330)],
     "r": [(6840,6960)],
     "z": [(7570, 7700)]
 }
-COUNTS_THRESHOLDS = {"ldls": 1000, "quartz": 1000}
 FIBER_MEASURING_CONFIG = {
         "counts": {"mode": "lsq", "method": "dogbox", "loss": "linear", "xtol": 1e-3, "ftol": 1e-3},
         "centroids": {"mode": "lsq", "method": "dogbox", "loss": "linear", "xtol": 1e-3, "ftol": 1e-3},
@@ -1051,7 +1052,7 @@ def _log_dry_run(frames, calibs=None, settings=None, caller=None, show_calibrati
             log.info(r)
 
 
-def _create_wavelengths_60177(use_longterm_cals=True, skip_done=True, remeasure_arcs=False, dry_run=False):
+def _create_wavelengths_60177(skip_done=True, remeasure_arcs=False, dry_run=False):
     """Reduce arc sequence for MJD = 60177"""
     pixwav = {"z1": np.asarray([
     [88.57, 7488.8712, 1],
@@ -1572,7 +1573,7 @@ def check_epochs_completeness(mjd=None, version=drpver, calibrations=CALIBRATION
             log.info(f"   {record}")
 
 
-def create_bias(mjd, epochs=None, use_longterm_cals=True, skip_done=True, dry_run=False):
+def create_bias(mjd, epochs=None, skip_done=True, dry_run=False):
     """Reduce a sequence of bias frames to produce master frames for each camera
 
     Given a set of MJDs and (optionally) exposure numbers, reduce the
@@ -1582,10 +1583,6 @@ def create_bias(mjd, epochs=None, use_longterm_cals=True, skip_done=True, dry_ru
     ----------
     mjd : int
         MJD to reduce
-    use_longterm_cals : bool
-        Whether to use long-term calibration frames or not, defaults to True
-    flavor : str
-        The type of frame to reduce
     skip_done : bool
         Skip pipeline steps that have already been done
     dry_run : bool, optional
@@ -1735,7 +1732,7 @@ def _fit_fiber_model(frames, camera, mjd, kind="longterm", cent_guess_ncolumns=1
     (model / img).writeFitsData(path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, camera=camera, kind=f"{prefix}ratio"))
 
 
-def create_nightly_traces(mjd, cameras=CAMERAS, use_longterm_cals=False,
+def create_nightly_traces(mjd, cameras=CAMERAS,
                           cent_guess_ncolumns=140, trace_full_ncolumns=40,
                           skip_done=True, dry_run=False):
     """Create the nightly fiber model from the nightly dome flats
@@ -1754,8 +1751,6 @@ def create_nightly_traces(mjd, cameras=CAMERAS, use_longterm_cals=False,
         MJD to reduce.
     cameras : list or tuple, optional
         Cameras to create the fiber model for, by default all
-    use_longterm_cals : bool, optional
-        Kept for compatibility, the bias of `mjd` is always used.
     cent_guess_ncolumns : int, optional
         Number of columns to guess the fiber parameters, by default 140.
     trace_full_ncolumns : int, optional
@@ -1791,7 +1786,6 @@ def create_nightly_traces(mjd, cameras=CAMERAS, use_longterm_cals=False,
 
 
 def create_traces(mjd, epochs=None, cameras=CAMERAS, ring="primary",
-                  use_longterm_cals=True,
                   cent_guess_ncolumns=140,
                   trace_full_ncolumns=40,
                   skip_done=True, dry_run=False):
@@ -1811,8 +1805,6 @@ def create_traces(mjd, epochs=None, cameras=CAMERAS, ring="primary",
         MJD to reduce
     cameras : list or tuple, optional
         List of cameras (e.g., b2, z3) to create traces for
-    use_longterm_cals : bool
-        Whether to use long-term calibration frames or not, defaults to True
     fit_poly : bool, optional
         Fit polynomials to traces, by default True
     poly_deg_amp : int, optional
@@ -2035,7 +2027,6 @@ def create_dome_fiberflats(mjd: int, epochs: dict[int, dict] = None, cals_mjd: i
                            cnorms: Dict[str, float] = SKYLINES_FIBERFLAT, dwave: float = 20.0,
                            smoothing: float = 0.07,
                            interpolate_invalid: bool = True,
-                           use_longterm_cals: bool = True,
                            skip_sequence_selection: bool = False,
                            skip_combination: bool = False,
                            skip_done: bool = False,
@@ -2084,8 +2075,6 @@ def create_dome_fiberflats(mjd: int, epochs: dict[int, dict] = None, cals_mjd: i
         Smoothing parameter for fiberflat fitting. Defaults to 0.07.
     interpolate_invalid : bool, optional
         Interpolate over invalid/masked fibers. Defaults to True.
-    use_longterm_cals : bool, optional
-        Kept for compatibility, the calibrations of `cals_mjd` are always used.
     skip_sequence_selection : bool, optional
         Use all the dome flats of each lamp instead of choosing a sequence. Defaults to False.
     skip_combination : bool, optional
@@ -2166,8 +2155,6 @@ def create_twilight_fiberflats(mjd: int, epochs: dict[int, dict] = None, cals_mj
     ----------
     mjd : int
         MJD to reduce.
-    use_longterm_cals : bool, optional
-        Whether to use long-term calibration frames. Defaults to True.
     expnums : list[int], optional
         List of twilight exposure numbers to process. If None, all available are used.
     ref_kind : int or callable, optional
@@ -2478,7 +2465,7 @@ def extract_arcs(arcs, calibs, skip_done=True):
     return xarc_paths
 
 
-def create_wavelengths(mjd, epochs=None, use_longterm_cals=True, kind="longterm", skip_done=True, remeasure_arcs=False, dry_run=False):
+def create_wavelengths(mjd, epochs=None, kind="longterm", skip_done=True, remeasure_arcs=False, dry_run=False):
     """Reduces an arc sequence to create master wavelength solutions
 
     Given a set of MJDs and (optionally) exposure numbers, create wavelength
@@ -2493,10 +2480,6 @@ def create_wavelengths(mjd, epochs=None, use_longterm_cals=True, kind="longterm"
     ----------
     mjd : int
         MJD to reduce
-    use_longterm_cals : bool
-        Whether to use long-term calibration frames or not, defaults to True
-    expnums : list
-        List of exposure numbers to reduce
     kind : str, optional
         Kind of calibration frames to produce, by default 'longterm'
     skip_done : bool
@@ -2510,7 +2493,7 @@ def create_wavelengths(mjd, epochs=None, use_longterm_cals=True, kind="longterm"
     # run wavelength calibration for special MJDs
     if mjd == 60177:
         log.info(f"running dedicated script to create wavelength calibrations for MJD = {mjd}")
-        _create_wavelengths_60177(use_longterm_cals=use_longterm_cals, skip_done=skip_done, remeasure_arcs=remeasure_arcs, dry_run=dry_run)
+        _create_wavelengths_60177(skip_done=skip_done, remeasure_arcs=remeasure_arcs, dry_run=dry_run)
         return
 
     mjds, frames, expnums = get_arc_sequence(mjd=mjd, epochs=epochs, kind=kind)
@@ -2600,44 +2583,39 @@ def detrend_calibrations(mjd, calibration, dry_run=False, skip_done=True):
     reduce_2d(mjds=mjd, calibrations=calibs, expnums=frames.expnum.unique(), reject_cr=False, add_astro=False, sub_straylight=False, skip_done=skip_done)
 
 
-def reduce_nightly_sequence(mjd, use_longterm_cals=False, reject_cr=True, only_cals=CALIBRATION_TYPES,
-                            counts_thresholds=COUNTS_THRESHOLDS, cent_guess_ncolumns=140, trace_full_ncolumns=40,
-                            extract_metadata=False, skip_done=True, keep_ancillary=False,
-                            fflats_from=None, link_pixelmasks=True, remeasure_arcs=False, dry_run=False):
+def reduce_nightly_sequence(mjd, only_cals=NIGHTLY_CALIBRATION_TYPES, cent_guess_ncolumns=140, trace_full_ncolumns=40,
+                            skip_done=True, link_pixelmasks=True, remeasure_arcs=False, dry_run=False):
     """Reduces the nightly calibration sequence:
 
     The nightly calibration sequence consists of the following exposures:
         * 7 - 9 bias
         * 2 dome flat (LDLS and quartz)
         * 2 arc (10s and 50s exposures)
-        * ~12 - 24 twilight (~half exposures at dawn and twilight)
 
     This routine will create *nightly* (not long-term) master calibrations
-    at $LVM_SPECTRO_REDUX/{drpver}/0011XX/11111/{mjd}/calib
+    at $LVM_SPECTRO_REDUX/{drpver}/0011XX/11111/{mjd}/calib: bias, fiber
+    model (ncounts, ncentroids, nsigmas, nmodel), wavelength and LSF (nwave,
+    nlsf) and dome fiberflats (nfiberflat_dome). These are analogs of the
+    long-term calibrations meant to track the instrument health and the
+    staleness of the long-term calibrations, not to reduce science frames.
 
     Parameters:
     ----------
     mjd : int
         MJD to reduce
-    use_longterm_cals : bool
-        Whether to use long-term calibration frames or not, defaults to False
-    reject_cr : bool
-        Reject cosmic rays in 2D reduction, by default True
     only_cals : list, tuple or set
-        Only produce this calibrations, by default {'bias', 'trace', 'wave', 'dome', 'twilight'}
-    extract_metadata : bool, optional
-        Extract or use cached metadata if exist, by default False (use cache)
+        Only produce this calibrations, by default {'bias', 'trace', 'wave', 'dome'}
+    cent_guess_ncolumns : int, optional
+        Number of columns to guess the fiber parameters, by default 140
+    trace_full_ncolumns : int, optional
+        Number of columns to fit the fiber parameters, by default 40
     skip_done : bool
         Skip pipeline steps that have already been done
-    keep_ancillary : bool
-        Keep ancillary files, by default False
+    link_pixelmasks : bool, optional
+        Create a symbolic link of current version of pixel mask and pixel flats to current version, by default True
     remeasure_arcs : bool, optional
         Measure the arc lines again, refit the wavelength/LSF solutions and rectify the arcs again even
         with `skip_done`; the detrended and extracted arcs are still reused, by default False
-    fflats_from : int, optional
-        Copy twilight fiberflats from given MJD, by default None (no copy)
-    link_pixelmasks : bool, optional
-        Create a symbolic link of current version of pixel mask and pixel flats to current version, by default True
     dry_run : bool, optional
         Logs useful information abaut the current setup without actually reducing, by default False
     """
@@ -2652,41 +2630,32 @@ def reduce_nightly_sequence(mjd, use_longterm_cals=False, reject_cr=True, only_c
     if link_pixelmasks:
         _link_pixelmasks()
 
-    if not set(only_cals).issubset(CALIBRATION_TYPES):
-        raise ValueError(f"some chosen image types in 'only_cals' are not valid: {only_cals.difference(CALIBRATION_TYPES)}")
+    if not set(only_cals).issubset(NIGHTLY_CALIBRATION_TYPES):
+        raise ValueError(f"some chosen image types in 'only_cals' are not valid: {set(only_cals).difference(NIGHTLY_CALIBRATION_TYPES)}")
     log.info(f"going to produce nightly calibrations: {only_cals}")
 
     if "bias" in only_cals:
-        create_bias(mjd=mjd, use_longterm_cals=use_longterm_cals, skip_done=skip_done, dry_run=dry_run)
+        create_bias(mjd=mjd, skip_done=skip_done, dry_run=dry_run)
 
     if "trace" in only_cals:
-        create_nightly_traces(mjd=mjd, use_longterm_cals=use_longterm_cals,
+        create_nightly_traces(mjd=mjd,
                               cent_guess_ncolumns=cent_guess_ncolumns,
                               trace_full_ncolumns=trace_full_ncolumns,
                               skip_done=skip_done, dry_run=dry_run)
 
     if "wave" in only_cals:
-        create_wavelengths(mjd=mjd, use_longterm_cals=use_longterm_cals, kind="nightly", skip_done=skip_done,
+        create_wavelengths(mjd=mjd, kind="nightly", skip_done=skip_done,
                            remeasure_arcs=remeasure_arcs, dry_run=dry_run)
 
     if "dome" in only_cals:
         create_dome_fiberflats(mjd=mjd, kind="nightly", skip_done=skip_done, dry_run=dry_run)
 
-    if "twilight" in only_cals:
-        create_twilight_fiberflats(mjd=mjd, skip_done=skip_done, dry_run=dry_run)
 
-    # if not keep_ancillary:
-    #     _clean_ancillary(mjd)
-
-
-def reduce_longterm_sequence(mjd, epochs=None, use_longterm_cals=True,
-                             reject_cr=True, only_cals=CALIBRATION_TYPES,
-                             counts_thresholds=COUNTS_THRESHOLDS,
+def reduce_longterm_sequence(mjd, epochs=None, only_cals=CALIBRATION_TYPES - {"dome"},
                              cent_guess_ncolumns=140, trace_full_ncolumns=40,
-                             extract_metadata=False,
                              skip_sequence_selection=False,
                              skip_combination=False,
-                             skip_done=True, keep_ancillary=False,
+                             skip_done=True,
                              link_pixelmasks=True, remeasure_arcs=False,
                              dry_run=False):
     """Reduces the long-term calibration sequence:
@@ -2706,22 +2675,19 @@ def reduce_longterm_sequence(mjd, epochs=None, use_longterm_cals=True,
         MJD to reduce
     epochs : dict[int, dict[str,dict]] | None, optional
         A dictionary with specifications of the calibration epoch, by default None
-    use_longterm_cals : bool
-        Whether to use long-term calibration frames or not, defaults to True
-    reject_cr : bool
-        Reject cosmic rays in 2D reduction, by default True
     only_cals : list, tuple or set
-        Only produce this calibrations, by default {'bias', 'trace', 'wave', 'dome', 'twilight'}
-    extract_metadata : bool, optional
-        Extract or use cached metadata if exist, by default False (use cache)
+        Only produce this calibrations, by default {'bias', 'trace', 'wave', 'twilight'}. Dome fiberflats
+        ('dome') are only needed for testing, science reductions use the twilight fiberflats
+    cent_guess_ncolumns : int, optional
+        Number of columns to guess the fiber parameters, by default 140
+    trace_full_ncolumns : int, optional
+        Number of columns to fit the fiber parameters, by default 40
     skip_sequence_selection : bool, optional
         Skip calibration sequence selection, by default False
     skip_combination : bool, optional
         Skip combination of calibrations into final master frames, by default False
     skip_done : bool, optional
         Skip pipeline steps that have already been done
-    keep_ancillary : bool
-        Keep ancillary files, by default False
     remeasure_arcs : bool, optional
         Measure the arc lines again, refit the wavelength/LSF solutions and rectify the arcs again even
         with `skip_done`; the detrended and extracted arcs are still reused, by default False
@@ -2746,20 +2712,19 @@ def reduce_longterm_sequence(mjd, epochs=None, use_longterm_cals=True,
     log.info(f"going to produce long-term calibrations: {only_cals}")
 
     if "bias" in only_cals:
-        create_bias(mjd=mjd, epochs=epochs, use_longterm_cals=use_longterm_cals, skip_done=skip_done, dry_run=dry_run)
+        create_bias(mjd=mjd, epochs=epochs, skip_done=skip_done, dry_run=dry_run)
 
     if "trace" in only_cals:
         create_traces(
             mjd=mjd,
             epochs=epochs,
-            use_longterm_cals=use_longterm_cals,
             cent_guess_ncolumns=cent_guess_ncolumns,
             trace_full_ncolumns=trace_full_ncolumns,
             skip_done=skip_done,
             dry_run=dry_run)
 
     if "wave" in only_cals:
-        create_wavelengths(mjd=mjd, epochs=epochs, use_longterm_cals=use_longterm_cals, skip_done=skip_done,
+        create_wavelengths(mjd=mjd, epochs=epochs, skip_done=skip_done,
                            remeasure_arcs=remeasure_arcs, dry_run=dry_run)
 
     if "dome" in only_cals:
@@ -2782,8 +2747,5 @@ def reduce_longterm_sequence(mjd, epochs=None, use_longterm_cals=True,
             skip_combination=skip_combination,
             skip_done=skip_done,
             dry_run=dry_run)
-
-    # if not keep_ancillary:
-    #     _clean_ancillary(mjd)
 
 
