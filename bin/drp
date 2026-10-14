@@ -894,11 +894,12 @@ def qa_flatfield_cli(drpver, redux_dir, mjd, mjd_list, mjd_range, tileid_list, f
 @click.option('-c', '--channels', type=str, default="brz", help='Channels to check')
 @click.option('-d', '--drpver', type=str, default=drpver, help='Pipeline version of the per-exposure twilight flats')
 @click.option('--no-raw', is_flag=True, default=False, help='Leave out the twilight exposures without a per-exposure flat, instead of showing their sky geometry from the raw headers')
+@click.option('-k', '--kmirror', type=str, default=None, help="Infer the position angle from the K-mirror angle (TESCIKM) when POSCIPA is missing: a drpall file (FITS or .h5) to calibrate the relation on guider-solved frames, or a kmirror_pa.json saved by a previous run")
 @click.option('-o', '--output-dir', type=str, default=None, help="Directory of the dashboard and table. Defaults to fiberflat_qa/twilights_{mjds} in the ancillary directory of the first MJD")
 @click.option('--dry-run', is_flag=True, default=False, help='Show the per-exposure flats found and the output paths without reading them')
 @cloup.constraint(mutually_exclusive, ['mjd', 'mjd_list', 'mjd_range'])
 @cloup.constraint(RequireExactly(1), ['mjd', 'mjd_list', 'mjd_range'])
-def qa_twilights_cli(mjd, mjd_list, mjd_range, channels, drpver, no_raw, output_dir, dry_run):
+def qa_twilights_cli(mjd, mjd_list, mjd_range, channels, drpver, no_raw, kmirror, output_dir, dry_run):
     """Compare the gradient and spectrograph factors removed from each twilight exposure with its sky geometry and write an HTML dashboard.
 
     Uses the per-exposure flats of the twilight fiber flat procedure; make them with
@@ -908,8 +909,8 @@ def qa_twilights_cli(mjd, mjd_list, mjd_range, channels, drpver, no_raw, output_
     mjds = [int(m) for m in (mjds if isinstance(mjds, (list, tuple)) else [mjds])]
     try:
         result = qa_twilight_sequence(mjds, channels=channels, drpver=drpver, include_raw=not no_raw,
-                                      output_dir=output_dir, dry_run=dry_run)
-    except FileNotFoundError as e:
+                                      kmirror=kmirror, output_dir=output_dir, dry_run=dry_run)
+    except (FileNotFoundError, ValueError) as e:
         raise click.UsageError(str(e))
     if result["report"]:
         click.echo(f"dashboard written to {result['report']}")

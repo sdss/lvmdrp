@@ -28,6 +28,7 @@ or dome flat sequence have their own dashboards too: :func:`qa_twilight_sequence
 """
 
 import os
+import pathlib
 import re
 import json
 import warnings
@@ -74,7 +75,7 @@ from lvmdrp.qa.report import (
     base_layout, style_axes, html_table, tiles_html, meta_html, figures_json, page_head, picker, write_dashboard,
     epoch_qa_dir, version_qa_dir, sandbox_qa_dir,
 )
-from lvmdrp.utils.convert import tileid_grp
+from lvmdrp.utils.convert import correct_sjd, dateobs_to_sjd, tileid_grp
 
 
 # ---------------------------------------------------------------------------
@@ -1199,6 +1200,36 @@ def find_frames(drpver: str, channels: str = "brz", mjds: List[int] = None, mjd_
     return paths
 
 
+def _night_sjd(header, path: str = None) -> int:
+    """SDSS MJD of the night of an exposure, as the pipeline assigns it
+
+    As in :func:`lvmdrp.utils.metadata.get_frames_metadata`: the SDSS MJD of
+    ``OBSTIME`` (MJD + 0.4, so the evening and morning of a night share it),
+    corrected by :func:`lvmdrp.utils.convert.correct_sjd` to the MJD of the
+    night directory the file is in (``{mjd}/`` or ``{mjd}/ancillary/``), if
+    any. Without ``OBSTIME``, the ``SMJD`` keyword, or else ``MJD``.
+
+    Parameters
+    ----------
+    header : astropy.io.fits.Header
+        Header of the exposure.
+    path : str, optional
+        Path of the file, to use its night directory.
+
+    Returns
+    -------
+    int
+        SDSS MJD of the night.
+    """
+    obstime = header.get("OBSTIME")
+    sjd = int(dateobs_to_sjd(obstime)) if obstime else int(header.get("SMJD", header.get("MJD", 0)) or 0)
+    if path is not None:
+        path = pathlib.Path(path)
+        if path.parent.stem.isdigit() or path.parent.parent.stem.isdigit():
+            sjd = correct_sjd(path, sjd)
+    return sjd
+
+
 def _frame_metadata(header) -> Dict:
     metadata = {}
     for column, keyword, default in FRAME_METADATA:
@@ -1217,6 +1248,7 @@ def _process_frame(args) -> Tuple[str, Union[Table, None], Union[str, None]]:
     try:
         frame = lvmFrame.from_file(frame_path)
         metadata = _frame_metadata(frame._header)
+        metadata["mjd"] = _night_sjd(frame._header, frame_path)
         if frame._header.get("IMAGETYP", "object") != "object":
             return frame_path, None, f"skipped IMAGETYP = {frame._header.get('IMAGETYP')}"
         if not metadata["exptime"] >= min_exptime:
@@ -3653,15 +3685,189 @@ def _plane_direction(x, y, values):
     return float(np.degrees(np.arctan2(slope_y, slope_x))), float(np.hypot(slope_x, slope_y))
 
 
-def twilight_geometry(header, slitmap) -> Dict:
+def _header_float(header, key) -> float:
+    """Header value as a float, NaN if missing, not a number or the -999 placeholder"""
+    try:
+        value = float(header.get(key))
+    except (TypeError, ValueError):
+        return np.nan
+    return value if np.isfinite(value) and value != -999 else np.nan
+
+
+def science_pointing(header) -> Tuple[float, float, str]:
+    """Position of the science telescope: commanded, or else measured by the telescope
+
+    The commanded position (``POSCIRA``, ``POSCIDE``) is the one the pipeline
+    uses without guider frames. Twilight sequences may lack it, so the
+    telescope position (``TESCIRA``, ``TESCIDE``) is used instead.
+
+    Returns
+    -------
+    tuple[float, float, str]
+        RA and Dec in degrees and their source: 'commanded', 'telescope' or
+        'none' (NaN coordinates).
+    """
+    for source, (ra_key, dec_key) in (("commanded", ("POSCIRA", "POSCIDE")), ("telescope", ("TESCIRA", "TESCIDE"))):
+        ra, dec = _header_float(header, ra_key), _header_float(header, dec_key)
+        if np.isfinite(ra) and np.isfinite(dec) and not (ra == 0 and dec == 0):
+            return ra, dec, source
+    return np.nan, np.nan, "none"
+
+
+def science_position_angle(header, ra: float, dec: float, time, kmirror: Dict = None) -> Tuple[float, str, float]:
+    """Position angle of the science IFU: commanded, or else inferred from the K-mirror angle
+
+    Parameters
+    ----------
+    header : astropy.io.fits.Header
+        Header of the exposure.
+    ra, dec : float
+        Position of the science telescope in degrees.
+    time : astropy.time.Time
+        Time of the exposure.
+    kmirror : dict, optional
+        K-mirror relation from :func:`calibrate_kmirror_pa`.
+
+    Returns
+    -------
+    tuple[float, str, float]
+        Position angle in degrees, its source ('commanded', 'K-mirror' or
+        'none', with a NaN angle) and the K-mirror angle ``TESCIKM`` (NaN if missing).
+    """
+    km = _header_float(header, "TESCIKM")
+    pa = _header_float(header, "POSCIPA")
+    if np.isfinite(pa):
+        return pa, "commanded", km
+    if kmirror is not None and np.isfinite(km) and np.isfinite(ra) and np.isfinite(dec):
+        return float(kmirror_pa(km, ra, dec, time, kmirror)), "K-mirror", km
+    return np.nan, "none", km
+
+
+def parallactic_angle(ra, dec, time) -> np.ndarray:
+    """Parallactic angle at LCO in degrees, from North towards East
+
+    Parameters
+    ----------
+    ra, dec : float or array_like
+        Position in degrees.
+    time : astropy.time.Time or array_like
+        Time of the observation.
+
+    Returns
+    -------
+    np.ndarray
+    """
+    from astropy.coordinates import AltAz, SkyCoord
+
+    location = _ephemeris()[3]
+    time = Time(time, scale="utc")
+    # position angle of the zenith seen from the target, measured against ICRS North like the guider position angles
+    zenith = SkyCoord(alt=np.full(time.shape, 90.0) * u.deg, az=np.zeros(time.shape) * u.deg,
+                      frame=AltAz(obstime=time, location=location)).icrs
+    target = SkyCoord(ra=np.asarray(ra, dtype=float) * u.deg, dec=np.asarray(dec, dtype=float) * u.deg)
+    return _wrap_angle(target.position_angle(zenith).deg)
+
+
+# models of the position angle from the K-mirror angle: PA = factor * km_sign * KM + q_sign * q + offset
+KMIRROR_MODELS = [(factor, km_sign, q_sign) for factor in (2, 1) for km_sign in (1, -1) for q_sign in (1, -1)]
+
+
+def _kmirror_model(km, q, factor, km_sign, q_sign):
+    return factor * km_sign * np.asarray(km, dtype=float) + q_sign * np.asarray(q, dtype=float)
+
+
+def calibrate_kmirror_pa(table, min_frames: int = 20) -> Dict:
+    """Calibrate the position angle of the science IFU from the K-mirror angle
+
+    The field of an alt-az telescope rotates with the parallactic angle q, and
+    a K-mirror rotates the image by twice its mechanical angle, so
+
+        PA = factor * km_sign * KM + q_sign * q + offset
+
+    The conventions (factor 2 or 1, signs) and the offset are not assumed: all
+    the combinations are fitted to frames with a guider-solved position angle,
+    each with the circular mean offset, and the one with the smallest robust
+    residual is kept. The fit is flagged as ambiguous if another combination
+    has a residual less than three times larger.
+
+    Parameters
+    ----------
+    table : str, astropy.table.Table or pandas.DataFrame
+        Frames with the drpall columns ``obstime``, ``sci_ra``, ``sci_dec``,
+        ``sci_pa`` (guider-solved), ``sci_kmpos`` (``TESCIKM``) and, if present,
+        ``sci_astsrc``, which keeps the frames with 'GDR' astrometry; or the
+        path to a drpall file (FITS or HDF5).
+    min_frames : int, optional
+        Minimum number of usable frames. Default is 20.
+
+    Returns
+    -------
+    dict
+        factor, km_sign, q_sign, offset (degrees), rms (robust residual,
+        degrees), nframes, ambiguous, and models (rms of every combination).
+    """
+    if isinstance(table, (str, pathlib.Path)):
+        table = pd.read_hdf(table) if str(table).endswith(".h5") else Table.read(table, hdu=1)
+    data = table.to_pandas() if isinstance(table, Table) else pd.DataFrame(table)
+    data = data.copy()
+    for column in ("sci_astsrc", "obstime"):
+        if column in data.columns:
+            data[column] = data[column].map(lambda v: v.decode() if isinstance(v, bytes) else v)
+    columns = ["sci_ra", "sci_dec", "sci_pa", "sci_kmpos"]
+    for column in columns:
+        data[column] = pd.to_numeric(data[column], errors="coerce").replace(-999, np.nan)
+    good = data[columns].notna().all(axis=1) & data["obstime"].notna() & ~((data["sci_ra"] == 0) & (data["sci_dec"] == 0))
+    if "sci_astsrc" in data.columns:
+        good &= data["sci_astsrc"].astype(str).str.contains("GDR")
+    data = data[good]
+    if len(data) < min_frames:
+        raise ValueError(f"only {len(data)} frames with a guider position angle and a K-mirror angle, need {min_frames}")
+
+    q = parallactic_angle(data["sci_ra"].to_numpy(), data["sci_dec"].to_numpy(), Time(list(data["obstime"]), scale="utc"))
+    pa, km = data["sci_pa"].to_numpy(), data["sci_kmpos"].to_numpy()
+    models = []
+    for factor, km_sign, q_sign in KMIRROR_MODELS:
+        residual = _wrap_angle(pa - _kmirror_model(km, q, factor, km_sign, q_sign))
+        radians = np.radians(residual)
+        offset = float(np.degrees(np.arctan2(np.mean(np.sin(radians)), np.mean(np.cos(radians)))))
+        rms = float(1.4826 * np.median(np.abs(_wrap_angle(residual - offset))))
+        models.append({"factor": factor, "km_sign": km_sign, "q_sign": q_sign, "offset": offset, "rms": rms})
+    models.sort(key=lambda m: m["rms"])
+    best = dict(models[0])
+    best.update({"nframes": int(len(data)), "ambiguous": bool(models[1]["rms"] < 3 * max(best["rms"], 1e-6)), "models": models})
+    log.info(f"K-mirror position angle: PA = {best['factor']} x {best['km_sign']:+d} KM {best['q_sign']:+d} q "
+             f"{best['offset']:+.2f} deg, rms {best['rms']:.2f} deg from {best['nframes']} frames"
+             + (" (ambiguous: another model fits almost as well)" if best["ambiguous"] else ""))
+    return best
+
+
+def kmirror_pa(km, ra, dec, time, relation: Dict):
+    """Position angle of the science IFU from the K-mirror angle, with a relation from :func:`calibrate_kmirror_pa`"""
+    q = parallactic_angle(ra, dec, time)
+    return _wrap_angle(_kmirror_model(km, q, relation["factor"], relation["km_sign"], relation["q_sign"]) + relation["offset"])
+
+
+def load_kmirror_relation(source) -> Dict:
+    """K-mirror relation from a dict, a JSON file written by :func:`qa_twilight_sequence`, or calibrated from a drpall file"""
+    if source is None or isinstance(source, dict):
+        return source
+    if str(source).endswith(".json"):
+        with open(source) as f:
+            return json.load(f)
+    return calibrate_kmirror_pa(source)
+
+
+def twilight_geometry(header, slitmap, kmirror: Dict = None) -> Dict:
     """Sky geometry of a twilight exposure and the directions of the Sun and the horizon across the science IFU
 
     At the middle of the exposure (``OBSTIME + EXPTIME/2``), computes the
     horizontal coordinates of the science IFU pointing, the Sun and the Moon
     (skyfield and the DE421 ephemeris), their separations and the illuminated
-    fraction of the Moon. The science IFU fibers are placed on the sky with the
-    pipeline astrometry (:func:`lvmdrp.core.astrometry.set_telescope_astrometry`
-    with the commanded ``POSCIRA``, ``POSCIDE``, ``POSCIPA`` and
+    fraction of the Moon. The pointing and the position angle of the science
+    IFU come from :func:`science_pointing` and :func:`science_position_angle`
+    (commanded values, or the telescope position and the K-mirror angle). The
+    science IFU fibers are placed on the sky with the pipeline astrometry
+    (:func:`lvmdrp.core.astrometry.set_telescope_astrometry` and
     :func:`~lvmdrp.core.astrometry.set_fibers_astrometry`), so the directions
     across the IFU use the same orientation as the rest of the pipeline. The
     direction towards the Sun is where the angular distance to the Sun decreases
@@ -3672,10 +3878,13 @@ def twilight_geometry(header, slitmap) -> Dict:
     Parameters
     ----------
     header : astropy.io.fits.Header
-        Header of the exposure, with ``OBSTIME``, ``EXPTIME`` and the commanded
-        science telescope position (``POSCIRA``, ``POSCIDE``, ``POSCIPA``).
+        Header of the exposure, with ``OBSTIME``, ``EXPTIME`` and the science
+        telescope position (see :func:`science_pointing`).
     slitmap : astropy.table.Table
         Slitmap with the fiber positions (``xpmm``, ``ypmm``).
+    kmirror : dict, optional
+        K-mirror relation from :func:`calibrate_kmirror_pa`, used to infer the
+        position angle when the header has no ``POSCIPA``.
 
     Returns
     -------
@@ -3684,8 +3893,11 @@ def twilight_geometry(header, slitmap) -> Dict:
         point_alt, point_az, sun_alt, sun_az, sun_sep, moon_alt, moon_az,
         moon_sep, moon_illum, dir_sun, dir_horizon (degrees), alt_change and
         sun_change (change of the altitude and of the distance to the Sun from
-        the IFU center to its edge along those directions, degrees). The
-        pointing-dependent values are NaN if the header has no commanded position.
+        the IFU center to its edge along those directions, degrees),
+        pointing_source and pa_source ('commanded', 'telescope', 'K-mirror' or
+        'none') and km (K-mirror angle). The pointing-dependent values are NaN
+        without a position, and the directions across the IFU without a
+        position angle.
     """
     exptime = float(header.get("EXPTIME", 0.0) or 0.0)
     time = Time(header["OBSTIME"], scale="utc") + exptime / 2 * u.s
@@ -3703,32 +3915,43 @@ def twilight_geometry(header, slitmap) -> Dict:
     result.update({key: np.nan for key in ("ra", "dec", "pa", "point_alt", "point_az", "sun_sep", "moon_sep",
                                            "dir_sun", "dir_horizon", "alt_change", "sun_change")})
 
-    frame = _PointingFrame(header, slitmap)
+    ra, dec, pointing_source = science_pointing(header)
+    result["pointing_source"] = pointing_source
+    if pointing_source == "none":
+        log.warning(f"no position of the science telescope for exposure {header.get('EXPOSURE')}, skipping its pointing geometry")
+        result.update({"pa_source": "none", "km": np.nan})
+        return result
+    horizontal = AltAz(obstime=time, location=location)
+    center = SkyCoord(ra, dec, unit="deg").transform_to(horizontal)
+    pa, pa_source, km = science_position_angle(header, ra, dec, time, kmirror=kmirror)
+    result.update({"ra": ra, "dec": dec, "pa": pa, "pa_source": pa_source, "km": km,
+                   "point_alt": float(center.alt.deg), "point_az": float(center.az.deg),
+                   "sun_sep": float(_angular_distance(center.alt.deg, center.az.deg, sun_alt, sun_az)),
+                   "moon_sep": float(_angular_distance(center.alt.deg, center.az.deg, moon_alt, moon_az))})
+    if pa_source == "none":
+        log.warning(f"no position angle of the science IFU for exposure {header.get('EXPOSURE')}, skipping the directions across the IFU")
+        return result
+
+    # place the fibers on the sky with the pipeline astrometry, from the resolved position and position angle
+    pointing_header = fits.Header(header)
+    pointing_header["POSCIRA"], pointing_header["POSCIDE"], pointing_header["POSCIPA"] = ra, dec, pa
+    frame = _PointingFrame(pointing_header, slitmap)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        pointing = set_telescope_astrometry("Sci", None, frame)
-    if pointing is None or (pointing[0] == 0 and pointing[1] == 0):
-        log.warning(f"no commanded position of the science telescope for exposure {header.get('EXPOSURE')}, skipping its pointing geometry")
-        return result
-    ra, dec, pa = (float(v) for v in pointing)
+        set_telescope_astrometry("Sci", None, frame)
     set_fibers_astrometry(frame, "Sci", platescale=FIDUCIAL_PLATESCALE)
 
     fibers = frame.getSlitmap()
     sci = _decode(fibers["telescope"]) == "Sci"
     x, y = np.asarray(fibers["xpmm"], dtype=float)[sci], np.asarray(fibers["ypmm"], dtype=float)[sci]
     radius = np.max(np.hypot(x - x.mean(), y - y.mean()))
-    horizontal = AltAz(obstime=time, location=location)
     fiber_altaz = SkyCoord(np.asarray(fibers["ra"], dtype=float)[sci], np.asarray(fibers["dec"], dtype=float)[sci],
                            unit="deg").transform_to(horizontal)
-    center = SkyCoord(ra, dec, unit="deg").transform_to(horizontal)
     fiber_alt, fiber_az = fiber_altaz.alt.deg, fiber_altaz.az.deg
 
     dir_horizon, alt_slope = _plane_direction(x, y, -fiber_alt)
     dir_sun, sun_slope = _plane_direction(x, y, -_angular_distance(fiber_alt, fiber_az, sun_alt, sun_az))
-    result.update({"ra": ra, "dec": dec, "pa": pa, "point_alt": float(center.alt.deg), "point_az": float(center.az.deg),
-                   "sun_sep": float(_angular_distance(center.alt.deg, center.az.deg, sun_alt, sun_az)),
-                   "moon_sep": float(_angular_distance(center.alt.deg, center.az.deg, moon_alt, moon_az)),
-                   "dir_sun": dir_sun, "dir_horizon": dir_horizon,
+    result.update({"dir_sun": dir_sun, "dir_horizon": dir_horizon,
                    "alt_change": alt_slope * radius, "sun_change": sun_slope * radius})
     return result
 
@@ -3799,7 +4022,7 @@ def find_twilight_flats(mjds, channels: str = "brz", drpver: str = None) -> List
 
 
 def _raw_twilight_headers(mjds, known_expnums, channels):
-    """Headers of the raw twilight exposures without a per-exposure flat, from the frames metadata"""
+    """Headers and paths of the raw twilight exposures without a per-exposure flat, from the frames metadata"""
     from lvmdrp import path
     from lvmdrp.utils import metadata as md
 
@@ -3817,13 +4040,13 @@ def _raw_twilight_headers(mjds, known_expnums, channels):
                 continue
             raw_path = path.full("lvm_raw", hemi="s", camspec=camera, mjd=int(mjd), expnum=int(expnum))
             if os.path.isfile(raw_path):
-                headers[int(expnum)] = fits.getheader(raw_path, 0)
+                headers[int(expnum)] = (fits.getheader(raw_path, 0), raw_path)
                 break
     return headers
 
 
 def qa_twilight_sequence(mjds, channels: str = "brz", drpver: str = None, flat_paths: List[str] = None,
-                         include_raw: bool = True, output_dir: str = None, dry_run: bool = False) -> Dict:
+                         include_raw: bool = True, kmirror=None, output_dir: str = None, dry_run: bool = False) -> Dict:
     """Check the gradient across the science IFU of a twilight sequence against the sky geometry, and write a dashboard.
 
     Two checks, for one or more nights of twilight exposures:
@@ -3855,6 +4078,12 @@ def qa_twilight_sequence(mjds, channels: str = "brz", drpver: str = None, flat_p
     include_raw : bool, optional
         Also show the geometry of the twilight exposures without a
         per-exposure flat, from their raw headers. Default is True.
+    kmirror : dict or str, optional
+        K-mirror relation to infer the position angle of the science IFU
+        when the headers have no ``POSCIPA`` (see :func:`calibrate_kmirror_pa`):
+        a relation, a JSON file with one (as written next to the dashboard), or
+        a drpall file to calibrate it from. Without it, exposures without
+        ``POSCIPA`` have no directions of the Sun and the horizon.
     output_dir : str, optional
         Directory of the dashboard and table. Default is
         ``fiberflat_qa/twilights_{mjds}`` in the ancillary directory of the
@@ -3887,11 +4116,14 @@ def qa_twilight_sequence(mjds, channels: str = "brz", drpver: str = None, flat_p
     flat_paths = flat_paths if flat_paths is not None else find_twilight_flats(mjds, channels=channels, drpver=drpver)
     log.info(f"found {len(flat_paths)} per-exposure flats for MJDs {mjds}")
     if dry_run:
+        if kmirror is not None:
+            log.info(f"dry run: K-mirror relation from {kmirror}")
         for flat_path in flat_paths:
             log.info(f"  {flat_path}")
         log.info(f"dry run: dashboard would be written to {report_path}")
         return {"summary": None, "figures": {}, "report": None}
 
+    relation = load_kmirror_relation(kmirror)
     geometry, rows, layout, maps = {}, [], None, {}
     for flat_path in tqdm(flat_paths, desc="twilight flats", unit="flat", ascii=True):
         header = fits.getheader(flat_path, 0)
@@ -3901,7 +4133,7 @@ def qa_twilight_sequence(mjds, channels: str = "brz", drpver: str = None, flat_p
         slitmap = Table.read(flat_path, hdu="SLITMAP")
         expnum = int(header["EXPOSURE"])
         if expnum not in geometry:
-            geometry[expnum] = {"mjd": int(header.get("MJD", 0)), "expnum": expnum, **twilight_geometry(header, slitmap)}
+            geometry[expnum] = {"mjd": _night_sjd(header, flat_path), "expnum": expnum, **twilight_geometry(header, slitmap, kmirror=relation)}
         row, layout, model = _removed_corrections(header, channel, slitmap, layout)
         if model is not None:
             maps.setdefault(channel, {})[expnum] = model
@@ -3912,8 +4144,8 @@ def qa_twilight_sequence(mjds, channels: str = "brz", drpver: str = None, flat_p
         raw_headers = _raw_twilight_headers(mjds, set(geometry), channels)
         if raw_headers:
             fibermap = read_fibermap(as_table=True)
-            for expnum, header in raw_headers.items():
-                geometry[expnum] = {"mjd": int(header.get("MJD", 0)), "expnum": expnum, **twilight_geometry(header, fibermap)}
+            for expnum, (header, raw_path) in raw_headers.items():
+                geometry[expnum] = {"mjd": _night_sjd(header, raw_path), "expnum": expnum, **twilight_geometry(header, fibermap, kmirror=relation)}
                 rows.append({"expnum": expnum, "channel": ""})
     if not geometry:
         raise FileNotFoundError(f"no twilight exposures found for MJDs {mjds}; run 'drp calibrations fiberflats --skip-combination' first")
@@ -3929,7 +4161,10 @@ def qa_twilight_sequence(mjds, channels: str = "brz", drpver: str = None, flat_p
     summary.to_csv(table_path, index=False)
 
     figures = _twilight_figures(summary)
-    _write_twilight_dashboard(report_path, summary, figures, mjds, drpver, layout, maps)
+    if relation is not None:
+        with open(os.path.join(output_dir, "kmirror_pa.json"), "w") as out:
+            json.dump(relation, out, indent=2)
+    _write_twilight_dashboard(report_path, summary, figures, mjds, drpver, layout, maps, relation)
     log.info(f"written twilight sequence dashboard to {report_path}")
     return {"summary": summary, "figures": figures, "report": report_path}
 
@@ -4075,7 +4310,8 @@ def _twilight_ifu_payload(summary, layout, maps):
     """Data of the twilight IFU small multiples, as a JSON-serializable dictionary"""
     exposures = [{"expnum": int(r["expnum"]), "time": str(r["time"])[11:16],
                   "subtitle": f"MJD {int(r['mjd'])} \u00b7 Sun " + ("-" if not np.isfinite(r["sun_alt"]) else f"{r['sun_alt']:.0f}\u00b0"),
-                  "dirSun": _finite_or_none(r["dir_sun"]), "dirHorizon": _finite_or_none(r["dir_horizon"])}
+                  "dirSun": _finite_or_none(r["dir_sun"]), "dirHorizon": _finite_or_none(r["dir_horizon"]),
+                  "paSource": str(r.get("pa_source", "none"))}
                  for _, r in summary.drop_duplicates("expnum").sort_values("time").iterrows()]
     return _exposures_ifu_payload(exposures, summary[summary["channel"] != ""], layout, maps)
 
@@ -4104,7 +4340,7 @@ def _exposures_ifu_payload(exposures, measured, layout, maps):
     }
 
 
-def _write_twilight_dashboard(report_path, summary, figures, mjds, drpver, layout=None, maps=None):
+def _write_twilight_dashboard(report_path, summary, figures, mjds, drpver, layout=None, maps=None, kmirror=None):
     nights = sorted(summary["mjd"].dropna().astype(int).unique())
     channels = [c for c in "brz" if c in set(summary["channel"])]
     geometry = _exposure_geometry(summary)
@@ -4122,6 +4358,13 @@ def _write_twilight_dashboard(report_path, summary, figures, mjds, drpver, layou
 
     meta = [("DRP version", drpver), ("MJDs", ", ".join(map(str, mjds))), ("Channels", "".join(channels) or "none"),
             ("Ephemeris", "DE421 (skyfield)"), ("Generated", datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"))]
+    for label, column in (("Pointing", "pointing_source"), ("Position angle", "pa_source")):
+        if column in geometry.columns:
+            meta.append((label, ", ".join(f"{count} {source}" for source, count in geometry[column].value_counts().items())))
+    if kmirror is not None:
+        meta.append(("K-mirror PA", f"{kmirror['factor']} x {kmirror['km_sign']:+d} KM {kmirror['q_sign']:+d} q "
+                                    f"{kmirror['offset']:+.1f} deg, rms {kmirror['rms']:.1f} deg, {kmirror['nframes']} frames"
+                                    + (", ambiguous" if kmirror.get("ambiguous") else "")))
     intro = ("<p>For each twilight exposure, the gradient across the science IFU and the spectrograph factors that the "
              "twilight fiber flat procedure removed (fit_fiberflat), next to the sky geometry of the exposure. A twilight sky "
              "gradient points towards the Sun and the horizon and changes as the Sun sets; a gradient of the instrument stays "
@@ -4134,15 +4377,17 @@ def _write_twilight_dashboard(report_path, summary, figures, mjds, drpver, layou
                            _num(r["point_alt"], ".1f"), _num(r["point_az"], ".0f"), _num(r["pa"], ".1f"), _num(r["sun_sep"], ".1f"),
                            f'{_num(r["moon_alt"], ".1f")} / {_num(100 * r["moon_illum"], ".0f")}%',
                            _num(100 * r["strength"], ".2f"), _num(r["direction"], ".0f"), _num(r["dir_sun"], ".0f"), _num(r["dir_horizon"], ".0f"),
-                           " / ".join(_num(r[f"factor{i}"], ".4f") for i in (1, 2, 3))])
+                           " / ".join(_num(r[f"factor{i}"], ".4f") for i in (1, 2, 3)),
+                           escape(f'{r.get("pointing_source", "-")} / {r.get("pa_source", "-")}')])
     table = html_table(
         [("MJD", ""), ("Exposure", ""), ("UTC", "middle of the exposure"), ("Ch", "channel"), ("Exptime (s)", ""),
          ("Sun alt (°)", ""), ("Sun az (°)", ""), ("Pointing alt (°)", ""), ("Pointing az (°)", ""),
          ("PA (°)", "commanded position angle of the science IFU"), ("Sun sep (°)", "from the pointing"),
          ("Moon alt / illum.", ""), ("Gradient (%)", "removed from the exposure, at the IFU edge"),
          ("Direction (°)", "of the removed gradient, from IFU +x towards +y"), ("Sun dir. (°)", "towards the Sun across the IFU"),
-         ("Horizon dir. (°)", "towards the horizon across the IFU"), ("Factors sp1 / sp2 / sp3", "removed from the exposure, mean 1")],
-        table_rows, numeric=[True, True, False, False] + [True] * 13)
+         ("Horizon dir. (°)", "towards the horizon across the IFU"), ("Factors sp1 / sp2 / sp3", "removed from the exposure, mean 1"),
+         ("Pointing / PA source", "commanded (PO*), telescope (TE*) or K-mirror")],
+        table_rows, numeric=[True, True, False, False] + [True] * 13 + [False])
 
     night_options = [(str(mjd), str(mjd)) for mjd in nights]
     channel_options = [(c, c) for c in channels]
@@ -4388,6 +4633,11 @@ TWILIGHT_IFU = r"""
       cap.appendChild(title);
       cap.appendChild(sun);
       cap.appendChild(grad);
+      if (exposure.dirSun === null || exposure.paSource === "K-mirror") {
+        const pa = document.createElement("span");
+        pa.textContent = exposure.dirSun === null ? "no position angle: no arrows" : "position angle from the K-mirror";
+        cap.appendChild(pa);
+      }
       tile.appendChild(canvas);
       tile.appendChild(cap);
       grid.appendChild(tile);
@@ -4528,7 +4778,7 @@ def qa_dome_sequence(mjds, channels: str = "brz", drpver: str = None, flat_paths
         if model is not None:
             maps.setdefault(channel, {})[expnum] = model
         lamps = [lamp for lamp in CON_LAMPS if _lamp_on(header, lamp)]
-        rows.append({"mjd": int(header.get("MJD", 0)), "expnum": expnum, "channel": channel, "path": flat_path,
+        rows.append({"mjd": _night_sjd(header, flat_path), "expnum": expnum, "channel": channel, "path": flat_path,
                      "time": str(header.get("OBSTIME", ""))[:19], "exptime": float(header.get("EXPTIME", np.nan) or np.nan),
                      "lamp": "+".join(lamps).lower(), "calibfib": str(header.get("CALIBFIB") or "-"), **row})
     if not rows:

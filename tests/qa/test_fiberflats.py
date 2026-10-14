@@ -569,7 +569,7 @@ def _twilight_header(t, alt, az, pa, expnum=1, channel="b", lamps_on=(), gcoeffs
 
     location = EarthLocation(lat=LVM_LAT, lon=LVM_LON, height=LVM_ELEVATION * u.m)
     pointing = SkyCoord(alt=alt * u.deg, az=az * u.deg, frame=AltAz(obstime=t, location=location)).icrs
-    header = fits.Header({"OBSTIME": t.isot, "EXPTIME": 0.0, "EXPOSURE": expnum, "MJD": 61000, "CCD": channel,
+    header = fits.Header({"OBSTIME": t.isot, "EXPTIME": 0.0, "EXPOSURE": expnum, "MJD": int(t.mjd), "CCD": channel,
                           "POSCIRA": pointing.ra.deg, "POSCIDE": pointing.dec.deg, "POSCIPA": pa})
     for lamp in ("NEON", "HGNE", "ARGON", "XENON", "LDLS", "QUARTZ"):
         header[lamp] = "ON" if lamp in lamps_on else "OFF"
@@ -623,6 +623,19 @@ def test_twilight_geometry():
     assert np.isfinite(missing["sun_alt"]) and np.isnan(missing["dir_sun"]) and np.isnan(missing["point_alt"])
 
 
+def test_night_sjd(tmp_path):
+    # evening and morning twilights of the same night share the SDSS MJD (MJD + 0.4)
+    assert ff._night_sjd(fits.Header({"OBSTIME": "2025-06-15T23:00:00", "MJD": 60841})) == 60842
+    assert ff._night_sjd(fits.Header({"OBSTIME": "2025-06-16T09:30:00", "MJD": 60842})) == 60842
+    # the night directory wins, as in the pipeline metadata (lvmdrp.utils.convert.correct_sjd)
+    flat_path = tmp_path / "60850" / "ancillary" / "lvm-fflat-b-00000001.fits"
+    assert ff._night_sjd(fits.Header({"OBSTIME": "2025-06-15T23:00:00"}), flat_path) == 60850
+    raw_path = tmp_path / "60842" / "sdR-s-b1-00000001.fits.gz"
+    assert ff._night_sjd(fits.Header({"OBSTIME": "2025-06-15T23:00:00"}), raw_path) == 60842
+    # without OBSTIME
+    assert ff._night_sjd(fits.Header({"SMJD": 60842, "MJD": 60841})) == 60842
+
+
 def test_is_twilight():
     from astropy.time import Time
 
@@ -653,7 +666,8 @@ def test_qa_twilight_sequence(tmp_path):
         with fits.open(hdul_path, mode="update") as hdul:
             hdul[1].name = "SLITMAP"
 
-    result = ff.qa_twilight_sequence(61000, channels="br", flat_paths=paths, include_raw=False, output_dir=str(tmp_path / "qa"))
+    # evening twilight of 2025-06-15 (calendar MJD 60841) belongs to the night of SDSS MJD 60842
+    result = ff.qa_twilight_sequence(60842, channels="br", flat_paths=paths, include_raw=False, output_dir=str(tmp_path / "qa"))
     summary = result["summary"]
     assert sorted(summary["expnum"].unique()) == [101, 102, 103]
     assert len(summary) == 6
@@ -667,9 +681,10 @@ def test_qa_twilight_sequence(tmp_path):
     assert np.all(np.diff(summary.drop_duplicates("expnum")["sun_alt"]) < 0)
 
     html = open(result["report"], encoding="utf-8").read()
-    assert html.isascii() and 'data-fig="sky|61000"' in html and 'data-fig="gradient|b|61000"' in html
-    assert set(result["figures"]) == {"sky|61000", "geometry|61000", "gradient|b|61000", "gradient|r|61000",
-                                      "factors|b|61000", "factors|r|61000"}
+    assert set(summary["mjd"]) == {60842}
+    assert html.isascii() and 'data-fig="sky|60842"' in html and 'data-fig="gradient|b|60842"' in html
+    assert set(result["figures"]) == {"sky|60842", "geometry|60842", "gradient|b|60842", "gradient|r|60842",
+                                      "factors|b|60842", "factors|r|60842"}
     # IFU tiles: the gradient model of each exposure and the directions of the Sun and the horizon
     assert 'id="twi-grid"' in html and ".ifu-grid" in html
     payload = json.loads(re.search(r"const D = (\{.*?\});\n", html).group(1))
@@ -754,3 +769,114 @@ def test_qa_dome_sequence(tmp_path):
 
     with pytest.raises(FileNotFoundError):
         ff.qa_dome_sequence(61000, flat_paths=[paths[-1]], output_dir=str(tmp_path / "none"))
+
+
+def test_parallactic_angle():
+    from astropy.coordinates import AltAz, EarthLocation, SkyCoord
+    from astropy.time import Time
+    from astropy import units as u
+    from lvmdrp.core.constants import LVM_LAT, LVM_LON, LVM_ELEVATION
+
+    # the parallactic angle is the position angle of the zenith seen from the target
+    location = EarthLocation(lat=LVM_LAT, lon=LVM_LON, height=LVM_ELEVATION * u.m)
+    t = Time("2025-06-16T03:00:00", scale="utc")
+    zenith = SkyCoord(alt=90 * u.deg, az=0 * u.deg, frame=AltAz(obstime=t, location=location)).icrs
+    rng = np.random.default_rng(0)
+    for _ in range(20):
+        alt, az = rng.uniform(25, 85), rng.uniform(0, 360)
+        target = SkyCoord(alt=alt * u.deg, az=az * u.deg, frame=AltAz(obstime=t, location=location)).icrs
+        expected = target.position_angle(zenith).deg
+        q = float(ff.parallactic_angle(target.ra.deg, target.dec.deg, t))
+        assert abs((q - expected + 180) % 360 - 180) < 0.2
+
+
+def _kmirror_frames(n=300, factor=2, km_sign=-1, q_sign=1, offset=37.0, noise=0.3, seed=1):
+    """drpall-like frames whose guider position angles follow a known K-mirror relation"""
+    from astropy.time import Time
+    import pandas as pd
+
+    rng = np.random.default_rng(seed)
+    times = Time("2025-01-01T02:00:00", scale="utc") + rng.uniform(0, 365, n) * ff.u.day + rng.uniform(0, 0.35, n) * ff.u.day
+    location = ff._ephemeris()[3]
+    lst = times.sidereal_time("apparent", longitude=location.lon).deg
+    ra = (lst + rng.uniform(-45, 45, n)) % 360
+    dec = rng.uniform(-80, 10, n)
+    pa = rng.choice([0.0, 0.0, 0.0, 30.0, -60.0], n) + rng.normal(0, noise, n)
+    q = ff.parallactic_angle(ra, dec, times)
+    km = ((pa - q_sign * q - offset + 180) % 360 - 180) / (factor * km_sign)
+    return pd.DataFrame({"obstime": times.isot, "sci_ra": ra, "sci_dec": dec, "sci_pa": pa, "sci_kmpos": km,
+                         "sci_astsrc": "GDR coadd"})
+
+
+def test_calibrate_kmirror_pa():
+    frames = _kmirror_frames()
+    relation = ff.calibrate_kmirror_pa(frames)
+    assert (relation["factor"], relation["km_sign"], relation["q_sign"]) == (2, -1, 1)
+    assert relation["offset"] == pytest.approx(37.0, abs=0.2) and relation["rms"] < 1.0 and not relation["ambiguous"]
+    # the relation gives back the position angles
+    from astropy.time import Time
+    pa = ff.kmirror_pa(frames["sci_kmpos"], frames["sci_ra"], frames["sci_dec"], Time(list(frames["obstime"]), scale="utc"), relation)
+    assert np.all(np.abs((pa - frames["sci_pa"] + 180) % 360 - 180) < 1.5)
+    # frames without guider astrometry are left out
+    frames.loc[:250, "sci_astsrc"] = "CMD position"
+    with pytest.raises(ValueError, match="need 20"):
+        ff.calibrate_kmirror_pa(frames.iloc[:260])
+
+
+def test_twilight_geometry_telescope_fallback():
+    from astropy.time import Time
+
+    slitmap = make_flat()._slitmap
+    t = Time("2025-06-15T23:05:00", scale="utc")
+    commanded = _twilight_header(t, 45, 250, 0.0)
+    # twilight headers: telescope position and K-mirror angle, no commanded position or position angle
+    header = fits.Header({key: commanded[key] for key in ("OBSTIME", "EXPTIME", "EXPOSURE", "MJD", "CCD")})
+    header["TESCIRA"], header["TESCIDE"], header["TESCIKM"] = commanded["POSCIRA"], commanded["POSCIDE"], -40.0
+
+    without = ff.twilight_geometry(header, slitmap)
+    assert without["pointing_source"] == "telescope" and without["pa_source"] == "none"
+    assert without["point_alt"] == pytest.approx(45, abs=0.01) and np.isnan(without["dir_sun"]) and without["km"] == -40.0
+
+    relation = {"factor": 2, "km_sign": -1, "q_sign": 1, "offset": 10.0}
+    inferred = ff.twilight_geometry(header, slitmap, kmirror=relation)
+    expected_pa = float(ff.kmirror_pa(-40.0, commanded["POSCIRA"], commanded["POSCIDE"], t, relation))
+    assert inferred["pa_source"] == "K-mirror" and inferred["pa"] == pytest.approx(expected_pa)
+    # same directions as with that position angle commanded
+    commanded["POSCIPA"] = expected_pa
+    reference = ff.twilight_geometry(commanded, slitmap)
+    assert inferred["dir_sun"] == pytest.approx(reference["dir_sun"]) and inferred["dir_horizon"] == pytest.approx(reference["dir_horizon"])
+    # the commanded position angle wins over the K-mirror
+    header["POSCIPA"] = 5.0
+    assert ff.twilight_geometry(header, slitmap, kmirror=relation)["pa_source"] == "commanded"
+
+
+def test_qa_twilight_sequence_with_kmirror(tmp_path):
+    from astropy.time import Time
+
+    slitmap = make_flat()._slitmap
+    start = Time("2025-06-15T23:00:00", scale="utc")
+    paths = []
+    for expnum, minutes in ((301, 0), (302, 5)):
+        full = _twilight_header(start + minutes * 60 * ff.u.s, 60, 100, 0.0, expnum=expnum, channel="b", gcoeffs=(2.0, 0.02, 0.01, 0.0))
+        header = fits.Header({key: value for key, value in full.items() if not key.startswith("POSCI")})
+        header["TESCIRA"], header["TESCIDE"], header["TESCIKM"] = full["POSCIRA"], full["POSCIDE"], -30.0
+        path = tmp_path / f"lvm-fflat-b-{expnum:08d}.fits"
+        hdu = fits.table_to_hdu(slitmap)
+        hdu.name = "SLITMAP"
+        fits.HDUList([fits.PrimaryHDU(header=header), hdu]).writeto(path)
+        paths.append(str(path))
+
+    relation = ff.calibrate_kmirror_pa(_kmirror_frames())
+    result = ff.qa_twilight_sequence(60842, channels="b", flat_paths=paths, include_raw=False, kmirror=relation,
+                                     output_dir=str(tmp_path / "qa"))
+    summary = result["summary"]
+    assert set(summary["pointing_source"]) == {"telescope"} and set(summary["pa_source"]) == {"K-mirror"}
+    assert np.isfinite(summary["dir_sun"]).all()
+    saved = tmp_path / "qa" / "kmirror_pa.json"
+    assert json.loads(saved.read_text())["factor"] == relation["factor"]
+    html = open(result["report"], encoding="utf-8").read()
+    assert "K-mirror PA" in html and '"paSource": "K-mirror"' in html
+    # the saved relation can be reused
+    again = ff.qa_twilight_sequence(60842, channels="b", flat_paths=paths, include_raw=False, kmirror=str(saved),
+                                    output_dir=str(tmp_path / "qa2"))
+    assert np.allclose(again["summary"]["pa"], summary["pa"])
