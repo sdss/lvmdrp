@@ -458,8 +458,9 @@ def choose_sequence(frames, calibration, ref_mjd=None, kind="longterm", ring="pr
     chosen_frames = _reject_pixelshifted(frames)
 
     if kind == "nightly" and calibration != "twilight":
-        chosen_frames = chosen_frames.head(EXPECTED_SEQUENCE_LENGTH[calibration])
-        return chosen_frames, chosen_frames.expnum.unique()
+        chosen_expnums = np.sort(chosen_frames.expnum.unique())[:EXPECTED_SEQUENCE_LENGTH[calibration]]
+        chosen_frames = chosen_frames.loc[chosen_frames.expnum.isin(chosen_expnums)]
+        return chosen_frames, chosen_expnums
 
     if calibration == "bias":
         return chosen_frames, chosen_frames.expnum.unique()
@@ -504,16 +505,17 @@ def get_sequence_iterator(frames, camera):
     for _, frame in frames.iterrows():
         # get block ID for exposed standard fiber
         fiber_par = slitmap[slitmap["orig_ifulabel"] == frame.calibfib]
+        if len(fiber_par) == 0:
+            continue
         block_idx = int(fiber_par["blockid"][0][1:])-1
         if block_idx in block_idxs:
             block_idxs.remove(block_idx)
 
         exposed_stds[frame.expnum] = (frame.calibfib, [block_idx])
 
-    # handle case of no standard fiber exposed
+    # handle case of no standard fiber exposed: the first exposure fits all blocks
     if len(exposed_stds) == 0:
-        block_idxs = []
-        exposed_stds[frames.expnums[0]] = (None, block_idxs)
+        exposed_stds[frames.expnum.iloc[0]] = (None, [])
 
     # add missing blocks for first exposure
     if len(block_idxs) > 0:
@@ -1623,153 +1625,169 @@ def create_bias(mjd, epochs=None, use_longterm_cals=True, skip_done=True, dry_ru
         image_tasks.create_master_frame(in_images=pframe_paths, out_image=mframe_path, batch_size=200, master_mjd=mjd, **kwargs)
 
 
-def create_nightly_traces(mjd, use_longterm_cals=False, expnums_ldls=None, expnums_qrtz=None,
-                          counts_thresholds=COUNTS_THRESHOLDS, cent_guess_ncolumns=140,
-                          trace_full_ncolumns=40,
-                          fit_poly=True, poly_deg_amp=5, poly_deg_cent=4, poly_deg_width=5,
-                          skip_done=True, dry_run=False):
-    """
-    Create nightly traces from dome flats.
+def _fit_fiber_model(frames, camera, mjd, kind="longterm", cent_guess_ncolumns=140, trace_full_ncolumns=40, skip_done=True):
+    """Fit the fiber model (counts, centroids and sigmas) of a camera from a sequence of dome flats
 
-    Given an MJD and (optionally) exposure numbers, create fiber traces from the nightly dome flats.
-    This routine stores the nightly master traces in the corresponding calibration directory for the given MJD.
-    If the required dome flats do not exist, they will be created first; otherwise, they will be read from disk.
+    Each exposure in `frames` fits the fiber blocks of its exposed standard
+    fiber (see :func:`get_sequence_iterator`), and the first exposure the
+    remaining blocks. The fitted parameters, model and model/exposure ratio
+    are written as master calibrations of `mjd`, with the 'm' (long-term) or
+    'n' (nightly) prefix.
+
+    Parameters
+    ----------
+    frames : pd.DataFrame
+        Metadata of the detrended dome flat frames of `camera`
+    camera : str
+        Camera name (e.g. "b1")
+    mjd : int
+        MJD of the master calibrations
+    kind : str, optional
+        Kind of master calibrations, 'longterm' or 'nightly', by default 'longterm'
+    cent_guess_ncolumns : int, optional
+        Number of columns to guess the fiber parameters, by default 140
+    trace_full_ncolumns : int, optional
+        Number of columns to fit the fiber parameters, by default 40
+    skip_done : bool, optional
+        Skip pipeline steps that have already been done, by default True
+    """
+    prefix = "m" if kind == "longterm" else "n"
+
+    # select fibers in current spectrograph
+    fibermap = SLITMAP[SLITMAP["spectrographid"] == int(camera[1])]
+    # initialize fiber traces
+    columns = np.linspace(5, 4080, trace_full_ncolumns, dtype="int")
+    fibers_params = {
+        "counts": TraceMask.create_empty(data_dim=(LVM_NFIBERS, LVM_NCOLS), slitmap=SLITMAP, samples_columns=columns),
+        "centroids": TraceMask.create_empty(data_dim=(LVM_NFIBERS, LVM_NCOLS), slitmap=SLITMAP, samples_columns=columns),
+        "sigmas": TraceMask.create_empty(data_dim=(LVM_NFIBERS, LVM_NCOLS), slitmap=SLITMAP, samples_columns=columns)
+    }
+
+    models = []
+    exposed_stds, unexposed_stds = get_sequence_iterator(frames, camera)
+    for expnum, (std_fiberid, block_idxs) in exposed_stds.items():
+        frame = frames.query("expnum == @expnum").squeeze()
+
+        # first fibers fitting (guess using pure Gaussian profiles) using first exposure in sequence
+        dflat_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=frame.mjd, kind="d", imagetype="flat", camera=camera, expnum=expnum)
+        counts_guess_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=frame.mjd, kind="d", imagetype="counts_guess", camera=camera, expnum=expnum)
+        centroids_guess_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=frame.mjd, kind="d", imagetype="centroids_guess", camera=camera, expnum=expnum)
+        sigmas_guess_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=frame.mjd, kind="d", imagetype="sigmas_guess", camera=camera, expnum=expnum)
+        guess_paths = {
+            "counts": counts_guess_path,
+            "centroids": centroids_guess_path,
+            "sigmas": sigmas_guess_path
+        }
+        guess_paths_exist = [os.path.isfile(guess_path) for guess_path in guess_paths.values()]
+        if skip_done and all(guess_paths_exist):
+            for guess_path in guess_paths.values():
+                log.info(f"skipping {guess_path}, file already exist")
+        else:
+            log.info(f"going to trace all fibers in {camera}")
+            image_tasks.guess_fibers_params(in_image=dflat_path, out_fiber_guess=guess_paths,
+                                            coadd=20, counts_range=[0.0, np.inf], centroids_range=[-2.0, +2.0], fwhms_range=[2.0, 3.5],
+                                            ncolumns=cent_guess_ncolumns)
+        # define paths
+        lflat_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=frame.mjd, kind="l", imagetype="flat", camera=camera, expnum=expnum)
+        dstray_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=frame.mjd, kind="d", imagetype="stray", camera=camera, expnum=expnum)
+
+        # subtract stray light only if imagetyp is flat
+        if skip_done and os.path.isfile(lflat_path):
+            log.info(f"skipping {lflat_path}, file already exist")
+        else:
+            image_tasks.subtract_straylight(in_image=dflat_path, out_image=lflat_path, out_stray=dstray_path,
+                                            in_cent_trace=guess_paths["centroids"])
+
+        log.info(f"going to trace std fiber {std_fiberid} in {camera} within {block_idxs = }")
+        fitted_params, img, model, _ = image_tasks.fit_fibers_params(in_image=lflat_path, in_fiber_guess=guess_paths, coadd=20,
+                                                                        ncolumns=trace_full_ncolumns, iblocks=block_idxs,
+                                                                        measuring_conf=FIBER_MEASURING_CONFIG, smoothing_conf=FIBER_SMOOTHING_CONFIG)
+
+        # update master traces
+        log.info(f"{camera = }, {expnum = }, {std_fiberid = }")
+        for name in fitted_params:
+            fibers_params[name].setHeader(img._header)
+
+            fibers_param = fibers_params[name]
+            fitted_param = fitted_params[name]
+            for iblock in block_idxs:
+                fibers_param.set_block(iblock=iblock, from_instance=fitted_param.get_block(iblock))
+
+        # store blocks models
+        models.append(model)
+
+    for name, fibers_param in fibers_params.items():
+        fibers_param.setHeader(img._header)
+        # masking bad fibers
+        bad_fibers = fibermap["fibstatus"] == 1
+        fibers_param._mask[bad_fibers] = True
+        # masking untraced standard fibers (two cases: 1. not set for tracing and 2. flagged during tracing)
+        untraced_fibers = np.isin(fibermap["orig_ifulabel"].value, unexposed_stds)
+        fibers_param._mask[untraced_fibers] = True
+        # interpolate master traces in missing fibers
+        fibers_param.interpolate_data(axis="Y", reset_mask=True)
+
+        fibers_param.writeFitsData(path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, camera=camera, kind=f"{prefix}{name}"))
+
+    # store final model and ratio
+    model = image_tasks.combineImages(images=models, method="sum", normalize=False, background_subtract=False, replace_with_nan=False)
+    model.writeFitsData(path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, camera=camera, kind=f"{prefix}model"))
+    (model / img).writeFitsData(path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, camera=camera, kind=f"{prefix}ratio"))
+
+
+def create_nightly_traces(mjd, cameras=CAMERAS, use_longterm_cals=False,
+                          cent_guess_ncolumns=140, trace_full_ncolumns=40,
+                          skip_done=True, dry_run=False):
+    """Create the nightly fiber model from the nightly dome flats
+
+    Fits the fiber model (counts, centroids and sigmas) of each camera as
+    :func:`create_traces` does for the long-term sequence, using the nightly
+    dome flats of the camera lamp (LDLS for b and r, quartz for z; see
+    :func:`choose_dome_sequence`). The fiber blocks of each standard fiber
+    exposed in the nightly flats are fitted from its exposure and the rest
+    from the first exposure. The products are written as ncounts, ncentroids,
+    nsigmas, nmodel and nratio in the calibration directory of `mjd`.
 
     Parameters
     ----------
     mjd : int
         MJD to reduce.
+    cameras : list or tuple, optional
+        Cameras to create the fiber model for, by default all
     use_longterm_cals : bool, optional
-        Whether to use long-term calibration frames, by default False.
-    expnums_ldls : list, optional
-        List of exposure numbers for LDLS dome flats.
-    expnums_qrtz : list, optional
-        List of exposure numbers for quartz dome flats.
-    counts_thresholds : dict, optional
-        Dictionary with count thresholds for each lamp type, by default COUNTS_THRESHOLDS.
+        Kept for compatibility, the bias of `mjd` is always used.
     cent_guess_ncolumns : int, optional
-        Number of columns to use for centroid tracing, by default 140.
+        Number of columns to guess the fiber parameters, by default 140.
     trace_full_ncolumns : int, optional
-        Number of columns to use for full fiber tracing, by default 40.
-    fit_poly : bool, optional
-        Fit polynomials to traces, by default True.
-    poly_deg_amp : int, optional
-        Degree of the polynomial to fit to the amplitude, by default 5.
-    poly_deg_cent : int, optional
-        Degree of the polynomial to fit to the centroids, by default 4.
-    poly_deg_width : int, optional
-        Degree of the polynomial to fit to the widths, by default 5.
+        Number of columns to fit the fiber parameters, by default 40.
     skip_done : bool, optional
         Skip pipeline steps that have already been done, by default True.
     dry_run : bool, optional
         If True, only logs the steps that would be performed, by default False.
     """
-    if expnums_ldls is not None and expnums_qrtz is not None:
-        expnums = np.concatenate([expnums_ldls, expnums_qrtz])
-    else:
-        expnums = None
-
-    frames = md.get_calibrations_metadata(mjd, calibration="trace", expnums=expnums)
+    frames = md.get_calibrations_metadata(mjds=mjd, calibration="trace")
+    if not frames.empty:
+        frames = choose_dome_sequence(frames, channels="".join(sorted({camera[0] for camera in cameras})), kind="nightly")
+        frames = frames.loc[frames.camera.isin(cameras)]
     if frames.empty:
         log.error("no dome flat frames found, skipping production of fiber traces")
         return
 
-    if expnums_ldls is None or expnums_qrtz is None:
-        frames, expnums = choose_sequence(frames, flavor="trace", kind="nightly")
-        expnums_ldls = np.sort(frames.query("ldls").expnum.unique())
-        expnums_qrtz = np.sort(frames.query("quartz").expnum.unique())
-
     # define master paths for target frames
-    calibs = get_calib_paths(mjd, version=drpver, flavors=CALIBRATION_NEEDS["trace"], from_sandbox=False)
+    calibs = get_calib_paths(mjd=mjd, version=drpver, flavors=CALIBRATION_NEEDS["trace"], from_sandbox=False)
 
     if dry_run:
         _log_dry_run(frames, calibs=calibs, settings=None, caller=create_nightly_traces.__name__)
         return
 
     # run 2D reduction on flats: preprocessing, detrending
-    reduce_2d(mjd, calibrations=calibs, expnums=expnums, reject_cr=False,
-              add_astro=False, sub_straylight=False, skip_done=skip_done)
+    reduce_2d(mjd, calibrations=calibs, expnums=sorted(frames.expnum.unique()), cameras=sorted(frames.camera.unique()),
+              reject_cr=False, add_astro=False, sub_straylight=False, skip_done=skip_done)
 
-    for channel, lamp in MASTER_CON_LAMPS.items():
-        counts_threshold = counts_thresholds[lamp]
-
-        # select dome flats accoding to current channel-lamp combination
-        flats_analogs = frames.loc[(frames[lamp])&(frames["camera"].str.startswith(channel))].groupby(["camera",])
-        for camera in flats_analogs.groups:
-            flats = flats_analogs.get_group((camera,))
-
-            # combine dome flats
-            if flats.expnum.min() != flats.expnum.max():
-                expnum_str = f"{flats.expnum.min():>08}_{flats.expnum.max():>08}"
-            else:
-                expnum_str = flats.expnum.min()
-            dflat_paths = [path.full("lvm_anc", drpver=drpver, kind="d", imagetype="flat", **flat) for flat in flats.to_dict("records")]
-            cflat_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="c", imagetype="flat", camera=camera, expnum=expnum_str)
-            os.makedirs(os.path.dirname(cflat_path), exist_ok=True)
-            image_tasks.create_master_frame(in_images=dflat_paths, out_image=cflat_path)
-
-            # define paths
-            lflat_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="l", imagetype="flat", camera=camera, expnum=expnum_str)
-            dstray_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="d", imagetype="stray", camera=camera, expnum=expnum_str)
-            dratio_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=mjd, kind="d", imagetype="ratio", camera=camera, expnum=expnum_str)
-
-            cent_guess_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, kind="ntrace_guess", camera=camera)
-            flux_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, kind="namp", camera=camera)
-            cent_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, kind="ntrace", camera=camera)
-            fwhm_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, kind="nwidth", camera=camera)
-            model_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, kind="nmodel", camera=camera)
-
-            # first centroids trace
-            if skip_done and os.path.isfile(cent_guess_path):
-                log.info(f"skipping {cent_guess_path}, file already exist")
-            else:
-                log.info(f"going to trace centroids fibers in {camera}")
-                centroids, img = image_tasks.trace_centroids(in_image=cflat_path, out_trace_cent=cent_guess_path,
-                                                             correct_ref=True, median_box=(1,10), coadd=20, counts_threshold=counts_threshold,
-                                                             max_diff=1.5, guess_fwhm=2.5, method="gauss", ncolumns=cent_guess_ncolumns,
-                                                             fit_poly=fit_poly, poly_deg=poly_deg_cent,
-                                                             interpolate_missing=True)
-
-            # subtract stray light only if imagetyp is flat
-            if skip_done and os.path.isfile(lflat_path):
-                log.info(f"skipping {lflat_path}, file already exist")
-            else:
-                image_tasks.subtract_straylight(in_image=cflat_path, out_image=lflat_path, out_stray=dstray_path,
-                                                in_cent_trace=cent_guess_path)
-
-            if skip_done and os.path.isfile(flux_path) and os.path.isfile(cent_path) and os.path.isfile(fwhm_path):
-                log.info(f"skipping {flux_path}, {cent_path} and {fwhm_path}, files already exist")
-            else:
-                log.info(f"going to trace fibers in {camera}")
-                centroids, trace_cent_fit, trace_flux_fit, trace_fwhm_fit, img_stray, model, mratio = image_tasks.trace_fibers(
-                    in_image=lflat_path,
-                    out_trace_amp=flux_path, out_trace_cent=cent_path, out_trace_fwhm=fwhm_path, out_model=model_path,
-                    in_trace_cent_guess=cent_guess_path,
-                    median_box=(1,10), coadd=20,
-                    counts_threshold=counts_threshold, max_diff=1.5, fwhms_guess=2.5,
-                    ncolumns=trace_full_ncolumns, fwhm_limits=(1.5, 4.5),
-                    fit_poly=fit_poly, interpolate_missing=True,
-                    poly_deg=(poly_deg_amp, poly_deg_cent, poly_deg_width)
-                )
-
-            # eval model continuum and ratio
-            if skip_done and os.path.isfile(model_path) and os.path.isfile(dratio_path):
-                log.info(f"skipping {model_path}, file already exist")
-            else:
-                log.info(f"going to create model image and mode/exposure ratio in {camera}")
-                if "trace_cent_fit" not in locals():
-                    trace_cent_fit = TraceMask.from_file(cent_path)
-                    trace_flux_fit = TraceMask.from_file(flux_path)
-                    trace_fwhm_fit = TraceMask.from_file(fwhm_path)
-                    img_stray = loadImage(lflat_path)
-                    img_stray.setData(data=np.nan_to_num(img_stray._data), error=np.nan_to_num(img_stray._error))
-                    img_stray = img_stray.replaceMaskMedian(1, 10, replace_error=None)
-                    img_stray._data = np.nan_to_num(img_stray._data)
-                    img_stray = img_stray.medianImg((1,10), propagate_error=True)
-                    img_stray = img_stray.convolveImg(np.ones((1, 20), dtype="uint8"))
-                model, ratio = img_stray.eval_fiber_model(trace_cent_fit, trace_fwhm_fit, trace_flux_fit)
-                model.writeFitsData(model_path)
-                ratio.writeFitsData(dratio_path)
+    for camera, camera_frames in frames.groupby("camera"):
+        _fit_fiber_model(camera_frames.sort_values("expnum"), camera=camera, mjd=mjd, kind="nightly",
+                         cent_guess_ncolumns=cent_guess_ncolumns, trace_full_ncolumns=trace_full_ncolumns,
+                         skip_done=skip_done)
 
 
 def create_traces(mjd, epochs=None, cameras=CAMERAS, ring="primary",
@@ -1836,89 +1854,57 @@ def create_traces(mjd, epochs=None, cameras=CAMERAS, ring="primary",
     reduce_2d(mjds, calibrations=calibs, expnums=expnums, cameras=cameras, reject_cr=False,
               add_astro=False, sub_straylight=False, skip_done=skip_done)
 
-    # iterate through exposures with std fibers exposed
+    # fit the fiber model of each camera with the exposures that have its standard fibers exposed
     for camera in cameras:
-        # select fibers in current spectrograph
-        fibermap = SLITMAP[SLITMAP["spectrographid"] == int(camera[1])]
-        # initialize fiber traces
-        columns = np.linspace(5, 4080, trace_full_ncolumns, dtype="int")
-        fibers_params = {
-            "counts": TraceMask.create_empty(data_dim=(LVM_NFIBERS, LVM_NCOLS), slitmap=SLITMAP, samples_columns=columns),
-            "centroids": TraceMask.create_empty(data_dim=(LVM_NFIBERS, LVM_NCOLS), slitmap=SLITMAP, samples_columns=columns),
-            "sigmas": TraceMask.create_empty(data_dim=(LVM_NFIBERS, LVM_NCOLS), slitmap=SLITMAP, samples_columns=columns)
-        }
+        _fit_fiber_model(camera_frames[camera], camera=camera, mjd=mjd, kind="longterm",
+                         cent_guess_ncolumns=cent_guess_ncolumns, trace_full_ncolumns=trace_full_ncolumns,
+                         skip_done=skip_done)
 
-        models = []
-        exposed_stds, unexposed_stds = get_sequence_iterator(camera_frames[camera], camera)
-        for expnum, (std_fiberid, block_idxs) in exposed_stds.items():
-            frame = camera_frames[camera].query("expnum == @expnum").squeeze()
 
-            # first fibers fitting (guess using pure Gaussian profiles) using first exposure in sequence
-            dflat_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=frame.mjd, kind="d", imagetype="flat", camera=camera, expnum=expnum)
-            counts_guess_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=frame.mjd, kind="d", imagetype="counts_guess", camera=camera, expnum=expnum)
-            centroids_guess_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=frame.mjd, kind="d", imagetype="centroids_guess", camera=camera, expnum=expnum)
-            sigmas_guess_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=frame.mjd, kind="d", imagetype="sigmas_guess", camera=camera, expnum=expnum)
-            guess_paths = {
-                "counts": counts_guess_path,
-                "centroids": centroids_guess_path,
-                "sigmas": sigmas_guess_path
-            }
-            guess_paths_exist = [os.path.isfile(guess_path) for guess_path in guess_paths.values()]
-            if skip_done and all(guess_paths_exist):
-                for guess_path in guess_paths.values():
-                    log.info(f"skipping {guess_path}, file already exist")
-            else:
-                log.info(f"going to trace all fibers in {camera}")
-                image_tasks.guess_fibers_params(in_image=dflat_path, out_fiber_guess=guess_paths,
-                                                coadd=20, counts_range=[0.0, np.inf], centroids_range=[-2.0, +2.0], fwhms_range=[2.0, 3.5],
-                                                ncolumns=cent_guess_ncolumns)
-            # define paths
-            dflat_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=frame.mjd, kind="d", imagetype="flat", camera=camera, expnum=expnum)
-            lflat_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=frame.mjd, kind="l", imagetype="flat", camera=camera, expnum=expnum)
-            dstray_path = path.full("lvm_anc", drpver=drpver, tileid=11111, mjd=frame.mjd, kind="d", imagetype="stray", camera=camera, expnum=expnum)
 
-            # subtract stray light only if imagetyp is flat
-            if skip_done and os.path.isfile(lflat_path):
-                log.info(f"skipping {lflat_path}, file already exist")
-            else:
-                image_tasks.subtract_straylight(in_image=dflat_path, out_image=lflat_path, out_stray=dstray_path,
-                                                in_cent_trace=guess_paths["centroids"])
 
-            log.info(f"going to trace std fiber {std_fiberid} in {camera} within {block_idxs = }")
-            fitted_params, img, model, _ = image_tasks.fit_fibers_params(in_image=lflat_path, in_fiber_guess=guess_paths, coadd=20,
-                                                                            ncolumns=trace_full_ncolumns, iblocks=block_idxs,
-                                                                            measuring_conf=FIBER_MEASURING_CONFIG, smoothing_conf=FIBER_SMOOTHING_CONFIG)
 
-            # update master traces
-            log.info(f"{camera = }, {expnum = }, {std_fiberid = }")
-            for name in fitted_params:
-                fibers_params[name].setHeader(img._header)
 
-                fibers_param = fibers_params[name]
-                fitted_param = fitted_params[name]
-                for iblock in block_idxs:
-                    fibers_param.set_block(iblock=iblock, from_instance=fitted_param.get_block(iblock))
+def choose_dome_sequence(frames: pd.DataFrame, channels: str = "brz", kind: str = "longterm", ring: str = "primary") -> pd.DataFrame:
+    """Choose the dome flat exposures of each channel
 
-            # store blocks models
-            models.append(model)
+    Each channel is flat-fielded with the exposures of its lamp (see
+    ``MASTER_CON_LAMPS``): LDLS for b and r, quartz for z. A long-term
+    sequence has one exposure per standard fiber of the `ring`, as for the
+    fiber traces; a nightly one the first two exposures of each lamp.
 
-        for name, fibers_param in fibers_params.items():
-            fibers_param.setHeader(img._header)
-            # masking bad fibers
-            bad_fibers = fibermap["fibstatus"] == 1
-            fibers_param._mask[bad_fibers] = True
-            # masking untraced standard fibers (two cases: 1. not set for tracing and 2. flagged during tracing)
-            untraced_fibers = np.isin(fibermap["orig_ifulabel"].value, unexposed_stds)
-            fibers_param._mask[untraced_fibers] = True
-            # interpolate master traces in missing fibers
-            fibers_param.interpolate_data(axis="Y", reset_mask=True)
+    Parameters
+    ----------
+    frames : pd.DataFrame
+        Metadata of the dome flat camera frames
+    channels : str, optional
+        Channels to choose exposures for, by default 'brz'
+    kind : str or None, optional
+        Sequence length, 'longterm' or 'nightly'. None keeps all the exposures of each lamp. By default 'longterm'
+    ring : str, optional
+        Standard fibers ring of a long-term sequence, by default 'primary'
 
-            fibers_param.writeFitsData(path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, camera=camera, kind=f"m{name}"))
-
-        # store final model and ratio
-        model = image_tasks.combineImages(images=models, method="sum", normalize=False, background_subtract=False, replace_with_nan=False)
-        model.writeFitsData(path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, camera=camera, kind="mmodel"))
-        (model / img).writeFitsData(path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, camera=camera, kind="mratio"))
+    Returns
+    -------
+    pd.DataFrame
+        Metadata of the camera frames of the chosen exposures, only for the cameras of the matching channel
+    """
+    sequences = []
+    for channel in channels:
+        lamp = MASTER_CON_LAMPS[channel]
+        frames_lamp = frames.loc[frames[lamp] & frames.camera.str.startswith(channel)]
+        if frames_lamp.empty:
+            log.warning(f"no {lamp} dome flats found for {channel = }")
+            continue
+        if kind == "nightly":
+            first = np.sort(frames_lamp.expnum.unique())[:2]
+            frames_lamp = frames_lamp.loc[frames_lamp.expnum.isin(first)]
+        elif kind is not None:
+            frames_lamp, _ = choose_sequence(frames_lamp, calibration="dome", kind=kind, ring=ring)
+        sequences.append(frames_lamp)
+    if not sequences:
+        return frames.iloc[:0]
+    return pd.concat(sequences, ignore_index=True)
 
 
 def create_dome_fiberflats(mjd, expnums_ldls=None, expnums_qrtz=None, cals_mjd=None, use_longterm_cals=True, kind="longterm", skip_done=True, dry_run=False):
@@ -2450,7 +2436,7 @@ def create_wavelengths(mjd, epochs=None, use_longterm_cals=True, kind="longterm"
         return
 
     # define master paths for target frames
-    calibs = get_calib_paths(mjd=mjd, version=drpver, flavors=CALIBRATION_NEEDS["wave"], from_sandbox=False)
+    calibs = get_calib_paths(mjd=mjd, version=drpver, flavors=CALIBRATION_NEEDS["wave"], nightly=kind == "nightly", from_sandbox=False)
 
     if dry_run:
         _log_dry_run(frames, calibs=calibs, settings=None, caller=create_wavelengths.__name__)
@@ -2592,7 +2578,6 @@ def reduce_nightly_sequence(mjd, use_longterm_cals=False, reject_cr=True, only_c
 
     if "trace" in only_cals:
         create_nightly_traces(mjd=mjd, use_longterm_cals=use_longterm_cals,
-                              counts_thresholds=counts_thresholds,
                               cent_guess_ncolumns=cent_guess_ncolumns,
                               trace_full_ncolumns=trace_full_ncolumns,
                               skip_done=skip_done, dry_run=dry_run)
