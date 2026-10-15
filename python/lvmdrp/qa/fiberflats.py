@@ -3743,8 +3743,15 @@ def science_position_angle(header, ra: float, dec: float, time, kmirror: Dict = 
     return np.nan, "none", km
 
 
-def parallactic_angle(ra, dec, time) -> np.ndarray:
-    """Parallactic angle at LCO in degrees, from North towards East
+def siderostat_field_angle(ra, dec, time) -> np.ndarray:
+    """Field angle of the LVM siderostat at LCO in degrees: the direction to the North Celestial Pole in the exit beam
+
+    The two flat mirrors of the siderostat rotate the field by an angle that
+    depends on the altitude and azimuth of the target, unlike the parallactic
+    angle of an alt-az telescope. This is the vectorized geometry of
+    ``lvmtipo.siderostat.Siderostat.fieldAngle`` (R. Mathar), with its LCO
+    design (horizontal exit beam towards North, meridian flip sign -1) and
+    without refraction.
 
     Parameters
     ----------
@@ -3760,29 +3767,47 @@ def parallactic_angle(ra, dec, time) -> np.ndarray:
     from astropy.coordinates import AltAz, SkyCoord
 
     location = _ephemeris()[3]
-    time = Time(time, scale="utc")
-    # position angle of the zenith seen from the target, measured against ICRS North like the guider position angles
-    zenith = SkyCoord(alt=np.full(time.shape, 90.0) * u.deg, az=np.zeros(time.shape) * u.deg,
-                      frame=AltAz(obstime=time, location=location)).icrs
+    frame = AltAz(obstime=Time(time, scale="utc"), location=location)
     target = SkyCoord(ra=np.asarray(ra, dtype=float) * u.deg, dec=np.asarray(dec, dtype=float) * u.deg)
-    return _wrap_angle(target.position_angle(zenith).deg)
+
+    def unit_vector(coords):
+        alt, az = coords.alt.radian, coords.az.radian
+        return np.stack([np.sin(az) * np.cos(alt), np.cos(az) * np.cos(alt), np.sin(alt)], axis=-1)
+
+    def normalized(v):
+        return v / np.linalg.norm(v, axis=-1, keepdims=True)
+
+    def reflect(v, normal):
+        return v - 2 * np.sum(v * normal, axis=-1, keepdims=True) * normal
+
+    # target and a point 0.16 deg towards the North Celestial Pole, in (East, North, up)
+    star = unit_vector(target.transform_to(frame))
+    north = unit_vector(target.spherical_offsets_by(0 * u.deg, 0.16 * u.deg).transform_to(frame))
+    beam, sign = np.array([0.0, 1.0, 0.0]), -1
+    m2_to_m1 = normalized(np.cross(star, beam)) / sign
+    image = reflect(reflect(north, normalized(star - m2_to_m1)), normalized(beam + m2_to_m1))
+    # axes of the exit beam: towards the zenith and towards the East
+    box = np.array([0.0, -beam[2], beam[1]])
+    boy = np.cross(beam, box)
+    return np.degrees(np.arctan2(image @ boy, image @ box))
 
 
-# models of the position angle from the K-mirror angle: PA = factor * km_sign * KM + q_sign * q + offset
-KMIRROR_MODELS = [(factor, km_sign, q_sign) for factor in (2, 1) for km_sign in (1, -1) for q_sign in (1, -1)]
+# models of the position angle from the K-mirror angle: PA = factor * km_sign * KM + field_sign * field angle + offset
+KMIRROR_MODELS = [(factor, km_sign, field_sign) for factor in (2, 1) for km_sign in (1, -1) for field_sign in (1, -1)]
 
 
-def _kmirror_model(km, q, factor, km_sign, q_sign):
-    return factor * km_sign * np.asarray(km, dtype=float) + q_sign * np.asarray(q, dtype=float)
+def _kmirror_model(km, field, factor, km_sign, field_sign):
+    return factor * km_sign * np.asarray(km, dtype=float) + field_sign * np.asarray(field, dtype=float)
 
 
 def calibrate_kmirror_pa(table, min_frames: int = 20) -> Dict:
     """Calibrate the position angle of the science IFU from the K-mirror angle
 
-    The field of an alt-az telescope rotates with the parallactic angle q, and
-    a K-mirror rotates the image by twice its mechanical angle, so
+    The siderostat rotates the field by its field angle
+    (:func:`siderostat_field_angle`), and the K-mirror rotates the image by
+    twice its mechanical angle, so
 
-        PA = factor * km_sign * KM + q_sign * q + offset
+        PA = factor * km_sign * KM + field_sign * field angle + offset
 
     The conventions (factor 2 or 1, signs) and the offset are not assumed: all
     the combinations are fitted to frames with a guider-solved position angle,
@@ -3803,8 +3828,9 @@ def calibrate_kmirror_pa(table, min_frames: int = 20) -> Dict:
     Returns
     -------
     dict
-        factor, km_sign, q_sign, offset (degrees), rms (robust residual,
-        degrees), nframes, ambiguous, and models (rms of every combination).
+        rotation ('siderostat'), factor, km_sign, field_sign, offset (degrees),
+        rms (robust residual, degrees), nframes, ambiguous, and models (rms of
+        every combination).
     """
     if isinstance(table, (str, pathlib.Path)):
         table = pd.read_hdf(table) if str(table).endswith(".h5") else Table.read(table, hdu=1)
@@ -3823,19 +3849,19 @@ def calibrate_kmirror_pa(table, min_frames: int = 20) -> Dict:
     if len(data) < min_frames:
         raise ValueError(f"only {len(data)} frames with a guider position angle and a K-mirror angle, need {min_frames}")
 
-    q = parallactic_angle(data["sci_ra"].to_numpy(), data["sci_dec"].to_numpy(), Time(list(data["obstime"]), scale="utc"))
+    field = siderostat_field_angle(data["sci_ra"].to_numpy(), data["sci_dec"].to_numpy(), Time(list(data["obstime"]), scale="utc"))
     pa, km = data["sci_pa"].to_numpy(), data["sci_kmpos"].to_numpy()
     models = []
-    for factor, km_sign, q_sign in KMIRROR_MODELS:
-        residual = _wrap_angle(pa - _kmirror_model(km, q, factor, km_sign, q_sign))
+    for factor, km_sign, field_sign in KMIRROR_MODELS:
+        residual = _wrap_angle(pa - _kmirror_model(km, field, factor, km_sign, field_sign))
         radians = np.radians(residual)
         offset = float(np.degrees(np.arctan2(np.mean(np.sin(radians)), np.mean(np.cos(radians)))))
         rms = float(1.4826 * np.median(np.abs(_wrap_angle(residual - offset))))
-        models.append({"factor": factor, "km_sign": km_sign, "q_sign": q_sign, "offset": offset, "rms": rms})
+        models.append({"factor": factor, "km_sign": km_sign, "field_sign": field_sign, "offset": offset, "rms": rms})
     models.sort(key=lambda m: m["rms"])
-    best = dict(models[0])
+    best = {"rotation": "siderostat", **models[0]}
     best.update({"nframes": int(len(data)), "ambiguous": bool(models[1]["rms"] < 3 * max(best["rms"], 1e-6)), "models": models})
-    log.info(f"K-mirror position angle: PA = {best['factor']} x {best['km_sign']:+d} KM {best['q_sign']:+d} q "
+    log.info(f"K-mirror position angle: PA = {best['factor']} x {best['km_sign']:+d} KM {best['field_sign']:+d} field "
              f"{best['offset']:+.2f} deg, rms {best['rms']:.2f} deg from {best['nframes']} frames"
              + (" (ambiguous: another model fits almost as well)" if best["ambiguous"] else ""))
     return best
@@ -3843,8 +3869,10 @@ def calibrate_kmirror_pa(table, min_frames: int = 20) -> Dict:
 
 def kmirror_pa(km, ra, dec, time, relation: Dict):
     """Position angle of the science IFU from the K-mirror angle, with a relation from :func:`calibrate_kmirror_pa`"""
-    q = parallactic_angle(ra, dec, time)
-    return _wrap_angle(_kmirror_model(km, q, relation["factor"], relation["km_sign"], relation["q_sign"]) + relation["offset"])
+    if relation.get("rotation") != "siderostat":
+        raise ValueError("K-mirror relation without the siderostat field angle (from an older version), calibrate it again from a drpall file")
+    field = siderostat_field_angle(ra, dec, time)
+    return _wrap_angle(_kmirror_model(km, field, relation["factor"], relation["km_sign"], relation["field_sign"]) + relation["offset"])
 
 
 def load_kmirror_relation(source) -> Dict:
@@ -3853,7 +3881,10 @@ def load_kmirror_relation(source) -> Dict:
         return source
     if str(source).endswith(".json"):
         with open(source) as f:
-            return json.load(f)
+            relation = json.load(f)
+        if relation.get("rotation") != "siderostat":
+            raise ValueError(f"{source} has no siderostat field angle (from an older version), calibrate it again from a drpall file")
+        return relation
     return calibrate_kmirror_pa(source)
 
 
@@ -4045,6 +4076,55 @@ def _raw_twilight_headers(mjds, known_expnums, channels):
     return headers
 
 
+def _twilight_summary(flat_paths, mjds, channels, include_raw, relation):
+    """Per-exposure and per-channel table of the twilight QA: removed gradient and factors, geometry and lab conditions
+
+    Returns the summary table (see :func:`qa_twilight_sequence`), the science
+    IFU layout and the gradient model of each exposure per channel.
+    """
+    geometry, rows, layout, maps = {}, [], None, {}
+    for flat_path in tqdm(flat_paths, desc="twilight flats", unit="flat", ascii=True):
+        header = fits.getheader(flat_path, 0)
+        channel = str(header.get("CCD", " "))[0]
+        if channel not in channels or not _is_twilight(header):
+            continue
+        slitmap = Table.read(flat_path, hdu="SLITMAP")
+        expnum = int(header["EXPOSURE"])
+        if expnum not in geometry:
+            geometry[expnum] = {"mjd": _night_sjd(header, flat_path), "expnum": expnum, **_lab_conditions(header),
+                                **twilight_geometry(header, slitmap, kmirror=relation)}
+        row, layout, model = _removed_corrections(header, channel, slitmap, layout)
+        if model is not None:
+            maps.setdefault(channel, {})[expnum] = model
+        rows.append({"expnum": expnum, "channel": channel, "path": flat_path, **row})
+
+    if include_raw:
+        from lvmdrp.main import read_fibermap
+        raw_headers = _raw_twilight_headers(mjds, set(geometry), channels)
+        if raw_headers:
+            fibermap = read_fibermap(as_table=True)
+            for expnum, (header, raw_path) in raw_headers.items():
+                geometry[expnum] = {"mjd": _night_sjd(header, raw_path), "expnum": expnum, **_lab_conditions(header),
+                                    **twilight_geometry(header, fibermap, kmirror=relation)}
+                rows.append({"expnum": expnum, "channel": ""})
+    if not geometry:
+        raise FileNotFoundError(f"no twilight exposures found for MJDs {mjds}; run 'drp calibrations fiberflats --skip-combination' first")
+
+    summary = pd.DataFrame(rows).merge(pd.DataFrame(list(geometry.values())), on="expnum", how="left")
+    for column in ("grad_x", "grad_y", "strength", "direction", "factor1", "factor2", "factor3"):
+        if column not in summary.columns:
+            summary[column] = np.nan
+    summary["dtheta_sun"] = _wrap_angle(summary["direction"] - summary["dir_sun"])
+    summary["dtheta_horizon"] = _wrap_angle(summary["direction"] - summary["dir_horizon"])
+    summary = summary.sort_values(["time", "channel"]).reset_index(drop=True)
+    return summary, layout, maps
+
+
+def _lab_conditions(header) -> Dict:
+    """Temperature and humidity of the spectrograph enclosure (LABTEMP, LABHUMID), NaN if missing"""
+    return {"labtemp": _header_float(header, "LABTEMP"), "labhumid": _header_float(header, "LABHUMID")}
+
+
 def qa_twilight_sequence(mjds, channels: str = "brz", drpver: str = None, flat_paths: List[str] = None,
                          include_raw: bool = True, kmirror=None, output_dir: str = None, dry_run: bool = False) -> Dict:
     """Check the gradient across the science IFU of a twilight sequence against the sky geometry, and write a dashboard.
@@ -4124,39 +4204,7 @@ def qa_twilight_sequence(mjds, channels: str = "brz", drpver: str = None, flat_p
         return {"summary": None, "figures": {}, "report": None}
 
     relation = load_kmirror_relation(kmirror)
-    geometry, rows, layout, maps = {}, [], None, {}
-    for flat_path in tqdm(flat_paths, desc="twilight flats", unit="flat", ascii=True):
-        header = fits.getheader(flat_path, 0)
-        channel = str(header.get("CCD", " "))[0]
-        if channel not in channels or not _is_twilight(header):
-            continue
-        slitmap = Table.read(flat_path, hdu="SLITMAP")
-        expnum = int(header["EXPOSURE"])
-        if expnum not in geometry:
-            geometry[expnum] = {"mjd": _night_sjd(header, flat_path), "expnum": expnum, **twilight_geometry(header, slitmap, kmirror=relation)}
-        row, layout, model = _removed_corrections(header, channel, slitmap, layout)
-        if model is not None:
-            maps.setdefault(channel, {})[expnum] = model
-        rows.append({"expnum": expnum, "channel": channel, "path": flat_path, **row})
-
-    if include_raw:
-        from lvmdrp.main import read_fibermap
-        raw_headers = _raw_twilight_headers(mjds, set(geometry), channels)
-        if raw_headers:
-            fibermap = read_fibermap(as_table=True)
-            for expnum, (header, raw_path) in raw_headers.items():
-                geometry[expnum] = {"mjd": _night_sjd(header, raw_path), "expnum": expnum, **twilight_geometry(header, fibermap, kmirror=relation)}
-                rows.append({"expnum": expnum, "channel": ""})
-    if not geometry:
-        raise FileNotFoundError(f"no twilight exposures found for MJDs {mjds}; run 'drp calibrations fiberflats --skip-combination' first")
-
-    summary = pd.DataFrame(rows).merge(pd.DataFrame(list(geometry.values())), on="expnum", how="left")
-    for column in ("grad_x", "grad_y", "strength", "direction", "factor1", "factor2", "factor3"):
-        if column not in summary.columns:
-            summary[column] = np.nan
-    summary["dtheta_sun"] = _wrap_angle(summary["direction"] - summary["dir_sun"])
-    summary["dtheta_horizon"] = _wrap_angle(summary["direction"] - summary["dir_horizon"])
-    summary = summary.sort_values(["time", "channel"]).reset_index(drop=True)
+    summary, layout, maps = _twilight_summary(flat_paths, mjds, channels, include_raw, relation)
     os.makedirs(output_dir, exist_ok=True)
     summary.to_csv(table_path, index=False)
 
@@ -4362,7 +4410,7 @@ def _write_twilight_dashboard(report_path, summary, figures, mjds, drpver, layou
         if column in geometry.columns:
             meta.append((label, ", ".join(f"{count} {source}" for source, count in geometry[column].value_counts().items())))
     if kmirror is not None:
-        meta.append(("K-mirror PA", f"{kmirror['factor']} x {kmirror['km_sign']:+d} KM {kmirror['q_sign']:+d} q "
+        meta.append(("K-mirror PA", f"{kmirror['factor']} x {kmirror['km_sign']:+d} KM {kmirror['field_sign']:+d} field "
                                     f"{kmirror['offset']:+.1f} deg, rms {kmirror['rms']:.1f} deg, {kmirror['nframes']} frames"
                                     + (", ambiguous" if kmirror.get("ambiguous") else "")))
     intro = ("<p>For each twilight exposure, the gradient across the science IFU and the spectrograph factors that the "
@@ -4688,6 +4736,597 @@ TWILIGHT_IFU = r"""
 # ---------------------------------------------------------------------------
 
 # colors of the channels in the dome dashboard
+# candidate drivers of the twilight gradient: (key, label, column, unit)
+TWILIGHT_DRIVERS = [
+    ("sun_alt", "Sun altitude", "sun_alt", "°"),
+    ("sun_az", "Sun azimuth", "sun_az", "°"),
+    ("sun_sep", "Sun separation", "sun_sep", "°"),
+    ("moon_sep", "Moon separation", "moon_sep", "°"),
+    ("moon_alt", "Moon altitude", "moon_alt", "°"),
+    ("moon_illum", "Moon illumination", "moon_illum", ""),
+    ("point_alt", "Pointing altitude", "point_alt", "°"),
+    ("point_az", "Pointing azimuth", "point_az", "°"),
+    ("pa", "Position angle", "pa", "°"),
+    ("km", "K-mirror angle", "km", "°"),
+    ("exptime", "Exposure time", "exptime", "s"),
+    ("labtemp", "Lab temperature", "labtemp", "°C"),
+    ("labhumid", "Lab humidity", "labhumid", "%"),
+    ("mjd", "Night (MJD)", "mjd", ""),
+    ("doy", "Day of the year", "doy", ""),
+]
+# angular drivers, correlated with their sine and cosine
+ANGULAR_DRIVERS = {"sun_az", "point_az", "pa", "km"}
+
+
+def _resultant_length(angles) -> Tuple[float, float]:
+    """Circular mean (degrees) and mean resultant length R of `angles`: 1 for a fixed direction, ~0 for random ones"""
+    radians = np.radians(np.asarray(angles, dtype=float))
+    radians = radians[np.isfinite(radians)]
+    if radians.size == 0:
+        return np.nan, np.nan
+    s, c = np.mean(np.sin(radians)), np.mean(np.cos(radians))
+    return float(np.degrees(np.arctan2(s, c))), float(np.hypot(s, c))
+
+
+def _linear_correlation(x, y) -> float:
+    """Pearson correlation of x and y over their finite pairs, NaN with fewer than 3 or no spread"""
+    x, y = np.asarray(x, dtype=float), np.asarray(y, dtype=float)
+    good = np.isfinite(x) & np.isfinite(y)
+    if good.sum() < 3 or np.std(x[good]) == 0 or np.std(y[good]) == 0:
+        return np.nan
+    return float(np.corrcoef(x[good], y[good])[0, 1])
+
+
+def _rank(values):
+    return pd.Series(values).rank().to_numpy(dtype=float)
+
+
+def _strength_correlation(x, strength, angular: bool) -> float:
+    """Spearman correlation of the gradient strength with a driver; for an angular driver, the circular-linear one"""
+    if not angular:
+        x, strength = np.asarray(x, dtype=float), np.asarray(strength, dtype=float)
+        good = np.isfinite(x) & np.isfinite(strength)
+        return _linear_correlation(_rank(x[good]), _rank(strength[good])) if good.sum() >= 3 else np.nan
+    return _circular_linear_correlation(x, strength)
+
+
+def _circular_linear_correlation(angles, x) -> float:
+    """Circular-linear correlation (Mardia) of angles in degrees with a linear quantity, from 0 to 1"""
+    angles, x = np.asarray(angles, dtype=float), np.asarray(x, dtype=float)
+    good = np.isfinite(angles) & np.isfinite(x)
+    if good.sum() < 4:
+        return np.nan
+    radians = np.radians(angles[good])
+    rxc, rxs = _linear_correlation(x[good], np.cos(radians)), _linear_correlation(x[good], np.sin(radians))
+    rcs = _linear_correlation(np.cos(radians), np.sin(radians))
+    if not np.isfinite([rxc, rxs]).all():
+        return np.nan
+    rcs = 0.0 if not np.isfinite(rcs) else rcs
+    return float(np.sqrt(max(rxc**2 + rxs**2 - 2 * rxc * rxs * rcs, 0) / max(1 - rcs**2, 1e-12)))
+
+
+def _circular_circular_correlation(a, b) -> float:
+    """Circular-circular correlation (Fisher and Lee) of two sets of angles in degrees, from -1 to 1"""
+    a, b = np.asarray(a, dtype=float), np.asarray(b, dtype=float)
+    good = np.isfinite(a) & np.isfinite(b)
+    if good.sum() < 4:
+        return np.nan
+    a, b = np.radians(a[good]), np.radians(b[good])
+    a, b = a - np.arctan2(np.mean(np.sin(a)), np.mean(np.cos(a))), b - np.arctan2(np.mean(np.sin(b)), np.mean(np.cos(b)))
+    norm = np.sqrt(np.sum(np.sin(a) ** 2) * np.sum(np.sin(b) ** 2))
+    return float(np.sum(np.sin(a) * np.sin(b)) / norm) if norm > 0 else np.nan
+
+
+def _direction_correlation(x, direction, angular: bool) -> float:
+    """Correlation of the gradient direction with a driver: circular-circular for an angular driver, else circular-linear"""
+    return abs(_circular_circular_correlation(direction, x)) if angular else _circular_linear_correlation(direction, x)
+
+
+def decompose_twilight_gradient(data: pd.DataFrame, min_exposures: int = 12) -> Dict:
+    """Split the gradients removed from twilight exposures into an instrumental and a sky component
+
+    Fits the gradient vectors of the exposures of one channel, in IFU
+    coordinates, as a vector fixed in the IFU that drifts linearly with time,
+    plus a sky gradient towards the Sun whose strength changes linearly with
+    the altitude of the Sun:
+
+        g = g0 + g1 * (t - t0) + (a + b * (-3 - h_sun)) * u_sun
+
+    with t in years from the first night t0 and u_sun the unit vector towards
+    the Sun across the IFU. The model is linear in its six parameters and is
+    fitted by least squares on the exposures with a direction of the Sun.
+
+    Parameters
+    ----------
+    data : pandas.DataFrame
+        Rows of one channel of the summary (see :func:`qa_twilight_sequence`).
+    min_exposures : int, optional
+        Minimum number of exposures with a direction of the Sun. Default is 12.
+
+    Returns
+    -------
+    dict
+        n, instrument (strength and direction at the first and the last night,
+        drift in %/yr and its direction), sky (amplitude a at a Sun altitude of
+        -3 deg and slope b per degree below it, in %), rms of the residuals and
+        of the gradients around their mean (%), and the fraction of the
+        variance explained. Only n if there are too few exposures.
+    """
+    good = data[np.isfinite(data[["grad_x", "grad_y", "dir_sun", "sun_alt", "mjd"]].astype(float)).all(axis=1)]
+    if len(good) < min_exposures:
+        return {"n": int(len(good))}
+    g = 100 * good[["grad_x", "grad_y"]].astype(float).to_numpy()
+    years = (good["mjd"].astype(float).to_numpy() - good["mjd"].min()) / 365.25
+    depth = -3 - good["sun_alt"].astype(float).to_numpy()
+    sun = np.radians(good["dir_sun"].astype(float).to_numpy())
+    ones, zeros = np.ones(len(good)), np.zeros(len(good))
+    # parameters: g0x, g0y, g1x, g1y, a, b; rows: x components then y components
+    design = np.vstack([np.column_stack([ones, zeros, years, zeros, np.cos(sun), depth * np.cos(sun)]),
+                        np.column_stack([zeros, ones, zeros, years, np.sin(sun), depth * np.sin(sun)])])
+    target = np.concatenate([g[:, 0], g[:, 1]])
+    params, *_ = np.linalg.lstsq(design, target, rcond=None)
+    residual = target - design @ params
+    g0, g1 = params[0:2], params[2:4]
+    span = float(years.max())
+    g_last = g0 + g1 * span
+    spread = float(np.sqrt(np.mean(np.sum((g - g.mean(axis=0)) ** 2, axis=1))))
+    rms = float(np.sqrt(np.mean(residual[: len(good)] ** 2 + residual[len(good):] ** 2)))
+    return {"n": int(len(good)), "years": span,
+            "instrument_first": float(np.hypot(*g0)), "instrument_first_dir": float(np.degrees(np.arctan2(g0[1], g0[0]))),
+            "instrument_last": float(np.hypot(*g_last)), "instrument_last_dir": float(np.degrees(np.arctan2(g_last[1], g_last[0]))),
+            "drift": float(np.hypot(*g1)), "drift_dir": float(np.degrees(np.arctan2(g1[1], g1[0]))),
+            "sky": float(params[4]), "sky_slope": float(params[5]), "rms": rms, "spread": spread,
+            "explained": float(1 - rms**2 / spread**2) if spread > 0 else np.nan}
+
+
+def twilight_trend_statistics(summary: pd.DataFrame) -> Dict[str, Dict]:
+    """Statistics of the gradient removed from the twilight exposures of many nights, per channel
+
+    For each channel: the number of exposures and nights, the median strength,
+    the circular mean direction and mean resultant length R of the gradient
+    in three frames (IFU, relative to the Sun, relative to the horizon), and
+    the correlation of the strength and of the direction with each driver of
+    :data:`TWILIGHT_DRIVERS` (Spearman or circular-linear for the strength,
+    circular-linear or circular-circular for the direction).
+    """
+    stats = {}
+    for channel in [c for c in "brz" if c in set(summary["channel"])]:
+        data = summary[(summary["channel"] == channel) & np.isfinite(summary["strength"].astype(float))]
+        frames = {}
+        for frame, column in (("IFU", "direction"), ("Sun", "dtheta_sun"), ("Horizon", "dtheta_horizon")):
+            mean, length = _resultant_length(data[column])
+            frames[frame] = {"mean": mean, "R": length, "n": int(np.isfinite(data[column].astype(float)).sum())}
+        # how much the directions of the Sun and the horizon move across the IFU: the frames can only be told apart if they do
+        for frame, column in (("Sun direction", "dir_sun"), ("Horizon direction", "dir_horizon")):
+            mean, length = _resultant_length(data[column])
+            frames[frame] = {"mean": mean, "R": length, "n": int(np.isfinite(data[column].astype(float)).sum())}
+        drivers = {}
+        for key, label, column, unit in TWILIGHT_DRIVERS:
+            if column not in data.columns:
+                continue
+            x = data[column].astype(float).to_numpy()
+            n = int(np.isfinite(x).sum())
+            if n < 4 or np.nanstd(x) == 0:
+                continue
+            angular = key in ANGULAR_DRIVERS
+            drivers[key] = {"label": label, "unit": unit, "n": n,
+                            "strength": _strength_correlation(x, data["strength"].astype(float).to_numpy(), angular),
+                            "direction": _direction_correlation(x, data["direction"].astype(float).to_numpy(), angular)}
+        stats[channel] = {"n": int(len(data)), "nights": int(data["mjd"].nunique()), "strength": float(np.nanmedian(data["strength"])) if len(data) else np.nan,
+                          "frames": frames, "drivers": drivers, "decomposition": decompose_twilight_gradient(data)}
+    return stats
+
+
+def qa_twilight_trends(mjds, channels: str = "brz", drpver: str = None, flat_paths: List[str] = None, kmirror=None,
+                       output_dir: str = None, dry_run: bool = False) -> Dict:
+    """Trends of the gradient removed from the twilight exposures over a range of nights, and a summary dashboard.
+
+    Gathers the gradient that :func:`lvmdrp.functions.run_twilights.fit_fiberflat`
+    removed from every twilight exposure of the nights (like
+    :func:`qa_twilight_sequence`, without the exposures lacking a per-exposure
+    flat), with the sky geometry and the lab conditions of each exposure, and
+    shows how the strength and direction of the gradient change with time and
+    with each candidate driver (:data:`TWILIGHT_DRIVERS`).
+
+    The direction of a twilight sky gradient is fixed relative to the Sun and
+    the horizon, and the one of an instrumental gradient in IFU coordinates:
+    the mean resultant length of the direction in each frame tells which one
+    holds the gradient fixed.
+
+    Parameters
+    ----------
+    mjds : int or list[int]
+        MJDs of the twilight exposures.
+    channels : str, optional
+        Channels to check. Default is 'brz'.
+    drpver : str, optional
+        Pipeline version of the reductions. Default is the installed version.
+    flat_paths : list[str], optional
+        Per-exposure flats to use instead of searching for them (see :func:`find_twilight_flats`).
+    kmirror : dict or str, optional
+        K-mirror relation to infer the position angle when the headers have no
+        ``POSCIPA`` (see :func:`qa_twilight_sequence`).
+    output_dir : str, optional
+        Directory of the dashboard and table. Default is
+        ``fiberflat_qa/twilight_trends_{mjd1}-{mjd2}`` in the ancillary
+        directory of the first MJD.
+    dry_run : bool, optional
+        If True, log the flats found and the output paths without reading them. Default is False.
+
+    Returns
+    -------
+    dict
+        - ``"summary"`` : pandas.DataFrame, one row per exposure and channel
+          (see :func:`qa_twilight_sequence`), plus the day of the year (doy).
+          None in a dry run.
+        - ``"statistics"`` : dict, from :func:`twilight_trend_statistics`.
+        - ``"figures"`` : dict, the Plotly figures of the dashboard.
+        - ``"report"`` : str, path of the dashboard, None in a dry run.
+    """
+    from lvmdrp import __version__
+
+    mjds = sorted(int(mjd) for mjd in np.atleast_1d(mjds))
+    drpver = drpver or __version__
+    name = f"twilight_trends_{mjds[0]}-{mjds[-1]}"
+    output_dir = output_dir or epoch_qa_dir(drpver, mjds[0], "fiberflat", name)
+    report_path = os.path.join(output_dir, f"{name}.html")
+    table_path = os.path.join(output_dir, f"{name}.csv")
+
+    flat_paths = flat_paths if flat_paths is not None else find_twilight_flats(mjds, channels=channels, drpver=drpver)
+    log.info(f"found {len(flat_paths)} per-exposure flats for {len(mjds)} MJDs from {mjds[0]} to {mjds[-1]}")
+    if dry_run:
+        if kmirror is not None:
+            log.info(f"dry run: K-mirror relation from {kmirror}")
+        log.info(f"dry run: dashboard would be written to {report_path}")
+        return {"summary": None, "statistics": {}, "figures": {}, "report": None}
+
+    relation = load_kmirror_relation(kmirror)
+    summary, _, _ = _twilight_summary(flat_paths, mjds, channels, include_raw=False, relation=relation)
+    summary = summary[summary["channel"] != ""].reset_index(drop=True)
+    summary["doy"] = pd.to_datetime(summary["time"]).dt.dayofyear.astype(float)
+    os.makedirs(output_dir, exist_ok=True)
+    summary.to_csv(table_path, index=False)
+
+    statistics = twilight_trend_statistics(summary)
+    figures = _twilight_trend_figures(summary, statistics)
+    if relation is not None:
+        with open(os.path.join(output_dir, "kmirror_pa.json"), "w") as out:
+            json.dump(relation, out, indent=2)
+    _write_twilight_trends_dashboard(report_path, summary, statistics, figures, mjds, drpver, relation)
+    log.info(f"written twilight trends dashboard to {report_path}")
+    return {"summary": summary, "statistics": statistics, "figures": figures, "report": report_path}
+
+
+def _trend_hover(data: pd.DataFrame) -> Tuple[np.ndarray, str]:
+    customdata = np.stack([data["mjd"].astype(int), data["expnum"].astype(int), data["time"].str[11:16],
+                           _fmt_list(100 * data["strength"].astype(float), ".2f"), _fmt_list(data["direction"].astype(float), ".0f"),
+                           _fmt_list(data["sun_alt"].astype(float), ".1f")], axis=-1)
+    template = ("MJD %{customdata[0]} · exposure %{customdata[1]} · %{customdata[2]} UTC<br>"
+                "gradient %{customdata[3]}% towards %{customdata[4]}°<br>Sun %{customdata[5]}°")
+    return customdata, template
+
+
+def _mjd_marker(data: pd.DataFrame, size=8, colorbar=True) -> Dict:
+    mjd = data["mjd"].astype(float)
+    marker = dict(size=size, color=mjd, colorscale=SEQUENTIAL, cmin=float(mjd.min()), cmax=float(max(mjd.max(), mjd.min() + 1)),
+                  line=dict(width=1, color=THEME["surface"]))
+    if colorbar:
+        marker["colorbar"] = dict(title=dict(text="MJD", side="right"), thickness=12, len=0.9, outlinewidth=0,
+                                  tickformat="d", tickfont=dict(color=THEME["muted"], size=11))
+    return marker
+
+
+def figure_twilight_trend(data: pd.DataFrame, channel: str) -> go.Figure:
+    """Strength and direction of the gradient removed from each twilight exposure versus the time of observation"""
+    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.1,
+                        subplot_titles=[f"Strength of the removed gradient ({channel})", "Direction across the science IFU, from +x towards +y"])
+    measured = data[data["channel"] == channel].copy()
+    measured["when"] = pd.to_datetime(measured["time"])
+    customdata, template = _trend_hover(measured)
+    for row, y, label in ((1, 100 * measured["strength"].astype(float), "Measured gradient"), (2, _wrap_angle(measured["direction"]), "Measured gradient")):
+        fig.add_trace(go.Scatter(x=measured["when"], y=y, mode="markers", name=label, showlegend=row == 1, legendgroup="measured", meta="seq",
+                                 marker=_mjd_marker(measured, colorbar=row == 1), customdata=customdata, hovertemplate=template + "<extra></extra>"),
+                      row=row, col=1)
+    # nightly medians, and the directions of the Sun and the horizon
+    nightly = measured.groupby("mjd").agg(when=("when", "median"), strength=("strength", "median"),
+                                          direction=("direction", lambda a: _resultant_length(a)[0])).reset_index()
+    fig.add_trace(go.Scatter(x=nightly["when"], y=100 * nightly["strength"], mode="lines", name="Nightly median", legendgroup="nightly",
+                             line=dict(width=1.5, color=THEME["ink2"]), hoverinfo="skip"), row=1, col=1)
+    for column, name, label in (("dir_sun", "Sun", "Towards the Sun"), ("dir_horizon", "Pointing", "Towards the horizon")):
+        geometry = measured.drop_duplicates("expnum")
+        fig.add_trace(go.Scatter(x=geometry["when"], y=_wrap_angle(geometry[column]), mode="markers", name=label,
+                                 marker=dict(size=6, symbol="diamond", color=TWILIGHT_COLORS[name], opacity=0.7),
+                                 customdata=geometry["expnum"], hovertemplate=f"<b>{label}</b> · exposure %{{customdata}}<br>%{{y:.0f}}°<extra></extra>"),
+                      row=2, col=1)
+    fig.update_yaxes(title_text="Strength (%)", rangemode="tozero", row=1, col=1)
+    fig.update_yaxes(title_text="Direction (°)", range=[-180, 180], tickvals=[-180, -90, 0, 90, 180], row=2, col=1)
+    fig.update_xaxes(title_text="Time of observation (UTC)", row=2, col=1)
+    fig = _finish_twilight_figure(fig, 560)
+    fig.update_layout(legend=dict(x=0, xanchor="left", y=1.08, yanchor="bottom", orientation="h"))
+    return fig
+
+
+def figure_twilight_frames(data: pd.DataFrame, channel: str, stats: Dict) -> go.Figure:
+    """Histograms of the gradient direction in IFU coordinates, relative to the Sun and relative to the horizon"""
+    frames = (("IFU", "direction", "In IFU coordinates"), ("Sun", "dtheta_sun", "Relative to the Sun"), ("Horizon", "dtheta_horizon", "Relative to the horizon"))
+    titles = [f"{title}: R = {_num(stats['frames'][frame]['R'], '.2f')}" for frame, _, title in frames]
+    fig = make_subplots(rows=1, cols=3, shared_yaxes=True, horizontal_spacing=0.04, subplot_titles=titles)
+    measured = data[data["channel"] == channel]
+    for col, (frame, column, title) in enumerate(frames, start=1):
+        values = _wrap_angle(measured[column].astype(float))
+        values = values[np.isfinite(values)]
+        color = TWILIGHT_COLORS["Sun"] if frame == "Sun" else TWILIGHT_COLORS["Pointing"] if frame == "Horizon" else SERIES[0]
+        fig.add_trace(go.Histogram(x=values, xbins=dict(start=-180, end=180, size=15), marker=dict(color=color, line=dict(width=1, color=THEME["surface"])),
+                                   name=title, showlegend=False, hovertemplate=f"<b>{title}</b><br>%{{x}}°: %{{y}} exposures<extra></extra>"), row=1, col=col)
+        fig.update_xaxes(range=[-180, 180], tickvals=[-180, -90, 0, 90, 180], title_text="Direction (°)" if frame == "IFU" else "Difference (°)", row=1, col=col)
+    fig.update_yaxes(title_text="Exposures", row=1, col=1)
+    # keep each subplot title over its own panel
+    positions = [(a.x, a.xanchor) for a in fig.layout.annotations]
+    fig = _finish_twilight_figure(fig, 340)
+    for annotation, (x, anchor) in zip(fig.layout.annotations, positions):
+        annotation.update(x=x, xanchor=anchor)
+    return fig
+
+
+def figure_twilight_vectors(data: pd.DataFrame, channel: str) -> go.Figure:
+    """Removed gradient vectors in IFU coordinates, colored by night: an instrumental gradient clusters away from the origin"""
+    measured = data[data["channel"] == channel]
+    customdata, template = _trend_hover(measured)
+    gx, gy = 100 * measured["grad_x"].astype(float), 100 * measured["grad_y"].astype(float)
+    limit = float(np.nanmax(np.abs(np.concatenate([gx, gy, [0.5]])))) * 1.15
+    fig = go.Figure(go.Scatter(x=gx, y=gy, mode="markers", meta="seq", marker=_mjd_marker(measured, size=9), showlegend=False,
+                               customdata=customdata, hovertemplate=template + "<extra></extra>"))
+    fig.add_hline(y=0, line=dict(color=THEME["axis"], width=1))
+    fig.add_vline(x=0, line=dict(color=THEME["axis"], width=1))
+    fig.update_xaxes(title_text="g<sub>x</sub> (%)", range=[-limit, limit], zeroline=False)
+    fig.update_yaxes(title_text="g<sub>y</sub> (%)", range=[-limit, limit], zeroline=False, scaleanchor="x", scaleratio=1)
+    return _finish_twilight_figure(fig, 480)
+
+
+def figure_twilight_driver(data: pd.DataFrame, channel: str, driver: Tuple[str, str, str, str], stats: Dict) -> go.Figure:
+    """Strength and direction of the removed gradient versus a candidate driver"""
+    key, label, column, unit = driver
+    measured = data[data["channel"] == channel]
+    corr = stats["drivers"].get(key, {})
+    kind = "circular-linear" if key in ANGULAR_DRIVERS else "Spearman"
+    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.12, subplot_titles=[
+        f"Strength ({channel}) · {kind} {_num(corr.get('strength', np.nan), '+.2f')}",
+        f"Direction ({channel}) · {'circular-circular' if key in ANGULAR_DRIVERS else 'circular-linear'} {_num(corr.get('direction', np.nan), '.2f')}"])
+    customdata, template = _trend_hover(measured)
+    x = measured[column].astype(float) * (100 if key == "moon_illum" else 1)
+    for row, y in ((1, 100 * measured["strength"].astype(float)), (2, _wrap_angle(measured["direction"]))):
+        fig.add_trace(go.Scatter(x=x, y=y, mode="markers", meta="seq", marker=_mjd_marker(measured, colorbar=row == 1), showlegend=False,
+                                 customdata=customdata, hovertemplate=f"{label} %{{x:.2f}}<br>" + template + "<extra></extra>"), row=row, col=1)
+    fig.update_yaxes(title_text="Strength (%)", rangemode="tozero", row=1, col=1)
+    fig.update_yaxes(title_text="Direction (°)", range=[-180, 180], tickvals=[-180, -90, 0, 90, 180], row=2, col=1)
+    unit = "%" if key == "moon_illum" else unit
+    fig.update_xaxes(title_text=f"{label} ({unit})" if unit else label, row=2, col=1)
+    return _finish_twilight_figure(fig, 520)
+
+
+def figure_twilight_factors_trend(data: pd.DataFrame, channel: str) -> go.Figure:
+    """Spectrograph factors removed from each twilight exposure versus the time of observation"""
+    fig = go.Figure()
+    measured = data[data["channel"] == channel]
+    when = pd.to_datetime(measured["time"])
+    for i in (1, 2, 3):
+        color = SERIES[i - 1]
+        fig.add_trace(go.Scatter(x=when, y=measured[f"factor{i}"].astype(float), mode="markers", name=f"sp{i}",
+                                 marker=dict(size=7, color=color, line=dict(width=1, color=THEME["surface"])),
+                                 customdata=np.stack([measured["mjd"].astype(int), measured["expnum"]], axis=-1),
+                                 hovertemplate=f"<b>sp{i}</b> · MJD %{{customdata[0]}} · exposure %{{customdata[1]}}<br>factor %{{y:.4f}}<extra></extra>"))
+    fig.add_hline(y=1, line=dict(color=THEME["axis"], width=1))
+    fig.update_yaxes(title_text="Factor (mean 1)")
+    fig.update_xaxes(title_text="Time of observation (UTC)")
+    return _finish_twilight_figure(fig, 340)
+
+
+def _twilight_trend_figures(summary: pd.DataFrame, statistics: Dict = None) -> Dict[str, go.Figure]:
+    statistics = statistics or twilight_trend_statistics(summary)
+    figures = {}
+    for channel, stats in statistics.items():
+        figures[f"trend|{channel}"] = figure_twilight_trend(summary, channel)
+        figures[f"frames|{channel}"] = figure_twilight_frames(summary, channel, stats)
+        figures[f"vectors|{channel}"] = figure_twilight_vectors(summary, channel)
+        figures[f"tfactors|{channel}"] = figure_twilight_factors_trend(summary, channel)
+        for driver in TWILIGHT_DRIVERS:
+            if driver[0] in stats["drivers"]:
+                figures[f"driver|{channel}|{driver[0]}"] = figure_twilight_driver(summary, channel, driver, stats)
+    return figures
+
+
+def _frame_verdict(frames: Dict) -> str:
+    """Which frame holds the gradient direction fixed, from the mean resultant lengths"""
+    ranked = sorted(((frames[f]["R"], f) for f in ("IFU", "Sun", "Horizon") if np.isfinite(frames[f]["R"])), reverse=True)
+    if not ranked:
+        return "no directions"
+    if len(ranked) > 1 and np.nanmax([frames[f]["R"] for f in ("Sun direction", "Horizon direction")]) > 0.8:
+        return "cannot tell: the Sun and the horizon barely move across the IFU between exposures"
+    best_r, best = ranked[0]
+    if best_r < 0.5:
+        return "no frame holds it fixed"
+    if len(ranked) > 1 and ranked[1][0] > best_r - 0.1:
+        return f"{best.lower()} or {ranked[1][1].lower()} frame, undecided"
+    return {"IFU": "fixed in the IFU: instrumental", "Sun": "follows the Sun: sky", "Horizon": "follows the horizon: sky"}[best]
+
+
+def _write_twilight_trends_dashboard(report_path, summary, statistics, figures, mjds, drpver, kmirror=None):
+    nights = sorted(summary["mjd"].dropna().astype(int).unique())
+    channels = list(statistics)
+    geometry = _exposure_geometry(summary)
+
+    tiles = [("Nights", f"{len(nights)}", f"{nights[0]} to {nights[-1]}" if nights else "none"),
+             ("Twilight exposures", f"{len(geometry)}", f"Sun from {np.nanmin(geometry['sun_alt']):.1f}° to {np.nanmax(geometry['sun_alt']):.1f}°")]
+    for channel, stats in statistics.items():
+        d = stats["decomposition"]
+        if "rms" in d:
+            detail = (f"median; instrument {d['instrument_first']:.1f}% to {d['instrument_last']:.1f}% at {d['instrument_last_dir']:.0f}°, "
+                      f"sky {d['sky']:.1f}% at Sun -3°; the fit explains {100 * d['explained']:.0f}%")
+        else:
+            detail = f"median; {_frame_verdict(stats['frames'])}"
+        tiles.append((f"{channel} gradient", f"{100 * stats['strength']:.2f}%", detail))
+
+    meta = [("DRP version", drpver), ("MJDs", f"{mjds[0]} to {mjds[-1]} ({len(mjds)} requested)"), ("Channels", "".join(channels) or "none"),
+            ("Ephemeris", "DE421 (skyfield)"), ("Generated", datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"))]
+    if "pa_source" in geometry.columns:
+        meta.append(("Position angle", ", ".join(f"{count} {source}" for source, count in geometry["pa_source"].value_counts().items())))
+    if kmirror is not None:
+        meta.append(("K-mirror PA", f"{kmirror['factor']} x {kmirror['km_sign']:+d} KM {kmirror['field_sign']:+d} field "
+                                    f"{kmirror['offset']:+.1f} deg, rms {kmirror['rms']:.1f} deg, {kmirror['nframes']} frames"
+                                    + (", ambiguous" if kmirror.get("ambiguous") else "")))
+    intro = ("<p>The gradient across the science IFU that the twilight fiber flat procedure (fit_fiberflat) removed from every "
+             "twilight exposure of the nights, against the time of observation, the sky geometry and the lab conditions. A "
+             "twilight sky gradient keeps its direction relative to the Sun and the horizon; an instrumental gradient keeps it "
+             "in IFU coordinates, whatever the pointing, position angle and time.</p>")
+
+    # correlation table: one row per driver, strength and direction per channel
+    rows = []
+    for key, label, column, unit in TWILIGHT_DRIVERS:
+        if not any(key in statistics[c]["drivers"] for c in channels):
+            continue
+        cells = [escape(label)]
+        for channel in channels:
+            corr = statistics[channel]["drivers"].get(key)
+            cells += [_num(corr["strength"], "+.2f"), _num(corr["direction"], ".2f")] if corr else ["-", "-"]
+        rows.append(cells)
+    columns = [("Driver", "")] + [col for c in channels for col in ((f"{c} strength", "Spearman, or circular-linear for angles"),
+                                                                    (f"{c} direction", "circular-linear, or circular-circular for angles"))]
+    table = html_table(columns, rows, numeric=[False] + [True] * (2 * len(channels)))
+
+    frame_rows = [[escape(c), str(statistics[c]["n"]), str(statistics[c]["nights"])]
+                  + [f"{_num(statistics[c]['frames'][f]['R'], '.2f')} @ {_num(statistics[c]['frames'][f]['mean'], '.0f')}°"
+                     for f in ("IFU", "Sun", "Horizon", "Sun direction")]
+                  + [escape(_frame_verdict(statistics[c]["frames"]))] for c in channels]
+    frame_table = html_table([("Ch", "channel"), ("Exposures", ""), ("Nights", ""), ("IFU: R @ mean", "direction in IFU coordinates"),
+                              ("Sun: R @ mean", "direction minus the direction of the Sun"),
+                              ("Horizon: R @ mean", "direction minus the direction of the horizon"),
+                              ("Sun itself: R @ mean", "direction of the Sun across the IFU; near 1, the frames cannot be told apart"), ("Reading", "")],
+                             frame_rows, numeric=[False, True, True, True, True, True, True, False])
+
+    decomposition_rows = []
+    for c in channels:
+        d = statistics[c]["decomposition"]
+        if "rms" not in d:
+            decomposition_rows.append([escape(c), str(d["n"])] + ["-"] * 6)
+            continue
+        decomposition_rows.append([escape(c), str(d["n"]),
+                                   f"{d['instrument_first']:.2f}% @ {d['instrument_first_dir']:.0f}°", f"{d['instrument_last']:.2f}% @ {d['instrument_last_dir']:.0f}°",
+                                   f"{d['drift']:.2f}%/yr @ {d['drift_dir']:.0f}°", f"{d['sky']:+.2f}% {d['sky_slope']:+.2f}%/°",
+                                   f"{d['rms']:.2f}% of {d['spread']:.2f}%", _num(100 * d["explained"], ".0f") + "%"])
+    decomposition_table = html_table(
+        [("Ch", "channel"), ("Exposures", "with a direction of the Sun"), ("Instrument, first night", "g0: strength @ direction in the IFU"),
+         ("Instrument, last night", "g0 + g1 (t_last - t0)"), ("Drift", "g1"), ("Sky at Sun -3° / per degree lower", "a and b, along the direction of the Sun"),
+         ("Residual rms", "of the vectors, against their spread around the mean"), ("Explained", "fraction of the variance of the vectors")],
+        decomposition_rows, numeric=[False] + [True] * 7)
+
+    channel_options = [(c, c) for c in channels]
+    driver_options = [(key, label) for key, label, _, _ in TWILIGHT_DRIVERS if any(key in statistics[c]["drivers"] for c in channels)]
+    body = (TWILIGHT_TRENDS_BODY.replace("@@FRAME_TABLE@@", frame_table).replace("@@TABLE@@", table)
+            .replace("@@DECOMPOSITION@@", decomposition_table))
+    if channels:
+        body = body.replace("@@TREND@@", picker("twilight-trend", "trend", [("Channel", channel_options)], 560))
+        body = body.replace("@@FRAMES@@", picker("twilight-frames", "frames", [("Channel", channel_options)], 340))
+        body = body.replace("@@VECTORS@@", picker("twilight-vectors", "vectors", [("Channel", channel_options)], 480))
+        body = body.replace("@@DRIVERS@@", picker("twilight-driver", "driver", [("Channel", channel_options), ("Driver", driver_options)], 520)
+                            if driver_options else '<p class="note">Not enough exposures to correlate.</p>')
+        body = body.replace("@@FACTORS@@", picker("twilight-tfactors", "tfactors", [("Channel", channel_options)], 340))
+    else:
+        missing = '<p class="note">No per-exposure flats found: run <span class="mono">drp calibrations fiberflats --skip-combination</span> first.</p>'
+        for key in ("@@TREND@@", "@@FRAMES@@", "@@VECTORS@@", "@@DRIVERS@@", "@@FACTORS@@"):
+            body = body.replace(key, missing)
+    write_dashboard(report_path, title="LVM Twilight Trends", eyebrow="LVM DRP · fiber flats · twilights",
+                    intro=intro, meta=meta, tiles=tiles, body=body, figures=figures, generator="lvmdrp.qa.fiberflats.qa_twilight_trends")
+    return report_path
+
+
+TWILIGHT_TRENDS_BODY = r"""
+<section>
+  <h2>Which frame holds the gradient fixed</h2>
+  <p>The mean resultant length \(R\) of the gradient direction measured in IFU coordinates, relative to the direction of
+  the Sun and relative to the direction of the horizon. \(R\) is 1 when the direction never changes in that frame and
+  close to 0 when it is random. A twilight sky gradient is fixed relative to the Sun or the horizon; an instrumental one in
+  the IFU. The frames can only be told apart if the Sun and the horizon move across the IFU between exposures: with the
+  same position angle and only evening twilights, the Sun is always towards the West, and a sky gradient looks as fixed
+  in the IFU as an instrumental one. Morning twilights and other position angles break that. The directions of the Sun
+  and the horizon need the position angle: without it, only the IFU frame is measured.</p>
+  @@FRAME_TABLE@@
+  @@FRAMES@@
+</section>
+
+<section>
+  <h2>Instrument and sky components</h2>
+  <p>The gradient vectors of each channel fitted as a vector fixed in the IFU that drifts linearly with time, plus a sky
+  gradient towards the Sun whose strength changes linearly with the altitude of the Sun (see the definitions). A
+  residual rms well below the spread of the vectors means the two components explain the gradients; a large residual
+  leaves room for something else. Needs the directions of the Sun, so the position angle.</p>
+  @@DECOMPOSITION@@
+</section>
+
+<section>
+  <h2>Gradient over time</h2>
+  <p>Strength and direction of the gradient removed from each twilight exposure, colored by night, with the nightly
+  median strength and the directions of the Sun and the horizon across the IFU.</p>
+  @@TREND@@
+  <p>The same gradients as vectors in IFU coordinates: an instrumental gradient forms a cluster away from the origin,
+  a sky gradient spreads around it as the geometry changes.</p>
+  @@VECTORS@@
+</section>
+
+<section>
+  <h2>What the gradient correlates with</h2>
+  <p>Correlation of the strength and of the direction of the removed gradient with each candidate driver, over all the
+  exposures. Strength: Spearman rank correlation, or circular-linear for the angular drivers (azimuths, position angle,
+  K-mirror angle). Direction: circular-linear, or circular-circular for the angular drivers. Values near 0 mean no
+  relation; with few nights, values up to about 0.3 are expected by chance.</p>
+  @@TABLE@@
+  @@DRIVERS@@
+</section>
+
+<section>
+  <h2>Spectrograph factors</h2>
+  <p>The spectrograph factors removed from each twilight exposure, normalized to a mean of 1.</p>
+  @@FACTORS@@
+</section>
+
+<section id="definitions">
+  <h2>How the quantities are computed</h2>
+  <div class="defs">
+    <div class="def">
+      <h3>Removed gradient</h3>
+      <p>The FIBERFLAT GCOEFF coefficients \(c_k\) fitted by fit_fiberflat, as the change from the science IFU center to
+      its edge at the radius \(R_\mathrm{IFU}\), relative to the mean of the model, and the directions of the Sun and the
+      horizon across the IFU as in the twilight sequence dashboard.</p>
+      <div class="eq">\[ \vec g = \frac{R_\mathrm{IFU}\,(c_2,\ c_1)}{\langle G \rangle}, \qquad \theta = \operatorname{atan2}(g_y,\ g_x), \qquad \Delta\theta_\odot = \theta - \theta_\odot \]</div>
+    </div>
+    <div class="def">
+      <h3>Instrument and sky components</h3>
+      <p>Least-squares fit of the gradient vectors \(\vec g_i\) with a vector fixed in the IFU that drifts with the time
+      \(t\) in years from the first night, and a sky term along the unit vector \(\hat u_{\odot,i}\) towards the Sun,
+      whose strength changes with the altitude of the Sun \(h_\odot\).</p>
+      <div class="eq">\[ \vec g_i = \vec g_0 + \vec g_1\,(t_i - t_0) + \big(a + b\,(-3^\circ - h_{\odot,i})\big)\,\hat u_{\odot,i} \]</div>
+    </div>
+    <div class="def">
+      <h3>Mean resultant length</h3>
+      <p>Length of the mean unit vector of the directions \(\theta_i\) of the \(n\) exposures, in a given frame.</p>
+      <div class="eq">\[ R = \sqrt{\Big(\tfrac{1}{n}\sum_i \cos\theta_i\Big)^2 + \Big(\tfrac{1}{n}\sum_i \sin\theta_i\Big)^2} \]</div>
+    </div>
+    <div class="def">
+      <h3>Circular-linear correlation</h3>
+      <p>Correlation of an angle \(\theta\) with a linear quantity \(x\) (Mardia), from the Pearson correlations
+      \(r_{xc}\), \(r_{xs}\) and \(r_{cs}\) of \(x\), \(\cos\theta\) and \(\sin\theta\); from 0 to 1.</p>
+      <div class="eq">\[ r_{x\theta} = \sqrt{\frac{r_{xc}^2 + r_{xs}^2 - 2\, r_{xc}\, r_{xs}\, r_{cs}}{1 - r_{cs}^2}} \]</div>
+    </div>
+    <div class="def">
+      <h3>Circular-circular correlation</h3>
+      <p>Correlation of two angles \(\alpha\) and \(\beta\) around their circular means \(\bar\alpha\) and \(\bar\beta\)
+      (Fisher and Lee), shown as its absolute value.</p>
+      <div class="eq">\[ r_{\alpha\beta} = \frac{\sum_i \sin(\alpha_i - \bar\alpha)\sin(\beta_i - \bar\beta)}{\sqrt{\sum_i \sin^2(\alpha_i - \bar\alpha)\sum_i \sin^2(\beta_i - \bar\beta)}} \]</div>
+    </div>
+  </div>
+</section>
+"""
+
+
 DOME_COLORS = {"b": SERIES[0], "r": SERIES[1], "z": SERIES[2]}
 
 

@@ -447,6 +447,7 @@ window.MathJax = { tex: { inlineMath: [["\\\\(", "\\\\)"]], displayMath: [["\\\\
     const fig = JSON.parse(text);
     if (dark) fig.data.forEach((trace) => {
       if (trace.meta === "seq") trace.colorscale = SEQ_DARK;
+      if (trace.meta === "seq" && trace.marker && trace.marker.colorscale) trace.marker.colorscale = SEQ_DARK;
       if (trace.meta === "div") trace.colorscale = DIV_DARK;
     });
     Plotly.react(el, fig.data, fig.layout, config);

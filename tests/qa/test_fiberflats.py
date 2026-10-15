@@ -771,26 +771,28 @@ def test_qa_dome_sequence(tmp_path):
         ff.qa_dome_sequence(61000, flat_paths=[paths[-1]], output_dir=str(tmp_path / "none"))
 
 
-def test_parallactic_angle():
-    from astropy.coordinates import AltAz, EarthLocation, SkyCoord
+# field angles from lvmtipo.siderostat.Siderostat.fieldAngle at LCO, 2025-06-16T03:00:00 UTC, without refraction
+SIDEROSTAT_FIELD_ANGLES = [
+    (190.0, -62.5, -105.2624),
+    (275.0, -30.0, -36.4622),
+    (236.0, -70.0, -51.7676),
+    (226.0, -36.0, -98.7835),
+    (267.0, 6.0, -72.0941),
+    (150.0, -20.0, 177.7287),
+    (300.0, -85.0, 30.9331),
+]
+
+
+def test_siderostat_field_angle():
     from astropy.time import Time
-    from astropy import units as u
-    from lvmdrp.core.constants import LVM_LAT, LVM_LON, LVM_ELEVATION
 
-    # the parallactic angle is the position angle of the zenith seen from the target
-    location = EarthLocation(lat=LVM_LAT, lon=LVM_LON, height=LVM_ELEVATION * u.m)
-    t = Time("2025-06-16T03:00:00", scale="utc")
-    zenith = SkyCoord(alt=90 * u.deg, az=0 * u.deg, frame=AltAz(obstime=t, location=location)).icrs
-    rng = np.random.default_rng(0)
-    for _ in range(20):
-        alt, az = rng.uniform(25, 85), rng.uniform(0, 360)
-        target = SkyCoord(alt=alt * u.deg, az=az * u.deg, frame=AltAz(obstime=t, location=location)).icrs
-        expected = target.position_angle(zenith).deg
-        q = float(ff.parallactic_angle(target.ra.deg, target.dec.deg, t))
-        assert abs((q - expected + 180) % 360 - 180) < 0.2
+    ra, dec, expected = np.array(SIDEROSTAT_FIELD_ANGLES).T
+    field = ff.siderostat_field_angle(ra, dec, Time("2025-06-16T03:00:00", scale="utc"))
+    # lvmtipo uses its own coordinates of LCO, slightly different from the pipeline ones
+    assert np.all(np.abs((field - expected + 180) % 360 - 180) < 0.05)
 
 
-def _kmirror_frames(n=300, factor=2, km_sign=-1, q_sign=1, offset=37.0, noise=0.3, seed=1):
+def _kmirror_frames(n=300, factor=2, km_sign=-1, field_sign=1, offset=37.0, noise=0.3, seed=1):
     """drpall-like frames whose guider position angles follow a known K-mirror relation"""
     from astropy.time import Time
     import pandas as pd
@@ -802,8 +804,8 @@ def _kmirror_frames(n=300, factor=2, km_sign=-1, q_sign=1, offset=37.0, noise=0.
     ra = (lst + rng.uniform(-45, 45, n)) % 360
     dec = rng.uniform(-80, 10, n)
     pa = rng.choice([0.0, 0.0, 0.0, 30.0, -60.0], n) + rng.normal(0, noise, n)
-    q = ff.parallactic_angle(ra, dec, times)
-    km = ((pa - q_sign * q - offset + 180) % 360 - 180) / (factor * km_sign)
+    field = ff.siderostat_field_angle(ra, dec, times)
+    km = ((pa - field_sign * field - offset + 180) % 360 - 180) / (factor * km_sign)
     return pd.DataFrame({"obstime": times.isot, "sci_ra": ra, "sci_dec": dec, "sci_pa": pa, "sci_kmpos": km,
                          "sci_astsrc": "GDR coadd"})
 
@@ -811,7 +813,7 @@ def _kmirror_frames(n=300, factor=2, km_sign=-1, q_sign=1, offset=37.0, noise=0.
 def test_calibrate_kmirror_pa():
     frames = _kmirror_frames()
     relation = ff.calibrate_kmirror_pa(frames)
-    assert (relation["factor"], relation["km_sign"], relation["q_sign"]) == (2, -1, 1)
+    assert (relation["rotation"], relation["factor"], relation["km_sign"], relation["field_sign"]) == ("siderostat", 2, -1, 1)
     assert relation["offset"] == pytest.approx(37.0, abs=0.2) and relation["rms"] < 1.0 and not relation["ambiguous"]
     # the relation gives back the position angles
     from astropy.time import Time
@@ -837,7 +839,7 @@ def test_twilight_geometry_telescope_fallback():
     assert without["pointing_source"] == "telescope" and without["pa_source"] == "none"
     assert without["point_alt"] == pytest.approx(45, abs=0.01) and np.isnan(without["dir_sun"]) and without["km"] == -40.0
 
-    relation = {"factor": 2, "km_sign": -1, "q_sign": 1, "offset": 10.0}
+    relation = {"rotation": "siderostat", "factor": 2, "km_sign": -1, "field_sign": 1, "offset": 10.0}
     inferred = ff.twilight_geometry(header, slitmap, kmirror=relation)
     expected_pa = float(ff.kmirror_pa(-40.0, commanded["POSCIRA"], commanded["POSCIDE"], t, relation))
     assert inferred["pa_source"] == "K-mirror" and inferred["pa"] == pytest.approx(expected_pa)
@@ -880,3 +882,95 @@ def test_qa_twilight_sequence_with_kmirror(tmp_path):
     again = ff.qa_twilight_sequence(60842, channels="b", flat_paths=paths, include_raw=False, kmirror=str(saved),
                                     output_dir=str(tmp_path / "qa2"))
     assert np.allclose(again["summary"]["pa"], summary["pa"])
+    # relations from the parallactic angle model are refused
+    old = tmp_path / "old_kmirror_pa.json"
+    old.write_text(json.dumps({"factor": 2, "km_sign": -1, "q_sign": 1, "offset": -123.3}))
+    with pytest.raises(ValueError, match="calibrate it again"):
+        ff.load_kmirror_relation(str(old))
+
+
+def _trend_rows(n_nights=12, per_night=6, instrument=(2.0, 51.0), drift=0.5, sky=1.5, slope=0.2, seed=2):
+    """Summary rows of a channel: an instrumental gradient drifting with time plus a sky gradient towards the Sun"""
+    import pandas as pd
+
+    rng = np.random.default_rng(seed)
+    rows = []
+    for night in range(n_nights):
+        mjd = 60700 + 40 * night
+        sun_dir = rng.uniform(-180, 180)
+        for k in range(per_night):
+            sun_alt = -3 - 0.8 * k
+            g = (instrument[0] + drift * (mjd - 60700) / 365.25) * np.array([np.cos(np.radians(instrument[1])), np.sin(np.radians(instrument[1]))])
+            g = g + (sky + slope * (-3 - sun_alt)) * np.array([np.cos(np.radians(sun_dir)), np.sin(np.radians(sun_dir))]) + rng.normal(0, 0.05, 2)
+            rows.append({"channel": "b", "mjd": mjd, "expnum": 100 * night + k, "time": f"2025-01-01T23:{10 + k:02d}:00",
+                         "grad_x": g[0] / 100, "grad_y": g[1] / 100, "strength": np.hypot(*g) / 100, "direction": np.degrees(np.arctan2(g[1], g[0])),
+                         "dir_sun": sun_dir, "dir_horizon": sun_dir + rng.normal(0, 5), "sun_alt": sun_alt, "sun_az": 250.0,
+                         "labtemp": 12 + rng.normal(), "exptime": 10.0 * (k + 1)})
+    data = pd.DataFrame(rows)
+    data["dtheta_sun"] = ff._wrap_angle(data["direction"] - data["dir_sun"])
+    data["dtheta_horizon"] = ff._wrap_angle(data["direction"] - data["dir_horizon"])
+    return data
+
+
+def test_decompose_twilight_gradient():
+    data = _trend_rows()
+    d = ff.decompose_twilight_gradient(data)
+    assert d["instrument_first"] == pytest.approx(2.0, abs=0.05) and d["instrument_first_dir"] == pytest.approx(51, abs=2)
+    assert d["drift"] == pytest.approx(0.5, abs=0.05) and d["sky"] == pytest.approx(1.5, abs=0.05) and d["sky_slope"] == pytest.approx(0.2, abs=0.02)
+    assert d["rms"] < 0.1 and d["explained"] > 0.99
+    # too few exposures with a direction of the Sun
+    assert ff.decompose_twilight_gradient(data.iloc[:5]) == {"n": 5}
+
+
+def test_twilight_trend_statistics():
+    # an instrumental gradient: fixed in the IFU while the Sun moves around it
+    stats = ff.twilight_trend_statistics(_trend_rows(sky=0.0, slope=0.0, drift=0.0))["b"]
+    assert stats["frames"]["IFU"]["R"] > 0.99 and stats["frames"]["Sun"]["R"] < 0.5
+    assert ff._frame_verdict(stats["frames"]) == "fixed in the IFU: instrumental"
+    # a sky gradient: fixed relative to the Sun
+    stats = ff.twilight_trend_statistics(_trend_rows(instrument=(0.0, 0.0), drift=0.0, slope=0.0))["b"]
+    assert stats["frames"]["Sun"]["R"] > 0.99 and stats["frames"]["IFU"]["R"] < 0.5
+    assert stats["drivers"]["sun_alt"]["strength"] == pytest.approx(0, abs=0.3)
+    # the Sun always in the same direction across the IFU: the frames cannot be told apart
+    data = _trend_rows()
+    data["dir_sun"] = 170.0 + np.random.default_rng(0).normal(0, 5, len(data))
+    data["dir_horizon"] = data["dir_sun"]
+    assert ff._frame_verdict(ff.twilight_trend_statistics(data)["b"]["frames"]).startswith("cannot tell")
+
+
+def test_circular_correlations():
+    rng = np.random.default_rng(1)
+    x = rng.uniform(0, 10, 200)
+    assert ff._circular_linear_correlation(20 * x + rng.normal(0, 3, 200), x) > 0.9
+    assert ff._circular_linear_correlation(rng.uniform(-180, 180, 200), x) < 0.25
+    a = rng.uniform(-180, 180, 200)
+    assert abs(ff._circular_circular_correlation(a, a + rng.normal(0, 5, 200))) > 0.95
+
+
+def test_qa_twilight_trends(tmp_path):
+    from astropy.time import Time
+
+    slitmap = make_flat()._slitmap
+    paths = []
+    for night, mjd in enumerate((60842, 60872, 60902)):
+        start = Time(mjd + 0.96, format="mjd", scale="utc")
+        for k in range(5):
+            expnum = 1000 * night + k
+            header = _twilight_header(start + 120 * k * ff.u.s, 60, 100 + 60 * night, 0.0, expnum=expnum, channel="b",
+                                      gcoeffs=(2.0, 0.02, 0.01 * (night + 1), 0.0))
+            header["LABTEMP"] = 12.0 + night
+            path = tmp_path / str(mjd) / f"lvm-fflat-b-{expnum:08d}.fits"
+            path.parent.mkdir(exist_ok=True)
+            hdu = fits.table_to_hdu(slitmap)
+            hdu.name = "SLITMAP"
+            fits.HDUList([fits.PrimaryHDU(header=header), hdu]).writeto(path)
+            paths.append(str(path))
+
+    result = ff.qa_twilight_trends([60842, 60872, 60902], channels="b", flat_paths=paths, output_dir=str(tmp_path / "qa"))
+    summary, stats = result["summary"], result["statistics"]["b"]
+    assert len(summary) == 15 and set(summary["mjd"]) == {60842, 60872, 60902} and summary["labtemp"].nunique() == 3
+    assert stats["nights"] == 3 and stats["decomposition"]["n"] == 15 and "labtemp" in stats["drivers"]
+    assert {"trend|b", "frames|b", "vectors|b", "tfactors|b", "driver|b|sun_alt"} <= set(result["figures"])
+    html = open(result["report"], encoding="utf-8").read()
+    assert "LVM Twilight Trends" in html and "Instrument and sky components" in html
+    assert os.path.isfile(tmp_path / "qa" / "twilight_trends_60842-60902.csv")
