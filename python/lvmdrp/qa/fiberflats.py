@@ -22,9 +22,11 @@ Two parts, each with its own dashboard and CLI (``drp qa-flatfield`` and
   change.
 
 The gradient and spectrograph factors removed from each exposure of a twilight
-or dome flat sequence have their own dashboards too: :func:`qa_twilight_sequence`
-(``drp calibrations qa-twilights``) and :func:`qa_dome_sequence`
-(``drp calibrations qa-domes``).
+or dome flat sequence have their own dashboards too, with the same plots for
+both kinds of flats: per sequence, :func:`qa_twilight_sequence` and
+:func:`qa_dome_sequence`, and over many nights, :func:`qa_twilight_trends` and
+:func:`qa_dome_trends` (``drp calibrations qa-twilights`` and ``qa-domes``,
+with ``--trends``).
 """
 
 import os
@@ -4001,6 +4003,21 @@ def _is_dome(header) -> bool:
     return any(_lamp_on(header, lamp) for lamp in CON_LAMPS) and not any(_lamp_on(header, lamp) for lamp in ARC_LAMPS)
 
 
+# kinds of flat sequences with per-exposure flats: how to tell their exposures apart, and how to make the flats
+FLAT_KINDS = {
+    "twilight": {"select": _is_twilight, "calibration": "twilight", "title": "Twilight", "noun": "twilight",
+                 "make": "drp calibrations fiberflats --skip-combination"},
+    "dome": {"select": _is_dome, "calibration": "dome", "title": "Dome", "noun": "dome flat",
+             "make": "drp calibrations fiberflats --kind dome --skip-combination"},
+}
+
+
+def _exposure_lamps(header) -> Dict:
+    """Continuum lamps on during an exposure (e.g. 'ldls', empty for twilights) and its exposed standard fiber"""
+    return {"lamp": "+".join(lamp for lamp in CON_LAMPS if _lamp_on(header, lamp)).lower(),
+            "calibfib": str(header.get("CALIBFIB") or "-")}
+
+
 def _removed_corrections(header, channel, slitmap, layout=None):
     """Gradient and spectrograph factors that fit_fiberflat removed from an exposure, from its per-exposure flat
 
@@ -4052,15 +4069,15 @@ def find_twilight_flats(mjds, channels: str = "brz", drpver: str = None) -> List
     return sorted(set(paths))
 
 
-def _raw_twilight_headers(mjds, known_expnums, channels):
-    """Headers and paths of the raw twilight exposures without a per-exposure flat, from the frames metadata"""
+def _raw_twilight_headers(mjds, known_expnums, channels, calibration="twilight"):
+    """Headers and paths of the raw twilight (or dome) exposures without a per-exposure flat, from the frames metadata"""
     from lvmdrp import path
     from lvmdrp.utils import metadata as md
 
     try:
-        frames = md.get_calibrations_metadata(mjds=list(np.atleast_1d(mjds)), calibration="twilight")
+        frames = md.get_calibrations_metadata(mjds=list(np.atleast_1d(mjds)), calibration=calibration)
     except Exception as e:
-        log.warning(f"could not get the twilight frames metadata ({type(e).__name__}: {e}), using the per-exposure flats only")
+        log.warning(f"could not get the {calibration} frames metadata ({type(e).__name__}: {e}), using the per-exposure flats only")
         return {}
     headers = {}
     for (mjd, expnum), group in frames.groupby(["mjd", "expnum"]):
@@ -4076,23 +4093,26 @@ def _raw_twilight_headers(mjds, known_expnums, channels):
     return headers
 
 
-def _twilight_summary(flat_paths, mjds, channels, include_raw, relation):
-    """Per-exposure and per-channel table of the twilight QA: removed gradient and factors, geometry and lab conditions
+def _twilight_summary(flat_paths, mjds, channels, include_raw, relation, kind="twilight"):
+    """Per-exposure and per-channel table of the twilight (or dome) QA: removed gradient and factors, geometry and lab conditions
 
     Returns the summary table (see :func:`qa_twilight_sequence`), the science
-    IFU layout and the gradient model of each exposure per channel.
+    IFU layout and the gradient model of each exposure per channel. `kind`
+    ('twilight' or 'dome', see :data:`FLAT_KINDS`) selects the per-exposure
+    flats and the raw exposures.
     """
+    config = FLAT_KINDS[kind]
     geometry, rows, layout, maps = {}, [], None, {}
-    for flat_path in tqdm(flat_paths, desc="twilight flats", unit="flat", ascii=True):
+    for flat_path in tqdm(flat_paths, desc=f"{kind} flats", unit="flat", ascii=True):
         header = fits.getheader(flat_path, 0)
         channel = str(header.get("CCD", " "))[0]
-        if channel not in channels or not _is_twilight(header):
+        if channel not in channels or not config["select"](header):
             continue
         slitmap = Table.read(flat_path, hdu="SLITMAP")
         expnum = int(header["EXPOSURE"])
         if expnum not in geometry:
             geometry[expnum] = {"mjd": _night_sjd(header, flat_path), "expnum": expnum, **_lab_conditions(header),
-                                **twilight_geometry(header, slitmap, kmirror=relation)}
+                                **_exposure_lamps(header), **twilight_geometry(header, slitmap, kmirror=relation)}
         row, layout, model = _removed_corrections(header, channel, slitmap, layout)
         if model is not None:
             maps.setdefault(channel, {})[expnum] = model
@@ -4100,15 +4120,15 @@ def _twilight_summary(flat_paths, mjds, channels, include_raw, relation):
 
     if include_raw:
         from lvmdrp.main import read_fibermap
-        raw_headers = _raw_twilight_headers(mjds, set(geometry), channels)
+        raw_headers = _raw_twilight_headers(mjds, set(geometry), channels, calibration=config["calibration"])
         if raw_headers:
             fibermap = read_fibermap(as_table=True)
             for expnum, (header, raw_path) in raw_headers.items():
                 geometry[expnum] = {"mjd": _night_sjd(header, raw_path), "expnum": expnum, **_lab_conditions(header),
-                                    **twilight_geometry(header, fibermap, kmirror=relation)}
+                                    **_exposure_lamps(header), **twilight_geometry(header, fibermap, kmirror=relation)}
                 rows.append({"expnum": expnum, "channel": ""})
     if not geometry:
-        raise FileNotFoundError(f"no twilight exposures found for MJDs {mjds}; run 'drp calibrations fiberflats --skip-combination' first")
+        raise FileNotFoundError(f"no {config['noun']} exposures found for MJDs {mjds}; run '{config['make']}' first")
 
     summary = pd.DataFrame(rows).merge(pd.DataFrame(list(geometry.values())), on="expnum", how="left")
     for column in ("grad_x", "grad_y", "strength", "direction", "factor1", "factor2", "factor3"):
@@ -4187,9 +4207,76 @@ def qa_twilight_sequence(mjds, channels: str = "brz", drpver: str = None, flat_p
     from lvmdrp import __version__
 
     mjds = sorted(int(mjd) for mjd in np.atleast_1d(mjds))
-    drpver = drpver or __version__
     name = f"twilights_{mjds[0]}" if len(mjds) == 1 else f"twilights_{mjds[0]}-{mjds[-1]}"
-    output_dir = output_dir or epoch_qa_dir(drpver, mjds[0], "fiberflat", name)
+    return _qa_flat_sequence("twilight", mjds, name, mjds[0], channels=channels, drpver=drpver or __version__, flat_paths=flat_paths,
+                             include_raw=include_raw, kmirror=kmirror, output_dir=output_dir, dry_run=dry_run)
+
+
+def qa_dome_sequence(mjds, channels: str = "brz", drpver: str = None, flat_paths: List[str] = None, include_raw: bool = True,
+                     kmirror=None, epoch_mjd: int = None, output_dir: str = None, dry_run: bool = False) -> Dict:
+    """Check the gradient across the science IFU of a dome flat sequence against the pointing geometry, and write a dashboard.
+
+    The dome version of :func:`qa_twilight_sequence`, with the same plots and
+    inputs: the gradient and spectrograph factors that
+    :func:`lvmdrp.functions.run_twilights.fit_fiberflat` removed from each dome
+    flat exposure (``FIBERFLAT GCOEFF`` and ``FACTOR`` keywords of its
+    per-exposure flat, made by the dome fiber flat procedure, see
+    :func:`lvmdrp.functions.run_calseq.create_dome_fiberflats`), next to the
+    geometry of the exposure (:func:`twilight_geometry`) and its lamp and
+    exposed standard fiber.
+
+    The dome screen is fixed relative to the horizon of the telescope, so a
+    gradient of the screen illumination follows the direction of the horizon
+    across the IFU, which turns with the position angle; a gradient of the
+    instrument stays fixed in IFU coordinates. Inside the closed enclosure,
+    a gradient that follows the Sun points to a light leak.
+
+    Parameters
+    ----------
+    mjds : int or list[int]
+        MJDs of the dome flat exposures.
+    channels : str, optional
+        Channels to check. Default is 'brz'.
+    drpver : str, optional
+        Pipeline version of the reductions. Default is the installed version.
+    flat_paths : list[str], optional
+        Per-exposure flats to use instead of searching for them (see :func:`find_twilight_flats`).
+    include_raw : bool, optional
+        Also show the geometry of the dome flat exposures without a
+        per-exposure flat, from their raw headers. Default is True.
+    kmirror : dict or str, optional
+        K-mirror relation to infer the position angle (see :func:`qa_twilight_sequence`).
+    epoch_mjd : int, optional
+        MJD of the calibration epoch the sequence belongs to, used to name and
+        place the dashboard. Default is the first MJD.
+    output_dir : str, optional
+        Directory of the dashboard and table. Default is
+        ``fiberflat_qa/domes_{epoch_mjd}`` in the ancillary directory of
+        `epoch_mjd`, or ``domes_{mjds}`` in the one of the first MJD.
+    dry_run : bool, optional
+        If True, log the flats found and the output paths without reading
+        them. Default is False.
+
+    Returns
+    -------
+    dict
+        As :func:`qa_twilight_sequence`, with the lamp and the exposed
+        standard fiber (calibfib) of each exposure in the summary.
+    """
+    from lvmdrp import __version__
+
+    mjds = sorted(int(mjd) for mjd in np.atleast_1d(mjds))
+    if epoch_mjd is not None:
+        name = f"domes_{int(epoch_mjd)}"
+    else:
+        name = f"domes_{mjds[0]}" if len(mjds) == 1 else f"domes_{mjds[0]}-{mjds[-1]}"
+    return _qa_flat_sequence("dome", mjds, name, int(epoch_mjd or mjds[0]), channels=channels, drpver=drpver or __version__,
+                             flat_paths=flat_paths, include_raw=include_raw, kmirror=kmirror, output_dir=output_dir, dry_run=dry_run)
+
+
+def _qa_flat_sequence(kind, mjds, name, qa_mjd, channels, drpver, flat_paths, include_raw, kmirror, output_dir, dry_run) -> Dict:
+    """Sequence dashboard of :func:`qa_twilight_sequence` and :func:`qa_dome_sequence`, for one kind of flat"""
+    output_dir = output_dir or epoch_qa_dir(drpver, qa_mjd, "fiberflat", name)
     report_path = os.path.join(output_dir, f"{name}.html")
     table_path = os.path.join(output_dir, f"{name}.csv")
 
@@ -4204,7 +4291,7 @@ def qa_twilight_sequence(mjds, channels: str = "brz", drpver: str = None, flat_p
         return {"summary": None, "figures": {}, "report": None}
 
     relation = load_kmirror_relation(kmirror)
-    summary, layout, maps = _twilight_summary(flat_paths, mjds, channels, include_raw, relation)
+    summary, layout, maps = _twilight_summary(flat_paths, mjds, channels, include_raw, relation, kind=kind)
     os.makedirs(output_dir, exist_ok=True)
     summary.to_csv(table_path, index=False)
 
@@ -4212,8 +4299,8 @@ def qa_twilight_sequence(mjds, channels: str = "brz", drpver: str = None, flat_p
     if relation is not None:
         with open(os.path.join(output_dir, "kmirror_pa.json"), "w") as out:
             json.dump(relation, out, indent=2)
-    _write_twilight_dashboard(report_path, summary, figures, mjds, drpver, layout, maps, relation)
-    log.info(f"written twilight sequence dashboard to {report_path}")
+    _write_twilight_dashboard(report_path, summary, figures, mjds, drpver, layout, maps, relation, kind=kind)
+    log.info(f"written {kind} sequence dashboard to {report_path}")
     return {"summary": summary, "figures": figures, "report": report_path}
 
 
@@ -4354,10 +4441,14 @@ def _twilight_figures(summary: pd.DataFrame) -> Dict[str, go.Figure]:
     return figures
 
 
-def _twilight_ifu_payload(summary, layout, maps):
-    """Data of the twilight IFU small multiples, as a JSON-serializable dictionary"""
-    exposures = [{"expnum": int(r["expnum"]), "time": str(r["time"])[11:16],
-                  "subtitle": f"MJD {int(r['mjd'])} \u00b7 Sun " + ("-" if not np.isfinite(r["sun_alt"]) else f"{r['sun_alt']:.0f}\u00b0"),
+def _twilight_ifu_payload(summary, layout, maps, kind="twilight"):
+    """Data of the twilight (or dome) IFU small multiples, as a JSON-serializable dictionary"""
+    def subtitle(r):
+        if kind == "dome":
+            return f"MJD {int(r['mjd'])} \u00b7 {r.get('lamp') or '-'} \u00b7 {r.get('calibfib', '-')}"
+        return f"MJD {int(r['mjd'])} \u00b7 Sun " + ("-" if not np.isfinite(r["sun_alt"]) else f"{r['sun_alt']:.0f}\u00b0")
+
+    exposures = [{"expnum": int(r["expnum"]), "time": str(r["time"])[11:16], "subtitle": subtitle(r),
                   "dirSun": _finite_or_none(r["dir_sun"]), "dirHorizon": _finite_or_none(r["dir_horizon"]),
                   "paSource": str(r.get("pa_source", "none"))}
                  for _, r in summary.drop_duplicates("expnum").sort_values("time").iterrows()]
@@ -4388,16 +4479,21 @@ def _exposures_ifu_payload(exposures, measured, layout, maps):
     }
 
 
-def _write_twilight_dashboard(report_path, summary, figures, mjds, drpver, layout=None, maps=None, kmirror=None):
+def _write_twilight_dashboard(report_path, summary, figures, mjds, drpver, layout=None, maps=None, kmirror=None, kind="twilight"):
+    config = FLAT_KINDS[kind]
     nights = sorted(summary["mjd"].dropna().astype(int).unique())
     channels = [c for c in "brz" if c in set(summary["channel"])]
     geometry = _exposure_geometry(summary)
     measured = summary[summary["channel"] != ""]
 
     tiles = [("Nights", f"{len(nights)}", ", ".join(map(str, nights))),
-             ("Twilight exposures", f"{len(geometry)}", f"{measured['expnum'].nunique()} with per-exposure flats"),
-             ("Sun altitude", f"{np.nanmin(geometry['sun_alt']):.1f}° to {np.nanmax(geometry['sun_alt']):.1f}°",
-              "at the middle of the exposures")]
+             (f"{config['title']} exposures", f"{len(geometry)}", f"{measured['expnum'].nunique()} with per-exposure flats")]
+    if kind == "dome":
+        lamps = geometry["lamp"].replace("", "none").value_counts() if "lamp" in geometry.columns else pd.Series(dtype=int)
+        tiles.append(("Lamps", ", ".join(f"{n} {lamp}" for lamp, n in lamps.items()) or "-", "exposures per lamp"))
+    else:
+        tiles.append(("Sun altitude", f"{np.nanmin(geometry['sun_alt']):.1f}° to {np.nanmax(geometry['sun_alt']):.1f}°",
+                      "at the middle of the exposures"))
     for channel in channels:
         sel = measured[measured["channel"] == channel]
         tiles.append((f"{channel} gradient", f"{100 * np.nanmedian(sel['strength']):.2f}%",
@@ -4413,48 +4509,59 @@ def _write_twilight_dashboard(report_path, summary, figures, mjds, drpver, layou
         meta.append(("K-mirror PA", f"{kmirror['factor']} x {kmirror['km_sign']:+d} KM {kmirror['field_sign']:+d} field "
                                     f"{kmirror['offset']:+.1f} deg, rms {kmirror['rms']:.1f} deg, {kmirror['nframes']} frames"
                                     + (", ambiguous" if kmirror.get("ambiguous") else "")))
-    intro = ("<p>For each twilight exposure, the gradient across the science IFU and the spectrograph factors that the "
-             "twilight fiber flat procedure removed (fit_fiberflat), next to the sky geometry of the exposure. A twilight sky "
-             "gradient points towards the Sun and the horizon and changes as the Sun sets; a gradient of the instrument stays "
-             "fixed in IFU coordinates whatever the pointing, position angle and time.</p>")
+    if kind == "dome":
+        intro = ("<p>For each dome flat exposure, the gradient across the science IFU and the spectrograph factors that the "
+                 "dome fiber flat procedure removed (fit_fiberflat), next to the geometry of the exposure. Each channel uses the "
+                 "exposures of its lamp: LDLS for b and r, quartz for z. The dome screen is fixed relative to the horizon of the "
+                 "telescope, so a gradient of its illumination follows the direction of the horizon across the IFU; a gradient of "
+                 "the instrument stays fixed in IFU coordinates whatever the pointing and position angle. Inside the closed "
+                 "enclosure, a gradient that follows the Sun points to a light leak.</p>")
+    else:
+        intro = ("<p>For each twilight exposure, the gradient across the science IFU and the spectrograph factors that the "
+                 "twilight fiber flat procedure removed (fit_fiberflat), next to the sky geometry of the exposure. A twilight sky "
+                 "gradient points towards the Sun and the horizon and changes as the Sun sets; a gradient of the instrument stays "
+                 "fixed in IFU coordinates whatever the pointing, position angle and time.</p>")
 
     table_rows = []
     for _, r in summary.iterrows():
+        lamp = f'{r.get("lamp") or "-"} / {r.get("calibfib", "-")}' if kind == "dome" else str(r.get("calibfib", "-"))
         table_rows.append([str(int(r["mjd"])) if np.isfinite(r["mjd"]) else "-", str(int(r["expnum"])), escape(str(r["time"])[11:19]),
-                           escape(r["channel"] or "-"), _num(r["exptime"], ".0f"), _num(r["sun_alt"], ".1f"), _num(r["sun_az"], ".0f"),
+                           escape(r["channel"] or "-"), escape(lamp), _num(r["exptime"], ".0f"), _num(r["sun_alt"], ".1f"), _num(r["sun_az"], ".0f"),
                            _num(r["point_alt"], ".1f"), _num(r["point_az"], ".0f"), _num(r["pa"], ".1f"), _num(r["sun_sep"], ".1f"),
                            f'{_num(r["moon_alt"], ".1f")} / {_num(100 * r["moon_illum"], ".0f")}%',
                            _num(100 * r["strength"], ".2f"), _num(r["direction"], ".0f"), _num(r["dir_sun"], ".0f"), _num(r["dir_horizon"], ".0f"),
                            " / ".join(_num(r[f"factor{i}"], ".4f") for i in (1, 2, 3)),
                            escape(f'{r.get("pointing_source", "-")} / {r.get("pa_source", "-")}')])
     table = html_table(
-        [("MJD", ""), ("Exposure", ""), ("UTC", "middle of the exposure"), ("Ch", "channel"), ("Exptime (s)", ""),
-         ("Sun alt (°)", ""), ("Sun az (°)", ""), ("Pointing alt (°)", ""), ("Pointing az (°)", ""),
+        [("MJD", ""), ("Exposure", ""), ("UTC", "middle of the exposure"), ("Ch", "channel"),
+         ("Lamp / std fiber", "continuum lamp and exposed standard fiber (CALIBFIB)") if kind == "dome" else ("Std fiber", "exposed standard fiber (CALIBFIB)"),
+         ("Exptime (s)", ""), ("Sun alt (°)", ""), ("Sun az (°)", ""), ("Pointing alt (°)", ""), ("Pointing az (°)", ""),
          ("PA (°)", "commanded position angle of the science IFU"), ("Sun sep (°)", "from the pointing"),
          ("Moon alt / illum.", ""), ("Gradient (%)", "removed from the exposure, at the IFU edge"),
          ("Direction (°)", "of the removed gradient, from IFU +x towards +y"), ("Sun dir. (°)", "towards the Sun across the IFU"),
          ("Horizon dir. (°)", "towards the horizon across the IFU"), ("Factors sp1 / sp2 / sp3", "removed from the exposure, mean 1"),
          ("Pointing / PA source", "commanded (PO*), telescope (TE*) or K-mirror")],
-        table_rows, numeric=[True, True, False, False] + [True] * 13 + [False])
+        table_rows, numeric=[True, True, False, False, False] + [True] * 13 + [False])
 
     night_options = [(str(mjd), str(mjd)) for mjd in nights]
     channel_options = [(c, c) for c in channels]
-    body = TWILIGHT_BODY.replace("@@TABLE@@", table)
+    body = (DOME_BODY if kind == "dome" else TWILIGHT_BODY).replace("@@TABLE@@", table)
     body = body.replace("@@SKY@@", picker("twilight-sky", "sky", [("Night", night_options)], 520))
     body = body.replace("@@GEOMETRY@@", picker("twilight-geometry", "geometry", [("Night", night_options)], 480))
     if channels:
         body = body.replace("@@GRADIENT@@", picker("twilight-gradient", "gradient", [("Channel", channel_options), ("Night", night_options)], 520))
         body = body.replace("@@FACTORS@@", picker("twilight-factors", "factors", [("Channel", channel_options), ("Night", night_options)], 320))
     if channels and layout is not None and maps:
-        payload = json.dumps(_twilight_ifu_payload(summary, layout, maps)).replace("</", "<\\/")
+        payload = json.dumps(_twilight_ifu_payload(summary, layout, maps, kind=kind)).replace("</", "<\\/")
         options = "".join(f'<option value="{c}">{c}</option>' for c in channels if c in maps)
         body = body.replace("@@IFU@@", TWILIGHT_IFU.replace("@@CHANNEL_OPTIONS@@", options).replace("@@TWI_PAYLOAD@@", payload)
                             .replace("@@IFU_KEY@@", TWILIGHT_IFU_KEY).replace("@@IFU_STYLE@@", IFU_STYLE))
     else:
-        missing = '<p class="note">No per-exposure flats found: run <span class="mono">drp calibrations fiberflats --skip-combination</span> first.</p>'
+        missing = f'<p class="note">No per-exposure flats found: run <span class="mono">{config["make"]}</span> first.</p>'
         body = body.replace("@@GRADIENT@@", missing).replace("@@FACTORS@@", missing).replace("@@IFU@@", missing)
-    write_dashboard(report_path, title="LVM Twilight Sequence", eyebrow="LVM DRP · fiber flats · twilights",
-                    intro=intro, meta=meta, tiles=tiles, body=body, figures=figures, generator="lvmdrp.qa.fiberflats.qa_twilight_sequence")
+    write_dashboard(report_path, title=f"LVM {config['title']} Sequence", eyebrow=f"LVM DRP · fiber flats · {kind}s",
+                    intro=intro, meta=meta, tiles=tiles, body=body, figures=figures,
+                    generator=f"lvmdrp.qa.fiberflats.qa_{kind}_sequence")
     return report_path
 
 
@@ -4513,6 +4620,71 @@ TWILIGHT_BODY = r"""
       <h3>Spectrograph factors</h3>
       <p>The FIBERFLAT FACTOR values that fit_fiberflat removed from the exposure, normalized to a mean of 1. Changes
       along a sequence point to differences in the spectrograph shutter timing.</p>
+      <div class="eq">\[ f_s \rightarrow \frac{f_s}{\tfrac{1}{3}\sum_{s'} f_{s'}} \]</div>
+    </div>
+  </div>
+</section>
+"""
+
+
+DOME_BODY = r"""
+<section>
+  <h2>Pointing during the sequence</h2>
+  <p>Pointing of the science telescope, Sun and Moon in horizontal coordinates at the middle of each exposure. The radius
+  is the zenith distance: the circle is the horizon. The dome flats are taken with the enclosure closed, so the Sun and
+  the Moon only matter through light leaks. The open marker is the first exposure of each track.</p>
+  @@SKY@@
+  @@GEOMETRY@@
+</section>
+
+<section>
+  <h2>Gradient removed from each exposure</h2>
+  <p>Strength and direction of the gradient that the dome fiber flat procedure fitted and removed from each exposure,
+  next to the directions of the Sun and of the horizon across the science IFU at the time of the exposure. The dome screen
+  is fixed relative to the horizon of the telescope: a gradient of its illumination follows the direction of the horizon,
+  which turns with the position angle; a gradient that keeps its direction while it turns belongs to the instrument.</p>
+  @@GRADIENT@@
+  @@FACTORS@@
+</section>
+
+<section>
+  <h2>Gradient model of each exposure on the science IFU</h2>
+  <p>The gradient model removed from each exposure, divided by its mean, on the science IFU fibers, with arrows towards
+  the Sun and towards the horizon at the time of the exposure. The caption gives the lamp and the exposed standard fiber.
+  A gradient of the dome screen increases along the horizon arrow and turns with it; a gradient of the instrument keeps
+  its pattern whatever their direction.</p>
+  @@IFU@@
+  <details><summary>Table view: all exposures</summary>@@TABLE@@</details>
+</section>
+
+<section id="definitions">
+  <h2>How the quantities are computed</h2>
+  <div class="defs">
+    <div class="def">
+      <h3>Removed gradient</h3>
+      <p>The FIBERFLAT GCOEFF coefficients \(c_k\) that fit_fiberflat fitted with IFUGradient on the dome flat counts at the
+      normalization window, as the change from the science IFU center to its edge, at the radius \(R\), relative to the mean
+      of the model over the good science fibers.</p>
+      <div class="eq">\[ \begin{gathered} G(x, y) = c_0 + c_1\, y + c_2\, x \\ \vec g = \frac{R\,(c_2,\ c_1)}{\langle G \rangle}, \qquad \theta = \operatorname{atan2}(g_y,\ g_x) \end{gathered} \]</div>
+    </div>
+    <div class="def">
+      <h3>Directions of the Sun and the horizon</h3>
+      <p>The science IFU fibers are placed on the sky with the pipeline astrometry from the position and position angle of
+      the science telescope, and transformed to horizontal coordinates at the middle of the exposure. Planes fitted over
+      the IFU to the angular distance to the Sun \(d_\odot\) and to the altitude \(h\) give the directions in which they
+      decrease.</p>
+      <div class="eq">\[ \theta_\odot = \operatorname{atan2}\!\left(-\partial_y d_\odot,\ -\partial_x d_\odot\right), \qquad \theta_h = \operatorname{atan2}\!\left(-\partial_y h,\ -\partial_x h\right) \]</div>
+    </div>
+    <div class="def">
+      <h3>Sun and Moon</h3>
+      <p>Apparent topocentric positions at Las Campanas from the DE421 ephemeris with skyfield, without refraction; the
+      separations are angular distances from the science IFU center.</p>
+      <div class="eq">\[ \cos s = \sin h_1 \sin h_2 + \cos h_1 \cos h_2 \cos(A_1 - A_2) \]</div>
+    </div>
+    <div class="def">
+      <h3>Spectrograph factors</h3>
+      <p>The FIBERFLAT FACTOR values that fit_fiberflat removed from the exposure, normalized to a mean of 1. With the same
+      lamp and exposure time, changes along a sequence point to differences in the spectrograph shutter timing.</p>
       <div class="eq">\[ f_s \rightarrow \frac{f_s}{\tfrac{1}{3}\sum_{s'} f_{s'}} \]</div>
     </div>
   </div>
@@ -4735,7 +4907,6 @@ TWILIGHT_IFU = r"""
 # dome sequences
 # ---------------------------------------------------------------------------
 
-# colors of the channels in the dome dashboard
 # candidate drivers of the twilight gradient: (key, label, column, unit)
 TWILIGHT_DRIVERS = [
     ("sun_alt", "Sun altitude", "sun_alt", "°"),
@@ -4822,47 +4993,63 @@ def _direction_correlation(x, direction, angular: bool) -> float:
     return abs(_circular_circular_correlation(direction, x)) if angular else _circular_linear_correlation(direction, x)
 
 
-def decompose_twilight_gradient(data: pd.DataFrame, min_exposures: int = 12) -> Dict:
-    """Split the gradients removed from twilight exposures into an instrumental and a sky component
+def decompose_twilight_gradient(data: pd.DataFrame, min_exposures: int = 12, kind: str = "twilight") -> Dict:
+    """Split the gradients removed from twilight (or dome flat) exposures into an instrumental and a sky (or screen) component
 
     Fits the gradient vectors of the exposures of one channel, in IFU
     coordinates, as a vector fixed in the IFU that drifts linearly with time,
-    plus a sky gradient towards the Sun whose strength changes linearly with
-    the altitude of the Sun:
+    plus, for twilights, a sky gradient towards the Sun whose strength changes
+    linearly with the altitude of the Sun:
 
         g = g0 + g1 * (t - t0) + (a + b * (-3 - h_sun)) * u_sun
 
     with t in years from the first night t0 and u_sun the unit vector towards
-    the Sun across the IFU. The model is linear in its six parameters and is
-    fitted by least squares on the exposures with a direction of the Sun.
+    the Sun across the IFU. For dome flats, the second term is a gradient of
+    the dome screen, fixed relative to the horizon of the telescope, with a
+    constant strength a along the unit vector u_h towards the horizon:
+
+        g = g0 + g1 * (t - t0) + a * u_h
+
+    The model is linear in its parameters and is fitted by least squares on
+    the exposures with a direction of the Sun (twilights) or of the horizon
+    (dome flats).
 
     Parameters
     ----------
     data : pandas.DataFrame
         Rows of one channel of the summary (see :func:`qa_twilight_sequence`).
     min_exposures : int, optional
-        Minimum number of exposures with a direction of the Sun. Default is 12.
+        Minimum number of exposures with the reference direction. Default is 12.
+    kind : str, optional
+        'twilight' or 'dome'. Default is 'twilight'.
 
     Returns
     -------
     dict
         n, instrument (strength and direction at the first and the last night,
-        drift in %/yr and its direction), sky (amplitude a at a Sun altitude of
-        -3 deg and slope b per degree below it, in %), rms of the residuals and
-        of the gradients around their mean (%), and the fraction of the
-        variance explained. Only n if there are too few exposures.
+        drift in %/yr and its direction), sky (amplitude a, at a Sun altitude of
+        -3 deg for twilights, in %), sky_slope (b per degree below it, in %;
+        NaN for dome flats), rms of the residuals and of the gradients around
+        their mean (%), and the fraction of the variance explained. Only n if
+        there are too few exposures.
     """
-    good = data[np.isfinite(data[["grad_x", "grad_y", "dir_sun", "sun_alt", "mjd"]].astype(float)).all(axis=1)]
+    reference = "dir_horizon" if kind == "dome" else "dir_sun"
+    columns = ["grad_x", "grad_y", reference, "mjd"] + ([] if kind == "dome" else ["sun_alt"])
+    good = data[np.isfinite(data[columns].astype(float)).all(axis=1)]
     if len(good) < min_exposures:
         return {"n": int(len(good))}
     g = 100 * good[["grad_x", "grad_y"]].astype(float).to_numpy()
     years = (good["mjd"].astype(float).to_numpy() - good["mjd"].min()) / 365.25
-    depth = -3 - good["sun_alt"].astype(float).to_numpy()
-    sun = np.radians(good["dir_sun"].astype(float).to_numpy())
+    direction = np.radians(good[reference].astype(float).to_numpy())
     ones, zeros = np.ones(len(good)), np.zeros(len(good))
-    # parameters: g0x, g0y, g1x, g1y, a, b; rows: x components then y components
-    design = np.vstack([np.column_stack([ones, zeros, years, zeros, np.cos(sun), depth * np.cos(sun)]),
-                        np.column_stack([zeros, ones, zeros, years, np.sin(sun), depth * np.sin(sun)])])
+    # parameters: g0x, g0y, g1x, g1y, a[, b]; rows: x components then y components
+    x_rows = [ones, zeros, years, zeros, np.cos(direction)]
+    y_rows = [zeros, ones, zeros, years, np.sin(direction)]
+    if kind != "dome":
+        depth = -3 - good["sun_alt"].astype(float).to_numpy()
+        x_rows.append(depth * np.cos(direction))
+        y_rows.append(depth * np.sin(direction))
+    design = np.vstack([np.column_stack(x_rows), np.column_stack(y_rows)])
     target = np.concatenate([g[:, 0], g[:, 1]])
     params, *_ = np.linalg.lstsq(design, target, rcond=None)
     residual = target - design @ params
@@ -4875,12 +5062,12 @@ def decompose_twilight_gradient(data: pd.DataFrame, min_exposures: int = 12) -> 
             "instrument_first": float(np.hypot(*g0)), "instrument_first_dir": float(np.degrees(np.arctan2(g0[1], g0[0]))),
             "instrument_last": float(np.hypot(*g_last)), "instrument_last_dir": float(np.degrees(np.arctan2(g_last[1], g_last[0]))),
             "drift": float(np.hypot(*g1)), "drift_dir": float(np.degrees(np.arctan2(g1[1], g1[0]))),
-            "sky": float(params[4]), "sky_slope": float(params[5]), "rms": rms, "spread": spread,
+            "sky": float(params[4]), "sky_slope": float(params[5]) if params.size > 5 else np.nan, "rms": rms, "spread": spread,
             "explained": float(1 - rms**2 / spread**2) if spread > 0 else np.nan}
 
 
-def twilight_trend_statistics(summary: pd.DataFrame) -> Dict[str, Dict]:
-    """Statistics of the gradient removed from the twilight exposures of many nights, per channel
+def twilight_trend_statistics(summary: pd.DataFrame, kind: str = "twilight") -> Dict[str, Dict]:
+    """Statistics of the gradient removed from the twilight (or dome flat) exposures of many nights, per channel
 
     For each channel: the number of exposures and nights, the median strength,
     the circular mean direction and mean resultant length R of the gradient
@@ -4913,7 +5100,7 @@ def twilight_trend_statistics(summary: pd.DataFrame) -> Dict[str, Dict]:
                             "strength": _strength_correlation(x, data["strength"].astype(float).to_numpy(), angular),
                             "direction": _direction_correlation(x, data["direction"].astype(float).to_numpy(), angular)}
         stats[channel] = {"n": int(len(data)), "nights": int(data["mjd"].nunique()), "strength": float(np.nanmedian(data["strength"])) if len(data) else np.nan,
-                          "frames": frames, "drivers": drivers, "decomposition": decompose_twilight_gradient(data)}
+                          "frames": frames, "drivers": drivers, "decomposition": decompose_twilight_gradient(data, kind=kind)}
     return stats
 
 
@@ -4966,8 +5153,56 @@ def qa_twilight_trends(mjds, channels: str = "brz", drpver: str = None, flat_pat
     from lvmdrp import __version__
 
     mjds = sorted(int(mjd) for mjd in np.atleast_1d(mjds))
-    drpver = drpver or __version__
-    name = f"twilight_trends_{mjds[0]}-{mjds[-1]}"
+    return _qa_flat_trends("twilight", mjds, f"twilight_trends_{mjds[0]}-{mjds[-1]}", channels=channels, drpver=drpver or __version__,
+                           flat_paths=flat_paths, kmirror=kmirror, output_dir=output_dir, dry_run=dry_run)
+
+
+def qa_dome_trends(mjds, channels: str = "brz", drpver: str = None, flat_paths: List[str] = None, kmirror=None,
+                   output_dir: str = None, dry_run: bool = False) -> Dict:
+    """Trends of the gradient removed from the dome flat exposures over a range of nights, and a summary dashboard.
+
+    The dome version of :func:`qa_twilight_trends`, with the same plots and
+    inputs: the per-exposure flats of the dome fiber flat procedure, with the
+    geometry and lab conditions of each exposure. The dome screen is fixed
+    relative to the horizon of the telescope, so a gradient of its
+    illumination keeps its direction relative to the horizon, and an
+    instrumental gradient in IFU coordinates; one fixed relative to the Sun
+    points to a light leak. The instrument and screen components are fitted
+    with :func:`decompose_twilight_gradient` (``kind='dome'``).
+
+    Parameters
+    ----------
+    mjds : int or list[int]
+        MJDs of the dome flat exposures.
+    channels : str, optional
+        Channels to check. Default is 'brz'.
+    drpver : str, optional
+        Pipeline version of the reductions. Default is the installed version.
+    flat_paths : list[str], optional
+        Per-exposure flats to use instead of searching for them (see :func:`find_twilight_flats`).
+    kmirror : dict or str, optional
+        K-mirror relation to infer the position angle (see :func:`qa_twilight_sequence`).
+    output_dir : str, optional
+        Directory of the dashboard and table. Default is
+        ``fiberflat_qa/dome_trends_{mjd1}-{mjd2}`` in the ancillary directory
+        of the first MJD.
+    dry_run : bool, optional
+        If True, log the flats found and the output paths without reading them. Default is False.
+
+    Returns
+    -------
+    dict
+        As :func:`qa_twilight_trends`.
+    """
+    from lvmdrp import __version__
+
+    mjds = sorted(int(mjd) for mjd in np.atleast_1d(mjds))
+    return _qa_flat_trends("dome", mjds, f"dome_trends_{mjds[0]}-{mjds[-1]}", channels=channels, drpver=drpver or __version__,
+                           flat_paths=flat_paths, kmirror=kmirror, output_dir=output_dir, dry_run=dry_run)
+
+
+def _qa_flat_trends(kind, mjds, name, channels, drpver, flat_paths, kmirror, output_dir, dry_run) -> Dict:
+    """Trends dashboard of :func:`qa_twilight_trends` and :func:`qa_dome_trends`, for one kind of flat"""
     output_dir = output_dir or epoch_qa_dir(drpver, mjds[0], "fiberflat", name)
     report_path = os.path.join(output_dir, f"{name}.html")
     table_path = os.path.join(output_dir, f"{name}.csv")
@@ -4981,19 +5216,19 @@ def qa_twilight_trends(mjds, channels: str = "brz", drpver: str = None, flat_pat
         return {"summary": None, "statistics": {}, "figures": {}, "report": None}
 
     relation = load_kmirror_relation(kmirror)
-    summary, _, _ = _twilight_summary(flat_paths, mjds, channels, include_raw=False, relation=relation)
+    summary, _, _ = _twilight_summary(flat_paths, mjds, channels, include_raw=False, relation=relation, kind=kind)
     summary = summary[summary["channel"] != ""].reset_index(drop=True)
     summary["doy"] = pd.to_datetime(summary["time"]).dt.dayofyear.astype(float)
     os.makedirs(output_dir, exist_ok=True)
     summary.to_csv(table_path, index=False)
 
-    statistics = twilight_trend_statistics(summary)
+    statistics = twilight_trend_statistics(summary, kind=kind)
     figures = _twilight_trend_figures(summary, statistics)
     if relation is not None:
         with open(os.path.join(output_dir, "kmirror_pa.json"), "w") as out:
             json.dump(relation, out, indent=2)
-    _write_twilight_trends_dashboard(report_path, summary, statistics, figures, mjds, drpver, relation)
-    log.info(f"written twilight trends dashboard to {report_path}")
+    _write_twilight_trends_dashboard(report_path, summary, statistics, figures, mjds, drpver, relation, kind=kind)
+    log.info(f"written {kind} trends dashboard to {report_path}")
     return {"summary": summary, "statistics": statistics, "figures": figures, "report": report_path}
 
 
@@ -5135,7 +5370,7 @@ def _twilight_trend_figures(summary: pd.DataFrame, statistics: Dict = None) -> D
     return figures
 
 
-def _frame_verdict(frames: Dict) -> str:
+def _frame_verdict(frames: Dict, kind: str = "twilight") -> str:
     """Which frame holds the gradient direction fixed, from the mean resultant lengths"""
     ranked = sorted(((frames[f]["R"], f) for f in ("IFU", "Sun", "Horizon") if np.isfinite(frames[f]["R"])), reverse=True)
     if not ranked:
@@ -5147,23 +5382,32 @@ def _frame_verdict(frames: Dict) -> str:
         return "no frame holds it fixed"
     if len(ranked) > 1 and ranked[1][0] > best_r - 0.1:
         return f"{best.lower()} or {ranked[1][1].lower()} frame, undecided"
+    if kind == "dome":
+        return {"IFU": "fixed in the IFU: instrumental", "Sun": "follows the Sun: light leak", "Horizon": "follows the horizon: dome screen"}[best]
     return {"IFU": "fixed in the IFU: instrumental", "Sun": "follows the Sun: sky", "Horizon": "follows the horizon: sky"}[best]
 
 
-def _write_twilight_trends_dashboard(report_path, summary, statistics, figures, mjds, drpver, kmirror=None):
+def _write_twilight_trends_dashboard(report_path, summary, statistics, figures, mjds, drpver, kmirror=None, kind="twilight"):
+    config = FLAT_KINDS[kind]
     nights = sorted(summary["mjd"].dropna().astype(int).unique())
     channels = list(statistics)
     geometry = _exposure_geometry(summary)
 
+    if kind == "dome":
+        lamps = geometry["lamp"].replace("", "none").value_counts() if "lamp" in geometry.columns else pd.Series(dtype=int)
+        exposures_detail = ", ".join(f"{n} {lamp}" for lamp, n in lamps.items()) or "-"
+    else:
+        exposures_detail = f"Sun from {np.nanmin(geometry['sun_alt']):.1f}° to {np.nanmax(geometry['sun_alt']):.1f}°"
     tiles = [("Nights", f"{len(nights)}", f"{nights[0]} to {nights[-1]}" if nights else "none"),
-             ("Twilight exposures", f"{len(geometry)}", f"Sun from {np.nanmin(geometry['sun_alt']):.1f}° to {np.nanmax(geometry['sun_alt']):.1f}°")]
+             (f"{config['title']} exposures", f"{len(geometry)}", exposures_detail)]
     for channel, stats in statistics.items():
         d = stats["decomposition"]
         if "rms" in d:
+            second = f"screen {d['sky']:.1f}% towards the horizon" if kind == "dome" else f"sky {d['sky']:.1f}% at Sun -3°"
             detail = (f"median; instrument {d['instrument_first']:.1f}% to {d['instrument_last']:.1f}% at {d['instrument_last_dir']:.0f}°, "
-                      f"sky {d['sky']:.1f}% at Sun -3°; the fit explains {100 * d['explained']:.0f}%")
+                      f"{second}; the fit explains {100 * d['explained']:.0f}%")
         else:
-            detail = f"median; {_frame_verdict(stats['frames'])}"
+            detail = f"median; {_frame_verdict(stats['frames'], kind)}"
         tiles.append((f"{channel} gradient", f"{100 * stats['strength']:.2f}%", detail))
 
     meta = [("DRP version", drpver), ("MJDs", f"{mjds[0]} to {mjds[-1]} ({len(mjds)} requested)"), ("Channels", "".join(channels) or "none"),
@@ -5174,10 +5418,17 @@ def _write_twilight_trends_dashboard(report_path, summary, statistics, figures, 
         meta.append(("K-mirror PA", f"{kmirror['factor']} x {kmirror['km_sign']:+d} KM {kmirror['field_sign']:+d} field "
                                     f"{kmirror['offset']:+.1f} deg, rms {kmirror['rms']:.1f} deg, {kmirror['nframes']} frames"
                                     + (", ambiguous" if kmirror.get("ambiguous") else "")))
-    intro = ("<p>The gradient across the science IFU that the twilight fiber flat procedure (fit_fiberflat) removed from every "
-             "twilight exposure of the nights, against the time of observation, the sky geometry and the lab conditions. A "
-             "twilight sky gradient keeps its direction relative to the Sun and the horizon; an instrumental gradient keeps it "
-             "in IFU coordinates, whatever the pointing, position angle and time.</p>")
+    if kind == "dome":
+        intro = ("<p>The gradient across the science IFU that the dome fiber flat procedure (fit_fiberflat) removed from every "
+                 "dome flat exposure of the nights, against the time of observation, the pointing geometry and the lab conditions. "
+                 "A gradient of the dome screen keeps its direction relative to the horizon of the telescope; an instrumental "
+                 "gradient keeps it in IFU coordinates, whatever the pointing, position angle and time. Inside the closed "
+                 "enclosure, a gradient that follows the Sun points to a light leak.</p>")
+    else:
+        intro = ("<p>The gradient across the science IFU that the twilight fiber flat procedure (fit_fiberflat) removed from every "
+                 "twilight exposure of the nights, against the time of observation, the sky geometry and the lab conditions. A "
+                 "twilight sky gradient keeps its direction relative to the Sun and the horizon; an instrumental gradient keeps it "
+                 "in IFU coordinates, whatever the pointing, position angle and time.</p>")
 
     # correlation table: one row per driver, strength and direction per channel
     rows = []
@@ -5196,7 +5447,7 @@ def _write_twilight_trends_dashboard(report_path, summary, statistics, figures, 
     frame_rows = [[escape(c), str(statistics[c]["n"]), str(statistics[c]["nights"])]
                   + [f"{_num(statistics[c]['frames'][f]['R'], '.2f')} @ {_num(statistics[c]['frames'][f]['mean'], '.0f')}°"
                      for f in ("IFU", "Sun", "Horizon", "Sun direction")]
-                  + [escape(_frame_verdict(statistics[c]["frames"]))] for c in channels]
+                  + [escape(_frame_verdict(statistics[c]["frames"], kind))] for c in channels]
     frame_table = html_table([("Ch", "channel"), ("Exposures", ""), ("Nights", ""), ("IFU: R @ mean", "direction in IFU coordinates"),
                               ("Sun: R @ mean", "direction minus the direction of the Sun"),
                               ("Horizon: R @ mean", "direction minus the direction of the horizon"),
@@ -5209,19 +5460,22 @@ def _write_twilight_trends_dashboard(report_path, summary, statistics, figures, 
         if "rms" not in d:
             decomposition_rows.append([escape(c), str(d["n"])] + ["-"] * 6)
             continue
+        second = f"{d['sky']:+.2f}%" if kind == "dome" else f"{d['sky']:+.2f}% {d['sky_slope']:+.2f}%/°"
         decomposition_rows.append([escape(c), str(d["n"]),
                                    f"{d['instrument_first']:.2f}% @ {d['instrument_first_dir']:.0f}°", f"{d['instrument_last']:.2f}% @ {d['instrument_last_dir']:.0f}°",
-                                   f"{d['drift']:.2f}%/yr @ {d['drift_dir']:.0f}°", f"{d['sky']:+.2f}% {d['sky_slope']:+.2f}%/°",
+                                   f"{d['drift']:.2f}%/yr @ {d['drift_dir']:.0f}°", second,
                                    f"{d['rms']:.2f}% of {d['spread']:.2f}%", _num(100 * d["explained"], ".0f") + "%"])
     decomposition_table = html_table(
-        [("Ch", "channel"), ("Exposures", "with a direction of the Sun"), ("Instrument, first night", "g0: strength @ direction in the IFU"),
-         ("Instrument, last night", "g0 + g1 (t_last - t0)"), ("Drift", "g1"), ("Sky at Sun -3° / per degree lower", "a and b, along the direction of the Sun"),
+        [("Ch", "channel"), ("Exposures", "with a direction of the horizon" if kind == "dome" else "with a direction of the Sun"),
+         ("Instrument, first night", "g0: strength @ direction in the IFU"), ("Instrument, last night", "g0 + g1 (t_last - t0)"), ("Drift", "g1"),
+         ("Screen, towards the horizon", "a, along the direction of the horizon") if kind == "dome"
+         else ("Sky at Sun -3° / per degree lower", "a and b, along the direction of the Sun"),
          ("Residual rms", "of the vectors, against their spread around the mean"), ("Explained", "fraction of the variance of the vectors")],
         decomposition_rows, numeric=[False] + [True] * 7)
 
     channel_options = [(c, c) for c in channels]
     driver_options = [(key, label) for key, label, _, _ in TWILIGHT_DRIVERS if any(key in statistics[c]["drivers"] for c in channels)]
-    body = (TWILIGHT_TRENDS_BODY.replace("@@FRAME_TABLE@@", frame_table).replace("@@TABLE@@", table)
+    body = ((DOME_TRENDS_BODY if kind == "dome" else TWILIGHT_TRENDS_BODY).replace("@@FRAME_TABLE@@", frame_table).replace("@@TABLE@@", table)
             .replace("@@DECOMPOSITION@@", decomposition_table))
     if channels:
         body = body.replace("@@TREND@@", picker("twilight-trend", "trend", [("Channel", channel_options)], 560))
@@ -5231,11 +5485,11 @@ def _write_twilight_trends_dashboard(report_path, summary, statistics, figures, 
                             if driver_options else '<p class="note">Not enough exposures to correlate.</p>')
         body = body.replace("@@FACTORS@@", picker("twilight-tfactors", "tfactors", [("Channel", channel_options)], 340))
     else:
-        missing = '<p class="note">No per-exposure flats found: run <span class="mono">drp calibrations fiberflats --skip-combination</span> first.</p>'
+        missing = f'<p class="note">No per-exposure flats found: run <span class="mono">{config["make"]}</span> first.</p>'
         for key in ("@@TREND@@", "@@FRAMES@@", "@@VECTORS@@", "@@DRIVERS@@", "@@FACTORS@@"):
             body = body.replace(key, missing)
-    write_dashboard(report_path, title="LVM Twilight Trends", eyebrow="LVM DRP · fiber flats · twilights",
-                    intro=intro, meta=meta, tiles=tiles, body=body, figures=figures, generator="lvmdrp.qa.fiberflats.qa_twilight_trends")
+    write_dashboard(report_path, title=f"LVM {config['title']} Trends", eyebrow=f"LVM DRP · fiber flats · {kind}s",
+                    intro=intro, meta=meta, tiles=tiles, body=body, figures=figures, generator=f"lvmdrp.qa.fiberflats.qa_{kind}_trends")
     return report_path
 
 
@@ -5327,274 +5581,55 @@ TWILIGHT_TRENDS_BODY = r"""
 """
 
 
-DOME_COLORS = {"b": SERIES[0], "r": SERIES[1], "z": SERIES[2]}
-
-
-def _circular_spread(angles):
-    """Circular mean of `angles` (degrees) and the median distance from it"""
-    angles = np.asarray(angles, dtype=float)
-    angles = angles[np.isfinite(angles)]
-    if angles.size == 0:
-        return np.nan, np.nan
-    radians = np.radians(angles)
-    mean = float(np.degrees(np.arctan2(np.mean(np.sin(radians)), np.mean(np.cos(radians)))))
-    return mean, float(np.median(np.abs(_wrap_angle(angles - mean))))
-
-
-def qa_dome_sequence(mjds, channels: str = "brz", drpver: str = None, flat_paths: List[str] = None,
-                     epoch_mjd: int = None, output_dir: str = None, dry_run: bool = False) -> Dict:
-    """Check the gradient and spectrograph factors removed from the exposures of a dome flat sequence, and write a dashboard.
-
-    The dome fiber flats follow the twilight procedure
-    (:func:`lvmdrp.functions.run_calseq.create_dome_fiberflats`): for each
-    exposure, :func:`lvmdrp.functions.run_twilights.fit_fiberflat` removes an
-    IFU gradient and spectrograph factors, kept in the ``FIBERFLAT GCOEFF`` and
-    ``FACTOR`` keywords of its per-exposure flat. This dashboard shows them
-    along the sequence, as in :func:`qa_twilight_sequence`, with the lamp and
-    the exposed standard fiber of each exposure instead of the sky geometry.
-    The dome is lit the same way in all the exposures of a lamp, so its
-    gradient should keep its strength and direction; changes along the
-    sequence come from the instrument (e.g. shutter timing in the factors).
-
-    Parameters
-    ----------
-    mjds : int or list[int]
-        MJDs of the dome flat exposures.
-    channels : str, optional
-        Channels to check. Default is 'brz'.
-    drpver : str, optional
-        Pipeline version of the reductions. Default is the installed version.
-    flat_paths : list[str], optional
-        Per-exposure flats to use instead of searching for them (see :func:`find_twilight_flats`).
-    epoch_mjd : int, optional
-        MJD of the calibration epoch the sequence belongs to, used to name and
-        place the dashboard. Default is the first MJD.
-    output_dir : str, optional
-        Directory of the dashboard and table. Default is
-        ``fiberflat_qa/domes_{epoch_mjd}`` in the ancillary directory of
-        `epoch_mjd` (see :func:`lvmdrp.qa.report.epoch_qa_dir`).
-    dry_run : bool, optional
-        If True, log the flats found and the output paths without reading
-        them. Default is False.
-
-    Returns
-    -------
-    dict
-        - ``"summary"`` : pandas.DataFrame, one row per exposure and channel,
-          with the lamp, exposed standard fiber (calibfib), exposure time, the
-          removed gradient (grad_x, grad_y, strength, direction) and the
-          spectrograph factors with mean 1 (factor1-3). None in a dry run.
-        - ``"figures"`` : dict, the Plotly figures of the dashboard.
-        - ``"report"`` : str, path of the dashboard, None in a dry run.
-    """
-    from lvmdrp import __version__
-
-    mjds = sorted(int(mjd) for mjd in np.atleast_1d(mjds))
-    drpver = drpver or __version__
-    epoch_mjd = int(epoch_mjd or mjds[0])
-    name = f"domes_{epoch_mjd}"
-    output_dir = output_dir or epoch_qa_dir(drpver, epoch_mjd, "fiberflat", name)
-    report_path = os.path.join(output_dir, f"{name}.html")
-    table_path = os.path.join(output_dir, f"{name}.csv")
-
-    flat_paths = flat_paths if flat_paths is not None else find_twilight_flats(mjds, channels=channels, drpver=drpver)
-    log.info(f"found {len(flat_paths)} per-exposure flats for MJDs {mjds}")
-    if dry_run:
-        for flat_path in flat_paths:
-            log.info(f"  {flat_path}")
-        log.info(f"dry run: dashboard would be written to {report_path}")
-        return {"summary": None, "figures": {}, "report": None}
-
-    rows, layout, maps = [], None, {}
-    for flat_path in tqdm(flat_paths, desc="dome flats", unit="flat", ascii=True):
-        header = fits.getheader(flat_path, 0)
-        channel = str(header.get("CCD", " "))[0]
-        if channel not in channels or not _is_dome(header):
-            continue
-        slitmap = Table.read(flat_path, hdu="SLITMAP")
-        expnum = int(header["EXPOSURE"])
-        row, layout, model = _removed_corrections(header, channel, slitmap, layout)
-        if model is not None:
-            maps.setdefault(channel, {})[expnum] = model
-        lamps = [lamp for lamp in CON_LAMPS if _lamp_on(header, lamp)]
-        rows.append({"mjd": _night_sjd(header, flat_path), "expnum": expnum, "channel": channel, "path": flat_path,
-                     "time": str(header.get("OBSTIME", ""))[:19], "exptime": float(header.get("EXPTIME", np.nan) or np.nan),
-                     "lamp": "+".join(lamps).lower(), "calibfib": str(header.get("CALIBFIB") or "-"), **row})
-    if not rows:
-        raise FileNotFoundError(f"no per-exposure dome flats found for MJDs {mjds}; run 'drp calibrations fiberflats --kind dome --skip-combination' first")
-
-    summary = pd.DataFrame(rows).sort_values(["time", "expnum", "channel"]).reset_index(drop=True)
-    os.makedirs(output_dir, exist_ok=True)
-    summary.to_csv(table_path, index=False)
-
-    figures = _dome_figures(summary)
-    _write_dome_dashboard(report_path, summary, figures, mjds, epoch_mjd, drpver, layout, maps)
-    log.info(f"written dome sequence dashboard to {report_path}")
-    return {"summary": summary, "figures": figures, "report": report_path}
-
-
-def _exposure_axis(summary: pd.DataFrame) -> List[str]:
-    """Exposure numbers in the order of the sequence, as categories of the x axis"""
-    return [str(e) for e in summary.drop_duplicates("expnum")["expnum"]]
-
-
-def _dome_hover(data: pd.DataFrame) -> np.ndarray:
-    return np.stack([data["mjd"], data["lamp"], data["calibfib"], data["time"].str[11:16]], axis=-1)
-
-
-def figure_dome_vectors(summary: pd.DataFrame) -> go.Figure:
-    """Gradient removed from each dome exposure as a vector in IFU coordinates, one color per channel
-
-    The angle is the direction across the science IFU (from +x towards +y) and
-    the radius the strength at the IFU edge; a stable dome gradient makes a
-    tight cluster per channel.
-    """
-    fig = go.Figure()
-    for channel in [c for c in "brz" if c in set(summary["channel"])]:
-        data = summary[summary["channel"] == channel]
-        color = DOME_COLORS[channel]
-        fig.add_trace(go.Scatterpolar(
-            r=100 * data["strength"].astype(float), theta=data["direction"].astype(float), mode="markers", name=channel,
-            marker=dict(size=9, color=color, line=dict(width=1.5, color=THEME["surface"])),
-            customdata=np.column_stack([data["expnum"], _dome_hover(data)]),
-            hovertemplate=(f"<b>{channel}</b> · exposure %{{customdata[0]}}<br>MJD %{{customdata[1]}}, %{{customdata[2]}}, "
-                           "%{customdata[3]}<br>strength %{r:.2f}%<br>direction %{theta:.0f}°<extra></extra>")))
-    fig.update_layout(base_layout(440, margin=dict(l=40, r=40, t=40, b=40)), polar=dict(
-        bgcolor=THEME["surface"],
-        radialaxis=dict(rangemode="tozero", ticksuffix="%", angle=90, tickangle=90, gridcolor=THEME["grid"], linecolor=THEME["axis"],
-                        tickfont=dict(color=THEME["muted"], size=11)),
-        angularaxis=dict(rotation=0, direction="counterclockwise", tickmode="array", tickvals=[0, 90, 180, 270],
-                         ticktext=["+x", "+y", "−x", "−y"], gridcolor=THEME["grid"], linecolor=THEME["axis"],
-                         tickfont=dict(color=THEME["ink2"]))))
-    return fig
-
-
-def figure_dome_gradient(summary: pd.DataFrame) -> go.Figure:
-    """Strength and direction of the gradient removed from each dome exposure, one line per channel"""
-    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.1,
-                        subplot_titles=["Strength of the gradient removed from each exposure",
-                                        "Direction across the science IFU, from +x towards +y"])
-    for channel in [c for c in "brz" if c in set(summary["channel"])]:
-        data = summary[summary["channel"] == channel]
-        color = DOME_COLORS[channel]
-        x = data["expnum"].astype(str)
-        hover = _dome_hover(data)
-        fig.add_trace(go.Scatter(
-            x=x, y=100 * data["strength"].astype(float), mode="lines+markers", name=channel, legendgroup=channel,
-            line=dict(width=2, color=color), marker=dict(size=8, color=color, line=dict(width=1.5, color=THEME["surface"])),
-            customdata=hover, hovertemplate=(f"<b>{channel}</b> · exposure %{{x}}<br>MJD %{{customdata[0]}}, %{{customdata[1]}}, "
-                                             "%{customdata[2]}<br>strength %{y:.2f}%<extra></extra>")), row=1, col=1)
-        fig.add_trace(go.Scatter(
-            x=x, y=_wrap_angle(data["direction"]), mode="markers", name=channel, legendgroup=channel, showlegend=False,
-            marker=dict(size=9, color=color, line=dict(width=1.5, color=THEME["surface"])),
-            customdata=hover, hovertemplate=(f"<b>{channel}</b> · exposure %{{x}}<br>MJD %{{customdata[0]}}, %{{customdata[1]}}, "
-                                             "%{customdata[2]}<br>direction %{y:.0f}°<extra></extra>")), row=2, col=1)
-    fig.update_yaxes(title_text="Strength (%)", rangemode="tozero", row=1, col=1)
-    fig.update_yaxes(title_text="Direction (°)", range=[-180, 180], tickvals=[-180, -90, 0, 90, 180], row=2, col=1)
-    fig.update_xaxes(type="category", categoryorder="array", categoryarray=_exposure_axis(summary))
-    fig.update_xaxes(title_text="Exposure", row=2, col=1)
-    return _finish_twilight_figure(fig, 520)
-
-
-def figure_dome_factors(summary: pd.DataFrame, channel: str) -> go.Figure:
-    """Spectrograph factors removed from each dome exposure of a channel"""
-    fig = go.Figure()
-    data = summary[summary["channel"] == channel]
-    for i in (1, 2, 3):
-        color = SERIES[i - 1]
-        fig.add_trace(go.Scatter(
-            x=data["expnum"].astype(str), y=data[f"factor{i}"].astype(float), mode="lines+markers", name=f"sp{i}",
-            line=dict(width=2, color=color), marker=dict(size=8, color=color, line=dict(width=1.5, color=THEME["surface"])),
-            customdata=_dome_hover(data), hovertemplate=(f"<b>sp{i}</b> · exposure %{{x}}<br>MJD %{{customdata[0]}}, %{{customdata[1]}}, "
-                                                         "%{customdata[2]}<br>factor %{y:.4f}<extra></extra>")))
-    fig.add_hline(y=1, line=dict(color=THEME["axis"], width=1))
-    fig.update_yaxes(title_text="Factor (mean 1)")
-    fig.update_xaxes(title_text="Exposure", type="category", categoryorder="array", categoryarray=_exposure_axis(data))
-    return _finish_twilight_figure(fig, 320)
-
-
-def _dome_figures(summary: pd.DataFrame) -> Dict[str, go.Figure]:
-    figures = {"vectors": figure_dome_vectors(summary), "gradient": figure_dome_gradient(summary)}
-    for channel in [c for c in "brz" if c in set(summary["channel"])]:
-        figures[f"factors|{channel}"] = figure_dome_factors(summary, channel)
-    return figures
-
-
-def _write_dome_dashboard(report_path, summary, figures, mjds, epoch_mjd, drpver, layout=None, maps=None):
-    channels = [c for c in "brz" if c in set(summary["channel"])]
-    exposures = summary.drop_duplicates("expnum")
-    lamps = exposures.groupby("lamp")["expnum"].nunique()
-
-    tiles = [("Nights", f"{summary['mjd'].nunique()}", ", ".join(map(str, sorted(summary["mjd"].unique())))),
-             ("Dome exposures", f"{len(exposures)}", ", ".join(f"{n} {lamp}" for lamp, n in lamps.items()))]
-    for channel in channels:
-        sel = summary[summary["channel"] == channel]
-        direction, spread = _circular_spread(sel["direction"])
-        factors = sel[["factor1", "factor2", "factor3"]].astype(float)
-        tiles.append((f"{channel} gradient", f"{100 * np.nanmedian(sel['strength']):.2f}%",
-                      (f"median, towards {_num(direction, '.0f')}° ± {_num(spread, '.0f')}°; "
-                       f"factors vary by {100 * np.nanmax(factors.max() - factors.min()):.2f}% at most")))
-
-    meta = [("DRP version", drpver), ("Epoch", str(epoch_mjd)), ("MJDs", ", ".join(map(str, mjds))),
-            ("Channels", "".join(channels)), ("Generated", datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"))]
-    intro = ("<p>For each dome flat exposure, the gradient across the science IFU and the spectrograph factors that the "
-             "fiber flat procedure removed (fit_fiberflat), as for the twilights. Each channel uses the exposures of its lamp: "
-             "LDLS for b and r, quartz for z. The dome is lit the same way in every exposure of a lamp, so the gradient should "
-             "keep its strength and direction along the sequence; the factors follow the spectrograph shutter timing.</p>")
-
-    table_rows = []
-    for _, r in summary.iterrows():
-        table_rows.append([str(int(r["mjd"])), str(int(r["expnum"])), escape(str(r["time"])[11:19] or "-"), escape(r["channel"]),
-                           escape(r["lamp"] or "-"), escape(r["calibfib"]), _num(r["exptime"], ".0f"),
-                           _num(100 * r["strength"], ".2f"), _num(r["direction"], ".0f"),
-                           " / ".join(_num(r[f"factor{i}"], ".4f") for i in (1, 2, 3))])
-    table = html_table(
-        [("MJD", ""), ("Exposure", ""), ("UTC", "start of the exposure"), ("Ch", "channel"), ("Lamp", ""),
-         ("Std fiber", "exposed standard fiber (CALIBFIB)"), ("Exptime (s)", ""),
-         ("Gradient (%)", "removed from the exposure, at the IFU edge"), ("Direction (°)", "of the removed gradient, from IFU +x towards +y"),
-         ("Factors sp1 / sp2 / sp3", "removed from the exposure, mean 1")],
-        table_rows, numeric=[True, True, False, False, False, False, True, True, True, False])
-
-    body = DOME_BODY.replace("@@TABLE@@", table)
-    body = body.replace("@@FACTORS@@", picker("dome-factors", "factors", [("Channel", [(c, c) for c in channels])], 320))
-    if layout is not None and maps:
-        ifu_exposures = [{"expnum": int(r["expnum"]), "time": str(r["time"])[11:16],
-                          "subtitle": f"MJD {int(r['mjd'])} · {r['lamp']} · {r['calibfib']}", "dirSun": None, "dirHorizon": None}
-                         for _, r in exposures.iterrows()]
-        payload = json.dumps(_exposures_ifu_payload(ifu_exposures, summary, layout, maps)).replace("</", "<\\/")
-        options = "".join(f'<option value="{c}">{c}</option>' for c in channels if c in maps)
-        body = body.replace("@@IFU@@", TWILIGHT_IFU.replace("@@CHANNEL_OPTIONS@@", options).replace("@@TWI_PAYLOAD@@", payload)
-                            .replace("@@IFU_KEY@@", "").replace("@@IFU_STYLE@@", IFU_STYLE))
-    else:
-        body = body.replace("@@IFU@@", '<p class="note">No gradient coefficients in the per-exposure flats.</p>')
-    write_dashboard(report_path, title="LVM Dome Flat Sequence", eyebrow="LVM DRP · fiber flats · domes",
-                    intro=intro, meta=meta, tiles=tiles, body=body, figures=figures, generator="lvmdrp.qa.fiberflats.qa_dome_sequence")
-    return report_path
-
-
-DOME_BODY = r"""
+DOME_TRENDS_BODY = r"""
 <section>
-  <h2>Gradient removed from each exposure</h2>
-  <p>Strength and direction of the gradient that the fiber flat procedure fitted and removed from each dome exposure. In
-  the first chart, each exposure is a point at the direction of its gradient across the science IFU and at its strength:
-  a stable dome illumination makes one tight cluster per channel. The second shows both along the sequence.</p>
-  <div class="chart" data-fig="vectors" role="img" aria-label="Removed gradient of each exposure in IFU coordinates" style="min-height: 440px"></div>
-  <div class="chart" data-fig="gradient" role="img" aria-label="Removed gradient strength and direction along the sequence" style="min-height: 520px"></div>
+  <h2>Which frame holds the gradient fixed</h2>
+  <p>The mean resultant length \(R\) of the gradient direction measured in IFU coordinates, relative to the direction of
+  the Sun and relative to the direction of the horizon. \(R\) is 1 when the direction never changes in that frame and
+  close to 0 when it is random. A gradient of the dome screen is fixed relative to the horizon of the telescope; an
+  instrumental one in the IFU; one fixed relative to the Sun points to a light leak into the closed enclosure. The frames
+  can only be told apart if the horizon moves across the IFU between exposures: dome flats taken at the same telescope
+  position and K-mirror angle keep the horizon in the same direction, and a screen gradient looks as fixed in the IFU as
+  an instrumental one. The directions of the Sun and the horizon need the position angle: without it, only the IFU frame
+  is measured.</p>
+  @@FRAME_TABLE@@
+  @@FRAMES@@
 </section>
 
 <section>
-  <h2>Spectrograph factors removed from each exposure</h2>
-  <p>The factor of each spectrograph, normalized to a mean of 1. With the same lamp and exposure time, changes along the
-  sequence come from the spectrograph shutters.</p>
+  <h2>Instrument and screen components</h2>
+  <p>The gradient vectors of each channel fitted as a vector fixed in the IFU that drifts linearly with time, plus a
+  gradient of the dome screen along the direction of the horizon with a constant strength (see the definitions). A
+  residual rms well below the spread of the vectors means the two components explain the gradients; a large residual
+  leaves room for something else. Needs the directions of the horizon, so the position angle.</p>
+  @@DECOMPOSITION@@
+</section>
+
+<section>
+  <h2>Gradient over time</h2>
+  <p>Strength and direction of the gradient removed from each dome flat exposure, colored by night, with the nightly
+  median strength and the directions of the Sun and the horizon across the IFU.</p>
+  @@TREND@@
+  <p>The same gradients as vectors in IFU coordinates: an instrumental gradient forms a cluster away from the origin,
+  a screen gradient spreads around it as the position angle changes.</p>
+  @@VECTORS@@
+</section>
+
+<section>
+  <h2>What the gradient correlates with</h2>
+  <p>Correlation of the strength and of the direction of the removed gradient with each candidate driver, over all the
+  exposures. Strength: Spearman rank correlation, or circular-linear for the angular drivers (azimuths, position angle,
+  K-mirror angle). Direction: circular-linear, or circular-circular for the angular drivers. Values near 0 mean no
+  relation; with few nights, values up to about 0.3 are expected by chance. The Sun and the Moon only matter through
+  light leaks.</p>
+  @@TABLE@@
+  @@DRIVERS@@
+</section>
+
+<section>
+  <h2>Spectrograph factors</h2>
+  <p>The spectrograph factors removed from each dome flat exposure, normalized to a mean of 1.</p>
   @@FACTORS@@
-</section>
-
-<section>
-  <h2>Gradient model of each exposure on the science IFU</h2>
-  <p>The gradient model removed from each exposure, divided by its mean, on the science IFU fibers. The caption gives the
-  lamp and the exposed standard fiber; a dome gradient keeps its pattern from one exposure to the next.</p>
-  @@IFU@@
-  <details><summary>Table view: all exposures</summary>@@TABLE@@</details>
 </section>
 
 <section id="definitions">
@@ -5602,21 +5637,34 @@ DOME_BODY = r"""
   <div class="defs">
     <div class="def">
       <h3>Removed gradient</h3>
-      <p>The FIBERFLAT GCOEFF coefficients \(c_k\) that fit_fiberflat fitted with IFUGradient on the dome counts at the
-      normalization window, as the change from the science IFU center to its edge, at the radius \(R\), relative to the mean
-      of the model over the good science fibers.</p>
-      <div class="eq">\[ \begin{gathered} G(x, y) = c_0 + c_1\, y + c_2\, x \\ \vec g = \frac{R\,(c_2,\ c_1)}{\langle G \rangle}, \qquad \theta = \operatorname{atan2}(g_y,\ g_x) \end{gathered} \]</div>
+      <p>The FIBERFLAT GCOEFF coefficients \(c_k\) fitted by fit_fiberflat, as the change from the science IFU center to
+      its edge at the radius \(R_\mathrm{IFU}\), relative to the mean of the model, and the directions of the Sun and the
+      horizon across the IFU as in the dome sequence dashboard.</p>
+      <div class="eq">\[ \vec g = \frac{R_\mathrm{IFU}\,(c_2,\ c_1)}{\langle G \rangle}, \qquad \theta = \operatorname{atan2}(g_y,\ g_x), \qquad \Delta\theta_h = \theta - \theta_h \]</div>
     </div>
     <div class="def">
-      <h3>Stability of the direction</h3>
-      <p>The direction quoted for each channel is the circular mean of the directions \(\theta_i\) of its exposures, with the
-      median angular distance to it.</p>
-      <div class="eq">\[ \bar\theta = \operatorname{atan2}\!\left(\textstyle\sum_i \sin\theta_i,\ \sum_i \cos\theta_i\right), \qquad \delta = \operatorname{median}_i \left|\theta_i - \bar\theta\right| \]</div>
+      <h3>Instrument and screen components</h3>
+      <p>Least-squares fit of the gradient vectors \(\vec g_i\) with a vector fixed in the IFU that drifts with the time
+      \(t\) in years from the first night, and a screen term of constant strength \(a\) along the unit vector
+      \(\hat u_{h,i}\) towards the horizon.</p>
+      <div class="eq">\[ \vec g_i = \vec g_0 + \vec g_1\,(t_i - t_0) + a\,\hat u_{h,i} \]</div>
     </div>
     <div class="def">
-      <h3>Spectrograph factors</h3>
-      <p>The FIBERFLAT FACTOR values that fit_fiberflat removed from the exposure, normalized to a mean of 1.</p>
-      <div class="eq">\[ f_s \rightarrow \frac{f_s}{\tfrac{1}{3}\sum_{s'} f_{s'}} \]</div>
+      <h3>Mean resultant length</h3>
+      <p>Length of the mean unit vector of the directions \(\theta_i\) of the \(n\) exposures, in a given frame.</p>
+      <div class="eq">\[ R = \sqrt{\Big(\tfrac{1}{n}\sum_i \cos\theta_i\Big)^2 + \Big(\tfrac{1}{n}\sum_i \sin\theta_i\Big)^2} \]</div>
+    </div>
+    <div class="def">
+      <h3>Circular-linear correlation</h3>
+      <p>Correlation of an angle \(\theta\) with a linear quantity \(x\) (Mardia), from the Pearson correlations
+      \(r_{xc}\), \(r_{xs}\) and \(r_{cs}\) of \(x\), \(\cos\theta\) and \(\sin\theta\); from 0 to 1.</p>
+      <div class="eq">\[ r_{x\theta} = \sqrt{\frac{r_{xc}^2 + r_{xs}^2 - 2\, r_{xc}\, r_{xs}\, r_{cs}}{1 - r_{cs}^2}} \]</div>
+    </div>
+    <div class="def">
+      <h3>Circular-circular correlation</h3>
+      <p>Correlation of two angles \(\alpha\) and \(\beta\) around their circular means \(\bar\alpha\) and \(\bar\beta\)
+      (Fisher and Lee), shown as its absolute value.</p>
+      <div class="eq">\[ r_{\alpha\beta} = \frac{\sum_i \sin(\alpha_i - \bar\alpha)\sin(\beta_i - \bar\beta)}{\sqrt{\sum_i \sin^2(\alpha_i - \bar\alpha)\sum_i \sin^2(\beta_i - \bar\beta)}} \]</div>
     </div>
   </div>
 </section>

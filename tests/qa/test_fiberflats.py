@@ -707,68 +707,104 @@ def test_is_dome():
     assert not ff._is_dome(fits.Header({"LDLS": "ON", "NEON": "ON"}))
 
 
-def test_circular_spread():
-    mean, spread = ff._circular_spread([179.0, -179.0, np.nan])
-    assert abs(abs(mean) - 180) < 1e-6 and spread == pytest.approx(1.0)
-    assert np.isnan(ff._circular_spread([np.nan])[0])
-
-
-def test_qa_dome_sequence(tmp_path):
+def _dome_flats(tmp_path, nights=((60842, 0.0),), per_night=3):
+    """Per-exposure dome flats: LDLS exposures for b and r, quartz for z, at the given nights and position angles, and a twilight"""
     from astropy.time import Time
 
     slitmap = make_flat()._slitmap
-    start = Time("2025-06-15T22:00:00", scale="utc")
     paths = []
 
-    def write(expnum, channel, lamps_on, gcoeffs, factors, calibfib):
-        header = _twilight_header(start + (expnum - 200) * 60 * ff.u.s, 60, 100, 0.0, expnum=expnum, channel=channel,
-                                  lamps_on=lamps_on, gcoeffs=gcoeffs, factors=factors)
-        header["CALIBFIB"] = calibfib
-        header["EXPTIME"] = 90.0
-        path = tmp_path / f"lvm-fflat-{channel}-{expnum:08d}.fits"
-        hdul = fits.HDUList([fits.PrimaryHDU(header=header), fits.table_to_hdu(slitmap)])
-        hdul[1].name = "SLITMAP"
-        hdul.writeto(path)
+    def write(header, channel, expnum, mjd):
+        path = tmp_path / str(mjd) / f"lvm-fflat-{channel}-{expnum:08d}.fits"
+        path.parent.mkdir(exist_ok=True)
+        hdu = fits.table_to_hdu(slitmap)
+        hdu.name = "SLITMAP"
+        fits.HDUList([fits.PrimaryHDU(header=header), hdu]).writeto(path)
         paths.append(str(path))
 
-    # LDLS exposures for b and r, quartz exposures for z, and a twilight that is left out
-    for i, expnum in enumerate((201, 202, 203)):
-        for channel in "br":
-            write(expnum, channel, ("LDLS",), (2.0, 0.02, 0.01, 0.0), (0.98, 1.0, 1.02 + 0.01 * i), f"P1-{i + 1}")
-    for i, expnum in enumerate((211, 212)):
-        write(expnum, "z", ("QUARTZ",), (2.0, -0.01, 0.0, 0.0), (1.0, 1.0, 1.0), f"P1-{i + 1}")
-    write(220, "b", (), (2.0, 0.0, 0.0, 0.0), (1.0, 1.0, 1.0), "P1-1")
+    for night, (mjd, pa) in enumerate(nights):
+        start = Time(mjd - 0.7, format="mjd", scale="utc")
+        for k in range(per_night):
+            for lamp, channels, offset in (("LDLS", "br", 0), ("QUARTZ", "z", 50)):
+                expnum = 1000 * night + offset + k
+                for channel in channels:
+                    header = _twilight_header(start + (offset + k) * 60 * ff.u.s, 40, 180, pa, expnum=expnum, channel=channel,
+                                              lamps_on=(lamp,), gcoeffs=(2.0, 0.02, 0.01, 0.0), factors=(0.98, 1.0, 1.02))
+                    header["CALIBFIB"] = f"P1-{k + 1}"
+                    header["EXPTIME"] = 90.0
+                    header["LABTEMP"] = 12.0 + night
+                    write(header, channel, expnum, mjd)
+    mjd = nights[0][0]
+    write(_twilight_header(Time(mjd - 0.04, format="mjd", scale="utc"), 60, 100, 0.0, expnum=999, channel="b"), "b", 999, mjd)
+    return paths
 
-    result = ff.qa_dome_sequence(61000, channels="brz", flat_paths=paths, epoch_mjd=60999, output_dir=str(tmp_path / "qa"))
+
+def test_qa_dome_sequence(tmp_path):
+    paths = _dome_flats(tmp_path)
+
+    result = ff.qa_dome_sequence(60842, channels="brz", flat_paths=paths, include_raw=False, epoch_mjd=60841,
+                                 output_dir=str(tmp_path / "qa"))
     summary = result["summary"]
-    assert sorted(summary["expnum"].unique()) == [201, 202, 203, 211, 212]
-    assert len(summary) == 8
+    # the dome flats of each lamp, without the twilight
+    assert sorted(summary["expnum"].unique()) == [0, 1, 2, 50, 51, 52]
+    assert len(summary) == 9 and set(summary["mjd"]) == {60842}
     assert set(summary.loc[summary["channel"] == "z", "lamp"]) == {"quartz"}
     assert set(summary.loc[summary["channel"] != "z", "lamp"]) == {"ldls"}
     assert list(summary.loc[summary["channel"] == "b", "calibfib"]) == ["P1-1", "P1-2", "P1-3"]
 
-    # removed gradient and factors as in the twilight dashboard
-    gx, gy, _ = ff._gradient_at_edge([2.0, 0.02, 0.01, 0.0], slitmap)
-    b = summary[summary["channel"] == "b"]
-    assert np.allclose(b["grad_x"], gx) and np.allclose(b["grad_y"], gy)
-    assert np.allclose(b[["factor1", "factor2", "factor3"]].mean(axis=1), 1.0)
-    # the z gradient points towards -y
-    assert np.allclose(summary.loc[summary["channel"] == "z", "direction"], -90)
+    # removed gradient and the same geometry as for the twilights
+    gx, gy, _ = ff._gradient_at_edge([2.0, 0.02, 0.01, 0.0], make_flat()._slitmap)
+    assert np.allclose(summary["grad_x"], gx) and np.allclose(summary["grad_y"], gy)
+    assert np.allclose(summary["point_alt"], 40, atol=0.01) and np.isfinite(summary["dir_horizon"]).all()
+    assert np.allclose(summary["dtheta_horizon"], (summary["direction"] - summary["dir_horizon"] + 180) % 360 - 180)
 
-    assert set(result["figures"]) == {"vectors", "gradient", "factors|b", "factors|r", "factors|z"}
-    assert list(result["figures"]["gradient"].layout.xaxis.categoryarray) == ["201", "202", "203", "211", "212"]
+    # the same plots as the twilight sequence dashboard
+    assert set(result["figures"]) == {"sky|60842", "geometry|60842"} | {f"{kind}|{c}|60842" for kind in ("gradient", "factors") for c in "brz"}
     html = open(result["report"], encoding="utf-8").read()
-    assert html.isascii() and 'data-fig="vectors"' in html and 'data-fig="factors|b"' in html
-    assert result["report"].endswith("domes_60999.html") and os.path.isfile(result["report"].replace(".html", ".csv"))
-    # IFU tiles of each channel, without arrows
+    assert html.isascii() and "LVM Dome Sequence" in html and "Pointing during the sequence" in html
+    assert result["report"].endswith("domes_60841.html") and os.path.isfile(result["report"].replace(".html", ".csv"))
     payload = json.loads(re.search(r"const D = (\{.*?\});\n", html).group(1))
-    assert set(payload["values"]) == {"b", "r", "z"} and set(payload["values"]["z"]) == {"211", "212"}
-    assert all(e["dirSun"] is None and e["dirHorizon"] is None for e in payload["exposures"])
-    assert payload["exposures"][0]["subtitle"].endswith("ldls · P1-1")
-    assert "towards the Sun" not in html
+    assert set(payload["values"]) == {"b", "r", "z"} and set(payload["values"]["z"]) == {"50", "51", "52"}
+    assert all(e["dirHorizon"] is not None for e in payload["exposures"])
+    assert payload["exposures"][0]["subtitle"].endswith("ldls \u00b7 P1-1")
 
-    with pytest.raises(FileNotFoundError):
-        ff.qa_dome_sequence(61000, flat_paths=[paths[-1]], output_dir=str(tmp_path / "none"))
+    with pytest.raises(FileNotFoundError, match="--kind dome"):
+        ff.qa_dome_sequence(60842, flat_paths=[paths[-1]], include_raw=False, output_dir=str(tmp_path / "none"))
+
+
+def test_decompose_dome_gradient():
+    # an instrumental gradient plus a screen gradient towards the horizon, with the horizon moving across the IFU
+    data = _trend_rows(slope=0.0)
+    data["dir_horizon"] = data["dir_sun"]
+    data["sun_alt"] = np.nan
+    d = ff.decompose_twilight_gradient(data, kind="dome")
+    assert d["instrument_first"] == pytest.approx(2.0, abs=0.05) and d["sky"] == pytest.approx(1.5, abs=0.05)
+    assert np.isnan(d["sky_slope"]) and d["explained"] > 0.99
+    # a screen gradient only: fixed relative to the horizon, while the Sun goes its own way
+    data = _trend_rows(instrument=(0.0, 0.0), drift=0.0, slope=0.0)
+    data["dir_horizon"] = data["dir_sun"]
+    data["dir_sun"] = np.random.default_rng(3).uniform(-180, 180, len(data))
+    data["dtheta_sun"] = ff._wrap_angle(data["direction"] - data["dir_sun"])
+    data["dtheta_horizon"] = ff._wrap_angle(data["direction"] - data["dir_horizon"])
+    frames = ff.twilight_trend_statistics(data, kind="dome")["b"]["frames"]
+    assert frames["Horizon"]["R"] > 0.99 and frames["IFU"]["R"] < 0.5
+    assert ff._frame_verdict(frames, "dome") == "follows the horizon: dome screen"
+
+
+def test_qa_dome_trends(tmp_path):
+    nights = ((60842, 0.0), (60872, 60.0), (60902, 120.0))
+    paths = _dome_flats(tmp_path, nights=nights, per_night=2)
+
+    result = ff.qa_dome_trends([m for m, _ in nights], channels="bz", flat_paths=paths, output_dir=str(tmp_path / "qa"))
+    summary, stats = result["summary"], result["statistics"]
+    assert set(summary["channel"]) == {"b", "z"} and len(summary) == 12 and set(summary["mjd"]) == {60842, 60872, 60902}
+    # the position angle turns the horizon across the IFU while the removed gradient stays fixed: instrumental
+    assert stats["b"]["frames"]["IFU"]["R"] > 0.99 and stats["b"]["frames"]["Horizon"]["R"] < 0.9
+    # the same plots as the twilight trends dashboard
+    assert {"trend|b", "frames|b", "vectors|b", "tfactors|b", "trend|z", "driver|b|pa", "driver|b|labtemp"} <= set(result["figures"])
+    html = open(result["report"], encoding="utf-8").read()
+    assert html.isascii() and "LVM Dome Trends" in html and "Instrument and screen components" in html
+    assert os.path.isfile(tmp_path / "qa" / "dome_trends_60842-60902.csv")
 
 
 # field angles from lvmtipo.siderostat.Siderostat.fieldAngle at LCO, 2025-06-16T03:00:00 UTC, without refraction
