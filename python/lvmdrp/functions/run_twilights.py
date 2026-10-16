@@ -699,6 +699,39 @@ def fit_fiberflat(in_rss, out_flat, out_rss, ref_kind=600, guess_coeffs=[1,2,3,0
 
     return flat, flat_g, rss_g, coeffs, factors
 
+def _ffactor_correction_model(mflat, coeffs, factors, groupby, apply_gradient=True):
+    """Per-fiber correction applied to a master fiberflat by `do_ffactor_correction`.
+
+    The per-spectrograph factors are applied to all fibers. The IFU gradient is
+    fitted jointly with the factors on Sci fibers only (see `fit_ifu_gradient`),
+    so when `apply_gradient` is True it is applied to the Sci fibers only,
+    normalized to unit mean over them. Spec and sky fibers get the factors only.
+
+    Parameters
+    ----------
+    mflat : RSS
+        Master fiberflat, used for its slitmap.
+    coeffs : sequence of float
+        IFU gradient coefficients.
+    factors : sequence of float
+        Per-group fiberflat correction factors.
+    groupby : str
+        Fiber grouping for the factors.
+    apply_gradient : bool, optional
+        Whether to include the IFU gradient, by default True.
+
+    Returns
+    -------
+    numpy.ndarray
+        Multiplicative correction per fiber.
+    """
+    _, gradient_model, factors_model = mflat.eval_ifu_gradient(coeffs=coeffs, factors=factors, groupby=groupby, normalize=True)
+    flatfield_corr = np.array(factors_model, dtype=float)
+    if apply_gradient:
+        sci = mflat._slitmap["telescope"] == "Sci"
+        flatfield_corr[sci] *= gradient_model[sci] / bn.nanmean(gradient_model[sci])
+    return flatfield_corr
+
 def do_ffactor_correction(in_mflat, coeffs, factor, sky_cwave, dwave, coadd_method, write_output=False):
     """Apply fiberflat skyline-factor corrections to a master flat.
 
@@ -736,13 +769,14 @@ def do_ffactor_correction(in_mflat, coeffs, factor, sky_cwave, dwave, coadd_meth
         log.info("correction already applied, nothing to do")
         return mflat, np.ones(mflat._fibers, dtype="float32"), was_corrected
 
-    _, _, flatfield_corr = mflat.eval_ifu_gradient(coeffs=coeffs, factors=factor, groupby=groupby, normalize=True)
-    log.info(f"fiber flat not corrected; doing '{groupby}' correction with: {factor}")
+    flatfield_corr = _ffactor_correction_model(mflat, coeffs=coeffs, factors=factor, groupby=groupby, apply_gradient=True)
+    log.info(f"fiber flat not corrected; doing '{groupby}' correction with: {factor} and IFU gradient {coeffs} (Sci fibers only)")
     mflat *= flatfield_corr[:, None]
     mflat.setHdrValue(f"HIERARCH {channel.upper()} FIBERFLAT CWAVE", sky_cwave, "norm. wavelength [Angstrom]")
     mflat.setHdrValue(f"HIERARCH {channel.upper()} FIBERFLAT DWAVE", dwave, "norm. window width [Angstrom]")
     mflat.setHdrValue(f"HIERARCH {channel.upper()} FIBERFLAT COADD", coadd_method, "coadding method")
     mflat.setHdrValue(f"HIERARCH {channel.upper()} FIBERFLAT SKYCORR", True, "fiberflat skyline-corrected?")
+    mflat.setHdrValue(f"HIERARCH {channel.upper()} FIBERFLAT GRADAPP", True, "IFU gradient applied to Sci fibers?")
     mflat.setHdrValue(f"HIERARCH {channel.upper()} FIBERFLAT GROUPBY", groupby, "fiber grouping")
     for i, f in enumerate(factor):
         mflat.setHdrValue(f"HIERARCH {channel.upper()} FIBERFLAT FACTOR{i+1}", np.round(f, 5), f"fiberflat factor {groupby}{i+1}")
@@ -790,9 +824,20 @@ def undo_ffactor_correction(in_mflat, write_output=False):
         return mflat, np.ones(mflat._fibers, dtype="float32"), was_corrected
 
     factors = [mflat._header.get(f"{channel} FIBERFLAT FACTOR{i+1}") for i in range(ngroups)]
-    flatfield_corr = IFUGradient.ifu_factors(factors, fiber_groups)
-    log.info(f"fiber flat already corrected; undoing '{groupby}' correction with: {factors}")
+    # flats written before the IFU gradient was applied (no GRADAPP keyword) carry only the factors
+    gradient_applied = bool(mflat._header.get(f"{channel} FIBERFLAT GRADAPP", False))
+    if gradient_applied:
+        coeffs = []
+        while f"{channel} FIBERFLAT GCOEFF{len(coeffs)+1}" in mflat._header:
+            coeffs.append(mflat._header[f"{channel} FIBERFLAT GCOEFF{len(coeffs)+1}"])
+        flatfield_corr = _ffactor_correction_model(mflat, coeffs=coeffs, factors=factors, groupby=groupby, apply_gradient=True)
+        log.info(f"fiber flat already corrected; undoing '{groupby}' correction with: {factors} and IFU gradient {coeffs} (Sci fibers only)")
+    else:
+        flatfield_corr = IFUGradient.ifu_factors(factors, fiber_groups)
+        log.info(f"fiber flat already corrected; undoing '{groupby}' correction with: {factors}")
     mflat /= flatfield_corr[:, None]
+    if f"{channel} FIBERFLAT GRADAPP" in mflat._header:
+        del mflat._header[f"{channel} FIBERFLAT GRADAPP"]
     del mflat._header[f"{channel} FIBERFLAT CWAVE"]
     del mflat._header[f"{channel} FIBERFLAT DWAVE"]
     del mflat._header[f"{channel} FIBERFLAT COADD"]
