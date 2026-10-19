@@ -3904,9 +3904,9 @@ def twilight_geometry(header, slitmap, kmirror: Dict = None) -> Dict:
     :func:`~lvmdrp.core.astrometry.set_fibers_astrometry`), so the directions
     across the IFU use the same orientation as the rest of the pipeline. The
     direction towards the Sun is where the angular distance to the Sun decreases
-    fastest across the IFU, and the direction towards the horizon where the
-    altitude of the fibers decreases fastest; both are measured from the IFU +x
-    axis towards +y, like the gradients.
+    fastest across the IFU (likewise towards the Moon), and the direction
+    towards the horizon where the altitude of the fibers decreases fastest; all
+    are measured from the IFU +x axis towards +y, like the gradients.
 
     Parameters
     ----------
@@ -3924,9 +3924,10 @@ def twilight_geometry(header, slitmap, kmirror: Dict = None) -> Dict:
     dict
         time (middle of the exposure, ISO), exptime, ra, dec, pa (commanded),
         point_alt, point_az, sun_alt, sun_az, sun_sep, moon_alt, moon_az,
-        moon_sep, moon_illum, dir_sun, dir_horizon (degrees), alt_change and
-        sun_change (change of the altitude and of the distance to the Sun from
-        the IFU center to its edge along those directions, degrees),
+        moon_sep, moon_illum, dir_sun, dir_horizon, dir_moon (degrees),
+        alt_change, sun_change and moon_change (change of the altitude and of
+        the distance to the Sun and the Moon from the IFU center to its edge
+        along those directions, degrees),
         pointing_source and pa_source ('commanded', 'telescope', 'K-mirror' or
         'none') and km (K-mirror angle). The pointing-dependent values are NaN
         without a position, and the directions across the IFU without a
@@ -3946,7 +3947,7 @@ def twilight_geometry(header, slitmap, kmirror: Dict = None) -> Dict:
     result = {"time": time.isot[:19], "exptime": exptime, "sun_alt": sun_alt, "sun_az": sun_az,
               "moon_alt": moon_alt, "moon_az": moon_az, "moon_illum": float(fraction_illuminated(eph, "moon", t))}
     result.update({key: np.nan for key in ("ra", "dec", "pa", "point_alt", "point_az", "sun_sep", "moon_sep",
-                                           "dir_sun", "dir_horizon", "alt_change", "sun_change")})
+                                           "dir_sun", "dir_horizon", "dir_moon", "alt_change", "sun_change", "moon_change")})
 
     ra, dec, pointing_source = science_pointing(header)
     result["pointing_source"] = pointing_source
@@ -3984,8 +3985,9 @@ def twilight_geometry(header, slitmap, kmirror: Dict = None) -> Dict:
 
     dir_horizon, alt_slope = _plane_direction(x, y, -fiber_alt)
     dir_sun, sun_slope = _plane_direction(x, y, -_angular_distance(fiber_alt, fiber_az, sun_alt, sun_az))
-    result.update({"dir_sun": dir_sun, "dir_horizon": dir_horizon,
-                   "alt_change": alt_slope * radius, "sun_change": sun_slope * radius})
+    dir_moon, moon_slope = _plane_direction(x, y, -_angular_distance(fiber_alt, fiber_az, moon_alt, moon_az))
+    result.update({"dir_sun": dir_sun, "dir_horizon": dir_horizon, "dir_moon": dir_moon,
+                   "alt_change": alt_slope * radius, "sun_change": sun_slope * radius, "moon_change": moon_slope * radius})
     return result
 
 

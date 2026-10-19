@@ -54,6 +54,7 @@ from lvmdrp.qa.fiberflats import (
     flatfield_qa_name, default_flatfield_qa_dir, qa_twilight_sequence, qa_twilight_trends, qa_dome_sequence, qa_dome_trends, TELESCOPES as QA_TELESCOPES,
 )
 from lvmdrp.qa.science import qa_science_exposure, QA_PARTS as SCIENCE_QA_PARTS
+from lvmdrp.qa.ifu_gradient import qa_instrument_gradient, intervention_breaks, science_gradients
 
 
 from sdss_access import Access
@@ -961,6 +962,45 @@ def qa_domes_cli(epoch, mjd, mjd_list, mjd_range, epochs_file, channels, drpver,
         click.echo(f"dashboard written to {result['report']}")
 
 
+@cloup.command('qa-instrument-gradient', short_help='Test for an instrument gradient across the science IFU, besides the sky gradient', context_settings=dict(show_default=True))
+@click.option('-t', '--twilight', type=str, default=None, help="Table of the twilight trends ('qa-twilights --trends'), CSV")
+@click.option('-D', '--dome', type=str, default=None, help="Table of the dome flat trends ('qa-domes --trends'), CSV")
+@click.option('-s', '--science', type=str, default=None, help="Science frame gradients: the summary table of 'drp qa-flatfield' (FITS), whose lvmFrame headers give the geometry, or a CSV saved by a previous run")
+@click.option('-b', '--breaks', type=IntListType(), default=None, help='MJDs where the instrument gradient may jump')
+@click.option('--interventions', is_flag=True, default=False, help="Break at the calibration epochs triggered by instrument interventions and warm-ups, instead of --breaks")
+@click.option('--epochs-file', type=str, default=None, help='Path to a calibration epochs file, for --interventions. Defaults to the one in lvmcore')
+@click.option('-c', '--channels', type=str, default="brz", help='Channels to fit')
+@click.option('-k', '--kmirror', type=str, default=None, help="K-mirror relation (a kmirror_pa.json or a drpall file), for the frames without POSCIPA and the sign of the field angle")
+@click.option('-d', '--drpver', type=str, default=None, help='Pipeline version of the lvmFrames of --science. Defaults to the one in the summary')
+@click.option('--redux-dir', type=str, default=None, help='Reductions root directory of the lvmFrames. Defaults to $LVM_SPECTRO_REDUX')
+@click.option('-n', '--name', type=str, default="instrument_gradient", help='Name of the dashboard and tables')
+@click.option('-o', '--output-dir', type=str, default=None, help="Directory of the dashboard and tables. Defaults to qa/fiberflat/{name} in the master calibrations directory")
+def qa_instrument_gradient_cli(twilight, dome, science, breaks, interventions, epochs_file, channels, kmirror, drpver, redux_dir, name, output_dir):
+    """Fit the gradients across the science IFU of twilights, dome flats and science frames as an instrument gradient plus a sky gradient, and write an HTML dashboard.
+
+    Compares an instrument gradient fixed in the IFU, one fixed before the K-mirror and none, with and
+    without jumps at the breaks, and checks the instrument gradient of the twilights against the dome
+    flats and the science frames.
+    """
+    if not (twilight or dome or science):
+        raise click.UsageError("give at least one of --twilight, --dome or --science")
+    if interventions:
+        breaks = intervention_breaks(load_calibration_epochs(epochs_file))
+        click.echo(f"breaks at {', '.join(map(str, breaks))}")
+    if science and science.endswith((".fits", ".fits.gz")):
+        table = science_gradients(science, drpver=drpver, redux_dir=redux_dir, kmirror=kmirror)
+        science = os.path.join(output_dir or os.path.dirname(os.path.abspath(science)), f"{name}_science.csv")
+        os.makedirs(os.path.dirname(science), exist_ok=True)
+        table.to_csv(science, index=False)
+        click.echo(f"science frame gradients written to {science}")
+    try:
+        result = qa_instrument_gradient(twilight=twilight, dome=dome, science=science, breaks=breaks, channels=channels,
+                                        kmirror=kmirror, output_dir=output_dir, name=name)
+    except (FileNotFoundError, ValueError) as e:
+        raise click.UsageError(str(e))
+    click.echo(f"dashboard written to {result['report']}")
+
+
 @cloup.command('qa-fiberflats', short_help='Compare the master fiber flats of all calibration epochs against a reference epoch', show_constraints=True, context_settings=dict(show_default=True))
 @click.option('-r', '--mjd-ref', type=int, default=None, help='MJD of the reference calibration epoch. Defaults to the latest epoch with flats in all channels')
 @click.option('-c', '--channels', type=str, default="brz", help='Channels to compare')
@@ -1173,6 +1213,7 @@ calibrations.add_command(qa_raw_pixelflats_cli)
 calibrations.add_command(qa_fiberflats_cli)
 calibrations.add_command(qa_twilights_cli)
 calibrations.add_command(qa_domes_cli)
+calibrations.add_command(qa_instrument_gradient_cli)
 calibrations.add_command(qa_wavelengths_cli)
 calibrations.add_command(qa_arc_sky_cli)
 calibrations.add_command(fiberflat_corrections)
