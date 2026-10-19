@@ -48,6 +48,7 @@ import plotly.graph_objects as go
 from astropy.io import fits
 from astropy.table import Table
 from astropy.time import Time
+from plotly.colors import sample_colorscale
 from plotly.subplots import make_subplots
 
 from lvmdrp import log
@@ -55,7 +56,7 @@ from lvmdrp.qa.fiberflats import (
     _night_sjd, _rayleigh_pvalue, _resultant_length, _wrap_angle, frame_gradients, load_calibration_epochs,
     load_kmirror_relation, siderostat_field_angle, twilight_geometry,
 )
-from lvmdrp.qa.report import SERIES, THEME, base_layout, html_table, sandbox_qa_dir, style_axes, write_dashboard
+from lvmdrp.qa.report import SEQUENTIAL, SERIES, THEME, base_layout, html_table, sandbox_qa_dir, style_axes, write_dashboard
 from lvmdrp.utils.convert import tileid_grp
 
 
@@ -79,6 +80,21 @@ DEFAULT_SKY = {
 
 # triggers of the calibration epochs that may change the instrument
 INTERVENTION_TRIGGERS = ("instrument intervention", "warm-up", "warm up")
+
+# layout of the sections of the dashboard: each source and channel is a <details> whose content is one grid
+# that can shrink to the page width, with tables and charts side by side on wide screens
+PAGE_STYLE = """<style>
+details.ig { display: block; min-width: 0; }
+details.ig summary { font-size: 15px; color: var(--ink); }
+.ig-body { display: grid; gap: 12px; min-width: 0; }
+.ig-body h3 { margin: 12px 0 0; font-size: 16px; font-weight: 600; }
+.ig-body td { white-space: normal; }
+.ig-body td.num { white-space: nowrap; }
+.ig-body th, .ig-body td { padding: 6px 9px; }
+.ig-pair { display: grid; gap: 12px; align-items: start; min-width: 0; }
+@media (min-width: 980px) { .ig-pair { grid-template-columns: minmax(0, 11fr) minmax(0, 9fr); } }
+.ig-pair > * { min-width: 0; }
+</style>"""
 
 # Sun altitude (degrees) where the twilight sky amplitude of the 'depth' model is referred to
 SUN_ALT_REF = -3.0
@@ -707,25 +723,29 @@ def figure_vectors(fit: Dict, title: str = None) -> go.Figure:
     data, instrument = fit["data"], fit["instrument"]
     segment = _segments(data["mjd"].to_numpy(float), fit["breaks"]) if not isinstance(fit["breaks"], str) else np.zeros(len(data), int)
     fig = go.Figure()
-    for i, k in enumerate(np.unique(segment)):
+    segments = np.unique(segment)
+    colors = SERIES if len(segments) <= len(SERIES) else sample_colorscale(SEQUENTIAL, np.linspace(0.25, 1, len(segments)))
+    for i, k in enumerate(segments):
         sel = data[segment == k]
-        color = SERIES[i % len(SERIES)]
+        color = colors[i]
         name = f"{int(sel['mjd'].min())}-{int(sel['mjd'].max())}"
-        fig.add_trace(go.Scatter(x=sel["gx"], y=sel["gy"], mode="markers", name=f"g, {name}", legendgroup=name,
+        fig.add_trace(go.Scatter(x=sel["gx"], y=sel["gy"], mode="markers", name=name, legendgroup=name, showlegend=False,
                                  marker=dict(size=6, color=color, opacity=0.45),
                                  customdata=np.stack([sel["mjd"], sel["expnum"]], axis=-1),
                                  hovertemplate="MJD %{customdata[0]} · exposure %{customdata[1]}<br>(%{x:.2f}, %{y:.2f})%<extra></extra>"))
         row = instrument[instrument["segment"] == k] if not instrument.empty else instrument
         if len(row):
             row = row.iloc[0]
-            fig.add_trace(go.Scatter(x=[0, row.gx], y=[0, row.gy], mode="lines+markers", name=f"I, {name}", legendgroup=name,
+            fig.add_trace(go.Scatter(x=[0, row.gx], y=[0, row.gy], mode="lines+markers", name=name, legendgroup=name,
                                      line=dict(color=color, width=3), marker=dict(size=[0, 14], symbol="diamond", color=color,
                                                                                     line=dict(width=2, color=THEME["ink"])),
                                      error_x=dict(type="data", array=[0, row.gx_err], visible=True, color=THEME["ink2"]),
                                      error_y=dict(type="data", array=[0, row.gy_err], visible=True, color=THEME["ink2"]),
                                      hovertemplate=f"<b>I {name}</b><br>{row.strength:.2f}% @ {row.direction:.0f}°<extra></extra>"))
     limit = float(np.nanpercentile(np.abs(np.r_[data["gx"], data["gy"]]), 98)) * 1.15 if len(data) else 1.0
-    fig.update_layout(base_layout(520, xaxis_title="g<sub>x</sub> (%)", yaxis_title="g<sub>y</sub> (%)", title=title))
+    fig.update_layout(base_layout(440, xaxis_title="g<sub>x</sub> (%)", yaxis_title="g<sub>y</sub> (%)", title=title,
+                                  legend=dict(orientation="v", x=1.02, y=1, xanchor="left", yanchor="top", font=dict(size=11, color=THEME["ink2"]),
+                                              bgcolor="rgba(0,0,0,0)", title=dict(text="Segment"))))
     style_axes(fig)
     fig.update_xaxes(range=[-limit, limit], zeroline=True, constrain="domain")
     fig.update_yaxes(range=[-limit, limit], zeroline=True, scaleanchor="x", scaleratio=1, constrain="domain")
@@ -752,7 +772,7 @@ def figure_nightly_instrument(fits: Dict[str, Dict], breaks: Sequence[int] = ())
                                  hovertemplate="MJD %{customdata[0]:.0f} · %{customdata[1]} exposures<br>%{y:.0f}°<extra></extra>", **common), row=2, col=1)
     for mjd in breaks:
         fig.add_vline(x=mjd, line=dict(color=THEME["muted"], width=1, dash="dot"))
-    fig.update_layout(base_layout(620))
+    fig.update_layout(base_layout(520))
     style_axes(fig)
     fig.update_yaxes(title_text="Strength (%)", rangemode="tozero", row=1, col=1)
     fig.update_yaxes(title_text="Direction (°)", range=[-180, 180], dtick=90, row=2, col=1)
@@ -788,31 +808,43 @@ def figure_residuals(fit: Dict) -> go.Figure:
     return fig
 
 
+FRAME_SHORT = {"none": "none", "ifu": "IFU", "kmirror": "K-mirror +φ", "kmirror-": "K-mirror −φ"}
+
+
 def _comparison_table(table: pd.DataFrame) -> str:
-    rows = [[escape(INSTRUMENT_FRAMES[r.frame][0]), escape(r.sky_model), escape(str(r.breaks)), "yes" if r.drift else "",
-             str(r.n), str(r.k), _num(r.rms, ".2f"), _num(r.cv_rms, ".2f"), _num(r.dbic, ".0f"),
-             "degenerate" if r.degenerate else "", escape(r.instrument)] for r in table.itertuples()]
-    return html_table([("Instrument", "frame of the instrument gradient"), ("Sky", "direction (amplitude) per source"),
-                       ("Breaks", "MJDs where the instrument gradient may jump"), ("Drift", "linear drift within the segments"),
-                       ("n", "exposures"), ("k", "parameters"), ("rms", "residual per exposure (%)"),
+    """Models of one channel and source; the instrument gradient of every model is in the models CSV"""
+    sky = table["sky_model"].str.replace(r"^\w+: ", "", regex=True) if table["sky_model"].str.count(";").max() == 0 else table["sky_model"]
+    rows = [[escape(FRAME_SHORT[r.frame]), escape(label), escape(str(r.breaks)) + (" + drift" if r.drift else ""),
+             str(r.k), _num(r.rms, ".2f"), _num(r.cv_rms, ".2f"), _num(r.dbic, ".0f"), "degenerate" if r.degenerate else ""]
+            for r, label in zip(table.itertuples(), sky)]
+    return html_table([("Instrument", "frame of the instrument gradient (φ: K-mirror rotation)"), ("Sky", "direction (amplitude)"),
+                       ("Breaks", "where the instrument gradient may jump"), ("k", "parameters"), ("rms", "residual per exposure (%)"),
                        ("CV rms", "leave-one-night-out residual (%)"), ("ΔBIC", "from the best model"),
-                       ("", "rank deficient, a poorly constrained segment, or a K-mirror frame with a fixed K-mirror"),
-                       ("I per segment", "strength @ direction")],
-                      rows, numeric=[False, False, False, False, True, True, True, True, True, False, False])
+                       ("", "rank deficient, a poorly constrained segment, or a K-mirror frame with a fixed K-mirror")],
+                      rows, numeric=[False, False, False, True, True, True, True, False])
+
+
+def _polar_errors(gx, gy, sx, sy):
+    """Errors of the strength (%) and direction (degrees) of a vector from the errors of its components"""
+    strength = max(np.hypot(gx, gy), 1e-9)
+    return (float(np.hypot(gx * sx, gy * sy) / strength),
+            float(np.degrees(np.hypot(gy * sx, gx * sy) / strength ** 2)))
 
 
 def _instrument_table(instrument: pd.DataFrame) -> str:
-    def error(jackknife, formal):
-        return _num(jackknife, ".2f") if np.isfinite(jackknife) else f"{_num(formal, '.2f')} (formal)"
-
-    rows = [[f"{int(r.mjd_first)}-{int(r.mjd_last)}", str(r.nights), str(r.n), f"{r.gx:+.2f} ± {error(r.gx_err, r.gx_sig)}",
-             f"{r.gy:+.2f} ± {error(r.gy_err, r.gy_sig)}", f"{r.strength:.2f}", f"{r.direction:.0f}", _num(r.phi_spread, ".1f")]
-            for r in instrument.itertuples()]
-    error_note = "jackknife error over nights, or the formal error with fewer than 3 nights"
-    return html_table([("Nights", "first and last night"), ("n nights", ""), ("n", "exposures"), ("I_x (%)", error_note),
-                       ("I_y (%)", error_note), ("Strength (%)", ""), ("Direction (°)", "from IFU +x towards +y"),
-                       ("K-mirror spread (°)", "std of the K-mirror rotation; near 0 the K-mirror frames equal the IFU")],
-                      rows, numeric=[False, True, True, True, True, True, True, True])
+    rows = []
+    for r in instrument.itertuples():
+        jackknife = np.isfinite(r.gx_err) and np.isfinite(r.gy_err)
+        sx, sy = (r.gx_err, r.gy_err) if jackknife else (r.gx_sig, r.gy_sig)
+        strength_err, direction_err = _polar_errors(r.gx, r.gy, sx, sy)
+        mark = "" if jackknife else "*"
+        rows.append([f"{int(r.mjd_first)}–{int(r.mjd_last)}", f"{r.nights} / {r.n}", f"{r.strength:.2f} ± {strength_err:.2f}{mark}",
+                     f"{r.direction:.0f} ± {min(direction_err, 180):.0f}{mark}", _num(r.phi_spread, ".1f")])
+    note = "jackknife error over nights; * formal error, with fewer than 3 nights"
+    return html_table([("Nights", "first and last night of the segment"), ("Nights / exp.", "nights and exposures"),
+                       ("Strength (%)", note), ("Direction (°)", "from IFU +x towards +y; " + note),
+                       ("K-m. (°)", "spread of the K-mirror rotation; near 0 the K-mirror frames equal the IFU")],
+                      rows, numeric=[False, True, True, True, True])
 
 
 def _alignment_table(alignment: pd.DataFrame) -> str:
@@ -937,19 +969,22 @@ def qa_instrument_gradient(twilight=None, dome=None, science=None, breaks: Seque
                                        f"instrument gradient; rms of their sky-only fit {check['sky_raw']:.2f}% before and "
                                        f"{check['sky_corrected']:.2f}% after.</p>" + _alignment_table(check["alignment"]))
 
+            last = fit["instrument"].iloc[-1]
             sections.append(
-                f'<details{" open" if not sections else ""}><summary>{escape(group.capitalize())} · {channel}: '
-                f'I = {escape(best.instrument)}</summary>'
+                f'<details class="ig"{" open" if not sections else ""}><summary><strong>{escape(group.capitalize())} · {channel}</strong>: '
+                f'{escape(INSTRUMENT_FRAMES[best.frame][0])}, last segment {last.strength:.2f}% @ {last.direction:.0f}°</summary>'
+                f'<div class="ig-body">'
                 f"<h3>Model comparison</h3>{_comparison_table(table)}"
                 f"<h3>Instrument gradient of the best model ({escape(INSTRUMENT_FRAMES[best.frame][0])}, sky {escape(best.sky)}, "
-                f"breaks {escape(str(best.breaks))})</h3>{_instrument_table(fit['instrument'])}"
-                f'<div class="chart" data-fig="vectors|{group}|{channel}"></div>'
+                f"breaks {escape(str(best.breaks))})</h3>"
+                f'<div class="ig-pair">{_instrument_table(fit["instrument"])}<div class="chart" data-fig="vectors|{group}|{channel}"></div></div>'
                 f"<h3>Instrument gradient night by night</h3><p>One IFU-fixed instrument gradient per night with the sky model "
                 f"shared by all the nights; a jump marks a change of the instrument, the dotted lines are the breaks.</p>"
                 f'<div class="chart" data-fig="nightly|{group}|{channel}"></div>'
                 f"<h3>Direction of the residual gradients</h3><p>After a correct instrument gradient is removed, the rest keeps its "
-                f"direction relative to the sky (R near 1) instead of the IFU.</p>{_alignment_table(alignment)}"
-                f'<div class="chart" data-fig="residuals|{group}|{channel}"></div>{scan_html}{check_html}</details>')
+                f"direction relative to the sky (R near 1) instead of the IFU.</p>"
+                f'<div class="ig-pair">{_alignment_table(alignment)}<div class="chart" data-fig="residuals|{group}|{channel}"></div></div>'
+                f"{scan_html}{check_html}</div></details>")
 
     comparison = pd.concat(comparisons, ignore_index=True) if comparisons else pd.DataFrame()
     instrument = pd.concat(instruments, ignore_index=True) if instruments else pd.DataFrame()
@@ -973,7 +1008,7 @@ def qa_instrument_gradient(twilight=None, dome=None, science=None, breaks: Seque
              "IFU. Lower BIC is better; the leave-one-night-out rms checks that the models predict nights they did not see. In "
              "twilights and dome flats the K-mirror does not move, so only science frames tell an IFU-fixed gradient from one fixed "
              "before the K-mirror (flagged as degenerate otherwise).</p>")
-    body = "".join(sections) or "<p>No model with an instrument gradient could be fitted.</p>"
+    body = PAGE_STYLE + ("".join(sections) or "<p>No model with an instrument gradient could be fitted.</p>")
     report = write_dashboard(os.path.join(output_dir, f"{name}.html"), "LVM Instrument Gradient", "LVM DRP · fiber flats · IFU gradient",
                              intro, meta, tiles, body, figures, "lvmdrp.qa.ifu_gradient.qa_instrument_gradient")
     log.info(f"written instrument gradient dashboard to {report}")
