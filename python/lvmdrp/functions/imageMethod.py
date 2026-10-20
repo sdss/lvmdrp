@@ -83,16 +83,18 @@ DEFAULT_GAIN = {
 }
 DEFAULT_PTC_PATH = os.path.join(os.environ["LVMCORE_DIR"], "metrology", "PTC_fit.txt")
 
-# per-quadrant gain corrections, the header gains are divided by these (see correct_gains)
-gain_corrs = {'b1': numpy.asarray([1.        , 0.96936066, 0.98936944, 0.99164104]),
- 'b2': numpy.asarray([1.        , 0.99146405, 1.00614175, 1.01945662]),
- 'b3': numpy.asarray([1.        , 0.97158781, 1.01023353, 1.01257099]),
- 'r1': numpy.asarray([1.        , 0.99306088, 0.97766919, 1.00602193]),
- 'r2': numpy.asarray([1.        , 0.97837479, 1.01929449, 1.03547192]),
- 'r3': numpy.asarray([1.        , 0.99283228, 1.0197669 , 1.04401763]),
- 'z1': numpy.asarray([1.        , 0.91468884, 1.04798286, 0.98482936]),
- 'z2': numpy.asarray([1.        , 1.04603072, 0.97786641, 1.05365208]),
- 'z3': numpy.asarray([1.        , 1.00523225, 1.00502321, 1.06469578])}
+# per-quadrant gain corrections of DRP 1.3.0, the header gains are multiplied by these (see correct_gains).
+# The 2025 corrections (commit 59d84694) changed the IFU gradient fitted on the twilights by 1.5-2.2%,
+# so they are rolled back until the gains are characterized again
+gain_corrs = {"b1": numpy.asarray([1.0, 1.036, 1.0, 1.0]),
+              "b2": numpy.asarray([1.0, 1.013, 1.011, 1.0]),
+              "b3": numpy.asarray([1.0, 1.029, 1.012, 1.0]),
+              "r1": numpy.asarray([1.0, 1.011, 1.027, 1.0]),
+              "r2": numpy.asarray([1.0, 1.025, 1.017, 1.0]),
+              "r3": numpy.asarray([1.0, 1.010, 1.020, 1.0]),
+              "z1": numpy.asarray([1.0, 1.093, 1.0, 1.063]),
+              "z2": numpy.asarray([1.043, 1.0, 1.089, 1.0]),
+              "z3": numpy.asarray([1.0, 1.0, 1.0, 1 / 1.056])}
 
 
 def correct_gains(camera, gains):
@@ -110,7 +112,7 @@ def correct_gains(camera, gains):
     numpy.ndarray
         corrected gains, rounded to two decimals
     """
-    return numpy.round(numpy.asarray(gains, dtype=float) / gain_corrs[camera], 2)
+    return numpy.round(numpy.asarray(gains, dtype=float) * gain_corrs[camera], 2)
 
 
 description = "Provides Methods to process 2D images"

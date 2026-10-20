@@ -206,7 +206,7 @@ def measure_raw_frame(raw_path, saturation=65000.0):
 
     For each quadrant, the overscan level and noise are measured in the
     ``BIASSEC`` region and the illumination in the ``TRIMSEC`` region, and
-    converted to electrons with the ``GAIN`` header values divided by the
+    converted to electrons with the ``GAIN`` header values multiplied by the
     pipeline's gain corrections, as in the preprocessing (see
     :func:`~lvmdrp.functions.imageMethod.correct_gains`), or with the default
     gains if the header has none.
@@ -1028,7 +1028,7 @@ def _write_raw_dashboard(report_path, mjd_epoch, epoch, cameras, descriptions, p
 
 RAW_DEFINITIONS = r"""<section id="definitions">
     <h2>How the quantities are computed</h2>
-    <p>Quadrants (amplifiers) are indexed by \(q\), flats by \(k\). \(g_q\) is the header gain divided by the pipeline's gain correction, \(T_q\) the
+    <p>Quadrants (amplifiers) are indexed by \(q\), flats by \(k\). \(g_q\) is the header gain multiplied by the pipeline's gain correction, \(T_q\) the
     science region (TRIMSEC) and \(O_q\) the overscan region (BIASSEC). MAD is the median absolute deviation.</p>
     <div class="defs">
       <div class="def">
