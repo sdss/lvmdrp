@@ -45,6 +45,7 @@ from typing import Dict, List, Sequence, Tuple, Union
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
+from scipy import sparse
 from astropy.io import fits
 from astropy.table import Table
 from astropy.time import Time
@@ -252,7 +253,7 @@ def _segment_edges(mjd: np.ndarray, breaks) -> Dict[int, Tuple[float, float]]:
 
 
 def gradient_design(data: pd.DataFrame, frame: str = "ifu", sky: Dict[str, Dict[str, str]] = None, breaks=None,
-                    drift: bool = False) -> Tuple[np.ndarray, np.ndarray, List[Tuple]]:
+                    drift: bool = False) -> Tuple[sparse.csc_matrix, np.ndarray, List[Tuple]]:
     """Design matrix of the gradient model, see the module docstring
 
     Parameters
@@ -273,30 +274,37 @@ def gradient_design(data: pd.DataFrame, frame: str = "ifu", sky: Dict[str, Dict[
     Returns
     -------
     tuple
-        Design matrix (2n x k: the x components of the n exposures, then the
-        y components), target vector (2n) and the label of each parameter:
+        Sparse design matrix (2n x k: the x components of the n exposures,
+        then the y components), target vector (2n) and the label of each parameter:
         ('inst', segment, 'x'|'y'), ('drift', segment, 'x'|'y') or
         ('sky', source, column, amplitude, group).
     """
     sky = sky or DEFAULT_SKY
     n = len(data)
     mjd = data["mjd"].to_numpy(float)
-    columns, labels = [], []
+    rows, cols, values, labels = [], [], [], []
+
+    def add(index, x, y, label):
+        """Column with the values x and y at the x and y components of the exposures in `index`"""
+        rows.extend([index, index + n])
+        cols.append(np.full(2 * index.size, len(labels)))
+        values.extend([x, y])
+        labels.append(label)
+
     rotation = INSTRUMENT_FRAMES[frame][1]
     if rotation is not None:
         phi = np.radians(rotation * data["phi"].to_numpy(float)) if rotation else np.zeros(n)
         cos, sin = np.cos(phi), np.sin(phi)
         segment = _segments(mjd, breaks)
         for k in np.unique(segment):
-            m = (segment == k).astype(float)
+            index = np.flatnonzero(segment == k)
             # R(phi) (Ix, Iy) = (cos Ix - sin Iy, sin Ix + cos Iy)
-            basis = [("x", np.r_[m * cos, m * sin]), ("y", np.r_[-m * sin, m * cos])]
-            columns += [b for _, b in basis]
-            labels += [("inst", int(k), c) for c, _ in basis]
+            add(index, cos[index], sin[index], ("inst", int(k), "x"))
+            add(index, -sin[index], cos[index], ("inst", int(k), "y"))
             if drift:
-                years = (mjd - mjd[segment == k].mean()) / 365.25 * m
-                columns += [np.r_[years * cos, years * sin], np.r_[-years * sin, years * cos]]
-                labels += [("drift", int(k), "x"), ("drift", int(k), "y")]
+                years = (mjd[index] - mjd[index].mean()) / 365.25
+                add(index, years * cos[index], years * sin[index], ("drift", int(k), "x"))
+                add(index, -years * sin[index], years * cos[index], ("drift", int(k), "y"))
 
     for source, terms in sky.items():
         in_source = (data["source"] == source).to_numpy()
@@ -306,21 +314,25 @@ def gradient_design(data: pd.DataFrame, frame: str = "ifu", sky: Dict[str, Dict[
             if amplitude not in SKY_AMPLITUDES:
                 raise ValueError(f"unknown sky amplitude {amplitude!r}, use one of {SKY_AMPLITUDES}")
             angle = np.radians(data[column].to_numpy(float))
-            ux, uy = np.where(in_source, np.cos(angle), 0.0), np.where(in_source, np.sin(angle), 0.0)
+            ux, uy = np.cos(angle), np.sin(angle)
             if amplitude in ("constant", "depth"):
-                groups = {"all": in_source.astype(float)}
+                groups = {"all": np.flatnonzero(in_source)}
             else:
                 key = data["mjd" if amplitude == "night" else "expnum"].to_numpy()
-                groups = {value: (in_source & (key == value)).astype(float) for value in np.unique(key[in_source])}
-            for group, m in groups.items():
-                columns.append(np.r_[m * ux, m * uy])
-                labels.append(("sky", source, column, amplitude, group))
+                order = np.flatnonzero(in_source)
+                values_in, inverse = np.unique(key[order], return_inverse=True)
+                groups = {value: order[inverse == i] for i, value in enumerate(values_in)}
+            for group, index in groups.items():
+                add(index, ux[index], uy[index], ("sky", source, column, amplitude, group))
             if amplitude == "depth":
-                depth = np.nan_to_num(data["depth"].to_numpy(float))
-                columns.append(np.r_[depth * ux, depth * uy])
-                labels.append(("sky", source, column, "slope", "all"))
+                index = groups["all"]
+                depth = np.nan_to_num(data["depth"].to_numpy(float))[index]
+                add(index, depth * ux[index], depth * uy[index], ("sky", source, column, "slope", "all"))
     target = np.r_[data["gx"].to_numpy(float), data["gy"].to_numpy(float)]
-    design = np.column_stack(columns) if columns else np.zeros((2 * n, 0))
+    if labels:
+        design = sparse.csc_matrix((np.concatenate(values), (np.concatenate(rows), np.concatenate(cols))), shape=(2 * n, len(labels)))
+    else:
+        design = sparse.csc_matrix((2 * n, 0))
     return design, target, labels
 
 
@@ -354,26 +366,100 @@ def _solve(design, target):
     return params, target - design @ params
 
 
-def _holdout_residuals(design, target, nights, n):
-    """Leave-one-night-out residuals and the parameters fitted without each night
+def _eliminate(design: sparse.csc_matrix, target: np.ndarray, nights: np.ndarray) -> Dict:
+    """Projects out the parameters that only act on one night, leaving a small least squares problem for the shared ones
 
-    The parameters only supported by the held-out night (its own sky
-    amplitudes, or the instrument gradient of a segment with that night only)
-    are fitted on the held-out night with the others fixed, so the residuals
-    measure how well the other nights predict the shared parameters.
+    The sky amplitudes per exposure or per night and the instrument gradient
+    of a single night only enter the equations of their night. Within each
+    night, the equations are projected onto the complement of the columns of
+    those local parameters; the shared parameters fitted to the projected
+    equations are the least squares solution of the whole problem, and the
+    local parameters follow night by night. This keeps the cost linear in the
+    number of exposures.
+
+    Returns
+    -------
+    dict
+        shared (indices of the shared columns), local ({night: (rows, columns,
+        block)}), projected design (dense, shared columns) and target, and
+        local_rank (summed rank of the local blocks).
     """
+    rows_night = np.r_[nights, nights]
+    k = design.shape[1]
+    shared = np.ones(k, dtype=bool)
+    local = {}
+    for j in range(k):
+        rows = design.indices[design.indptr[j]:design.indptr[j + 1]]
+        if rows.size:
+            owners = np.unique(rows_night[rows])
+            if owners.size == 1:
+                local.setdefault(owners[0], []).append(j)
+                shared[j] = False
+    shared = np.flatnonzero(shared)
+    projected = design[:, shared].toarray()
+    b = target.copy()
+    by_rows = design.tocsr()
+    blocks, local_rank = {}, 0
+    for night, columns in local.items():
+        rows = np.flatnonzero(rows_night == night)
+        block = by_rows[rows][:, columns].toarray()
+        u, singular, _ = np.linalg.svd(block, full_matrices=False)
+        basis = u[:, singular > singular.max() * 1e-10] if singular.size and singular.max() > 0 else u[:, :0]
+        local_rank += basis.shape[1]
+        projected[rows] -= basis @ (basis.T @ projected[rows])
+        b[rows] -= basis @ (basis.T @ b[rows])
+        blocks[night] = (rows, np.asarray(columns), block)
+    return {"shared": shared, "local": blocks, "design": projected, "target": b, "local_rank": local_rank}
+
+
+def _solve_eliminated(design, target, reduced) -> Tuple[np.ndarray, np.ndarray, int, np.ndarray]:
+    """Parameters, residuals, rank and unscaled formal variances of the problem reduced by :func:`_eliminate`"""
+    k = design.shape[1]
+    params = np.zeros(k)
+    variance = np.full(k, np.nan)
+    shared = reduced["shared"]
+    rank = reduced["local_rank"]
+    if shared.size:
+        params[shared], _ = _solve(reduced["design"], reduced["target"])
+        rank += int(np.linalg.matrix_rank(reduced["design"]))
+        variance[shared] = np.diag(np.linalg.pinv(reduced["design"].T @ reduced["design"]))
+    shared_model = design[:, shared] @ params[shared] if shared.size else np.zeros(target.size)
+    for rows, columns, block in reduced["local"].values():
+        params[columns], _ = _solve(block, target[rows] - shared_model[rows])
+        # conditional on the shared parameters
+        variance[columns] = np.diag(np.linalg.pinv(block.T @ block))
+    return params, target - design @ params, rank, variance
+
+
+def _holdout_residuals(reduced, nights, k):
+    """Leave-one-night-out residuals and the shared parameters fitted without each night
+
+    The parameters local to the held-out night (its own sky amplitudes, or the
+    instrument gradient of a segment with that night only) are already
+    projected out of its equations, and shared parameters that only the
+    held-out night constrains are fitted on that night with the others fixed,
+    so the residuals measure how well the other nights predict the shared
+    parameters.
+    """
+    design, target, shared = reduced["design"], reduced["target"], reduced["shared"]
+    rows_night = np.r_[nights, nights]
     residuals = np.full(target.shape, np.nan)
     jackknife = []
     for night in np.unique(nights):
-        test = np.r_[nights == night, nights == night]
+        test = rows_night == night
         train = ~test
-        supported = np.any(design[train] != 0, axis=0)
-        params = np.full(design.shape[1], np.nan)
-        params[supported], _ = _solve(design[train][:, supported], target[train])
-        predicted = design[test][:, supported] @ params[supported]
-        if (~supported).any():
-            local, _ = _solve(design[test][:, ~supported], target[test] - predicted)
-            predicted = predicted + design[test][:, ~supported] @ local
+        params = np.full(k, np.nan)
+        if shared.size:
+            supported = np.any(design[train] != 0, axis=0)
+            fitted = np.full(shared.size, np.nan)
+            fitted[supported], _ = _solve(design[train][:, supported], target[train])
+            predicted = design[test][:, supported] @ fitted[supported]
+            if (~supported).any():
+                extra, _ = _solve(design[test][:, ~supported], target[test] - predicted)
+                predicted = predicted + design[test][:, ~supported] @ extra
+            params[shared] = fitted
+        else:
+            predicted = np.zeros(test.sum())
         residuals[test] = target[test] - predicted
         jackknife.append(params)
     return residuals, np.array(jackknife)
@@ -423,22 +509,24 @@ def _fit_gradient_model(data, frame, sky, breaks, drift, crossval):
                 "instrument": pd.DataFrame(), "drift": pd.DataFrame(), "sky": pd.DataFrame(), "data": data}
 
     design, target, labels = gradient_design(data, frame=frame, sky=sky, breaks=breaks, drift=drift)
-    params, residual = _solve(design, target)
+    nights = data["mjd"].to_numpy()
+    reduced = _eliminate(design, target, nights)
+    params, residual, rank, variance = _solve_eliminated(design, target, reduced)
     rss = float(residual @ residual)
     size, k = target.size, design.shape[1]
-    result.update({"k": k, "rank": int(np.linalg.matrix_rank(design)) if k else 0,
+    result.update({"k": k, "rank": rank,
                    "rms": float(np.sqrt(rss / n)), "bic": float(size * np.log(max(rss, 1e-12) / size) + k * np.log(size))})
 
     jackknife = None
     if crossval and result["nights"] > 2:
-        cv_residual, jackknife = _holdout_residuals(design, target, data["mjd"].to_numpy(), n)
+        cv_residual, jackknife = _holdout_residuals(reduced, nights, k)
         result["cv_rms"] = float(np.sqrt(np.nansum(cv_residual ** 2) / n))
     else:
         result["cv_rms"] = np.nan
 
     # formal errors, which ignore that the exposures of a night share their errors; they show how well each parameter is constrained
     with np.errstate(invalid="ignore"):
-        formal = np.sqrt(np.diag(rss / max(size - result["rank"], 1) * np.linalg.pinv(design.T @ design)))
+        formal = np.sqrt(rss / max(size - rank, 1) * variance)
 
     def errors(index):
         if jackknife is None:
@@ -474,7 +562,7 @@ def _fit_gradient_model(data, frame, sky, breaks, drift, crossval):
     result["instrument"] = per_segment("inst")
     result["drift"] = per_segment("drift")
     result["sky"] = pd.DataFrame([{"source": label[1], "direction": label[2], "amplitude": label[3], "group": label[4],
-                                   "value": float(params[i]), "error": errors(i)}
+                                   "value": float(params[i]), "error": errors(i) if label[4] == "all" else np.nan}
                                   for i, label in enumerate(labels) if label[0] == "sky"])
 
     is_inst = np.array([label[0] in ("inst", "drift") for label in labels], dtype=bool)
