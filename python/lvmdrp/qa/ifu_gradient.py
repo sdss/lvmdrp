@@ -97,6 +97,125 @@ details.ig summary { font-size: 15px; color: var(--ink); }
 .ig-pair > * { min-width: 0; }
 </style>"""
 
+# definitions of the quantities of the dashboard, shown at the bottom of the page
+DEFINITIONS = r"""<section id="definitions">
+  <h2>How the quantities are computed</h2>
+  <p>Exposures are indexed by \(e\), nights by \(\nu\) and segments between breaks by \(k(e)\). Gradients are vectors in IFU
+  coordinates, in %, and directions are measured from the IFU \(+x\) axis towards \(+y\). The fits are done separately for each
+  channel and for each source (twilight, dome, science) and for all of them together (joint).</p>
+  <div class="defs">
+    <div class="def">
+      <h3>Measured gradient</h3>
+      <p>The plane fitted across the science IFU with the spectrograph factors (pipeline <code>IFUGradient</code>, terms 1, \(y\), \(x\)),
+      expressed as the change from the IFU center to its edge, of radius \(\rho\), relative to the mean level \(c_0\). Twilights and dome
+      flats: the coefficients that <code>fit_fiberflat</code> removed from each exposure (<code>FIBERFLAT GCOEFF</code> of the per-exposure
+      flats). Science frames: the median over the reliable sky lines and continuum windows of the flat field QA of each lvmFrame. Strength and
+      direction are the length and angle of \(\vec g_e\).</p>
+      <div class="eq">\[ \vec g_e = \frac{\rho}{c_0}\left(c_x,\ c_y\right), \qquad |\vec g_e|, \qquad \theta_e = \operatorname{atan2}\left(g_{e,y},\ g_{e,x}\right) \]</div>
+    </div>
+    <div class="def">
+      <h3>Gradient model</h3>
+      <p>An instrument gradient \(\vec I_k\) shared by the exposures of segment \(k\), seen through a rotation by the K-mirror angle
+      \(\varphi_e\) when it is fixed before the K-mirror (\(s=\pm1\); \(s=0\) for one fixed in the IFU, no term for none), with an optional
+      linear drift \(\vec D_k\) around the mean time \(\bar t_k\) of the segment, plus sky gradients along the unit vectors
+      \(\hat u_j\) of the sky directions of each exposure, with amplitudes \(a_j\). The model is linear in all its parameters.</p>
+      <div class="eq">\[ \begin{gathered} \vec g_e = R(s\,\varphi_e)\left[\vec I_{k(e)} + \vec D_{k(e)}\,(t_e - \bar t_k)\right] + \sum_j a_j(e)\, \hat u_j(e) + \vec\varepsilon_e \\ R(\alpha) = \begin{pmatrix}\cos\alpha & -\sin\alpha\\ \sin\alpha & \cos\alpha\end{pmatrix} \end{gathered} \]</div>
+    </div>
+    <div class="def">
+      <h3>K-mirror rotation</h3>
+      <p>The K-mirror rotates the image by \(\mathrm{PA} - s_F\,\mathrm{FA} = 2\,s_K\,\mathrm{KM} + \mathrm{offset}\), with PA the position
+      angle of the science IFU, FA the siderostat field angle and the signs \(s_F, s_K\) of the K-mirror relation calibrated on guider-solved
+      frames (\(s_F=-1\) at LCO). The constant offset is absorbed in \(\vec I_k\). <strong>K-m.</strong> is the standard deviation of
+      \(\varphi_e\) within a segment: near 0 (a parked K-mirror, as in twilights and dome flats) the K-mirror frames are the IFU frame.</p>
+      <div class="eq">\[ \varphi_e = \mathrm{PA}_e - s_F\,\mathrm{FA}_e, \qquad \text{K-m.} = \operatorname{std}_{e \in k}\left(\varphi_e\right) \]</div>
+    </div>
+    <div class="def">
+      <h3>Sky directions</h3>
+      <p>The science IFU fibers are placed on the sky with the pipeline astrometry at the middle of the exposure. The direction towards
+      the Sun (or the Moon) is the one in which the angular distance \(d\) to it decreases fastest across the IFU, and the direction towards
+      the horizon the one in which the altitude \(h\) of the fibers decreases fastest; both from a plane fitted to those values over the fibers.
+      Twilights use the Sun, dome flats and science frames the horizon (the dome screen and the airglow).</p>
+      <div class="eq">\[ \begin{gathered} \hat u_\odot \parallel -\nabla_{x,y}\, d_\odot(x,y), \qquad \hat u_h \parallel -\nabla_{x,y}\, h(x,y) \\ \hat u_{\mathrm{moon}} \parallel -\nabla_{x,y}\, d_{\mathrm{moon}}(x,y) \end{gathered} \]</div>
+    </div>
+    <div class="def">
+      <h3>Sky amplitudes</h3>
+      <p>How the amplitude of each sky gradient varies. <strong>constant</strong>: one value. <strong>depth</strong>: linear in the
+      depression of the Sun below \(-3^\circ\) (the twilight sky changes as the Sun sets). <strong>night</strong>: free per night.
+      <strong>exposure</strong>: free per exposure; it only removes the component of \(\vec g_e\) along \(\hat u_j\), so the instrument
+      gradient is constrained by the perpendicular components, which change as the sky direction moves across the IFU.</p>
+      <div class="eq">\[ a = a_0, \qquad a = a_0 + a_1\left(-3^\circ - h_\odot\right), \qquad a = a_\nu, \qquad a = a_e \]</div>
+    </div>
+    <div class="def">
+      <h3>Segments and breaks</h3>
+      <p>The instrument gradient may jump at the breaks: the MJDs given, or with <code>--interventions</code> the calibration epochs
+      triggered by instrument interventions and warm-ups. Each segment runs from one break to the next and is labeled by the first and last
+      night with data. <strong>Nights / exp.</strong> counts the nights and exposures in it. The night-by-night fit uses one segment per night.</p>
+      <div class="eq">\[ k(e) = \#\left\{\,b \in \text{breaks} : b \le \mathrm{MJD}_e\,\right\} \]</div>
+    </div>
+    <div class="def">
+      <h3>Fit and residual rms</h3>
+      <p>All the exposures of a channel are fitted at once by linear least squares on the \(N = 2n\) components of the \(n\) gradients.
+      The parameters that act on one night only (sky amplitudes per exposure or per night, the instrument gradient of a one-night segment)
+      are projected out night by night, which gives the same solution. <strong>rms</strong> is the residual per exposure, adding the
+      two components; compare it with the spread of the gradients themselves.</p>
+      <div class="eq">\[ \vec r_e = \vec g_e - \vec m_e, \qquad \mathrm{rms} = \sqrt{\frac{1}{n}\sum_e \left|\vec r_e\right|^2}, \qquad \mathrm{RSS} = \sum_e \left|\vec r_e\right|^2 \]</div>
+    </div>
+    <div class="def">
+      <h3>BIC and &Delta;BIC</h3>
+      <p>Bayesian information criterion of each model, with \(k\) parameters (column <strong>k</strong>, counting every sky amplitude).
+      It rewards a smaller residual and penalizes parameters; lower is better. &Delta;BIC is the difference from the best model of the
+      table: above about 10 the worse model is strongly disfavored. The tiles give &Delta;BIC of the model without an instrument gradient
+      relative to the best one with it.</p>
+      <div class="eq">\[ \mathrm{BIC} = N \ln\frac{\mathrm{RSS}}{N} + k \ln N, \qquad \Delta\mathrm{BIC} = \mathrm{BIC} - \min_{\text{models}} \mathrm{BIC} \]</div>
+    </div>
+    <div class="def">
+      <h3>CV rms</h3>
+      <p>Leave-one-night-out cross validation: each night is predicted with the shared parameters fitted without it, after fitting only its
+      own sky amplitudes. Close to the rms, the model generalizes; well above it, the model overfits or the nights disagree.</p>
+      <div class="eq">\[ \mathrm{CV\ rms} = \sqrt{\frac{1}{n}\sum_\nu \sum_{e \in \nu} \left|\vec g_e - \vec m_e^{(-\nu)}\right|^2} \]</div>
+    </div>
+    <div class="def">
+      <h3>Errors of the instrument gradient</h3>
+      <p>Jackknife over nights: the scatter of the instrument gradient fitted without each of the \(M\) nights, which accounts for the
+      errors shared by the exposures of a night. With fewer than 3 nights in a segment the formal least squares error is shown instead,
+      marked with *; it assumes independent exposures and underestimates the error. Strength and direction errors propagate those of
+      \(I_x, I_y\).</p>
+      <div class="eq">\[ \begin{gathered} \sigma^2_{\mathrm{jk}} = \frac{M-1}{M}\sum_\nu \left(\hat I^{(-\nu)} - \bar I\right)^2 \\ \sigma^2_{\mathrm{formal}} = \frac{\mathrm{RSS}}{N - \mathrm{rank}}\left[(A^\top A)^{-1}\right]_{jj} \\ \sigma_{|I|} = \frac{\sqrt{I_x^2\sigma_x^2 + I_y^2\sigma_y^2}}{|I|}, \qquad \sigma_\theta = \frac{\sqrt{I_y^2\sigma_x^2 + I_x^2\sigma_y^2}}{|I|^2} \end{gathered} \]</div>
+    </div>
+    <div class="def">
+      <h3>Degenerate models</h3>
+      <p>A model is flagged and never chosen as the best when its parameters are not all determined: the design matrix \(A\) is rank
+      deficient, an instrument gradient is less constrained than a single exposure (e.g. a one-night segment with a free sky amplitude per
+      night), or a K-mirror frame is fitted where the K-mirror does not move (then it equals the IFU frame, with the same rms and BIC).</p>
+      <div class="eq">\[ \mathrm{rank}(A) < k \quad\text{or}\quad \max_k \sigma_{\mathrm{formal}}(I_k) > \tfrac12\,\mathrm{rms} \quad\text{or}\quad \text{K-m.} < 1^\circ \]</div>
+    </div>
+    <div class="def">
+      <h3>Direction of the residual gradients</h3>
+      <p>Mean resultant length \(R\) and circular mean of the directions of the measured gradient (g) and of the gradient minus the
+      instrument model (g &minus; I), in the IFU and relative to each sky direction. \(R=1\) for a fixed direction, near 0 for random ones;
+      p is the Rayleigh test of uniform directions. After a correct instrument gradient is removed, what is left is the sky gradient, so R
+      relative to its sky direction should rise, with a mean near 0&deg;, and R in the IFU should drop.</p>
+      <div class="eq">\[ \begin{gathered} R = \frac{1}{n}\left|\sum_e e^{\,i(\theta_e - \theta^{\mathrm{ref}}_e)}\right|, \qquad \bar\theta = \arg\sum_e e^{\,i(\theta_e - \theta^{\mathrm{ref}}_e)} \\ p \simeq \exp\!\left(\sqrt{1 + 4n + 4(n^2 - n^2R^2)} - (1 + 2n)\right) \end{gathered} \]</div>
+    </div>
+    <div class="def">
+      <h3>Geometry of the sky gradient</h3>
+      <p>Twilights only. The best model is fitted again with the direction of the Sun rotated by an offset \(\delta\), and mirrored, with
+      (sky + I) and without (sky only) the instrument gradient. A minimum near \(\delta = 0\) unmirrored confirms the orientation of the
+      geometry; an instrument gradient that only made up for a wrong geometry would not be needed at the best offset, so sky only would get
+      close to sky + I there.</p>
+      <div class="eq">\[ \theta_\odot \ \to\ \theta_\odot + \delta \quad \text{(direct)}, \qquad \theta_\odot \ \to\ -\theta_\odot + \delta \quad \text{(mirrored)} \]</div>
+    </div>
+    <div class="def">
+      <h3>Twilight I applied to other sources</h3>
+      <p>The instrument gradient of the twilights is evaluated at each dome or science exposure (its segment and K-mirror angle) and
+      subtracted. The rms of the gradients before and after, and of their sky-only fit before and after, tell how much of the gradient of
+      the other source the twilight instrument gradient explains; the table gives the direction of the corrected gradients, which should
+      follow the horizon.</p>
+      <div class="eq">\[ \vec g'_e = \vec g_e - R(s\,\varphi_e)\,\vec I^{\,\mathrm{twilight}}_{k(e)}, \qquad \sqrt{\tfrac1n \textstyle\sum_e |\vec g_e|^2} \ \to\ \sqrt{\tfrac1n \textstyle\sum_e |\vec g'_e|^2} \]</div>
+    </div>
+  </div>
+</section>"""
+
 # Sun altitude (degrees) where the twilight sky amplitude of the 'depth' model is referred to
 SUN_ALT_REF = -3.0
 
@@ -1095,8 +1214,9 @@ def qa_instrument_gradient(twilight=None, dome=None, science=None, breaks: Seque
              "the sky gradient follows the direction of the Sun (twilights) or of the horizon (dome flats, science frames) across the "
              "IFU. Lower BIC is better; the leave-one-night-out rms checks that the models predict nights they did not see. In "
              "twilights and dome flats the K-mirror does not move, so only science frames tell an IFU-fixed gradient from one fixed "
-             "before the K-mirror (flagged as degenerate otherwise).</p>")
-    body = PAGE_STYLE + ("".join(sections) or "<p>No model with an instrument gradient could be fitted.</p>")
+             "before the K-mirror (flagged as degenerate otherwise). Every quantity is defined under "
+             '<a href="#definitions">How the quantities are computed</a>.</p>')
+    body = PAGE_STYLE + ("".join(sections) or "<p>No model with an instrument gradient could be fitted.</p>") + DEFINITIONS
     report = write_dashboard(os.path.join(output_dir, f"{name}.html"), "LVM Instrument Gradient", "LVM DRP · fiber flats · IFU gradient",
                              intro, meta, tiles, body, figures, "lvmdrp.qa.ifu_gradient.qa_instrument_gradient")
     log.info(f"written instrument gradient dashboard to {report}")
