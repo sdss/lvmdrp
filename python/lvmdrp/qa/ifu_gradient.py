@@ -960,15 +960,22 @@ def figure_vectors(fit: Dict, title: str = None) -> go.Figure:
 
 
 def figure_nightly_instrument(fits: Dict[str, Dict], breaks: Sequence[int] = ()) -> go.Figure:
-    """Instrument gradient fitted per night (sky model shared by all nights), strength and direction against the night"""
+    """Instrument gradient fitted per night (sky model shared by all nights), strength and direction against the night
+
+    The error bars are the jackknife errors over nights when a segment has at
+    least 3 nights, else the formal errors, which ignore that the exposures of
+    a night share their errors.
+    """
     fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.08)
     for i, (label, fit) in enumerate(fits.items()):
         instrument = fit["instrument"]
         if instrument.empty:
             continue
         color = SERIES[i % len(SERIES)]
-        err = np.hypot(instrument["gx_err"], instrument["gy_err"])
-        direction_err = np.degrees(err / np.maximum(instrument["strength"], 1e-6))
+        # jackknife errors where the segment has enough nights, else the formal ones (always for one segment per night)
+        sx = np.where(np.isfinite(instrument["gx_err"]), instrument["gx_err"], instrument["gx_sig"])
+        sy = np.where(np.isfinite(instrument["gy_err"]), instrument["gy_err"], instrument["gy_sig"])
+        err, direction_err = np.array([_polar_errors(gx, gy, ex, ey) for gx, gy, ex, ey in zip(instrument["gx"], instrument["gy"], sx, sy)]).T
         common = dict(mode="markers", legendgroup=label, marker=dict(size=7, color=color),
                       customdata=np.stack([instrument["mjd_first"], instrument["n"]], axis=-1))
         fig.add_trace(go.Scatter(x=instrument["mjd_first"], y=instrument["strength"], name=label,
