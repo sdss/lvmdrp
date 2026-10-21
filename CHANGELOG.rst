@@ -9,6 +9,7 @@ This document records the main changes to the drp code.
 1.3.3dev (unreleased)
 ---------------------
 
+- Disabled the IFU gradient fitting by default when creating twilight fiberflats and when measuring spectrograph-to-spectrograph factors in science frames; only the fiber group factors are fitted now
 
 
 1.3.2 (02-09-2026)

@@ -375,7 +375,7 @@ def combine_twilight_sequence(in_twilights: list[str], in_fflats: List[str], out
         # fit factors in twilights
         log.info(f"  removing factors with parameters: {cwave = :.2f}, {dwave = :.2f} Angstrom, {coadd_method = } and fibers {groupby = }")
         x, y, z, coeffs, factors = lvmflat_r.fit_ifu_gradient(
-            guess_coeffs=[1,0,0,0], fixed_coeffs=[3],
+            guess_coeffs=[1,0,0,0], fixed_coeffs=[0,1,2,3],
             cwave=cwave, dwave=dwave, coadd_method=coadd_method, groupby=groupby)
         lvmflat_r = lvmflat_r.remove_ifu_gradient(coeffs=coeffs, factors=factors, groupby=groupby)
 
@@ -579,7 +579,7 @@ def iterate_gradient_fit(rss, cwave, dwave=8, guess_coeffs=[1,2,3,0], fixed_coef
 
     return x, y, z, coeffs, factors
 
-def fit_fiberflat(in_rss, out_flat, out_rss, ref_kind=600, guess_coeffs=[1,2,3,0], fixed_coeffs=[3], groupby="spec",
+def fit_fiberflat(in_rss, out_flat, out_rss, ref_kind=600, guess_coeffs=[1,0,0,0], fixed_coeffs=[0,1,2,3], groupby="spec",
                   norm_cwave=None, norm_dwave=8, coadd_method="average", smoothing=0.1, interpolate_invalid=True, display_plots=False):
     """Creates a flatfield given a flat (twilight, dome) exposure
 

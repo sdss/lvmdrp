@@ -2054,7 +2054,7 @@ def create_dome_fiberflats(mjd, expnums_ldls=None, expnums_qrtz=None, cals_mjd=N
 
 def create_twilight_fiberflats(mjd: int, epochs: dict[int, dict] = None, cals_mjd: int = None, channels: str = "brz",
                       ref_kind: Union[int, Callable[[np.ndarray, int], np.ndarray]] = bn.nanmedian,
-                      groupby: str = "spec", guess_coeffs: List[int] = [1,0,0,0], fixed_coeffs: List[int] = [3],
+                      groupby: str = "spec", guess_coeffs: List[int] = [1,0,0,0], fixed_coeffs: List[int] = [0,1,2,3],
                       cnorms: Dict[str, float] = SKYLINES_FIBERFLAT, dwave: float = 20.0,
                       smoothing: float = 0.07,
                       interpolate_invalid: bool = True,
@@ -2085,7 +2085,8 @@ def create_twilight_fiberflats(mjd: int, epochs: dict[int, dict] = None, cals_mj
     guess_coeffs : list[int], optional
         Initial guess for polynomial coefficients in gradient fitting. Defaults to [1,0,0,0].
     fixed_coeffs : list[int], optional
-        Indices of coefficients to fix during fitting. Defaults to [3].
+        Indices of coefficients to fix during fitting. Defaults to [0,1,2,3],
+        i.e., no IFU gradient is fitted, only the fiber group factors.
     cnorms : dict, optional
         Dictionary of normalization wavelengths per channel. Defaults to SKYLINES_FIBERFLAT.
     dwave : float, optional
@@ -2217,7 +2218,7 @@ def create_fiberflats_corrections(
     groupby: str = "spec",
     coadd_method: str = "fit",
     norm_stat: Callable[[np.ndarray], float] = lambda x: biweight_location(x, ignore_nan=True),
-    fit_gradient: bool = True,
+    fit_gradient: bool = False,
     use_science: bool = True,
     skip_done: bool = False,
     undo_correction: bool = False,
@@ -2262,7 +2263,8 @@ def create_fiberflats_corrections(
     norm_stat : callable, optional
         Robust statistic used to combine the measured factors.
     fit_gradient : bool, optional
-        Whether to fit an IFU gradient component in addition to the factors.
+        Whether to fit an IFU gradient component in addition to the factors,
+        by default False.
     use_science : bool, optional
         Whether to derive the factors from science exposures instead of twilight
         exposures.
