@@ -165,3 +165,31 @@ def test_alignment_rose_and_ifu_examples():
     for row in range(3):
         g, inst, res = (np.asarray(maps[3 * row + c].marker.color) for c in range(3))
         assert np.allclose(res, g - inst)
+
+
+def test_calibration_epoch_of():
+    assert ig._mjd_list("60469, 60477") == [60469, 60477] and ig._mjd_list(60339) == [60339] and ig._mjd_list("60177-60179") == [60177, 60178, 60179]
+    epochs = {60446: {"flavors": {"twilight": "60448, 60450"}}, 60465: {"flavors": {"twilight": "60469, 60477"}}, 60511: {"flavors": {"twilight": 60514}}}
+    # listed nights go to their epoch, even after the next epoch starts; others to the last epoch before them
+    assert ig.calibration_epoch_of([60448, 60469, 60477, 60490, 60514, 60520, 60400], epochs) == \
+        {60400: 60446, 60448: 60446, 60469: 60465, 60477: 60465, 60490: 60465, 60514: 60511, 60520: 60511}
+
+
+def test_epoch_browser_payload():
+    import json
+
+    data = _gradients()
+    fit = ig.fit_gradient_model(data, frame="ifu", breaks=[60465], crossval=False)
+    epochs = {60300: {"trigger": "Survey start", "flavors": {"twilight": "60300, 60320"}}, 60465: {"trigger": "Instrument intervention", "flavors": {}}}
+    html = ig.epoch_browser({("twilight", "b"): fit, ("science", "b"): fit}, ig.ifu_fiber_positions(), epochs)
+    payload = json.loads(html.split("const DATA = ", 1)[1].split(";\n", 1)[0])
+    assert list(payload["sets"]) == ["twilight|b"] and payload["sets"]["twilight|b"]["reference"] == "sun"
+    rows = payload["sets"]["twilight|b"]["rows"]
+    assert len(rows) == len(fit["data"]) and {r[2] for r in rows} == {"60300", "60465"}
+    assert all(r[2] == ("60300" if r[1] < 60465 else "60465") for r in rows)
+    assert "Instrument intervention" in payload["epochs"]["60465"] and "</script>" in html
+    # without epochs, the exposures are grouped by the segments of the fit
+    html = ig.epoch_browser({("twilight", "b"): fit}, ig.ifu_fiber_positions())
+    payload = json.loads(html.split("const DATA = ", 1)[1].split(";\n", 1)[0])
+    assert {r[2] for r in payload["sets"]["twilight|b"]["rows"]} == {"60300", "60480"}
+    assert ig.epoch_browser({("science", "b"): fit}, ig.ifu_fiber_positions()) == ""

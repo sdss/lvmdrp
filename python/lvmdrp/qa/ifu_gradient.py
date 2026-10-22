@@ -36,6 +36,7 @@ with the geometry of each frame (:func:`science_gradients`). The dashboard is
 written by :func:`qa_instrument_gradient` (``drp calibrations qa-instrument-gradient``).
 """
 
+import json
 import os
 from contextlib import nullcontext
 from datetime import datetime, timezone
@@ -46,6 +47,7 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 from scipy import sparse
+from scipy.spatial import cKDTree
 from astropy.io import fits
 from astropy.table import Table
 from astropy.time import Time
@@ -57,7 +59,7 @@ from lvmdrp.qa.fiberflats import (
     _night_sjd, _rayleigh_pvalue, _resultant_length, _wrap_angle, frame_gradients, load_calibration_epochs,
     load_kmirror_relation, siderostat_field_angle, twilight_geometry,
 )
-from lvmdrp.qa.report import DIVERGING, SEQUENTIAL, SERIES, THEME, base_layout, html_table, sandbox_qa_dir, style_axes, write_dashboard
+from lvmdrp.qa.report import DIVERGING, DIVERGING_DARK, SEQUENTIAL, SERIES, THEME, base_layout, html_table, sandbox_qa_dir, style_axes, write_dashboard
 from lvmdrp.utils.convert import tileid_grp
 
 
@@ -1127,8 +1129,8 @@ def figure_ifu_examples(fit: Dict, positions: Tuple[np.ndarray, np.ndarray], n: 
     plane measured by the pipeline (g), the instrument model of the fit at that
     exposure (I, rotated with the K-mirror if the frame says so) and their
     difference (g - I), which is what the sky should explain. The planes are
-    evaluated at the fiber positions, in % relative to the mean, with the same
-    color scale in all panels; arrows mark the direction of the gradient in the
+    evaluated at the fiber positions, in % relative to the mean; g and I share
+    a color scale and g - I has its own, as it is much weaker; arrows mark the direction of the gradient in the
     first two panels, and the directions of the Sun, the horizon and the Moon
     (when up) in the last one.
     """
@@ -1151,15 +1153,18 @@ def figure_ifu_examples(fit: Dict, positions: Tuple[np.ndarray, np.ndarray], n: 
                    else f"<br>g − I {np.hypot(*res):.2f}% @ {res_dir:.0f}°"]
     nrows = len(examples)
     fig = make_subplots(rows=nrows, cols=3, subplot_titles=titles, horizontal_spacing=0.03, vertical_spacing=0.06)
-    limit = 0.0
+    # g and I share a color scale, g - I has its own, as it is several times weaker
+    limit, limit_res = 0.0, 0.0
+    for row in examples.itertuples():
+        limit = max(limit, np.hypot(row.gx, row.gy), np.hypot(row.inst_x, row.inst_y))
+        limit_res = max(limit_res, np.hypot(row.gx - row.inst_x, row.gy - row.inst_y))
     for r, row in enumerate(examples.itertuples(), start=1):
         vectors = [np.array([row.gx, row.gy]), np.array([row.inst_x, row.inst_y])]
         vectors.append(vectors[0] - vectors[1])
-        limit = max(limit, max(np.hypot(*v) for v in vectors))
         for c, ((label, _, _), vector) in enumerate(zip(panels, vectors), start=1):
             values = vector[0] * x + vector[1] * y
             fig.add_trace(go.Scatter(x=x, y=y, mode="markers", showlegend=False, hoverinfo="skip",
-                                     marker=dict(size=3, color=values, coloraxis="coloraxis")), row=r, col=c)
+                                     marker=dict(size=3, color=values, coloraxis="coloraxis2" if c == 3 else "coloraxis")), row=r, col=c)
             if c < 3:
                 ax, ay = _arrow(np.degrees(np.arctan2(vector[1], vector[0])))
                 fig.add_trace(go.Scatter(x=ax, y=ay, mode="lines+markers", showlegend=False, line=dict(color=THEME["ink"], width=2),
@@ -1180,13 +1185,286 @@ def figure_ifu_examples(fit: Dict, positions: Tuple[np.ndarray, np.ndarray], n: 
     fig.update_layout(base_layout(260 * nrows + 90, margin=dict(l=16, r=16, t=90, b=16),
                                   legend=dict(orientation="h", x=0, y=0.995, yanchor="top", yref="container", font=dict(color=THEME["ink2"])),
                                   coloraxis=dict(colorscale=DIVERGING, cmin=-limit, cmax=limit,
-                                                 colorbar=dict(title=dict(text="%", side="right"), thickness=12, len=0.5, y=0.5))))
+                                                 colorbar=dict(title=dict(text="g, I (%)", side="right"), thickness=12, len=0.42,
+                                                               y=0.75, x=1.0)),
+                                  coloraxis2=dict(colorscale=DIVERGING, cmin=-max(limit_res, 1e-3), cmax=max(limit_res, 1e-3),
+                                                  colorbar=dict(title=dict(text="g − I (%)", side="right"), thickness=12, len=0.42,
+                                                                y=0.25, x=1.0))))
     fig.update_annotations(font=dict(size=11))
     for i in range(1, 3 * nrows + 1):
         suffix = "" if i == 1 else str(i)
         fig.update_layout(**{f"xaxis{suffix}": dict(visible=False, range=[-1.25, 1.25]),
                              f"yaxis{suffix}": dict(visible=False, range=[-1.25, 1.25], scaleanchor=f"x{suffix}", scaleratio=1)})
     return fig
+
+
+def _mjd_list(value) -> List[int]:
+    """MJDs of a flavor of the calibration epochs file: an integer, a comma separated list or a range 'MJD1-MJD2'"""
+    if value is None:
+        return []
+    mjds = []
+    for item in str(value).split(","):
+        item = item.strip()
+        if "-" in item:
+            first, last = (int(v) for v in item.split("-"))
+            mjds.extend(range(first, last + 1))
+        elif item:
+            mjds.append(int(item))
+    return mjds
+
+
+def calibration_epoch_of(nights: Sequence[int], epochs: Dict[int, Dict], flavor: str = "twilight") -> Dict[int, int]:
+    """Calibration epoch of each night: the one whose `flavor` MJDs include it, else the last epoch starting on or before it"""
+    starts = sorted(epochs)
+    listed = {night: mjd for mjd in starts for night in _mjd_list((epochs[mjd] or {}).get("flavors", {}).get(flavor))}
+    result = {}
+    for night in sorted(set(int(n) for n in nights)):
+        if night in listed:
+            result[night] = listed[night]
+        else:
+            before = [mjd for mjd in starts if mjd <= night]
+            result[night] = before[-1] if before else starts[0]
+    return result
+
+
+BROWSER_SOURCES = {"twilight": "Twilights", "dome": "Dome flats"}
+
+BROWSER_STYLE = """<style>
+.eb-controls { display: flex; flex-wrap: wrap; gap: 8px 20px; align-items: center; font-size: 13px; color: var(--ink-2); }
+.eb-controls label { display: inline-flex; gap: 8px; align-items: center; }
+.eb-controls select { font: 13px var(--sans); color: var(--ink); background: var(--surface); border: 1px solid var(--axis); border-radius: 6px; padding: 4px 8px; }
+.eb-legend { display: flex; flex-wrap: wrap; gap: 8px 28px; align-items: center; font-size: 12px; color: var(--ink-2); }
+.eb-bar { display: inline-flex; align-items: center; gap: 6px; font-family: var(--mono); }
+.eb-bar span.ramp { display: inline-block; width: 140px; height: 10px; border-radius: 3px; border: 1px solid var(--border); }
+.eb-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 330px), 1fr)); gap: 12px; }
+.eb-card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 10px; display: grid; gap: 6px; min-width: 0; }
+.eb-title { font-size: 12px; color: var(--ink); font-family: var(--mono); }
+.eb-panels { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; }
+.eb-panel { display: grid; gap: 2px; justify-items: center; min-width: 0; }
+.eb-panel canvas { width: 100%; max-width: 120px; aspect-ratio: 1; }
+.eb-caption { font-size: 11px; color: var(--ink-2); text-align: center; line-height: 1.3; }
+</style>"""
+
+BROWSER_SCRIPT = """<script>
+(function () {
+  const DATA = @@DATA@@;
+  const $ = (id) => document.getElementById(id);
+  const source = $("eb-source"), channel = $("eb-channel"), epoch = $("eb-epoch");
+  const media = window.matchMedia("(prefers-color-scheme: dark)");
+  const DEG = "\\u00b0", MINUS = "\\u2212";
+  function isDark() {
+    const theme = document.documentElement.getAttribute("data-theme");
+    return theme ? theme === "dark" : media.matches;
+  }
+  function css(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+  function hex(c) { return [1, 3, 5].map((i) => parseInt(c.slice(i, i + 2), 16)); }
+  function colormap(t) {
+    const stops = isDark() ? DATA.div_dark : DATA.div;
+    t = Math.min(1, Math.max(0, t));
+    for (let i = 1; i < stops.length; i++) {
+      if (t <= stops[i][0]) {
+        const f = (t - stops[i - 1][0]) / (stops[i][0] - stops[i - 1][0]);
+        const a = hex(stops[i - 1][1]), b = hex(stops[i][1]);
+        return "rgb(" + a.map((v, k) => Math.round(v + f * (b[k] - v))).join(",") + ")";
+      }
+    }
+    return stops[stops.length - 1][1];
+  }
+  function ramp() {
+    const n = 11, colors = [];
+    for (let i = 0; i < n; i++) colors.push(colormap(i / (n - 1)));
+    return "linear-gradient(90deg," + colors.join(",") + ")";
+  }
+  function polar(vx, vy) { return [Math.hypot(vx, vy), Math.atan2(vy, vx) * 180 / Math.PI]; }
+  function wrap(a) { return ((a + 180) % 360 + 360) % 360 - 180; }
+  function fmt(vx, vy) { const [s, d] = polar(vx, vy); return s.toFixed(2) + "% @ " + d.toFixed(0) + DEG; }
+
+  function draw(canvas, vx, vy, limit, arrows) {
+    const ratio = window.devicePixelRatio || 1, size = 120;
+    canvas.width = size * ratio; canvas.height = size * ratio;
+    const ctx = canvas.getContext("2d");
+    ctx.scale(ratio, ratio);
+    const scale = size / 2 / 1.25, cx = size / 2, cy = size / 2, radius = Math.max(0.8, 0.5 * DATA.spacing * scale);
+    for (let i = 0; i < DATA.x.length; i++) {
+      const v = vx * DATA.x[i] + vy * DATA.y[i];
+      ctx.fillStyle = colormap(0.5 + 0.5 * v / limit);
+      ctx.beginPath();
+      ctx.arc(cx + DATA.x[i] * scale, cy - DATA.y[i] * scale, radius, 0, 2 * Math.PI);
+      ctx.fill();
+    }
+    for (const [direction, color, dashed] of arrows) {
+      if (direction === null || !isFinite(direction)) continue;
+      const a = direction * Math.PI / 180, ex = cx + 1.15 * scale * Math.cos(a), ey = cy - 1.15 * scale * Math.sin(a);
+      ctx.strokeStyle = color; ctx.fillStyle = color; ctx.lineWidth = 1.6;
+      ctx.setLineDash(dashed ? [3, 3] : []);
+      ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(ex, ey); ctx.stroke();
+      ctx.setLineDash([]);
+      const h = 6, b = Math.atan2(cy - ey, ex - cx);
+      ctx.beginPath();
+      ctx.moveTo(ex, ey);
+      ctx.lineTo(ex - h * Math.cos(b - 0.45), ey + h * Math.sin(b - 0.45));
+      ctx.lineTo(ex - h * Math.cos(b + 0.45), ey + h * Math.sin(b + 0.45));
+      ctx.closePath(); ctx.fill();
+    }
+  }
+
+  function key() { return source.value + "|" + channel.value; }
+  function fillChannels() {
+    const current = channel.value;
+    channel.innerHTML = "";
+    for (const k of Object.keys(DATA.sets)) {
+      const [s, c] = k.split("|");
+      if (s === source.value) channel.add(new Option(c, c));
+    }
+    if ([...channel.options].some((o) => o.value === current)) channel.value = current;
+  }
+  function fillEpochs() {
+    const current = epoch.value, rows = DATA.sets[key()].rows, counts = {};
+    for (const r of rows) counts[r[2]] = (counts[r[2]] || 0) + 1;
+    epoch.innerHTML = "";
+    for (const e of Object.keys(counts).sort()) {
+      epoch.add(new Option((DATA.epochs[e] || e) + " (" + counts[e] + ")", e));
+    }
+    if ([...epoch.options].some((o) => o.value === current)) epoch.value = current;
+  }
+  function render() {
+    const set = DATA.sets[key()], rows = set.rows.filter((r) => String(r[2]) === epoch.value);
+    let limit = 1e-3, limitRes = 1e-3;
+    for (const r of rows) {
+      limit = Math.max(limit, Math.hypot(r[5], r[6]), Math.hypot(r[7], r[8]));
+      limitRes = Math.max(limitRes, Math.hypot(r[5] - r[7], r[6] - r[8]));
+    }
+    const gradient = ramp();
+    $("eb-legend").innerHTML =
+      '<span class="eb-bar">g, I <span>' + MINUS + limit.toFixed(1) + '%</span><span class="ramp" style="background:' + gradient +
+      '"></span><span>+' + limit.toFixed(1) + '%</span></span>' +
+      '<span class="eb-bar">g ' + MINUS + ' I <span>' + MINUS + limitRes.toFixed(1) + '%</span><span class="ramp" style="background:' + gradient +
+      '"></span><span>+' + limitRes.toFixed(1) + '%</span></span>' +
+      '<span>arrows: <b style="color:' + css("--warn") + '">Sun</b>, <b style="color:' + css("--ok") + '">horizon</b>, <b style="color:' +
+      css("--muted") + '">Moon</b> (when up)</span><span>' + set.model + '</span>';
+    const grid = $("eb-grid");
+    grid.innerHTML = "";
+    const ink = css("--ink");
+    for (const r of rows) {
+      const [expnum, mjd, , exptime, sunAlt, gx, gy, ix, iy, dSun, dHorizon, dMoon, moonAlt] = r;
+      const rx = gx - ix, ry = gy - iy, reference = set.reference === "sun" ? dSun : dHorizon;
+      const offset = reference === null ? null : Math.abs(wrap(polar(rx, ry)[1] - reference));
+      const card = document.createElement("div");
+      card.className = "eb-card";
+      card.innerHTML = '<div class="eb-title">' + expnum + " \\u00b7 MJD " + mjd + (exptime === null ? "" : " \\u00b7 " + exptime + " s") +
+        (sunAlt === null ? "" : " \\u00b7 Sun " + sunAlt.toFixed(1) + DEG) + '</div><div class="eb-panels"></div>';
+      const panels = card.querySelector(".eb-panels");
+      const specs = [
+        ["g " + fmt(gx, gy), gx, gy, limit, [[polar(gx, gy)[1], ink, false]]],
+        ["I " + fmt(ix, iy), ix, iy, limit, [[polar(ix, iy)[1], ink, false]]],
+        ["g " + MINUS + " I " + fmt(rx, ry) + (offset === null ? "" : "<br>" + offset.toFixed(0) + DEG + " from the " + set.reference),
+         rx, ry, limitRes, [[dSun, css("--warn"), true], [dHorizon, css("--ok"), true], [moonAlt !== null && moonAlt > 0 ? dMoon : null, css("--muted"), true]]],
+      ];
+      for (const [caption, vx, vy, lim, arrows] of specs) {
+        const panel = document.createElement("div");
+        panel.className = "eb-panel";
+        const canvas = document.createElement("canvas");
+        panel.appendChild(canvas);
+        const label = document.createElement("div");
+        label.className = "eb-caption"; label.innerHTML = caption;
+        panel.appendChild(label);
+        panels.appendChild(panel);
+        draw(canvas, vx, vy, lim, arrows);
+      }
+      grid.appendChild(card);
+    }
+  }
+  for (const s of [...new Set(Object.keys(DATA.sets).map((k) => k.split("|")[0]))]) source.add(new Option(DATA.sources[s] || s, s));
+  source.addEventListener("change", () => { fillChannels(); fillEpochs(); render(); });
+  channel.addEventListener("change", () => { fillEpochs(); render(); });
+  epoch.addEventListener("change", render);
+  fillChannels(); fillEpochs(); render();
+  media.addEventListener("change", render);
+  new MutationObserver(render).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+})();
+</script>"""
+
+
+def epoch_browser(fits: Dict[Tuple[str, str], Dict], positions: Tuple[np.ndarray, np.ndarray], epochs: Dict[int, Dict] = None) -> str:
+    """HTML of the maps across the IFU of every twilight (and dome flat) exposure, grouped by calibration epoch
+
+    The maps are drawn in the browser from the gradient vectors of each
+    exposure (measured, instrument model and their difference) and the fiber
+    positions, so that all the exposures fit in the page; the source, channel
+    and calibration epoch are chosen with dropdowns.
+
+    Parameters
+    ----------
+    fits : dict
+        Best fit of each (source, channel), from :func:`fit_gradient_model`;
+        only the 'twilight' and 'dome' sources are shown.
+    positions : tuple[np.ndarray, np.ndarray]
+        Fiber positions scaled to the IFU edge, from :func:`ifu_fiber_positions`.
+    epochs : dict, optional
+        Calibration epochs (see :func:`lvmdrp.qa.fiberflats.load_calibration_epochs`).
+        Without them, the exposures are grouped by the segments of the fit.
+
+    Returns
+    -------
+    str
+        The HTML section, empty if there is nothing to show.
+    """
+    def value(row, column):
+        v = getattr(row, column, None)
+        return None if v is None or not np.isfinite(float(v)) else round(float(v), 3)
+
+    sets, labels = {}, {}
+    for (source, channel), fit in fits.items():
+        if source not in BROWSER_SOURCES:
+            continue
+        data = fit["data"][fit["data"]["source"] == source]
+        if data.empty:
+            continue
+        nights = data["mjd"].astype(int).to_numpy()
+        if epochs:
+            epoch_of = calibration_epoch_of(nights, epochs, flavor=source)
+            for mjd in set(epoch_of.values()):
+                epoch = epochs[mjd] or {}
+                listed = _mjd_list(epoch.get("flavors", {}).get(source))
+                labels[str(mjd)] = f"{mjd} · {epoch.get('trigger', '')}" + (f" · {source}s {', '.join(map(str, listed))}" if listed else "")
+            groups = [str(epoch_of[n]) for n in nights]
+        else:
+            edges = _segment_edges(nights.astype(float), fit["breaks"])
+            segment = _segments(nights.astype(float), fit["breaks"])
+            groups = [f"{int(edges[k][0])}" for k in segment]
+            labels.update({g: f"segment from {g}" for g in groups})
+        rows = []
+        order = np.lexsort((data["expnum"].to_numpy(), nights))
+        for i in order:
+            row = next(data.iloc[[i]].itertuples())
+            rows.append([int(row.expnum), int(row.mjd), groups[i], value(row, "exptime"), value(row, "sun_alt"),
+                         round(row.gx, 4), round(row.gy, 4), round(row.inst_x, 4), round(row.inst_y, 4),
+                         value(row, "dir_sun"), value(row, "dir_horizon"), value(row, "dir_moon"), value(row, "moon_alt")])
+        last = fit["instrument"].iloc[-1] if not fit["instrument"].empty else None
+        sets[f"{source}|{channel}"] = {
+            "rows": rows, "reference": "sun" if EXAMPLE_REFERENCE[source] == "dir_sun" else "horizon",
+            "model": f"I {INSTRUMENT_FRAMES[fit['frame']][0]}, breaks {_label_breaks(fit['breaks'])}"
+                     + (f", last segment {last.strength:.2f}% @ {last.direction:.0f}°" if last is not None else "")}
+    if not sets:
+        return ""
+    x, y = positions
+    tree = cKDTree(np.column_stack([x, y]))
+    spacing = float(np.median(tree.query(np.column_stack([x, y]), k=2)[0][:, 1]))
+    payload = {"x": np.round(x, 4).tolist(), "y": np.round(y, 4).tolist(), "spacing": spacing, "sets": sets, "epochs": labels,
+               "sources": BROWSER_SOURCES, "div": DIVERGING, "div_dark": DIVERGING_DARK}
+    data_json = json.dumps(payload, separators=(",", ":")).replace("</", "<\\/")
+    nouns = " and ".join(BROWSER_SOURCES[s].lower() for s in BROWSER_SOURCES if any(k.startswith(s + "|") for k in sets))
+    return (BROWSER_STYLE
+            + f'<section id="epoch-browser"><h2>{nouns.capitalize()} by calibration epoch</h2>'
+            f"<p>Every exposure of the chosen calibration epoch across the science IFU: the plane measured by the pipeline (g), the "
+            f"instrument model of the best fit at that exposure (I) and their difference (g − I), with the arrows of the Sun, the "
+            f"horizon and the Moon in the last panel. g and I share a color scale and g − I has its own, both set by the exposures "
+            f"of the epoch shown. Exposures are assigned to the epoch whose {nouns} MJDs include their night, or else to the last "
+            f"epoch before it.</p>"
+            '<div class="eb-controls"><label>Source <select id="eb-source"></select></label>'
+            '<label>Channel <select id="eb-channel"></select></label><label>Epoch <select id="eb-epoch"></select></label></div>'
+            '<div class="eb-legend" id="eb-legend"></div><div class="eb-grid" id="eb-grid"></div>'
+            + BROWSER_SCRIPT.replace("@@DATA@@", data_json) + "</section>")
 
 
 def figure_alignment_rose(fit: Dict, bin_width: float = 20.0) -> go.Figure:
@@ -1279,7 +1557,8 @@ def _alignment_table(alignment: pd.DataFrame) -> str:
 
 
 def qa_instrument_gradient(twilight=None, dome=None, science=None, breaks: Sequence[int] = None, channels: str = "brz",
-                           kmirror=None, skies: Dict[str, Dict] = None, output_dir: str = None, name: str = "instrument_gradient") -> Dict:
+                           kmirror=None, skies: Dict[str, Dict] = None, epochs: Dict[int, Dict] = None, output_dir: str = None,
+                           name: str = "instrument_gradient") -> Dict:
     """Tests for an instrument gradient across the science IFU and writes a dashboard
 
     For each channel and source (twilight, dome, science, and all of them
@@ -1313,6 +1592,10 @@ def qa_instrument_gradient(twilight=None, dome=None, science=None, breaks: Seque
     output_dir : str, optional
         Directory of the dashboard and tables. Default is
         ``qa/fiberflat/{name}`` in the master calibrations directory.
+    epochs : dict, optional
+        Calibration epochs, to group the twilight and dome flat exposures of the
+        maps by epoch. Default is the epochs file in lvmcore; without it, they
+        are grouped by segment.
     name : str, optional
         Name of the dashboard. Default is 'instrument_gradient'.
 
@@ -1341,6 +1624,12 @@ def qa_instrument_gradient(twilight=None, dome=None, science=None, breaks: Seque
 
     comparisons, instruments, figures, sections, cross_checks = [], [], {}, [], {}
     positions = ifu_fiber_positions()
+    browser_fits = {}
+    if epochs is None:
+        try:
+            epochs = load_calibration_epochs()
+        except Exception as e:
+            log.warning(f"cannot read the calibration epochs ({type(e).__name__}: {e}), grouping the maps by segment")
     for group, data in groups.items():
         for channel in [c for c in channels if c in set(data["channel"])]:
             subset = data[data["channel"] == channel].reset_index(drop=True)
@@ -1359,6 +1648,8 @@ def qa_instrument_gradient(twilight=None, dome=None, science=None, breaks: Seque
             instrument.insert(0, "channel", channel)
             instrument.insert(0, "group", group)
             instruments.append(instrument)
+            if group in BROWSER_SOURCES:
+                browser_fits[(group, channel)] = fit
             sky_model = skies[best.sky]
             nightly = {"IFU": fit_gradient_model(subset, frame="ifu", sky=sky_model, breaks="nights")}
             figures[f"vectors|{group}|{channel}"] = figure_vectors(fit)
@@ -1420,7 +1711,7 @@ def qa_instrument_gradient(twilight=None, dome=None, science=None, breaks: Seque
                 f'<div class="chart" data-fig="rose|{group}|{channel}"></div>'
                 + (f"<h3>Examples across the science IFU</h3><p>A few exposures chosen to span the {_reference_noun(subset)} across "
                    f"the IFU. For each: the plane measured by the pipeline (g), the instrument model of the best fit at that exposure (I) "
-                   f"and their difference (g − I), evaluated at the fiber positions in % relative to the mean, on one color scale. The "
+                   f"and their difference (g − I), evaluated at the fiber positions in % relative to the mean. g and I share a color scale; g − I has its own, as it is much weaker. The "
                    f"black arrows give the direction of g and I; the dotted ones in the last panel point to the Sun, the horizon and "
                    f"the Moon (when up). A sky gradient makes the g − I ramp rise along its arrow.</p>"
                    f'<div class="chart" data-fig="ifu|{group}|{channel}"></div>' if examples_figure is not None else "")
@@ -1449,7 +1740,8 @@ def qa_instrument_gradient(twilight=None, dome=None, science=None, breaks: Seque
              "twilights and dome flats the K-mirror does not move, so only science frames tell an IFU-fixed gradient from one fixed "
              "before the K-mirror (flagged as degenerate otherwise). Every quantity is defined under "
              '<a href="#definitions">How the quantities are computed</a>.</p>')
-    body = PAGE_STYLE + ("".join(sections) or "<p>No model with an instrument gradient could be fitted.</p>") + DEFINITIONS
+    body = (PAGE_STYLE + ("".join(sections) or "<p>No model with an instrument gradient could be fitted.</p>")
+            + epoch_browser(browser_fits, positions, epochs) + DEFINITIONS)
     report = write_dashboard(os.path.join(output_dir, f"{name}.html"), "LVM Instrument Gradient", "LVM DRP · fiber flats · IFU gradient",
                              intro, meta, tiles, body, figures, "lvmdrp.qa.ifu_gradient.qa_instrument_gradient")
     log.info(f"written instrument gradient dashboard to {report}")

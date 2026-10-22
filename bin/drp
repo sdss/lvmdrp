@@ -968,7 +968,7 @@ def qa_domes_cli(epoch, mjd, mjd_list, mjd_range, epochs_file, channels, drpver,
 @click.option('-s', '--science', type=str, default=None, help="Science frame gradients: the summary table of 'drp qa-flatfield' (FITS), whose lvmFrame headers give the geometry, or a CSV saved by a previous run")
 @click.option('-b', '--breaks', type=IntListType(), default=None, help='MJDs where the instrument gradient may jump')
 @click.option('--interventions', is_flag=True, default=False, help="Break at the calibration epochs triggered by instrument interventions and warm-ups, instead of --breaks")
-@click.option('--epochs-file', type=str, default=None, help='Path to a calibration epochs file, for --interventions. Defaults to the one in lvmcore')
+@click.option('--epochs-file', type=str, default=None, help='Path to a calibration epochs file, for --interventions and to group the maps of the flats by epoch. Defaults to the one in lvmcore')
 @click.option('-c', '--channels', type=str, default="brz", help='Channels to fit')
 @click.option('-k', '--kmirror', type=str, default=None, help="K-mirror relation (a kmirror_pa.json or a drpall file), for the frames without POSCIPA and the sign of the field angle")
 @click.option('-d', '--drpver', type=str, default=None, help='Pipeline version of the lvmFrames of --science. Defaults to the one in the summary')
@@ -995,7 +995,7 @@ def qa_instrument_gradient_cli(twilight, dome, science, breaks, interventions, e
         click.echo(f"science frame gradients written to {science}")
     try:
         result = qa_instrument_gradient(twilight=twilight, dome=dome, science=science, breaks=breaks, channels=channels,
-                                        kmirror=kmirror, output_dir=output_dir, name=name)
+                                        kmirror=kmirror, epochs=load_calibration_epochs(epochs_file), output_dir=output_dir, name=name)
     except (FileNotFoundError, ValueError) as e:
         raise click.UsageError(str(e))
     click.echo(f"dashboard written to {result['report']}")
