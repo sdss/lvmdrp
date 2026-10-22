@@ -256,3 +256,14 @@ def test_sky_nouns():
     assert ig._sky_nouns(data) == "towards the Sun"
     both = pd.concat([data, _gradients(source="science")], ignore_index=True)
     assert ig._sky_nouns(both) == "towards the Sun for twilights, towards the horizon for science frames"
+
+
+def test_introduction_for_the_sources_used():
+    text = ig._introduction(["twilight"])
+    assert "the direction of the Sun across the IFU" in text and "In twilights the K-mirror does not move, so they cannot" in text
+    assert "science frames are needed" in text and "joint" not in text and "dome" not in text
+    text = ig._introduction(["science"])
+    assert "the direction of the horizon across the IFU" in text and "follows the field rotation" in text and "twilight" not in text
+    text = ig._introduction(["twilight", "dome", "science"])
+    assert "the direction of the Sun for twilights and the direction of the horizon for dome flats" in text
+    assert "In twilights and dome flats the K-mirror does not move, so only the science frames" in text and "(joint)" in text

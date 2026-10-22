@@ -1061,6 +1061,31 @@ def figure_nightly_instrument(fits: Dict[str, Dict], breaks: Sequence[int] = ())
     return fig
 
 
+def _introduction(sources: Sequence[str]) -> str:
+    """Introduction of the dashboard, naming only the sources of exposures of the run"""
+    nouns = {"twilight": "twilights", "dome": "dome flats", "science": "science frames"}
+    present = [s for s in SOURCE_SKY_REFERENCE if s in sources]
+    sky = (f"the direction of {'the Sun' if SOURCE_SKY_REFERENCE[present[0]] == 'dir_sun' else 'the horizon'}" if len(present) == 1 else
+           " and ".join(f"the direction of {'the Sun' if SOURCE_SKY_REFERENCE[s] == 'dir_sun' else 'the horizon'} for {nouns[s]}" for s in present))
+    flats = [nouns[s] for s in present if s != "science"]
+    if flats and "science" in present:
+        kmirror = (f"In {' and '.join(flats)} the K-mirror does not move, so only the science frames tell an IFU-fixed gradient from one "
+                   f"fixed before the K-mirror (flagged as degenerate otherwise).")
+    elif flats:
+        kmirror = (f"In {' and '.join(flats)} the K-mirror does not move, so they cannot tell an IFU-fixed gradient from one fixed "
+                   f"before the K-mirror: those models are flagged as degenerate, and science frames are needed to tell them apart.")
+    else:
+        kmirror = "In science frames the K-mirror follows the field rotation, which tells an IFU-fixed gradient from one fixed before it."
+    joint = (f" The {' and the '.join(nouns[s] for s in present)} are fitted separately and together (joint), sharing the instrument "
+             f"gradient." if len(present) > 1 else "")
+    return ("<p>Tests whether the gradient that the pipeline fits across the science IFU holds an instrument gradient, fixed in "
+            "the IFU or before the K-mirror, besides the sky gradient, fixed on the sky. Each model is fitted to the gradient vectors "
+            "of all the exposures of a channel; the instrument gradient is shared by all the exposures of a segment between breaks, "
+            f"the sky gradient follows {sky} across the IFU.{joint} Lower BIC is better; the leave-one-night-out rms checks that the "
+            f"models predict nights they did not see. {kmirror} Every quantity is defined under "
+            '<a href="#definitions">How the quantities are computed</a>.</p>')
+
+
 def _sky_nouns(data: pd.DataFrame) -> str:
     """The sky direction of each source in `data`, e.g. 'towards the Sun for twilights, towards the horizon for science frames'"""
     nouns = {"twilight": "twilights", "dome": "dome flats", "science": "science frames"}
@@ -1816,14 +1841,7 @@ def qa_instrument_gradient(twilight=None, dome=None, science=None, breaks: Seque
     meta = [("Sources", ", ".join(f"{s}: {d['expnum'].nunique()} exposures, {d['mjd'].nunique()} nights" for s, d in sources.items())),
             ("Channels", channels), ("Breaks", _label_breaks(breaks)),
             ("Generated", datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"))]
-    intro = ("<p>Tests whether the gradient that the pipeline fits across the science IFU holds an instrument gradient, fixed in "
-             "the IFU or before the K-mirror, besides the sky gradient, fixed on the sky. Each model is fitted to the gradient vectors "
-             "of all the exposures of a channel; the instrument gradient is shared by all the exposures of a segment between breaks, "
-             "the sky gradient follows the direction of the Sun (twilights) or of the horizon (dome flats, science frames) across the "
-             "IFU. Lower BIC is better; the leave-one-night-out rms checks that the models predict nights they did not see. In "
-             "twilights and dome flats the K-mirror does not move, so only science frames tell an IFU-fixed gradient from one fixed "
-             "before the K-mirror (flagged as degenerate otherwise). Every quantity is defined under "
-             '<a href="#definitions">How the quantities are computed</a>.</p>')
+    intro = _introduction(list(sources))
     browser = epoch_browser(browser_fits, positions, epochs)
     body = (PAGE_STYLE + ("".join(sections) or "<p>No model with an instrument gradient could be fitted.</p>")
             + browser + _definitions_for(list(sources), roses, direction_scan, bool(browser)))
