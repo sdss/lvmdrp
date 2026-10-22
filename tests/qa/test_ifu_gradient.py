@@ -196,6 +196,8 @@ def test_epoch_browser_payload():
     assert all(r[2] == ("60300" if r[1] < 60465 else "60465") for r in rows)
     assert "Instrument intervention" in payload["epochs"]["60465"] and "</script>" in html
     assert payload["departure"] == {"angle": 45.0, "strength": 0.5, "fraction": 0.25, "min_exposures": 2} and 'id="eb-flags"' in html
+    # local time and Moon illumination are the last columns, None when the table has no times
+    assert all(len(r) == 15 and r[13] is None for r in rows)
     # without epochs, the exposures are grouped by the segments of the fit
     html = ig.epoch_browser({("twilight", "b"): fit}, ig.ifu_fiber_positions())
     payload = json.loads(html.split("const DATA = ", 1)[1].split(";\n", 1)[0])
@@ -220,3 +222,10 @@ def test_nightly_falls_back_to_the_best_model():
     fig = ig.figure_nightly_instrument(fits, [60200, 60465, 61000])
     # only the breaks within the nights are drawn
     assert {shape.x0 for shape in fig.layout.shapes} == {60465}
+
+
+def test_local_times_at_lco():
+    data = pd.DataFrame({"expnum": [1, 2, 3], "time": ["2023-11-06T23:19:52", "2024-06-07T22:01:13", None]})
+    # Chilean summer time (UTC-3) in November, winter time (UTC-4) in June
+    assert ig._local_times(data) == {1: "20:19", 2: "18:01"}
+    assert ig._local_times(data.drop(columns="time")) == {}

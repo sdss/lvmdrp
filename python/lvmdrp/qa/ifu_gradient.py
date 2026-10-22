@@ -1183,6 +1183,9 @@ def calibration_epoch_of(nights: Sequence[int], epochs: Dict[int, Dict], flavor:
 
 BROWSER_SOURCES = {"twilight": "Twilights", "dome": "Dome flats"}
 
+# time zone of LCO, for the local time of the exposures (Chilean time, with daylight saving)
+LCO_TIMEZONE = "America/Santiago"
+
 BROWSER_STYLE = """<style>
 .eb-controls { display: flex; flex-wrap: wrap; gap: 8px 20px; align-items: center; font-size: 13px; color: var(--ink-2); }
 .eb-controls label { display: inline-flex; gap: 8px; align-items: center; }
@@ -1337,19 +1340,28 @@ BROWSER_SCRIPT = """<script>
     grid.innerHTML = "";
     const ink = css("--ink");
     for (const r of rows) {
-      const [expnum, mjd, , exptime, sunAlt, gx, gy, ix, iy, dSun, dHorizon, dMoon, moonAlt] = r;
+      const [expnum, mjd, , exptime, sunAlt, gx, gy, ix, iy, dSun, dHorizon, dMoon, moonAlt, local, illum] = r;
       const rx = gx - ix, ry = gy - iy, reference = set.reference === "sun" ? dSun : dHorizon;
       const [offset, departs] = departure(set, r);
       const card = document.createElement("div");
       card.className = departs ? "eb-card departs" : "eb-card";
-      card.innerHTML = '<div class="eb-title">' + expnum + " \\u00b7 MJD " + mjd + (exptime === null ? "" : " \\u00b7 " + exptime + " s") +
-        (sunAlt === null ? "" : " \\u00b7 Sun " + sunAlt.toFixed(1) + DEG) + '</div><div class="eb-panels"></div>';
+      const moonUp = moonAlt !== null && moonAlt > 0;
+      const moon = moonAlt === null ? "" : moonUp ? "Moon up " + moonAlt.toFixed(0) + DEG + (illum === null ? "" : ", " + (100 * illum).toFixed(0) + "% lit")
+                                                  : "Moon down";
+      card.innerHTML = '<div class="eb-title">' + expnum + " \\u00b7 MJD " + mjd + (local === null ? "" : " \\u00b7 " + local + " local") +
+        (exptime === null ? "" : " \\u00b7 " + exptime + " s") + "<br>" + (sunAlt === null ? "" : "Sun " + sunAlt.toFixed(1) + DEG) +
+        (moon ? (sunAlt === null ? "" : " \\u00b7 ") + moon : "") + '</div><div class="eb-panels"></div>';
+      // angle from each sky direction to g - I, the closest one highlighted in its color
+      const near = [["Sun", dSun, css("--warn")], ["horizon", dHorizon, css("--ok")], ["Moon", moonUp ? dMoon : null, css("--muted")]]
+        .filter((d) => d[1] !== null).map(([name, d, color]) => [name, Math.abs(wrap(polar(rx, ry)[1] - d)), color]);
+      const closest = near.length ? near.reduce((a, b) => (b[1] < a[1] ? b : a))[0] : null;
+      const offsets = near.map(([name, o, color]) => name === closest ? '<b style="color:' + color + '">' + name + " " + o.toFixed(0) + DEG + "</b>"
+                                                                      : name + " " + o.toFixed(0) + DEG).join(" \\u00b7 ");
       const panels = card.querySelector(".eb-panels");
       const specs = [
         ["g " + fmt(gx, gy), gx, gy, limit, [[polar(gx, gy)[1], ink, false]]],
         ["I " + fmt(ix, iy), ix, iy, limit, [[polar(ix, iy)[1], ink, false]]],
-        ["g " + MINUS + " I " + fmt(rx, ry) + (offset === null ? "" : '<br><span class="eb-flag">' + offset.toFixed(0) + DEG + " from " +
-         (set.reference === "sun" ? "the Sun" : "the horizon") + "</span>"),
+        ["g " + MINUS + " I " + fmt(rx, ry) + (offsets ? '<br><span class="eb-flag">from ' + offsets + "</span>" : ""),
          rx, ry, limitRes, [[dSun, css("--warn"), true], [dHorizon, css("--ok"), true], [moonAlt !== null && moonAlt > 0 ? dMoon : null, css("--muted"), true]],
          [gx, gy, ix, iy]],
       ];
@@ -1379,6 +1391,19 @@ BROWSER_SCRIPT = """<script>
   new MutationObserver(render).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
 })();
 </script>"""
+
+
+def _local_times(data: pd.DataFrame, timezone: str = LCO_TIMEZONE) -> Dict[int, str]:
+    """Local time at LCO (HH:MM) of the middle of each exposure, from its UTC ``time``, by exposure number"""
+    if "time" not in data.columns:
+        return {}
+    times = pd.to_datetime(data["time"], utc=True, errors="coerce")
+    try:
+        times = times.dt.tz_convert(timezone)
+    except Exception as e:
+        log.warning(f"cannot convert the times to {timezone} ({type(e).__name__}: {e}), using UTC-4")
+        times = times - pd.Timedelta(hours=4)
+    return {int(e): t.strftime("%H:%M") for e, t in zip(data["expnum"], times) if not pd.isna(t)}
 
 
 def epoch_browser(fits: Dict[Tuple[str, str], Dict], positions: Tuple[np.ndarray, np.ndarray], epochs: Dict[int, Dict] = None,
@@ -1439,13 +1464,18 @@ def epoch_browser(fits: Dict[Tuple[str, str], Dict], positions: Tuple[np.ndarray
             segment = _segments(nights.astype(float), fit["breaks"])
             groups = [f"{int(edges[k][0])}" for k in segment]
             labels.update({g: f"segment from {g}" for g in groups})
+        local = _local_times(data)
         rows = []
         order = np.lexsort((data["expnum"].to_numpy(), nights))
         for i in order:
             row = next(data.iloc[[i]].itertuples())
+            illum = value(row, "moon_illum")
             rows.append([int(row.expnum), int(row.mjd), groups[i], value(row, "exptime"), value(row, "sun_alt"),
                          round(row.gx, 4), round(row.gy, 4), round(row.inst_x, 4), round(row.inst_y, 4),
-                         value(row, "dir_sun"), value(row, "dir_horizon"), value(row, "dir_moon"), value(row, "moon_alt")])
+                         value(row, "dir_sun"), value(row, "dir_horizon"), value(row, "dir_moon"), value(row, "moon_alt"),
+                         local.get(int(row.expnum)),
+                         # illuminated fraction of the Moon; some tables give it in percent
+                         None if illum is None else round(illum / 100 if illum > 1 else illum, 3)])
         last = fit["instrument"].iloc[-1] if not fit["instrument"].empty else None
         sets[f"{source}|{channel}"] = {
             "rows": rows, "reference": "sun" if SOURCE_SKY_REFERENCE[source] == "dir_sun" else "horizon",
@@ -1470,7 +1500,9 @@ def epoch_browser(fits: Dict[Tuple[str, str], Dict], positions: Tuple[np.ndarray
             f"of the epoch shown. Exposures are assigned to the epoch whose {nouns} MJDs include their night, or else to the last "
             f"epoch before it.</p><p>An exposure departs from its sky direction (the Sun for twilights, the horizon for dome flats) "
             f"when g − I points more than {departure_angle:.0f}° away from it and is at least {departure_strength:g}% strong, so "
-            f"that its direction is measured; its card has an orange border. Epochs where at least {100 * departure_fraction:.0f}% of "
+            f"that its direction is measured; its card has an orange border. Each card gives the local time at LCO, the "
+            f"altitudes of the Sun and the Moon, and the angle from the Sun, the horizon and the Moon (when up) to g − I, the "
+            f"closest one highlighted. Epochs where at least {100 * departure_fraction:.0f}% of "
             f"the exposures, and at least {departure_min}, depart are marked with ⚠ in the list and given as buttons, to find "
             f"them for further investigation.</p>"
             '<div class="eb-controls"><label>Source <select id="eb-source"></select></label>'
