@@ -631,7 +631,7 @@ def fit_gradient_model(data: pd.DataFrame, frame: str = "ifu", sky: Dict[str, Di
         gx, gy, their jackknife errors over nights (NaN with fewer than 3
         nights) and formal errors, strength, direction, spread of the K-mirror
         angle), drift (likewise, %/yr), sky (pandas.DataFrame of the
-        sky amplitudes), and data (the rows used, with the instrument and sky
+        sky amplitudes, with jackknife and formal errors), and data (the rows used, with the instrument and sky
         model and the residuals: inst_x, inst_y, sky_x, sky_y, res_x, res_y).
     """
     with _single_thread():
@@ -704,7 +704,7 @@ def _fit_gradient_model(data, frame, sky, breaks, drift, crossval):
     result["instrument"] = per_segment("inst")
     result["drift"] = per_segment("drift")
     result["sky"] = pd.DataFrame([{"source": label[1], "direction": label[2], "amplitude": label[3], "group": label[4],
-                                   "value": float(params[i]), "error": errors(i) if label[4] == "all" else np.nan}
+                                   "value": float(params[i]), "error": errors(i) if label[4] == "all" else np.nan, "sigma": float(formal[i])}
                                   for i, label in enumerate(labels) if label[0] == "sky"])
 
     is_inst = np.array([label[0] in ("inst", "drift") for label in labels], dtype=bool)
@@ -987,9 +987,10 @@ def figure_nightly_instrument(fits: Dict[str, Dict], breaks: Sequence[int] = ())
 
     The error bars are the jackknife errors over nights when a segment has at
     least 3 nights, else the formal errors, which ignore that the exposures of
-    a night share their errors. The open circles are the gradient of each
-    exposure minus the instrument gradient of its night (g - I, spread within
-    the night), and the crosses the direction of its sky gradient: the Sun for
+    a night share their errors. For each exposure, spread within its night:
+    the measured gradient (g, gray dots), the measured gradient minus the
+    instrument gradient of its night (g - I, open circles) and, in the
+    direction panel, the direction of its sky gradient (crosses): the Sun for
     twilights, the horizon for dome flats and science frames.
     """
     fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.08)
@@ -1010,7 +1011,7 @@ def figure_nightly_instrument(fits: Dict[str, Dict], breaks: Sequence[int] = ())
         fig.add_trace(go.Scatter(x=instrument["mjd_first"], y=instrument["direction"], name=label, showlegend=False,
                                  error_y=dict(type="data", array=np.minimum(direction_err, 180), visible=True, thickness=1),
                                  hovertemplate="MJD %{customdata[0]:.0f} · %{customdata[1]} exposures<br>%{y:.0f}°<extra></extra>", **common), row=2, col=1)
-        # g - I of each exposure with the I of its night, spread within the night so they don't overlap
+        # g and g - I of each exposure, with the I of its night, spread within the night so they don't overlap
         data = fit["data"]
         if "inst_x" in data.columns and len(data):
             rank = data.groupby("mjd").cumcount().to_numpy()
@@ -1018,6 +1019,13 @@ def figure_nightly_instrument(fits: Dict[str, Dict], breaks: Sequence[int] = ())
             x = data["mjd"].to_numpy(float) + 0.6 * ((rank + 1) / (size + 1) - 0.5)
             rx, ry = data["gx"] - data["inst_x"], data["gy"] - data["inst_y"]
             custom = np.stack([data["mjd"].astype(int), data["expnum"].astype(int)], axis=-1)
+            measured = dict(mode="markers", legendgroup="g", customdata=custom, marker=dict(size=4, color=THEME["muted"], opacity=0.7))
+            fig.add_trace(go.Scatter(x=x, y=np.hypot(data["gx"], data["gy"]), name="g per exposure",
+                                     hovertemplate="MJD %{customdata[0]} · exposure %{customdata[1]}<br>g %{y:.2f}%<extra></extra>",
+                                     **measured), row=1, col=1)
+            fig.add_trace(go.Scatter(x=x, y=np.degrees(np.arctan2(data["gy"], data["gx"])), name="g", showlegend=False,
+                                     hovertemplate="MJD %{customdata[0]} · exposure %{customdata[1]}<br>g towards %{y:.0f}°<extra></extra>",
+                                     **measured), row=2, col=1)
             exposures = dict(mode="markers", legendgroup="g − I", customdata=custom,
                              marker=dict(size=5, color=SERIES[1], opacity=0.55, symbol="circle-open", line=dict(width=1.2)))
             fig.add_trace(go.Scatter(x=x, y=np.hypot(rx, ry), name="g − I per exposure",
@@ -1031,17 +1039,53 @@ def figure_nightly_instrument(fits: Dict[str, Dict], breaks: Sequence[int] = ())
             nouns = sorted({"Sun" if SOURCE_SKY_REFERENCE.get(s) == "dir_sun" else "horizon" for s in set(data["source"])})
             if np.isfinite(reference).any():
                 fig.add_trace(go.Scatter(x=x, y=reference, mode="markers", name=f"towards the {' or '.join(nouns)}", customdata=custom,
-                                         marker=dict(size=4, symbol="x-thin", color=THEME["muted"], line=dict(width=1, color=THEME["muted"])),
+                                         marker=dict(size=7, symbol="x-thin", color=THEME["ink"], line=dict(width=1.5, color=THEME["ink"])),
                                          hovertemplate="MJD %{customdata[0]} · exposure %{customdata[1]}<br>sky towards %{y:.0f}°<extra></extra>"),
                               row=2, col=1)
+    nights = np.concatenate([f["data"]["mjd"].to_numpy(float) for f in fits.values() if len(f["data"])] or [np.array([0.0])])
+    pad = max(2.0, 0.03 * np.ptp(nights))
+    lo, hi = nights.min() - pad, nights.max() + pad
     for mjd in breaks:
-        fig.add_vline(x=mjd, line=dict(color=THEME["muted"], width=1, dash="dot"))
+        if lo <= mjd <= hi:
+            fig.add_vline(x=mjd, line=dict(color=THEME["muted"], width=1, dash="dot"))
+    fig.update_xaxes(range=[lo, hi])
     fig.update_layout(base_layout(560))
     style_axes(fig)
     fig.update_yaxes(title_text="Strength (%)", rangemode="tozero", row=1, col=1)
     fig.update_yaxes(title_text="Direction (°)", range=[-180, 180], dtick=90, row=2, col=1)
     fig.update_xaxes(title_text="MJD", row=2, col=1)
     return fig
+
+
+def _nightly_or_best(nightly: Dict, best: Dict) -> Tuple[Dict[str, Dict], str]:
+    """The fit with one I per night, or the best fit drawn night by night when the sky shared by the nights is not constrained
+
+    With one I per night, the sky gradient is only constrained by how it
+    changes between nights; with few nights (or nights with the same
+    geometry) its shared amplitudes are not determined and I per night takes
+    any value. Then the I of the segments of the best model is shown at each
+    night instead, with the g - I of the best model.
+
+    Returns
+    -------
+    tuple
+        The fits to draw, {label: fit}, for :func:`figure_nightly_instrument`,
+        and a note for the page, empty when the fit per night is used.
+    """
+    shared = nightly["sky"][nightly["sky"]["group"] == "all"] if not nightly["sky"].empty else nightly["sky"]
+    worst = float(shared["sigma"].max()) if len(shared) else 0.0
+    if not nightly["instrument"].empty and np.isfinite(worst) and worst <= nightly["rms"]:
+        return {"I per night": nightly}, ""
+    data = best["data"]
+    segment = _segments(data["mjd"].to_numpy(float), best["breaks"])
+    per_night = (pd.DataFrame({"mjd": data["mjd"].to_numpy(int), "segment": segment}).groupby("mjd")
+                 .agg(segment=("segment", "first"), n=("segment", "size")).reset_index())
+    per_night = per_night.merge(best["instrument"].drop(columns=["n", "nights"]), on="segment", how="inner")
+    per_night["mjd_first"] = per_night["mjd"].astype(float)
+    note = (f" With {nightly['nights']} nights the sky gradient shared by the nights is not constrained (formal error of its "
+            f"amplitude {worst:.1f}%, against an rms of {nightly['rms']:.2f}%), so one I per night cannot be fitted: the plot shows "
+            f"the I of the best model at each night, and g − I with it.")
+    return {"I of the best model": {**best, "instrument": per_night}}, note
 
 
 def figure_direction_scan(scan: pd.DataFrame) -> go.Figure:
@@ -1577,7 +1621,8 @@ def qa_instrument_gradient(twilight=None, dome=None, science=None, breaks: Seque
             if group in BROWSER_SOURCES:
                 browser_fits[(group, channel)] = fit
             sky_model = skies[best.sky]
-            nightly = {"I per night": fit_gradient_model(subset, frame="ifu", sky=sky_model, breaks="nights")}
+            nightly_fit = fit_gradient_model(subset, frame="ifu", sky=sky_model, breaks="nights")
+            nightly, nightly_note = _nightly_or_best(nightly_fit, fit)
             figures[f"vectors|{group}|{channel}"] = figure_vectors(fit)
             figures[f"nightly|{group}|{channel}"] = figure_nightly_instrument(nightly, breaks)
             figures[f"residuals|{group}|{channel}"] = figure_residuals(fit)
@@ -1623,10 +1668,10 @@ def qa_instrument_gradient(twilight=None, dome=None, science=None, breaks: Seque
                 f"breaks {escape(str(best.breaks))})</h3>"
                 f'<div class="ig-pair">{_instrument_table(fit["instrument"])}<div class="chart" data-fig="vectors|{group}|{channel}"></div></div>'
                 f"<h3>Instrument gradient I night by night</h3><p>One instrument gradient I fixed in the IFU per night (filled) with the sky "
-                f"model shared by all the nights; a jump marks a change of the instrument, the dotted lines are the breaks. The open "
-                f"circles are each exposure's gradient minus the I of its night (g − I), spread within the night, and the crosses in "
-                f"the direction panel the direction of its sky gradient (Sun for twilights, horizon for dome flats and science "
-                f"frames): a sky gradient left in g − I follows the crosses.</p>"
+                f"model shared by all the nights; a jump marks a change of the instrument, the dotted lines are the breaks. For each "
+                f"exposure, spread within its night: the measured gradient (g, gray dots), g minus the I of its night (g − I, open "
+                f"circles) and, in the direction panel, the direction of its sky gradient (crosses: Sun for twilights, horizon for "
+                f"dome flats and science frames). A sky gradient left in g − I follows the crosses.{nightly_note}</p>"
                 f'<div class="chart" data-fig="nightly|{group}|{channel}"></div>'
                 f"<h3>Direction of g and g − I</h3><p>After a correct instrument gradient I is removed, g − I keeps its "
                 f"direction relative to the sky (R near 1) instead of the IFU. The plot below gives the fit residual of each exposure, "

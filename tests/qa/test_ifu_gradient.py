@@ -163,7 +163,9 @@ def test_nightly_figure_shows_g_minus_i():
     fit = ig.fit_gradient_model(data, frame="ifu", breaks="nights", crossval=False)
     fig = ig.figure_nightly_instrument({"I per night": fit}, [60465])
     names = [t.name for t in fig.data]
-    assert "g − I per exposure" in names and "I per night" in names and "towards the Sun" in names
+    assert "g − I per exposure" in names and "I per night" in names and "g per exposure" in names
+    measured = [t for t in fig.data if t.name == "g per exposure"][0]
+    assert np.allclose(measured.y, np.hypot(fit["data"]["gx"], fit["data"]["gy"])) and "towards the Sun" in names
     exposures = [t for t in fig.data if t.name == "g − I per exposure"][0]
     assert len(exposures.y) == len(fit["data"])
     # with the I of each night removed, what is left points to the Sun
@@ -198,3 +200,22 @@ def test_epoch_browser_payload():
     payload = json.loads(html.split("const DATA = ", 1)[1].split(";\n", 1)[0])
     assert {r[2] for r in payload["sets"]["twilight|b"]["rows"]} == {"60300", "60480"}
     assert ig.epoch_browser({("science", "b"): fit}, ig.ifu_fiber_positions()) == ""
+
+
+def test_nightly_falls_back_to_the_best_model():
+    # two nights with the Sun in the same direction: the sky shared by the nights is not constrained
+    data = _gradients(n_nights=2, per_night=10)
+    data["dir_sun"] = 30.0 + np.random.default_rng(1).normal(0, 1, len(data))
+    best = ig.fit_gradient_model(data, frame="ifu", crossval=False)
+    nightly = ig.fit_gradient_model(data, frame="ifu", breaks="nights", crossval=False)
+    fits, note = ig._nightly_or_best(nightly, best)
+    assert list(fits) == ["I of the best model"] and "not constrained" in note
+    assert len(fits["I of the best model"]["instrument"]) == 2
+    # with many nights the fit per night is used
+    data = _gradients()
+    nightly = ig.fit_gradient_model(data, frame="ifu", breaks="nights", crossval=False)
+    fits, note = ig._nightly_or_best(nightly, ig.fit_gradient_model(data, frame="ifu", breaks=[60465], crossval=False))
+    assert list(fits) == ["I per night"] and note == ""
+    fig = ig.figure_nightly_instrument(fits, [60200, 60465, 61000])
+    # only the breaks within the nights are drawn
+    assert {shape.x0 for shape in fig.layout.shapes} == {60465}
