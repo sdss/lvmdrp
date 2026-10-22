@@ -229,3 +229,30 @@ def test_local_times_at_lco():
     # Chilean summer time (UTC-3) in November, winter time (UTC-4) in June
     assert ig._local_times(data) == {1: "20:19", 2: "18:01"}
     assert ig._local_times(data.drop(columns="time")) == {}
+
+
+def test_definitions_for_the_sources_used():
+    # twilights only: no cards or sentences about science frames, dome flats or the joint fit
+    text = ig._definitions_for(["twilight"], roses=False, direction_scan=False, browser=True)
+    assert "Twilights use the Sun." in text and "Maps across the IFU" in text
+    for absent in ("Science frames", "Dome flats use", "Twilight I applied to other sources", "(joint)", "Direction rose",
+                   "Geometry of the sky gradient", "data-sources"):
+        assert absent not in text
+    # science frames only: no browser, no twilight cards
+    text = ig._definitions_for(["science"], roses=False, direction_scan=True, browser=False)
+    assert "Science frames use the horizon" in text and "Science frames: the median" in text
+    for absent in ("Twilights", "Maps across the IFU", "Geometry of the sky gradient", "Twilight I applied", "as in twilights"):
+        assert absent not in text
+    # twilights and science frames: both, the joint fit and the cross check
+    text = ig._definitions_for(["twilight", "science"], roses=True, direction_scan=True, browser=True)
+    for present in ("Twilights use the Sun.", "Science frames use the horizon", "(joint)", "Twilight I applied to other sources",
+                    "Direction rose", "Geometry of the sky gradient"):
+        assert present in text
+    assert "Dome flats use" not in text
+
+
+def test_sky_nouns():
+    data = _gradients()
+    assert ig._sky_nouns(data) == "towards the Sun"
+    both = pd.concat([data, _gradients(source="science")], ignore_index=True)
+    assert ig._sky_nouns(both) == "towards the Sun for twilights, towards the horizon for science frames"

@@ -38,6 +38,7 @@ written by :func:`qa_instrument_gradient` (``drp calibrations qa-instrument-grad
 
 import json
 import os
+import re
 from contextlib import nullcontext
 from datetime import datetime, timezone
 from html import escape
@@ -104,7 +105,7 @@ DEFINITIONS = r"""<section id="definitions">
   <h2>How the quantities are computed</h2>
   <p>Exposures are indexed by \(e\), nights by \(\nu\) and segments between breaks by \(k(e)\). Gradients are vectors in IFU
   coordinates, in %, and directions are measured from the IFU \(+x\) axis towards \(+y\). The fits are done separately for each
-  channel and for each source (twilight, dome, science) and for all of them together (joint).</p>
+  channel and for each source<span data-sources="joint"> and for all of them together (joint)</span>.</p>
   <div class="defs">
     <div class="def">
       <h3>Measured gradient</h3>
@@ -112,10 +113,11 @@ DEFINITIONS = r"""<section id="definitions">
       center, so the gradients of terms that multiply add up as vectors there: subtracting \(\vec I\) from \(\vec g\) is
       dividing the measured illumination by the instrument model, up to the curvature of their product (second order, under
       0.04% for these gradients). The plane fitted across the science IFU with the spectrograph factors (pipeline <code>IFUGradient</code>, terms 1, \(y\), \(x\)),
-      expressed as the change from the IFU center to its edge, of radius \(\rho\), relative to the mean level \(c_0\). Twilights and dome
-      flats: the coefficients that <code>fit_fiberflat</code> removed from each exposure (<code>FIBERFLAT GCOEFF</code> of the per-exposure
-      flats). Science frames: the median over the reliable sky lines and continuum windows of the flat field QA of each lvmFrame. Strength and
-      direction are the length and angle of \(\vec g_e\).</p>
+      expressed as the change from the IFU center to its edge, of radius \(\rho\), relative to the mean level \(c_0\).
+      <span data-sources="twilight dome">Twilights and dome flats: the coefficients that <code>fit_fiberflat</code> removed from each
+      exposure (<code>FIBERFLAT GCOEFF</code> of the per-exposure flats).</span>
+      <span data-sources="science">Science frames: the median over the reliable sky lines and continuum windows of the flat field QA of
+      each lvmFrame.</span> Strength and direction are the length and angle of \(\vec g_e\).</p>
       <div class="eq">\[ \vec g_e = \frac{\rho}{c_0}\left(c_x,\ c_y\right), \qquad |\vec g_e|, \qquad \theta_e = \operatorname{atan2}\left(g_{e,y},\ g_{e,x}\right) \]</div>
     </div>
     <div class="def">
@@ -131,7 +133,8 @@ DEFINITIONS = r"""<section id="definitions">
       <p>The K-mirror rotates the image by \(\mathrm{PA} - s_F\,\mathrm{FA} = 2\,s_K\,\mathrm{KM} + \mathrm{offset}\), with PA the position
       angle of the science IFU, FA the siderostat field angle and the signs \(s_F, s_K\) of the K-mirror relation calibrated on guider-solved
       frames (\(s_F=-1\) at LCO). The constant offset is absorbed in \(\vec I_k\). <strong>K-m.</strong> is the standard deviation of
-      \(\varphi_e\) within a segment: near 0 (a parked K-mirror, as in twilights and dome flats) the K-mirror frames are the IFU frame.</p>
+      \(\varphi_e\) within a segment: near 0 (a parked K-mirror<span data-sources="twilight dome">, as in twilights and dome flats</span>) the
+      K-mirror frames are the IFU frame.</p>
       <div class="eq">\[ \varphi_e = \mathrm{PA}_e - s_F\,\mathrm{FA}_e, \qquad \text{K-m.} = \operatorname{std}_{e \in k}\left(\varphi_e\right) \]</div>
     </div>
     <div class="def">
@@ -139,7 +142,8 @@ DEFINITIONS = r"""<section id="definitions">
       <p>The science IFU fibers are placed on the sky with the pipeline astrometry at the middle of the exposure. The direction towards
       the Sun (or the Moon) is the one in which the angular distance \(d\) to it decreases fastest across the IFU, and the direction towards
       the horizon the one in which the altitude \(h\) of the fibers decreases fastest; both from a plane fitted to those values over the fibers.
-      Twilights use the Sun, dome flats and science frames the horizon (the dome screen and the airglow).</p>
+      <span data-sources="twilight">Twilights use the Sun.</span> <span data-sources="dome">Dome flats use the horizon (the dome
+      screen).</span> <span data-sources="science">Science frames use the horizon (the airglow).</span></p>
       <div class="eq">\[ \begin{gathered} \hat u_\odot \parallel -\nabla_{x,y}\, d_\odot(x,y), \qquad \hat u_h \parallel -\nabla_{x,y}\, h(x,y) \\ \hat u_{\mathrm{moon}} \parallel -\nabla_{x,y}\, d_{\mathrm{moon}}(x,y) \end{gathered} \]</div>
     </div>
     <div class="def">
@@ -1057,6 +1061,15 @@ def figure_nightly_instrument(fits: Dict[str, Dict], breaks: Sequence[int] = ())
     return fig
 
 
+def _sky_nouns(data: pd.DataFrame) -> str:
+    """The sky direction of each source in `data`, e.g. 'towards the Sun for twilights, towards the horizon for science frames'"""
+    nouns = {"twilight": "twilights", "dome": "dome flats", "science": "science frames"}
+    present = [s for s in SOURCE_SKY_REFERENCE if s in set(data["source"])]
+    parts = [f"towards {'the Sun' if SOURCE_SKY_REFERENCE[s] == 'dir_sun' else 'the horizon'}" + (f" for {nouns[s]}" if len(present) > 1 else "")
+             for s in present]
+    return ", ".join(parts)
+
+
 def _nightly_or_best(nightly: Dict, best: Dict) -> Tuple[Dict[str, Dict], str]:
     """The fit with one I per night, or the best fit drawn night by night when the sky shared by the nights is not constrained
 
@@ -1492,13 +1505,16 @@ def epoch_browser(fits: Dict[Tuple[str, str], Dict], positions: Tuple[np.ndarray
                              "min_exposures": departure_min}}
     data_json = json.dumps(payload, separators=(",", ":")).replace("</", "<\\/")
     nouns = " and ".join(BROWSER_SOURCES[s].lower() for s in BROWSER_SOURCES if any(k.startswith(s + "|") for k in sets))
+    references = ", ".join(f"the {'Sun' if SOURCE_SKY_REFERENCE[s] == 'dir_sun' else 'horizon'}"
+                           + (f" for {BROWSER_SOURCES[s].lower()}" if len({k.split('|')[0] for k in sets}) > 1 else "")
+                           for s in BROWSER_SOURCES if any(k.startswith(s + "|") for k in sets))
     return (BROWSER_STYLE
             + f'<section id="epoch-browser"><h2>{nouns.capitalize()} by calibration epoch</h2>'
             f"<p>Every exposure of the chosen calibration epoch across the science IFU: the plane measured by the pipeline (g), the "
             f"instrument model of the best fit at that exposure (I) and the measured illumination divided by it (g − I), with the arrows of the Sun, the "
             f"horizon and the Moon in the last panel. g and I share a color scale and g − I has its own, both set by the exposures "
             f"of the epoch shown. Exposures are assigned to the epoch whose {nouns} MJDs include their night, or else to the last "
-            f"epoch before it.</p><p>An exposure departs from its sky direction (the Sun for twilights, the horizon for dome flats) "
+            f"epoch before it.</p><p>An exposure departs from its sky direction ({references}) "
             f"when g − I points more than {departure_angle:.0f}° away from it and is at least {departure_strength:g}% strong, so "
             f"that its direction is measured; its card has an orange border. Each card gives the local time at LCO, the "
             f"altitudes of the Sun and the Moon, and the angle from the Sun, the horizon and the Moon (when up) to g − I, the "
@@ -1550,6 +1566,21 @@ def figure_alignment_rose(fit: Dict, bin_width: float = 20.0) -> go.Figure:
                                       gridcolor=THEME["grid"], linecolor=THEME["axis"]),
                       bgcolor=THEME["surface"])
     return fig
+
+
+def _definitions_for(sources: Sequence[str], roses: bool, direction_scan: bool, browser: bool) -> str:
+    """The definitions of the quantities shown in a run: without the cards of plots that are not on the page, and without
+    the sentences about sources of exposures that are not used (tagged ``<span data-sources="...">``)"""
+    sources = set(sources) | ({"joint"} if len(set(sources)) > 1 else set())
+    cards = {"Direction rose": roses, "Geometry of the sky gradient": direction_scan and "twilight" in sources,
+             "Maps across the IFU": browser, "Twilight I applied to other sources": "twilight" in sources and bool({"dome", "science"} & sources)}
+    definitions = _without_cards(DEFINITIONS, [title for title, shown in cards.items() if not shown])
+
+    def keep(match):
+        return match.group(2) if set(match.group(1).split()) & sources else ""
+
+    definitions = re.sub(r'<span data-sources="([^"]+)">(.*?)</span>', keep, definitions, flags=re.S)
+    return re.sub(r"[ \t]*\n[ \t]*(?=\n)", "", definitions)
 
 
 def _without_cards(definitions: str, titles: Sequence[str]) -> str:
@@ -1756,8 +1787,8 @@ def qa_instrument_gradient(twilight=None, dome=None, science=None, breaks: Seque
                 f"<h3>Instrument gradient I night by night</h3><p>One instrument gradient I fixed in the IFU per night (filled) with the sky "
                 f"model shared by all the nights; a jump marks a change of the instrument, the dotted lines are the breaks. For each "
                 f"exposure, spread within its night: the measured gradient (g, gray dots), g minus the I of its night (g − I, open "
-                f"circles) and, in the direction panel, the direction of its sky gradient (crosses: Sun for twilights, horizon for "
-                f"dome flats and science frames). A sky gradient left in g − I follows the crosses.{nightly_note}</p>"
+                f"circles) and, in the direction panel, the direction of its sky gradient (crosses: {_sky_nouns(subset)}). A sky "
+                f"gradient left in g − I follows the crosses.{nightly_note}</p>"
                 f'<div class="chart" data-fig="nightly|{group}|{channel}"></div>'
                 f"<h3>Direction of g and g − I</h3><p>After a correct instrument gradient I is removed, g − I keeps its "
                 f"direction relative to the sky (R near 1) instead of the IFU. The plot below gives the fit residual of each exposure, "
@@ -1793,10 +1824,9 @@ def qa_instrument_gradient(twilight=None, dome=None, science=None, breaks: Seque
              "twilights and dome flats the K-mirror does not move, so only science frames tell an IFU-fixed gradient from one fixed "
              "before the K-mirror (flagged as degenerate otherwise). Every quantity is defined under "
              '<a href="#definitions">How the quantities are computed</a>.</p>')
+    browser = epoch_browser(browser_fits, positions, epochs)
     body = (PAGE_STYLE + ("".join(sections) or "<p>No model with an instrument gradient could be fitted.</p>")
-            + epoch_browser(browser_fits, positions, epochs)
-            + _without_cards(DEFINITIONS, [title for title, shown in (("Direction rose", roses), ("Geometry of the sky gradient", direction_scan))
-                                           if not shown]))
+            + browser + _definitions_for(list(sources), roses, direction_scan, bool(browser)))
     report = write_dashboard(os.path.join(output_dir, f"{name}.html"), "LVM Instrument Gradient", "LVM DRP · fiber flats · IFU gradient",
                              intro, meta, tiles, body, figures, "lvmdrp.qa.ifu_gradient.qa_instrument_gradient")
     log.info(f"written instrument gradient dashboard to {report}")
