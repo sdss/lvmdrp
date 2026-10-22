@@ -108,7 +108,10 @@ DEFINITIONS = r"""<section id="definitions">
   <div class="defs">
     <div class="def">
       <h3>Measured gradient</h3>
-      <p>The plane fitted across the science IFU with the spectrograph factors (pipeline <code>IFUGradient</code>, terms 1, \(y\), \(x\)),
+      <p>The gradients multiply the fiber fluxes, and \(\vec g\) is the gradient of the logarithm of the fitted plane at the IFU
+      center, so the gradients of terms that multiply add up as vectors there: subtracting \(\vec I\) from \(\vec g\) is
+      dividing the measured illumination by the instrument model, up to the curvature of their product (second order, under
+      0.04% for these gradients). The plane fitted across the science IFU with the spectrograph factors (pipeline <code>IFUGradient</code>, terms 1, \(y\), \(x\)),
       expressed as the change from the IFU center to its edge, of radius \(\rho\), relative to the mean level \(c_0\). Twilights and dome
       flats: the coefficients that <code>fit_fiberflat</code> removed from each exposure (<code>FIBERFLAT GCOEFF</code> of the per-exposure
       flats). Science frames: the median over the reliable sky lines and continuum windows of the flat field QA of each lvmFrame. Strength and
@@ -213,8 +216,9 @@ DEFINITIONS = r"""<section id="definitions">
       relative to the instrument gradient; twilights of at least 9&nbsp;s when possible), the planes of the measured gradient,
       of the instrument model at that exposure and of their difference, evaluated at the science IFU fibers with the positions
       \((x, y)\) scaled to the IFU edge, in % relative to the mean. They are planes because each exposure only keeps the plane
-      that the pipeline fitted, not the fluxes of the fibers.</p>
-      <div class="eq">\[ v(x, y) = g_x\,\frac{x}{\rho} + g_y\,\frac{y}{\rho}, \qquad \vec g \in \left\{\vec g_e,\ \vec m^{I}_e,\ \vec g_e - \vec m^{I}_e\right\}, \qquad \vec m^{I}_e = R(s\,\varphi_e)\,\vec I_{k(e)} \]</div>
+      that the pipeline fitted, not the fluxes of the fibers. The last map divides the measured illumination by the instrument
+      model; its arrow and caption give \(\vec g_e - \vec m^{I}_e\), the gradient of that ratio at the center.</p>
+      <div class="eq">\[ \begin{gathered} G(x, y) = 1 + \vec g \cdot \frac{(x, y)}{\rho}, \qquad \text{maps: } G_{\vec g_e} - 1,\quad G_{\vec m^{I}_e} - 1,\quad \frac{G_{\vec g_e}}{G_{\vec m^{I}_e}} - 1 \\ \vec m^{I}_e = R(s\,\varphi_e)\,\vec I_{k(e)}, \qquad \nabla \ln \frac{G_{\vec g_e}}{G_{\vec m^{I}_e}}\Big|_{0} = \vec g_e - \vec m^{I}_e \end{gathered} \]</div>
     </div>
     <div class="def">
       <h3>Geometry of the sky gradient</h3>
@@ -983,7 +987,10 @@ def figure_nightly_instrument(fits: Dict[str, Dict], breaks: Sequence[int] = ())
 
     The error bars are the jackknife errors over nights when a segment has at
     least 3 nights, else the formal errors, which ignore that the exposures of
-    a night share their errors.
+    a night share their errors. The open circles are the gradient of each
+    exposure minus the instrument gradient of its night (g - I, spread within
+    the night), and the crosses the direction of its sky gradient: the Sun for
+    twilights, the horizon for dome flats and science frames.
     """
     fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.08)
     for i, (label, fit) in enumerate(fits.items()):
@@ -1003,9 +1010,33 @@ def figure_nightly_instrument(fits: Dict[str, Dict], breaks: Sequence[int] = ())
         fig.add_trace(go.Scatter(x=instrument["mjd_first"], y=instrument["direction"], name=label, showlegend=False,
                                  error_y=dict(type="data", array=np.minimum(direction_err, 180), visible=True, thickness=1),
                                  hovertemplate="MJD %{customdata[0]:.0f} · %{customdata[1]} exposures<br>%{y:.0f}°<extra></extra>", **common), row=2, col=1)
+        # g - I of each exposure with the I of its night, spread within the night so they don't overlap
+        data = fit["data"]
+        if "inst_x" in data.columns and len(data):
+            rank = data.groupby("mjd").cumcount().to_numpy()
+            size = data.groupby("mjd")["mjd"].transform("size").to_numpy()
+            x = data["mjd"].to_numpy(float) + 0.6 * ((rank + 1) / (size + 1) - 0.5)
+            rx, ry = data["gx"] - data["inst_x"], data["gy"] - data["inst_y"]
+            custom = np.stack([data["mjd"].astype(int), data["expnum"].astype(int)], axis=-1)
+            exposures = dict(mode="markers", legendgroup="g − I", customdata=custom,
+                             marker=dict(size=5, color=SERIES[1], opacity=0.55, symbol="circle-open", line=dict(width=1.2)))
+            fig.add_trace(go.Scatter(x=x, y=np.hypot(rx, ry), name="g − I per exposure, I of its night",
+                                     hovertemplate="MJD %{customdata[0]} · exposure %{customdata[1]}<br>g − I %{y:.2f}%<extra></extra>",
+                                     **exposures), row=1, col=1)
+            fig.add_trace(go.Scatter(x=x, y=np.degrees(np.arctan2(ry, rx)), name="g − I", showlegend=False,
+                                     hovertemplate="MJD %{customdata[0]} · exposure %{customdata[1]}<br>g − I towards %{y:.0f}°<extra></extra>",
+                                     **exposures), row=2, col=1)
+            reference = np.array([data[EXAMPLE_REFERENCE[s]].iloc[j] if EXAMPLE_REFERENCE.get(s) in data.columns else np.nan
+                                  for j, s in enumerate(data["source"])], dtype=float)
+            nouns = sorted({"Sun" if EXAMPLE_REFERENCE.get(s) == "dir_sun" else "horizon" for s in set(data["source"])})
+            if np.isfinite(reference).any():
+                fig.add_trace(go.Scatter(x=x, y=reference, mode="markers", name=f"towards the {' or '.join(nouns)}", customdata=custom,
+                                         marker=dict(size=4, symbol="x-thin", color=THEME["muted"], line=dict(width=1, color=THEME["muted"])),
+                                         hovertemplate="MJD %{customdata[0]} · exposure %{customdata[1]}<br>sky towards %{y:.0f}°<extra></extra>"),
+                              row=2, col=1)
     for mjd in breaks:
         fig.add_vline(x=mjd, line=dict(color=THEME["muted"], width=1, dash="dot"))
-    fig.update_layout(base_layout(520))
+    fig.update_layout(base_layout(560))
     style_axes(fig)
     fig.update_yaxes(title_text="Strength (%)", rangemode="tozero", row=1, col=1)
     fig.update_yaxes(title_text="Direction (°)", range=[-180, 180], dtick=90, row=2, col=1)
@@ -1163,6 +1194,9 @@ def figure_ifu_examples(fit: Dict, positions: Tuple[np.ndarray, np.ndarray], n: 
         vectors.append(vectors[0] - vectors[1])
         for c, ((label, _, _), vector) in enumerate(zip(panels, vectors), start=1):
             values = vector[0] * x + vector[1] * y
+            if c == 3:
+                # the gradients multiply: g - I is the measured illumination divided by the instrument model
+                values = 100 * ((1 + (row.gx * x + row.gy * y) / 100) / (1 + (row.inst_x * x + row.inst_y * y) / 100) - 1)
             fig.add_trace(go.Scatter(x=x, y=y, mode="markers", showlegend=False, hoverinfo="skip",
                                      marker=dict(size=3, color=values, coloraxis="coloraxis2" if c == 3 else "coloraxis")), row=r, col=c)
             if c < 3:
@@ -1279,14 +1313,17 @@ BROWSER_SCRIPT = """<script>
   function wrap(a) { return ((a + 180) % 360 + 360) % 360 - 180; }
   function fmt(vx, vy) { const [s, d] = polar(vx, vy); return s.toFixed(2) + "% @ " + d.toFixed(0) + DEG; }
 
-  function draw(canvas, vx, vy, limit, arrows) {
+  function draw(canvas, vx, vy, limit, arrows, divide) {
     const ratio = window.devicePixelRatio || 1, size = 120;
     canvas.width = size * ratio; canvas.height = size * ratio;
     const ctx = canvas.getContext("2d");
     ctx.scale(ratio, ratio);
     const scale = size / 2 / 1.25, cx = size / 2, cy = size / 2, radius = Math.max(0.8, 0.5 * DATA.spacing * scale);
     for (let i = 0; i < DATA.x.length; i++) {
-      const v = vx * DATA.x[i] + vy * DATA.y[i];
+      // the gradients multiply: the g - I map is the measured illumination divided by the instrument model
+      const v = divide ? 100 * ((1 + (divide[0] * DATA.x[i] + divide[1] * DATA.y[i]) / 100) /
+                                (1 + (divide[2] * DATA.x[i] + divide[3] * DATA.y[i]) / 100) - 1)
+                       : vx * DATA.x[i] + vy * DATA.y[i];
       ctx.fillStyle = colormap(0.5 + 0.5 * v / limit);
       ctx.beginPath();
       ctx.arc(cx + DATA.x[i] * scale, cy - DATA.y[i] * scale, radius, 0, 2 * Math.PI);
@@ -1358,9 +1395,10 @@ BROWSER_SCRIPT = """<script>
         ["g " + fmt(gx, gy), gx, gy, limit, [[polar(gx, gy)[1], ink, false]]],
         ["I " + fmt(ix, iy), ix, iy, limit, [[polar(ix, iy)[1], ink, false]]],
         ["g " + MINUS + " I " + fmt(rx, ry) + (offset === null ? "" : "<br>" + offset.toFixed(0) + DEG + " from the " + set.reference),
-         rx, ry, limitRes, [[dSun, css("--warn"), true], [dHorizon, css("--ok"), true], [moonAlt !== null && moonAlt > 0 ? dMoon : null, css("--muted"), true]]],
+         rx, ry, limitRes, [[dSun, css("--warn"), true], [dHorizon, css("--ok"), true], [moonAlt !== null && moonAlt > 0 ? dMoon : null, css("--muted"), true]],
+         [gx, gy, ix, iy]],
       ];
-      for (const [caption, vx, vy, lim, arrows] of specs) {
+      for (const [caption, vx, vy, lim, arrows, divide] of specs) {
         const panel = document.createElement("div");
         panel.className = "eb-panel";
         const canvas = document.createElement("canvas");
@@ -1369,7 +1407,7 @@ BROWSER_SCRIPT = """<script>
         label.className = "eb-caption"; label.innerHTML = caption;
         panel.appendChild(label);
         panels.appendChild(panel);
-        draw(canvas, vx, vy, lim, arrows);
+        draw(canvas, vx, vy, lim, arrows, divide);
       }
       grid.appendChild(card);
     }
@@ -1457,7 +1495,7 @@ def epoch_browser(fits: Dict[Tuple[str, str], Dict], positions: Tuple[np.ndarray
     return (BROWSER_STYLE
             + f'<section id="epoch-browser"><h2>{nouns.capitalize()} by calibration epoch</h2>'
             f"<p>Every exposure of the chosen calibration epoch across the science IFU: the plane measured by the pipeline (g), the "
-            f"instrument model of the best fit at that exposure (I) and their difference (g − I), with the arrows of the Sun, the "
+            f"instrument model of the best fit at that exposure (I) and the measured illumination divided by it (g − I), with the arrows of the Sun, the "
             f"horizon and the Moon in the last panel. g and I share a color scale and g − I has its own, both set by the exposures "
             f"of the epoch shown. Exposures are assigned to the epoch whose {nouns} MJDs include their night, or else to the last "
             f"epoch before it.</p>"
@@ -1698,8 +1736,11 @@ def qa_instrument_gradient(twilight=None, dome=None, science=None, breaks: Seque
                 f"<h3>Instrument gradient of the best model ({escape(INSTRUMENT_FRAMES[best.frame][0])}, sky {escape(best.sky)}, "
                 f"breaks {escape(str(best.breaks))})</h3>"
                 f'<div class="ig-pair">{_instrument_table(fit["instrument"])}<div class="chart" data-fig="vectors|{group}|{channel}"></div></div>'
-                f"<h3>Instrument gradient night by night</h3><p>One IFU-fixed instrument gradient per night with the sky model "
-                f"shared by all the nights; a jump marks a change of the instrument, the dotted lines are the breaks.</p>"
+                f"<h3>Instrument gradient night by night</h3><p>One IFU-fixed instrument gradient per night (I, filled) with the sky "
+                f"model shared by all the nights; a jump marks a change of the instrument, the dotted lines are the breaks. The open "
+                f"circles are each exposure's gradient minus the I of its night (g − I), spread within the night, and the crosses in "
+                f"the direction panel the direction of its sky gradient (Sun for twilights, horizon for dome flats and science "
+                f"frames): a sky gradient left in g − I follows the crosses.</p>"
                 f'<div class="chart" data-fig="nightly|{group}|{channel}"></div>'
                 f"<h3>Direction of the residual gradients</h3><p>After a correct instrument gradient is removed, the rest keeps its "
                 f"direction relative to the sky (R near 1) instead of the IFU.</p>"
@@ -1711,7 +1752,7 @@ def qa_instrument_gradient(twilight=None, dome=None, science=None, breaks: Seque
                 f'<div class="chart" data-fig="rose|{group}|{channel}"></div>'
                 + (f"<h3>Examples across the science IFU</h3><p>A few exposures chosen to span the {_reference_noun(subset)} across "
                    f"the IFU. For each: the plane measured by the pipeline (g), the instrument model of the best fit at that exposure (I) "
-                   f"and their difference (g − I), evaluated at the fiber positions in % relative to the mean. g and I share a color scale; g − I has its own, as it is much weaker. The "
+                   f"and the measured illumination divided by the instrument model (g − I), in % relative to the mean at the fiber positions. g and I share a color scale; g − I has its own, as it is much weaker. The "
                    f"black arrows give the direction of g and I; the dotted ones in the last panel point to the Sun, the horizon and "
                    f"the Moon (when up). A sky gradient makes the g − I ramp rise along its arrow.</p>"
                    f'<div class="chart" data-fig="ifu|{group}|{channel}"></div>' if examples_figure is not None else "")

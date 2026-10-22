@@ -161,10 +161,25 @@ def test_alignment_rose_and_ifu_examples():
     fig = ig.figure_ifu_examples(fit, (x, y), n=3)
     maps = [t for t in fig.data if t.mode == "markers"]
     assert len(maps) == 9
-    # the last panel of each row is the first minus the second
+    # the last panel of each row is the measured illumination divided by the instrument model
     for row in range(3):
         g, inst, res = (np.asarray(maps[3 * row + c].marker.color) for c in range(3))
-        assert np.allclose(res, g - inst)
+        assert np.allclose(res, 100 * ((1 + g / 100) / (1 + inst / 100) - 1))
+        assert np.allclose(res, g - inst, atol=0.5)
+
+
+def test_nightly_figure_shows_g_minus_i():
+    data = _gradients()
+    fit = ig.fit_gradient_model(data, frame="ifu", breaks="nights", crossval=False)
+    fig = ig.figure_nightly_instrument({"IFU": fit}, [60465])
+    names = [t.name for t in fig.data]
+    assert "g − I per exposure, I of its night" in names and "towards the Sun" in names
+    exposures = [t for t in fig.data if t.name == "g − I per exposure, I of its night"][0]
+    assert len(exposures.y) == len(fit["data"])
+    # with the I of each night removed, what is left points to the Sun
+    direction = [t for t in fig.data if t.name == "g − I"][0].y
+    offset = np.abs(ig._wrap_angle(np.asarray(direction) - fit["data"]["dir_sun"].to_numpy()))
+    assert np.median(offset) < 3 and offset.max() < 15
 
 
 def test_calibration_epoch_of():
