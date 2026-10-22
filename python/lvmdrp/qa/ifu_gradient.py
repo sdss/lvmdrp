@@ -163,7 +163,7 @@ DEFINITIONS = r"""<section id="definitions">
       The parameters that act on one night only (sky amplitudes per exposure or per night, the instrument gradient of a one-night segment)
       are projected out night by night, which gives the same solution. The fit residual \(\vec r_e\) is what neither I nor the
       sky explains; <strong>rms</strong> is its size per exposure, adding the two components; compare it with the spread of the
-      gradients themselves. The plot next to the direction table gives \(|\vec r_e|\) of each exposure against the night.</p>
+      gradients themselves. The plot under the direction table gives \(|\vec r_e|\) of each exposure against the night.</p>
       <div class="eq">\[ \vec r_e = \vec g_e - \vec m^{I}_e - \vec m^{\mathrm{sky}}_e, \qquad \mathrm{rms} = \sqrt{\frac{1}{n}\sum_e \left|\vec r_e\right|^2}, \qquad \mathrm{RSS} = \sum_e \left|\vec r_e\right|^2 \]</div>
     </div>
     <div class="def">
@@ -1629,9 +1629,9 @@ def qa_instrument_gradient(twilight=None, dome=None, science=None, breaks: Seque
                 f"frames): a sky gradient left in g − I follows the crosses.</p>"
                 f'<div class="chart" data-fig="nightly|{group}|{channel}"></div>'
                 f"<h3>Direction of g and g − I</h3><p>After a correct instrument gradient I is removed, g − I keeps its "
-                f"direction relative to the sky (R near 1) instead of the IFU. The plot gives the fit residual of each exposure, "
+                f"direction relative to the sky (R near 1) instead of the IFU. The plot below gives the fit residual of each exposure, "
                 f"|r| = |g − I − sky|, against the night, to spot nights the model does not describe.</p>"
-                f'<div class="ig-pair">{_alignment_table(alignment)}<div class="chart" data-fig="residuals|{group}|{channel}"></div></div>'
+                f'{_alignment_table(alignment)}<div class="chart" data-fig="residuals|{group}|{channel}"></div>'
                 + (f"<p>Angle from each sky direction to the measured gradient (g, gray) and to the gradient minus the instrument model "
                    f"(g − I, blue), as the fraction of exposures per 20° bin. If what is left after removing the instrument gradient is a "
                    f"sky gradient, g − I piles up near 0° for its sky direction: the Sun in twilights, the horizon (airglow) or the Moon "
