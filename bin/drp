@@ -973,9 +973,10 @@ def qa_domes_cli(epoch, mjd, mjd_list, mjd_range, epochs_file, channels, drpver,
 @click.option('-k', '--kmirror', type=str, default=None, help="K-mirror relation (a kmirror_pa.json or a drpall file), for the frames without POSCIPA and the sign of the field angle")
 @click.option('-d', '--drpver', type=str, default=None, help='Pipeline version of the lvmFrames of --science. Defaults to the one in the summary')
 @click.option('--redux-dir', type=str, default=None, help='Reductions root directory of the lvmFrames. Defaults to $LVM_SPECTRO_REDUX')
+@click.option('--roses', is_flag=True, default=False, help='Add the polar histograms of the direction of g and g - I relative to the Sun, the horizon and the Moon')
 @click.option('-n', '--name', type=str, default="instrument_gradient", help='Name of the dashboard and tables')
 @click.option('-o', '--output-dir', type=str, default=None, help="Directory of the dashboard and tables. Defaults to qa/fiberflat/{name} in the master calibrations directory")
-def qa_instrument_gradient_cli(twilight, dome, science, breaks, interventions, epochs_file, channels, kmirror, drpver, redux_dir, name, output_dir):
+def qa_instrument_gradient_cli(twilight, dome, science, breaks, interventions, epochs_file, channels, kmirror, drpver, redux_dir, roses, name, output_dir):
     """Fit the gradients across the science IFU of twilights, dome flats and science frames as an instrument gradient plus a sky gradient, and write an HTML dashboard.
 
     Compares an instrument gradient fixed in the IFU, one fixed before the K-mirror and none, with and
@@ -995,7 +996,7 @@ def qa_instrument_gradient_cli(twilight, dome, science, breaks, interventions, e
         click.echo(f"science frame gradients written to {science}")
     try:
         result = qa_instrument_gradient(twilight=twilight, dome=dome, science=science, breaks=breaks, channels=channels,
-                                        kmirror=kmirror, epochs=load_calibration_epochs(epochs_file), output_dir=output_dir, name=name)
+                                        kmirror=kmirror, epochs=load_calibration_epochs(epochs_file), roses=roses, output_dir=output_dir, name=name)
     except (FileNotFoundError, ValueError) as e:
         raise click.UsageError(str(e))
     click.echo(f"dashboard written to {result['report']}")

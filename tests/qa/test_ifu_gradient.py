@@ -69,8 +69,8 @@ def test_fit_recovers_instrument_and_sky():
     assert (inst[["gx_err", "gy_err"]].to_numpy() < 0.1).all()
     # the residual gradients point to the Sun once the instrument gradient is removed
     alignment = ig.residual_alignment(fit).set_index(["gradient", "frame"])
-    assert alignment.loc[("g - I", "Sun"), "R"] > 0.95
-    assert alignment.loc[("g", "IFU"), "R"] > alignment.loc[("g - I", "IFU"), "R"]
+    assert alignment.loc[("g − I", "Sun"), "R"] > 0.95
+    assert alignment.loc[("g", "IFU"), "R"] > alignment.loc[("g − I", "IFU"), "R"]
 
 
 def test_compare_models_prefers_the_true_one():
@@ -121,7 +121,7 @@ def test_cross_check_with_science():
     assert check["n"] == len(science)
     assert check["sky_corrected"] < 0.1 < check["sky_raw"]
     alignment = check["alignment"].set_index(["gradient", "frame"])
-    assert alignment.loc[("g", "Horizon"), "R"] > 0.95
+    assert alignment.loc[("g − I", "Horizon"), "R"] > 0.95 > alignment.loc[("g", "Horizon"), "R"]
 
 
 def test_qa_instrument_gradient(tmp_path):
@@ -136,6 +136,10 @@ def test_qa_instrument_gradient(tmp_path):
     assert ("science", "b") in result["cross_checks"]
     html = open(result["report"]).read()
     assert "LVM Instrument Gradient" in html and "vectors|twilight|b" in html
+    # the direction roses are optional
+    assert "rose|twilight|b" not in result["figures"] and "Direction rose" not in html
+    result = ig.qa_instrument_gradient(twilight=twilight, breaks=[60465], channels="b", roses=True, output_dir=str(tmp_path / "roses"))
+    assert "rose|twilight|b" in result["figures"] and "Direction rose" in open(result["report"]).read()
     assert (tmp_path / "out" / "instrument_gradient_models.csv").exists()
 
 
@@ -171,10 +175,10 @@ def test_alignment_rose_and_ifu_examples():
 def test_nightly_figure_shows_g_minus_i():
     data = _gradients()
     fit = ig.fit_gradient_model(data, frame="ifu", breaks="nights", crossval=False)
-    fig = ig.figure_nightly_instrument({"IFU": fit}, [60465])
+    fig = ig.figure_nightly_instrument({"I per night": fit}, [60465])
     names = [t.name for t in fig.data]
-    assert "g − I per exposure, I of its night" in names and "towards the Sun" in names
-    exposures = [t for t in fig.data if t.name == "g − I per exposure, I of its night"][0]
+    assert "g − I per exposure" in names and "I per night" in names and "towards the Sun" in names
+    exposures = [t for t in fig.data if t.name == "g − I per exposure"][0]
     assert len(exposures.y) == len(fit["data"])
     # with the I of each night removed, what is left points to the Sun
     direction = [t for t in fig.data if t.name == "g − I"][0].y

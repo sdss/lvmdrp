@@ -161,9 +161,10 @@ DEFINITIONS = r"""<section id="definitions">
       <h3>Fit and residual rms</h3>
       <p>All the exposures of a channel are fitted at once by linear least squares on the \(N = 2n\) components of the \(n\) gradients.
       The parameters that act on one night only (sky amplitudes per exposure or per night, the instrument gradient of a one-night segment)
-      are projected out night by night, which gives the same solution. <strong>rms</strong> is the residual per exposure, adding the
-      two components; compare it with the spread of the gradients themselves.</p>
-      <div class="eq">\[ \vec r_e = \vec g_e - \vec m_e, \qquad \mathrm{rms} = \sqrt{\frac{1}{n}\sum_e \left|\vec r_e\right|^2}, \qquad \mathrm{RSS} = \sum_e \left|\vec r_e\right|^2 \]</div>
+      are projected out night by night, which gives the same solution. The fit residual \(\vec r_e\) is what neither I nor the
+      sky explains; <strong>rms</strong> is its size per exposure, adding the two components; compare it with the spread of the
+      gradients themselves. The plot next to the direction table gives \(|\vec r_e|\) of each exposure against the night.</p>
+      <div class="eq">\[ \vec r_e = \vec g_e - \vec m^{I}_e - \vec m^{\mathrm{sky}}_e, \qquad \mathrm{rms} = \sqrt{\frac{1}{n}\sum_e \left|\vec r_e\right|^2}, \qquad \mathrm{RSS} = \sum_e \left|\vec r_e\right|^2 \]</div>
     </div>
     <div class="def">
       <h3>BIC and &Delta;BIC</h3>
@@ -180,7 +181,7 @@ DEFINITIONS = r"""<section id="definitions">
       <div class="eq">\[ \mathrm{CV\ rms} = \sqrt{\frac{1}{n}\sum_\nu \sum_{e \in \nu} \left|\vec g_e - \vec m_e^{(-\nu)}\right|^2} \]</div>
     </div>
     <div class="def">
-      <h3>Errors of the instrument gradient</h3>
+      <h3>Errors of I</h3>
       <p>Jackknife over nights: the scatter of the instrument gradient fitted without each of the \(M\) nights, which accounts for the
       errors shared by the exposures of a night. With fewer than 3 nights in a segment the formal least squares error is shown instead,
       marked with *; it assumes independent exposures and underestimates the error. Strength and direction errors propagate those of
@@ -195,7 +196,7 @@ DEFINITIONS = r"""<section id="definitions">
       <div class="eq">\[ \mathrm{rank}(A) < k \quad\text{or}\quad \max_k \sigma_{\mathrm{formal}}(I_k) > \tfrac12\,\mathrm{rms} \quad\text{or}\quad \text{K-m.} < 1^\circ \]</div>
     </div>
     <div class="def">
-      <h3>Direction of the residual gradients</h3>
+      <h3>Direction of g and g &minus; I</h3>
       <p>Mean resultant length \(R\) and circular mean of the directions of the measured gradient (g) and of the gradient minus the
       instrument model (g &minus; I), in the IFU and relative to each sky direction. \(R=1\) for a fixed direction, near 0 for random ones;
       p is the Rayleigh test of uniform directions. After a correct instrument gradient is removed, what is left is the sky gradient, so R
@@ -814,7 +815,7 @@ def residual_alignment(fit: Dict, references: Sequence[str] = ("dir_sun", "dir_h
     """
     data = fit["data"]
     rows = []
-    for label, gx, gy in (("g", data["gx"], data["gy"]), ("g - I", data["gx"] - data["inst_x"], data["gy"] - data["inst_y"])):
+    for label, gx, gy in (("g", data["gx"], data["gy"]), ("g − I", data["gx"] - data["inst_x"], data["gy"] - data["inst_y"])):
         direction = np.degrees(np.arctan2(np.asarray(gy, dtype=float), np.asarray(gx, dtype=float)))
         for frame, reference in [("IFU", None)] + [(ref.replace("dir_", "").capitalize(), ref) for ref in references if ref in data.columns]:
             angles = direction if reference is None else _wrap_angle(direction - data[reference].to_numpy(float))
@@ -920,8 +921,9 @@ def cross_check(data: pd.DataFrame, fit: Dict, sky: Dict[str, str]) -> Dict:
     dict
         n, rms of the gradients around zero (raw) and after the correction
         (corrected), rms of the sky-only fit without (sky_raw) and with the
-        correction (sky_corrected), and the alignment of the corrected
-        gradients (see :func:`residual_alignment`).
+        correction (sky_corrected), and the alignment of the measured gradients
+        (g) and of the gradients minus the twilight instrument gradient (g − I),
+        see :func:`residual_alignment`.
     """
     source = data["source"].iloc[0]
     predicted = predict_instrument(data, fit)
@@ -932,12 +934,11 @@ def cross_check(data: pd.DataFrame, fit: Dict, sky: Dict[str, str]) -> Dict:
     corrected["gx"], corrected["gy"] = predicted["gx"] - predicted["inst_x"], predicted["gy"] - predicted["inst_y"]
     raw_fit = fit_gradient_model(predicted, frame="none", sky={source: sky}, crossval=False)
     corrected_fit = fit_gradient_model(corrected, frame="none", sky={source: sky}, crossval=False)
-    corrected_fit["data"]["inst_x"], corrected_fit["data"]["inst_y"] = 0.0, 0.0
     return {"n": len(predicted),
             "raw": float(np.sqrt(np.mean(predicted["gx"] ** 2 + predicted["gy"] ** 2))),
             "corrected": float(np.sqrt(np.mean(corrected["gx"] ** 2 + corrected["gy"] ** 2))),
             "sky_raw": raw_fit["rms"], "sky_corrected": corrected_fit["rms"],
-            "alignment": residual_alignment(corrected_fit)}
+            "alignment": residual_alignment({"data": predicted})}
 
 
 # ---------------------------------------------------------------------------
@@ -975,7 +976,7 @@ def figure_vectors(fit: Dict, title: str = None) -> go.Figure:
     limit = float(np.nanpercentile(np.abs(np.r_[data["gx"], data["gy"]]), 98)) * 1.15 if len(data) else 1.0
     fig.update_layout(base_layout(440, xaxis_title="g<sub>x</sub> (%)", yaxis_title="g<sub>y</sub> (%)", title=title,
                                   legend=dict(orientation="v", x=1.02, y=1, xanchor="left", yanchor="top", font=dict(size=11, color=THEME["ink2"]),
-                                              bgcolor="rgba(0,0,0,0)", title=dict(text="Segment"))))
+                                              bgcolor="rgba(0,0,0,0)", title=dict(text="I per segment<br>(dots: g)"))))
     style_axes(fig)
     fig.update_xaxes(range=[-limit, limit], zeroline=True, constrain="domain")
     fig.update_yaxes(range=[-limit, limit], zeroline=True, scaleanchor="x", scaleratio=1, constrain="domain")
@@ -1020,7 +1021,7 @@ def figure_nightly_instrument(fits: Dict[str, Dict], breaks: Sequence[int] = ())
             custom = np.stack([data["mjd"].astype(int), data["expnum"].astype(int)], axis=-1)
             exposures = dict(mode="markers", legendgroup="g − I", customdata=custom,
                              marker=dict(size=5, color=SERIES[1], opacity=0.55, symbol="circle-open", line=dict(width=1.2)))
-            fig.add_trace(go.Scatter(x=x, y=np.hypot(rx, ry), name="g − I per exposure, I of its night",
+            fig.add_trace(go.Scatter(x=x, y=np.hypot(rx, ry), name="g − I per exposure",
                                      hovertemplate="MJD %{customdata[0]} · exposure %{customdata[1]}<br>g − I %{y:.2f}%<extra></extra>",
                                      **exposures), row=1, col=1)
             fig.add_trace(go.Scatter(x=x, y=np.degrees(np.arctan2(ry, rx)), name="g − I", showlegend=False,
@@ -1053,7 +1054,7 @@ def figure_direction_scan(scan: pd.DataFrame) -> go.Figure:
         fig.add_trace(go.Scatter(x=sel["offset"], y=sel["rms_inst"], mode="lines", name=f"sky + I{suffix}", line=dict(color=SERIES[0], dash=dash)))
         fig.add_trace(go.Scatter(x=sel["offset"], y=sel["rms_sky"], mode="lines", name=f"sky only{suffix}", line=dict(color=SERIES[1], dash=dash)))
     fig.add_vline(x=0, line=dict(color=THEME["muted"], width=1, dash="dot"))
-    fig.update_layout(base_layout(420, xaxis_title="Offset added to the sky direction (°)", yaxis_title="Residual rms (%)"))
+    fig.update_layout(base_layout(420, xaxis_title="Offset added to the direction of the Sun (°)", yaxis_title="rms (%)"))
     style_axes(fig)
     fig.update_xaxes(dtick=45)
     fig.update_yaxes(rangemode="tozero")
@@ -1066,7 +1067,7 @@ def figure_residuals(fit: Dict) -> go.Figure:
     fig = go.Figure(go.Scatter(x=data["mjd"], y=np.hypot(data["res_x"], data["res_y"]), mode="markers",
                                marker=dict(size=6, color=SERIES[0], opacity=0.6),
                                customdata=data["expnum"], hovertemplate="exposure %{customdata}<br>%{y:.2f}%<extra></extra>"))
-    fig.update_layout(base_layout(320, xaxis_title="MJD", yaxis_title="|residual| (%)"))
+    fig.update_layout(base_layout(320, xaxis_title="MJD", yaxis_title="|r| = |g − I − sky| (%)"))
     style_axes(fig)
     fig.update_yaxes(rangemode="tozero")
     return fig
@@ -1077,6 +1078,9 @@ FRAME_SHORT = {"none": "none", "ifu": "IFU", "kmirror": "K-mirror +φ", "kmirror
 
 # sky directions drawn in the dashboard: column, label and color
 SKY_REFERENCES = (("dir_sun", "Sun", SERIES[1]), ("dir_horizon", "Horizon", SERIES[2]), ("dir_moon", "Moon", THEME["muted"]))
+
+# sky directions as written in the report: 'towards the Sun', 'from the horizon', ...
+SKY_NOUN = {"Sun": "the Sun", "Horizon": "the horizon", "Moon": "the Moon"}
 
 # reference sky direction of each source, used to choose the examples across the IFU
 EXAMPLE_REFERENCE = {"twilight": "dir_sun", "dome": "dir_horizon", "science": "dir_horizon"}
@@ -1211,11 +1215,11 @@ def figure_ifu_examples(fit: Dict, positions: Tuple[np.ndarray, np.ndarray], n: 
                 if not np.isfinite(direction) or (column == "dir_moon" and not getattr(row, "moon_alt", -1) > 0):
                     continue
                 ax, ay = _arrow(direction)
-                fig.add_trace(go.Scatter(x=ax, y=ay, mode="lines+markers", name=f"towards the {name.lower()}", legendgroup=name,
+                fig.add_trace(go.Scatter(x=ax, y=ay, mode="lines+markers", name=f"towards {SKY_NOUN[name]}", legendgroup=name,
                                          showlegend=r == 1 or name not in {t.legendgroup for t in fig.data if t.showlegend},
                                          line=dict(color=color, width=2, dash="dot"),
                                          marker=dict(size=[0, 9], symbol="arrow", angleref="previous", color=color),
-                                         hovertemplate=f"towards the {name.lower()} {direction:.0f}°<extra></extra>"), row=r, col=c)
+                                         hovertemplate=f"towards {SKY_NOUN[name]}: {direction:.0f}°<extra></extra>"), row=r, col=c)
     fig.update_layout(base_layout(260 * nrows + 90, margin=dict(l=16, r=16, t=90, b=16),
                                   legend=dict(orientation="h", x=0, y=0.995, yanchor="top", yref="container", font=dict(color=THEME["ink2"])),
                                   coloraxis=dict(colorscale=DIVERGING, cmin=-limit, cmax=limit,
@@ -1394,7 +1398,7 @@ BROWSER_SCRIPT = """<script>
       const specs = [
         ["g " + fmt(gx, gy), gx, gy, limit, [[polar(gx, gy)[1], ink, false]]],
         ["I " + fmt(ix, iy), ix, iy, limit, [[polar(ix, iy)[1], ink, false]]],
-        ["g " + MINUS + " I " + fmt(rx, ry) + (offset === null ? "" : "<br>" + offset.toFixed(0) + DEG + " from the " + set.reference),
+        ["g " + MINUS + " I " + fmt(rx, ry) + (offset === null ? "" : "<br>" + offset.toFixed(0) + DEG + " from " + (set.reference === "sun" ? "the Sun" : "the horizon")),
          rx, ry, limitRes, [[dSun, css("--warn"), true], [dHorizon, css("--ok"), true], [moonAlt !== null && moonAlt > 0 ? dMoon : null, css("--muted"), true]],
          [gx, gy, ix, iy]],
       ];
@@ -1517,7 +1521,7 @@ def figure_alignment_rose(fit: Dict, bin_width: float = 20.0) -> go.Figure:
     references = [(column, name, color) for column, name, color in SKY_REFERENCES
                   if column in data.columns and np.isfinite(data[column].astype(float)).sum() >= 3]
     fig = make_subplots(rows=1, cols=max(len(references), 1), specs=[[{"type": "polar"}] * max(len(references), 1)],
-                        subplot_titles=[name for _, name, _ in references] or ["no sky directions"])
+                        subplot_titles=[f"from {SKY_NOUN[name]}" for _, name, _ in references] or ["no sky directions"])
     # bins centered on 0, 20, ..., 340 degrees, so a gradient along the sky direction falls in one bin
     edges = np.arange(-bin_width / 2, 360 - bin_width / 2 + 1e-9, bin_width)
     centers = edges[:-1] + bin_width / 2
@@ -1532,7 +1536,7 @@ def figure_alignment_rose(fit: Dict, bin_width: float = 20.0) -> go.Figure:
             mean, length = _resultant_length(angle)
             fig.add_trace(go.Barpolar(r=counts / max(len(rows), 1), theta=centers, width=bin_width * 0.9, name=label, legendgroup=label,
                                       showlegend=k == 1, marker=dict(color=style["color"], opacity=0.75 if label == "g" else 0.85),
-                                      hovertemplate=f"{label}: %{{r:.0%}} at %{{theta:.0f}}° from the {name.lower()}"
+                                      hovertemplate=f"{label}: %{{r:.0%}} at %{{theta:.0f}}° from {SKY_NOUN[name]}"
                                                     f"<br>R = {length:.2f}, mean {mean:.0f}° (n = {len(rows)})<extra></extra>"), row=1, col=k)
     fig.update_layout(base_layout(400, margin=dict(l=32, r=32, t=96, b=24),
                                   legend=dict(orientation="h", x=0, y=0.99, yanchor="top", yref="container")))
@@ -1546,6 +1550,13 @@ def figure_alignment_rose(fit: Dict, bin_width: float = 20.0) -> go.Figure:
     return fig
 
 
+def _without_rose_card(definitions: str) -> str:
+    """The definitions without the card of the direction roses, when they are not shown"""
+    start = definitions.index('    <div class="def">\n      <h3>Direction rose</h3>')
+    end = definitions.index('    <div class="def">', start + 1)
+    return definitions[:start] + definitions[end:]
+
+
 def _reference_noun(data: pd.DataFrame) -> str:
     nouns = {"twilight": "direction of the Sun", "dome": "direction of the horizon", "science": "direction of the horizon"}
     return " and the ".join(dict.fromkeys(nouns[s] for s in EXAMPLE_REFERENCE if s in set(data["source"]))) or "sky direction"
@@ -1557,8 +1568,8 @@ def _comparison_table(table: pd.DataFrame) -> str:
     rows = [[escape(FRAME_SHORT[r.frame]), escape(label), escape(str(r.breaks)) + (" + drift" if r.drift else ""),
              str(r.k), _num(r.rms, ".2f"), _num(r.cv_rms, ".2f"), _num(r.dbic, ".0f"), "degenerate" if r.degenerate else ""]
             for r, label in zip(table.itertuples(), sky)]
-    return html_table([("Instrument", "frame of the instrument gradient (φ: K-mirror rotation)"), ("Sky", "direction (amplitude)"),
-                       ("Breaks", "where the instrument gradient may jump"), ("k", "parameters"), ("rms", "residual per exposure (%)"),
+    return html_table([("Frame of I", "frame of the instrument gradient I (φ: K-mirror rotation)"), ("Sky", "direction (amplitude)"),
+                       ("Breaks", "where I may jump"), ("k", "parameters"), ("rms", "fit residual r per exposure (%)"),
                        ("CV rms", "leave-one-night-out residual (%)"), ("ΔBIC", "from the best model"),
                        ("", "rank deficient, a poorly constrained segment, or a K-mirror frame with a fixed K-mirror")],
                       rows, numeric=[False, False, False, True, True, True, True, False])
@@ -1589,14 +1600,14 @@ def _instrument_table(instrument: pd.DataFrame) -> str:
 
 def _alignment_table(alignment: pd.DataFrame) -> str:
     rows = [[escape(r.gradient), escape(r.frame), _num(r.R, ".2f"), _num(r.mean, ".0f"), _num(r.p, ".1e"), str(r.n)] for r in alignment.itertuples()]
-    return html_table([("Gradient", "measured, or minus the instrument model"), ("Frame", "direction measured in the IFU or relative to"),
+    return html_table([("Gradient", "g: measured; g − I: minus the instrument gradient"), ("Relative to", "direction measured in the IFU or from a sky direction"),
                        ("R", "mean resultant length"), ("Mean (°)", "circular mean"), ("p", "Rayleigh test"), ("n", "")],
                       rows, numeric=[False, False, True, True, True, True])
 
 
 def qa_instrument_gradient(twilight=None, dome=None, science=None, breaks: Sequence[int] = None, channels: str = "brz",
-                           kmirror=None, skies: Dict[str, Dict] = None, epochs: Dict[int, Dict] = None, output_dir: str = None,
-                           name: str = "instrument_gradient") -> Dict:
+                           kmirror=None, skies: Dict[str, Dict] = None, epochs: Dict[int, Dict] = None, roses: bool = False,
+                           output_dir: str = None, name: str = "instrument_gradient") -> Dict:
     """Tests for an instrument gradient across the science IFU and writes a dashboard
 
     For each channel and source (twilight, dome, science, and all of them
@@ -1634,6 +1645,9 @@ def qa_instrument_gradient(twilight=None, dome=None, science=None, breaks: Seque
         Calibration epochs, to group the twilight and dome flat exposures of the
         maps by epoch. Default is the epochs file in lvmcore; without it, they
         are grouped by segment.
+    roses : bool, optional
+        Add the polar histograms of the direction of g and g - I relative to
+        each sky direction (see :func:`figure_alignment_rose`). Default is False.
     name : str, optional
         Name of the dashboard. Default is 'instrument_gradient'.
 
@@ -1689,11 +1703,12 @@ def qa_instrument_gradient(twilight=None, dome=None, science=None, breaks: Seque
             if group in BROWSER_SOURCES:
                 browser_fits[(group, channel)] = fit
             sky_model = skies[best.sky]
-            nightly = {"IFU": fit_gradient_model(subset, frame="ifu", sky=sky_model, breaks="nights")}
+            nightly = {"I per night": fit_gradient_model(subset, frame="ifu", sky=sky_model, breaks="nights")}
             figures[f"vectors|{group}|{channel}"] = figure_vectors(fit)
             figures[f"nightly|{group}|{channel}"] = figure_nightly_instrument(nightly, breaks)
             figures[f"residuals|{group}|{channel}"] = figure_residuals(fit)
-            figures[f"rose|{group}|{channel}"] = figure_alignment_rose(fit)
+            if roses:
+                figures[f"rose|{group}|{channel}"] = figure_alignment_rose(fit)
             examples_figure = figure_ifu_examples(fit, positions)
             if examples_figure is not None:
                 figures[f"ifu|{group}|{channel}"] = examples_figure
@@ -1730,27 +1745,28 @@ def qa_instrument_gradient(twilight=None, dome=None, science=None, breaks: Seque
             last = fit["instrument"].iloc[-1]
             sections.append(
                 f'<details class="ig"{" open" if not sections else ""}><summary><strong>{escape(group.capitalize())} · {channel}</strong>: '
-                f'{escape(INSTRUMENT_FRAMES[best.frame][0])}, last segment {last.strength:.2f}% @ {last.direction:.0f}°</summary>'
+                f'I {escape(INSTRUMENT_FRAMES[best.frame][0])}, last segment {last.strength:.2f}% @ {last.direction:.0f}°</summary>'
                 f'<div class="ig-body">'
                 f"<h3>Model comparison</h3>{_comparison_table(table)}"
-                f"<h3>Instrument gradient of the best model ({escape(INSTRUMENT_FRAMES[best.frame][0])}, sky {escape(best.sky)}, "
+                f"<h3>Instrument gradient I of the best model ({escape(INSTRUMENT_FRAMES[best.frame][0])}, sky {escape(best.sky)}, "
                 f"breaks {escape(str(best.breaks))})</h3>"
                 f'<div class="ig-pair">{_instrument_table(fit["instrument"])}<div class="chart" data-fig="vectors|{group}|{channel}"></div></div>'
-                f"<h3>Instrument gradient night by night</h3><p>One IFU-fixed instrument gradient per night (I, filled) with the sky "
+                f"<h3>Instrument gradient I night by night</h3><p>One instrument gradient I fixed in the IFU per night (filled) with the sky "
                 f"model shared by all the nights; a jump marks a change of the instrument, the dotted lines are the breaks. The open "
                 f"circles are each exposure's gradient minus the I of its night (g − I), spread within the night, and the crosses in "
                 f"the direction panel the direction of its sky gradient (Sun for twilights, horizon for dome flats and science "
                 f"frames): a sky gradient left in g − I follows the crosses.</p>"
                 f'<div class="chart" data-fig="nightly|{group}|{channel}"></div>'
-                f"<h3>Direction of the residual gradients</h3><p>After a correct instrument gradient is removed, the rest keeps its "
-                f"direction relative to the sky (R near 1) instead of the IFU.</p>"
+                f"<h3>Direction of g and g − I</h3><p>After a correct instrument gradient I is removed, g − I keeps its "
+                f"direction relative to the sky (R near 1) instead of the IFU. The plot gives the fit residual of each exposure, "
+                f"|r| = |g − I − sky|, against the night, to spot nights the model does not describe.</p>"
                 f'<div class="ig-pair">{_alignment_table(alignment)}<div class="chart" data-fig="residuals|{group}|{channel}"></div></div>'
-                f"<p>Angle from each sky direction to the measured gradient (g, gray) and to the gradient minus the instrument model "
-                f"(g − I, blue), as the fraction of exposures per 20° bin. If what is left after removing the instrument gradient is a "
-                f"sky gradient, g − I piles up near 0° for its sky direction: the Sun in twilights, the horizon (airglow) or the Moon "
-                f"in science frames, the horizon for the dome screen.</p>"
-                f'<div class="chart" data-fig="rose|{group}|{channel}"></div>'
-                + (f"<h3>Examples across the science IFU</h3><p>A few exposures chosen to span the {_reference_noun(subset)} across "
+                + (f"<p>Angle from each sky direction to the measured gradient (g, gray) and to the gradient minus the instrument model "
+                   f"(g − I, blue), as the fraction of exposures per 20° bin. If what is left after removing the instrument gradient is a "
+                   f"sky gradient, g − I piles up near 0° for its sky direction: the Sun in twilights, the horizon (airglow) or the Moon "
+                   f"in science frames, the horizon for the dome screen.</p>"
+                   f'<div class="chart" data-fig="rose|{group}|{channel}"></div>' if roses else "")
+                + (f"<h3>Examples across the IFU</h3><p>A few exposures chosen to span the {_reference_noun(subset)} across "
                    f"the IFU. For each: the plane measured by the pipeline (g), the instrument model of the best fit at that exposure (I) "
                    f"and the measured illumination divided by the instrument model (g − I), in % relative to the mean at the fiber positions. g and I share a color scale; g − I has its own, as it is much weaker. The "
                    f"black arrows give the direction of g and I; the dotted ones in the last panel point to the Sun, the horizon and "
@@ -1768,8 +1784,8 @@ def qa_instrument_gradient(twilight=None, dome=None, science=None, breaks: Seque
         rows = comparison[(comparison["group"] == group) & (comparison["channel"] == channel)]
         none = rows[rows["frame"] == "none"]["bic"].min()
         best_bic = rows[(rows["frame"] != "none") & ~rows["degenerate"]]["bic"].min()
-        tiles.append((f"{group} {channel}", f"{row.strength:.2f}% @ {row.direction:.0f}°",
-                      f"last segment, {INSTRUMENT_FRAMES[row.frame][0]}; ΔBIC {none - best_bic:.0f} over no instrument gradient"))
+        tiles.append((f"I · {group.capitalize()} · {channel}", f"{row.strength:.2f}% @ {row.direction:.0f}°",
+                      f"last segment, {INSTRUMENT_FRAMES[row.frame][0]}; ΔBIC {none - best_bic:.0f} over no I"))
     meta = [("Sources", ", ".join(f"{s}: {d['expnum'].nunique()} exposures, {d['mjd'].nunique()} nights" for s, d in sources.items())),
             ("Channels", channels), ("Breaks", _label_breaks(breaks)),
             ("Generated", datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"))]
@@ -1782,7 +1798,7 @@ def qa_instrument_gradient(twilight=None, dome=None, science=None, breaks: Seque
              "before the K-mirror (flagged as degenerate otherwise). Every quantity is defined under "
              '<a href="#definitions">How the quantities are computed</a>.</p>')
     body = (PAGE_STYLE + ("".join(sections) or "<p>No model with an instrument gradient could be fitted.</p>")
-            + epoch_browser(browser_fits, positions, epochs) + DEFINITIONS)
+            + epoch_browser(browser_fits, positions, epochs) + (DEFINITIONS if roses else _without_rose_card(DEFINITIONS)))
     report = write_dashboard(os.path.join(output_dir, f"{name}.html"), "LVM Instrument Gradient", "LVM DRP · fiber flats · IFU gradient",
                              intro, meta, tiles, body, figures, "lvmdrp.qa.ifu_gradient.qa_instrument_gradient")
     log.info(f"written instrument gradient dashboard to {report}")
