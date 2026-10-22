@@ -137,3 +137,31 @@ def test_qa_instrument_gradient(tmp_path):
     html = open(result["report"]).read()
     assert "LVM Instrument Gradient" in html and "vectors|twilight|b" in html
     assert (tmp_path / "out" / "instrument_gradient_models.csv").exists()
+
+
+def test_choose_examples_spans_the_sky_direction():
+    data = _gradients()
+    data["exptime"] = np.where(data["expnum"] % 1000 < 3, 2.0, 30.0)
+    fit = ig.fit_gradient_model(data, frame="ifu", breaks=[60465], crossval=False)
+    examples = ig.choose_examples(fit, n=4)
+    assert len(examples) == 4 and (examples["exptime"] >= 9).all()
+    relative = ig._wrap_angle(examples["dir_sun"] - np.degrees(np.arctan2(examples["inst_y"], examples["inst_x"])))
+    assert np.ptp(relative) > 180
+
+
+def test_alignment_rose_and_ifu_examples():
+    data = _gradients()
+    fit = ig.fit_gradient_model(data, frame="ifu", breaks=[60465], crossval=False)
+    rose = ig.figure_alignment_rose(fit)
+    # the measured gradients spread, the gradients minus the instrument model point to the Sun (bin centered on 0 deg)
+    sun = {t.name: np.asarray(t.r) for t in rose.data if t.subplot == "polar"}
+    assert sun["g − I"].max() > 0.8 and sun["g"].max() < 0.5
+    x, y = ig.ifu_fiber_positions()
+    assert np.isclose(np.max(np.hypot(x, y)), 1.0)
+    fig = ig.figure_ifu_examples(fit, (x, y), n=3)
+    maps = [t for t in fig.data if t.mode == "markers"]
+    assert len(maps) == 9
+    # the last panel of each row is the first minus the second
+    for row in range(3):
+        g, inst, res = (np.asarray(maps[3 * row + c].marker.color) for c in range(3))
+        assert np.allclose(res, g - inst)
