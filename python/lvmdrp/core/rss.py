@@ -3444,6 +3444,48 @@ class RSS(FiberRows):
 
         return x, y, z, coeffs, factors
 
+    def fit_slit_trends(self, cwave, dwave=8, degree=3, upper_row=2040, comb_stat=bn.nanmean, niter=4, nsigma=4.0):
+        """Fits the smooth throughput trends along each slit, jointly with a plane across the science IFU
+
+        The sky fibers share the slits and detectors with the science fibers
+        but not the science IFU, so a trend along the slit is told apart from
+        a plane across the science IFU. The log of the counts within
+        `cwave` +/- `dwave`/2 is fitted with a level per telescope and
+        spectrograph, a Legendre polynomial of `degree` in the position along
+        each slit plus a step for the fibers on the upper half of the detector
+        (rows >= `upper_row`), and a plane in the science fiber positions. The
+        standard fibers are left out and outliers are clipped at `nsigma`.
+
+        Parameters
+        ----------
+        cwave : float
+            Central wavelength of the window
+        dwave : float, optional
+            Width of the window, by default 8 Angstroms
+        degree : int, optional
+            Degree of the Legendre polynomial along each slit, by default 3
+        upper_row : int, optional
+            First detector row of the upper half, by default 2040
+        comb_stat : callable, optional
+            Statistic of the counts within the window, by default bn.nanmean
+        niter : int, optional
+            Number of clipping iterations, by default 4
+        nsigma : float, optional
+            Clipping threshold in robust standard deviations, by default 4.0
+
+        Returns
+        -------
+        numpy.ndarray
+            Multiplicative trend of each fiber, with a mean of 1 over each spectrograph
+        numpy.ndarray
+            Log-gradient of the science IFU plane along x and y, per mm
+        """
+        z = self.coadd_flux(cwave=cwave, dwave=dwave, comb_stat=comb_stat)
+        ypix = f"ypix_{self._header.get('CCD', '')[:1]}"
+        upper = numpy.asarray(self._slitmap[ypix]) >= upper_row if ypix in self._slitmap.colnames else None
+        model = fit_slit_trend_model(z, self._slitmap, upper=upper, degree=degree, niter=niter, nsigma=nsigma)
+        return model["trend"], model["plane"]
+
     def eval_ifu_gradient(self, coeffs, factors=None, groupby=None, normalize=True):
         if factors is not None and groupby is not None:
             pass
@@ -3750,6 +3792,87 @@ class RSS(FiberRows):
         hdus[0].header['DRPVER'] = drpver
         hdus[0].scale(bzero=0, bscale=1)
         hdus.writeto(out_rss, overwrite=True, output_verify="silentfix")
+
+def fit_slit_trend_model(counts, slitmap, upper=None, degree=3, with_trends=True, niter=4, nsigma=4.0):
+    """Fits the smooth throughput trends along each slit and a plane across the science IFU to the counts of each fiber
+
+    The log of `counts` is fitted with a level per telescope and spectrograph,
+    a plane in the science fiber positions and, with `with_trends`, a Legendre
+    polynomial of `degree` in the position along each slit plus a step for the
+    fibers on the upper half of the detector. The sky fibers share the slits and
+    detectors with the science fibers but not the science IFU, so they tell the
+    trends apart from the plane. The standard fibers are left out and outliers
+    are clipped at `nsigma` robust standard deviations. See
+    :meth:`RSS.fit_slit_trends`.
+
+    Parameters
+    ----------
+    counts : array_like
+        Counts of each fiber of the slitmap
+    slitmap : astropy.table.Table
+        Slitmap with ``telescope``, ``spectrographid``, ``xpmm`` and ``ypmm``
+    upper : array_like of bool, optional
+        Fibers on the upper half of the detector. Default is the second half of each slit
+    degree : int, optional
+        Degree of the Legendre polynomial along each slit, by default 3
+    with_trends : bool, optional
+        Fit the trends along the slits; without them only the levels and the plane are fitted, by default True
+    niter : int, optional
+        Number of clipping iterations, by default 4
+    nsigma : float, optional
+        Clipping threshold in robust standard deviations, by default 4.0
+
+    Returns
+    -------
+    dict
+        ``trend`` (multiplicative trend of each fiber, with a mean of 1 over each
+        spectrograph), ``plane`` (log-gradient of the science IFU plane along x
+        and y, per mm), ``coeffs`` (per spectrograph, the log step of the upper
+        half and the Legendre coefficients 1 to `degree`; zeros without trends)
+        and ``fitted`` (fibers kept by the clipping).
+    """
+    counts = numpy.asarray(counts, dtype=float)
+    telescope = numpy.array([str(t).strip() for t in slitmap["telescope"]])
+    specid = numpy.asarray(slitmap["spectrographid"], dtype=int)
+    x, y = numpy.asarray(slitmap["xpmm"], dtype=float), numpy.asarray(slitmap["ypmm"], dtype=float)
+    specids = numpy.unique(specid)
+
+    # position along each slit in [-1, 1]
+    position = numpy.zeros(specid.size)
+    for spid in specids:
+        select = numpy.where(specid == spid)[0]
+        position[select] = numpy.linspace(-1, 1, select.size)
+    upper = position >= 0 if upper is None else numpy.asarray(upper, dtype=bool)
+
+    trend_columns = []
+    if with_trends:
+        for spid in specids:
+            select = specid == spid
+            trend_columns.append((select & upper).astype(float))
+            trend_columns += [select * numpy.polynomial.legendre.legval(position, [0] * k + [1]) for k in range(1, degree + 1)]
+    level_columns = [((telescope == tel) & (specid == spid)).astype(float) for tel in ("Sci", "SkyE", "SkyW") for spid in specids]
+    science = telescope == "Sci"
+    plane_columns = [science * (x - x[science].mean()), science * (y - y[science].mean())]
+    A = numpy.column_stack(trend_columns + level_columns + plane_columns)
+
+    fit = numpy.isin(telescope, ["Sci", "SkyE", "SkyW"]) & numpy.isfinite(counts) & (counts > 0)
+    v = numpy.log(numpy.where(fit, counts, 1.0))
+    # drop the levels of telescopes without fibers to fit (e.g. no sky fibers in a spectrograph)
+    used = A[fit].any(axis=0)
+    for _ in range(niter):
+        coeffs = numpy.zeros(A.shape[1])
+        coeffs[used], *_ = numpy.linalg.lstsq(A[fit][:, used], v[fit], rcond=None)
+        residuals = v - A @ coeffs
+        scale = 1.4826 * numpy.nanmedian(numpy.abs(residuals[fit] - numpy.nanmedian(residuals[fit])))
+        fit &= numpy.abs(residuals) < nsigma * scale
+
+    ntrend = len(trend_columns)
+    trend = numpy.exp(numpy.column_stack(trend_columns) @ coeffs[:ntrend]) if ntrend else numpy.ones(specid.size)
+    for spid in specids:
+        trend[specid == spid] /= numpy.mean(trend[specid == spid])
+    trend_coeffs = coeffs[:ntrend].reshape(specids.size, degree + 1) if ntrend else numpy.zeros((specids.size, degree + 1))
+    return {"trend": trend, "plane": coeffs[-2:], "coeffs": trend_coeffs, "fitted": fit}
+
 
 def loadRSS(in_rss):
     rss = RSS.from_file(in_rss)

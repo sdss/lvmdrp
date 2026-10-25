@@ -580,7 +580,8 @@ def iterate_gradient_fit(rss, cwave, dwave=8, guess_coeffs=[1,2,3,0], fixed_coef
     return x, y, z, coeffs, factors
 
 def fit_fiberflat(in_rss, out_flat, out_rss, ref_kind=600, guess_coeffs=[1,2,3,0], fixed_coeffs=[3], groupby="spec",
-                  norm_cwave=None, norm_dwave=8, coadd_method="average", smoothing=0.1, interpolate_invalid=True, display_plots=False):
+                  norm_cwave=None, norm_dwave=8, coadd_method="average", smoothing=0.1, interpolate_invalid=True,
+                  slit_trends=True, slit_degree=3, display_plots=False):
     """Creates a flatfield given a flat (twilight, dome) exposure
 
     The input RSS needs to be wavelength calibrated, rectified and LSF matched
@@ -592,6 +593,8 @@ def fit_fiberflat(in_rss, out_flat, out_rss, ref_kind=600, guess_coeffs=[1,2,3,0
         - Combine the resulting flatfields into a master
         - For each exposure:
             * Apply flatfield to each twilight exposure
+            * Optionally fit the smooth throughput trends along the slits
+              jointly with the sky fibers, which stay in the flat field
             * Fit gradient and correct each telescope IFU by it
         - Combine gradient corrected flatfields into final master
 
@@ -629,6 +632,12 @@ def fit_fiberflat(in_rss, out_flat, out_rss, ref_kind=600, guess_coeffs=[1,2,3,0
         Interpolate invalid pixels (NaN, infinity), by default True
     smoothing : float, optional
         Perform a low-pass filtering to remove artifacts and denoise, by default 0.1
+    slit_trends : bool, optional
+        Fit the smooth throughput trends along the slits (see
+        :meth:`lvmdrp.core.rss.RSS.fit_slit_trends`) and keep them in the flat
+        field, so that the IFU gradient is fitted only to what is left, by default True
+    slit_degree : int, optional
+        Degree of the Legendre polynomial of the slit trends, by default 3
     display_plots : bool, optional
         Whether to display plots or not, by default False
 
@@ -672,8 +681,15 @@ def fit_fiberflat(in_rss, out_flat, out_rss, ref_kind=600, guess_coeffs=[1,2,3,0
     flat, _, ref_fiber, _ = get_flatfield(rss=rss, ref_kind=ref_kind, interpolate_invalid=interpolate_invalid, smoothing=smoothing, axs={"ref_fiber": ax_ref, "smoothing": ax_smo})
 
     log.info(f"fitting and correcting IFU gradient and '{groupby}' factors @ {norm_cwave:.2f} Angstroms")
+    rss_fit = rss
+    if slit_trends:
+        # keep the smooth throughput trends along the slits (measured with the sky fibers) in the flat field
+        trend, _ = rss.fit_slit_trends(cwave=norm_cwave, dwave=norm_dwave, degree=slit_degree)
+        log.info(f"slit trends span {trend.min():.4f} to {trend.max():.4f}, kept in the flat field")
+        rss_fit = copy(rss)
+        rss_fit /= trend[:, None]
     # fit gradient with spectrograph normalizations (make n-iterations of this or stop when gradient is <1% across)
-    x, y, z_ori, coeffs, factors = iterate_gradient_fit(rss, cwave=norm_cwave, dwave=norm_dwave, coadd_method=coadd_method, groupby=groupby,
+    x, y, z_ori, coeffs, factors = iterate_gradient_fit(rss_fit, cwave=norm_cwave, dwave=norm_dwave, coadd_method=coadd_method, groupby=groupby,
                                                         guess_coeffs=guess_coeffs, fixed_coeffs=fixed_coeffs, axs=(axs_fin,axs_res))
 
     # apply gradient correction
@@ -689,6 +705,7 @@ def fit_fiberflat(in_rss, out_flat, out_rss, ref_kind=600, guess_coeffs=[1,2,3,0
     flat_g.setHdrValue(f"HIERARCH {channel} FIBERFLAT COADD", coadd_method, "coadding method")
     flat_g.setHdrValue(f"HIERARCH {channel} FIBERFLAT SKYCORR", False, "fiberflat skyline-corrected?")
     flat_g.setHdrValue(f"HIERARCH {channel} FIBERFLAT GROUPBY", groupby, "fiber grouping")
+    flat_g.setHdrValue(f"HIERARCH {channel} FIBERFLAT SLITTRND", slit_trends, "slit trends kept in fiberflat?")
     for i, factor in enumerate(factors):
         flat_g.setHdrValue(f"HIERARCH {channel} FIBERFLAT FACTOR{i+1}", np.round(factor, 5), f"fiberflat factor {groupby}{i+1}")
     for i, coeff in enumerate(coeffs):

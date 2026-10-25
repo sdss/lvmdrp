@@ -2,6 +2,7 @@
 # encoding: utf-8
 #
 
+import glob
 import os
 import pathlib
 import shutil
@@ -54,7 +55,7 @@ from lvmdrp.qa.fiberflats import (
     flatfield_qa_name, default_flatfield_qa_dir, qa_twilight_sequence, qa_twilight_trends, qa_dome_sequence, qa_dome_trends, TELESCOPES as QA_TELESCOPES,
 )
 from lvmdrp.qa.science import qa_science_exposure, QA_PARTS as SCIENCE_QA_PARTS
-from lvmdrp.qa.ifu_gradient import qa_instrument_gradient, intervention_breaks, science_gradients
+from lvmdrp.qa.ifu_gradient import qa_instrument_gradient, intervention_breaks, science_gradients, slit_trend_split
 
 
 from sdss_access import Access
@@ -966,6 +967,7 @@ def qa_domes_cli(epoch, mjd, mjd_list, mjd_range, epochs_file, channels, drpver,
 @click.option('-t', '--twilight', type=str, default=None, help="Table of the twilight trends ('qa-twilights --trends'), CSV")
 @click.option('-D', '--dome', type=str, default=None, help="Table of the dome flat trends ('qa-domes --trends'), CSV")
 @click.option('-s', '--science', type=str, default=None, help="Science frame gradients: the summary table of 'drp qa-flatfield' (FITS), whose lvmFrame headers give the geometry, or a CSV saved by a previous run")
+@click.option('--slit', type=str, default=None, help="Trends along the slits: comma-separated paths or globs of lvmTFlat, lvmDFlat or lvmFrame files (continuum of the flats, sky lines of the science frames), or a CSV saved by a previous run")
 @click.option('-b', '--breaks', type=IntListType(), default=None, help='MJDs where the instrument gradient may jump')
 @click.option('--interventions', is_flag=True, default=False, help="Break at the calibration epochs triggered by instrument interventions and warm-ups, instead of --breaks")
 @click.option('--epochs-file', type=str, default=None, help='Path to a calibration epochs file, for --interventions and to group the maps of the flats by epoch. Defaults to the one in lvmcore')
@@ -977,15 +979,15 @@ def qa_domes_cli(epoch, mjd, mjd_list, mjd_range, epochs_file, channels, drpver,
 @click.option('--direction-scan', is_flag=True, default=False, help='Refit the twilights with the direction of the Sun rotated and mirrored, a test of the geometry, and plot the rms against the offset')
 @click.option('-n', '--name', type=str, default="instrument_gradient", help='Name of the dashboard and tables')
 @click.option('-o', '--output-dir', type=str, default=None, help="Directory of the dashboard and tables. Defaults to qa/fiberflat/{name} in the master calibrations directory")
-def qa_instrument_gradient_cli(twilight, dome, science, breaks, interventions, epochs_file, channels, kmirror, drpver, redux_dir, roses, direction_scan, name, output_dir):
+def qa_instrument_gradient_cli(twilight, dome, science, slit, breaks, interventions, epochs_file, channels, kmirror, drpver, redux_dir, roses, direction_scan, name, output_dir):
     """Fit the gradients across the science IFU of twilights, dome flats and science frames as an instrument gradient plus a sky gradient, and write an HTML dashboard.
 
     Compares an instrument gradient fixed in the IFU, one fixed before the K-mirror and none, with and
     without jumps at the breaks, and checks the instrument gradient of the twilights against the dome
     flats and the science frames.
     """
-    if not (twilight or dome or science):
-        raise click.UsageError("give at least one of --twilight, --dome or --science")
+    if not (twilight or dome or science or slit):
+        raise click.UsageError("give at least one of --twilight, --dome, --science or --slit")
     if interventions:
         breaks = intervention_breaks(load_calibration_epochs(epochs_file))
         click.echo(f"breaks at {', '.join(map(str, breaks))}")
@@ -995,8 +997,17 @@ def qa_instrument_gradient_cli(twilight, dome, science, breaks, interventions, e
         os.makedirs(os.path.dirname(science), exist_ok=True)
         table.to_csv(science, index=False)
         click.echo(f"science frame gradients written to {science}")
+    if slit and not slit.endswith(".csv"):
+        paths = sorted({path for pattern in slit.split(",") for path in glob.glob(os.path.expandvars(os.path.expanduser(pattern.strip())))})
+        if not paths:
+            raise click.UsageError(f"no files match --slit {slit}")
+        table = slit_trend_split(paths, kmirror=kmirror)
+        slit = os.path.join(output_dir or os.getcwd(), f"{name}_slit.csv")
+        os.makedirs(os.path.dirname(slit), exist_ok=True)
+        table.to_csv(slit, index=False)
+        click.echo(f"slit trends of {len(paths)} files written to {slit}")
     try:
-        result = qa_instrument_gradient(twilight=twilight, dome=dome, science=science, breaks=breaks, channels=channels,
+        result = qa_instrument_gradient(twilight=twilight, dome=dome, science=science, slit=slit, breaks=breaks, channels=channels,
                                         kmirror=kmirror, epochs=load_calibration_epochs(epochs_file), roses=roses, direction_scan=direction_scan,
                                         output_dir=output_dir, name=name)
     except (FileNotFoundError, ValueError) as e:

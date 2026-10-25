@@ -240,6 +240,19 @@ DEFINITIONS = r"""<section id="definitions">
       follow the horizon.</p>
       <div class="eq">\[ \vec g'_e = \vec g_e - R(s\,\varphi_e)\,\vec I^{\,\mathrm{twilight}}_{k(e)}, \qquad \sqrt{\tfrac1n \textstyle\sum_e |\vec g_e|^2} \ \to\ \sqrt{\tfrac1n \textstyle\sum_e |\vec g'_e|^2} \]</div>
     </div>
+    <div class="def">
+      <h3>Trends along the slits</h3>
+      <p>The flat field is undone (FLUX &times; SUPERFLAT of the lvmTFlat, lvmDFlat or lvmFrame), so the counts \(c_f\) of each fiber
+      \(f\) are the illumination times its throughput: in continuum windows of the twilight and dome flats, and in sky lines of the
+      science frames, whose airglow is the same across the science IFU whatever the target. Their logarithm is fitted with a level
+      \(\ell\) per telescope and spectrograph, a plane across the science IFU and smooth trends along each slit: a step \(c_0\) for the
+      fibers on the upper half of the detector \(U\) and Legendre polynomials of the position \(p_f \in [-1, 1]\) along the slit. The sky
+      fibers share the slits and detectors but not the science IFU, so they tell the trends from the plane. The fit without the
+      trends gives the plane that the pipeline fits, \(\vec g\); with them, the IFU part \(\vec g_{\mathrm{IFU}}\); their difference is
+      the part of \(\vec g\) made by the trends, \(\vec g_{\mathrm{slit}}\). Fibers off by more than 4 robust standard deviations are
+      clipped. The table gives the medians of the components over the exposures of each source and segment.</p>
+      <div class="eq">\[ \begin{gathered} \ln c_f = \ell_{t(f),s(f)} + \Big[c_{0,s}\,[f \in U] + \sum_{k=1}^{3} c_{k,s}\,P_k(p_f)\Big] + [f \in \mathrm{Sci}]\ \vec\gamma\cdot(\vec x_f - \bar{\vec x}) \\ \vec g = \rho\,\vec\gamma_{\text{no trends}}, \qquad \vec g_{\mathrm{IFU}} = \rho\,\vec\gamma, \qquad \vec g_{\mathrm{slit}} = \vec g - \vec g_{\mathrm{IFU}} \end{gathered} \]</div>
+    </div>
   </div>
 </section>"""
 
@@ -378,6 +391,118 @@ def science_gradients(summary: Union[str, Table], drpver: str = None, redux_dir:
     data["mjd"] = data.pop("mjd_night")
     data["strength"] = np.hypot(data["grad_x"], data["grad_y"])
     data["direction"] = np.degrees(np.arctan2(data["grad_y"], data["grad_x"]))
+    return data
+
+
+# continuum windows of the twilight and dome flats, and sky lines of the science frames, where the slit trends are measured
+SLIT_WINDOWS = {"b": ((4650, 4750), (5300, 5400)), "r": ((6650, 6750), (7300, 7400)), "z": ((8600, 8700), (9150, 9250))}
+# sky lines away from the bright nebular lines ([OII] 7320/7330, [SII], Paschen), so the science fibers see only the airglow
+SLIT_SKY_LINES = {"b": (5577.34,), "r": (6863.96, 7276.41), "z": (8885.85, 9375.98)}
+
+# source of each product the slit trends are measured on, and whether in the continuum or in the sky lines
+SLIT_PRODUCTS = {"lvmTFlat": ("twilight", "continuum"), "lvmDFlat": ("dome", "continuum"), "lvmFrame": ("science", "lines")}
+
+
+def _line_counts(flux: np.ndarray, wave: np.ndarray, cwave: float, half_width: float = 6.0, gap: float = 10.0, width: float = 10.0) -> np.ndarray:
+    """Flux of a sky line in each fiber, over the median of the continuum on both sides"""
+    core = np.abs(wave - cwave) <= half_width
+    side = (np.abs(wave - cwave) > gap) & (np.abs(wave - cwave) <= gap + width)
+    continuum = np.nanmedian(np.where(side, flux, np.nan), axis=1)
+    return np.nansum(np.where(core, flux - continuum[:, None], 0.0), axis=1) / np.maximum(core.sum(axis=1), 1)
+
+
+def slit_trend_split(paths: Sequence[str], degree: int = 3, kmirror=None) -> pd.DataFrame:
+    """Split of the gradient across the science IFU into the trends along the slits and an IFU part, from lvmTFlat, lvmDFlat or lvmFrame files
+
+    The flat field is undone (FLUX x SUPERFLAT), so the counts of each fiber
+    are the illumination times the fiber throughput. In the continuum of the
+    twilight and dome flats, and in sky lines of the science frames (the
+    airglow is the same across the science IFU, whatever the target), the
+    counts are fitted with :func:`lvmdrp.core.rss.fit_slit_trend_model`: a level
+    per telescope and spectrograph, smooth trends along each slit (a step for
+    the upper half of the detector and Legendre polynomials) measured with the
+    sky fibers, and a plane across the science IFU. The same fit without the
+    trends gives the plane that the pipeline fits (g); with them, the IFU part;
+    the difference is the part of g that the trends along the slits make.
+
+    Parameters
+    ----------
+    paths : list[str]
+        Paths of the files, named lvmTFlat-*, lvmDFlat-* or lvmFrame-*.
+    degree : int, optional
+        Degree of the Legendre polynomials along the slits. Default is 3.
+    kmirror : dict or str, optional
+        K-mirror relation, for the sky geometry of the frames without ``POSCIPA``.
+
+    Returns
+    -------
+    pandas.DataFrame
+        One row per file and window or sky line: ``source``, ``measure``
+        ('continuum' or 'lines'), ``window``, ``filename``, ``expnum``, ``mjd``,
+        ``channel``, the vectors at the IFU edge in % (``all_x/y``: the
+        pipeline plane g, ``slit_x/y``: the part of the trends along the slits,
+        ``ifu_x/y``: the rest), the log coefficients of the trends
+        (``c{spectrograph}_{k}``, k=0 the step, 1.. the Legendre terms),
+        ``nfit`` (fibers kept) and the sky geometry of
+        :func:`lvmdrp.qa.fiberflats.twilight_geometry`.
+    """
+    from lvmdrp.core.rss import fit_slit_trend_model
+    from lvmdrp.core.tracemask import TraceMask
+
+    relation = load_kmirror_relation(kmirror)
+    rows = []
+    for path in paths:
+        name = os.path.basename(path)
+        product = name.split("-")[0]
+        if product not in SLIT_PRODUCTS:
+            log.warning(f"{name} is not an lvmTFlat, lvmDFlat or lvmFrame, skipping")
+            continue
+        source, measure = SLIT_PRODUCTS[product]
+        with fits.open(path) as hdus:
+            header = hdus[0].header
+            flux = hdus["FLUX"].data.astype(float)
+            if "SUPERFLAT" in hdus:
+                flux = flux * hdus["SUPERFLAT"].data
+            flux[hdus["MASK"].data.astype(bool)] = np.nan
+            wave = TraceMask.from_coeff_table(Table(hdus["WAVE_TRACE"].data))._data
+            cent = TraceMask.from_coeff_table(Table(hdus["CENT_TRACE"].data))._data
+            slitmap = Table(hdus["SLITMAP"].data)
+        channel = name.split("-")[1][0]
+        telescope = np.array([str(t).strip() for t in slitmap["telescope"]])
+        x, y = np.asarray(slitmap["xpmm"], dtype=float), np.asarray(slitmap["ypmm"], dtype=float)
+        science = telescope == "Sci"
+        rho = np.max(np.hypot(x[science] - x[science].mean(), y[science] - y[science].mean()))
+        try:
+            geometry = twilight_geometry(header, slitmap, kmirror=relation)
+        except Exception as e:
+            log.warning(f"cannot compute the sky geometry of {name} ({type(e).__name__}: {e})")
+            geometry = {}
+        windows = SLIT_WINDOWS[channel] if measure == "continuum" else [(w, w) for w in SLIT_SKY_LINES[channel]]
+        for lo, hi in windows:
+            if measure == "continuum":
+                counts = np.nanmedian(np.where((wave >= lo) & (wave < hi), flux, np.nan), axis=1)
+                label = f"{lo:.0f}–{hi:.0f} Å"
+            else:
+                counts = _line_counts(flux, wave, lo)
+                label = f"{lo:.1f} Å"
+            column = np.argmin(np.abs(wave - 0.5 * (lo + hi)), axis=1)
+            upper = cent[np.arange(len(cent)), column] >= 2040
+            plain = fit_slit_trend_model(counts, slitmap, upper=upper, degree=degree, with_trends=False)
+            model = fit_slit_trend_model(counts, slitmap, upper=upper, degree=degree)
+            g_all, g_ifu = 100 * rho * plain["plane"], 100 * rho * model["plane"]
+            row = {"source": source, "measure": measure, "window": label, "filename": name, "expnum": int(header.get("EXPOSURE", 0)),
+                   "mjd": _night_sjd(header, path), "channel": channel, "all_x": g_all[0], "all_y": g_all[1],
+                   "slit_x": g_all[0] - g_ifu[0], "slit_y": g_all[1] - g_ifu[1], "ifu_x": g_ifu[0], "ifu_y": g_ifu[1],
+                   "nfit": int(model["fitted"].sum())}
+            for i, coeffs in enumerate(model["coeffs"]):
+                row.update({f"c{i + 1}_{k}": float(c) for k, c in enumerate(coeffs)})
+            rows.append({**row, **geometry})
+        log.info(f"slit trends of {name}: {len(windows)} {'windows' if measure == 'continuum' else 'sky lines'}")
+    data = pd.DataFrame(rows)
+    for part in ("all", "slit", "ifu"):
+        if len(data):
+            data[f"{part}_g"] = np.hypot(data[f"{part}_x"], data[f"{part}_y"])
+            data[f"{part}_dir"] = np.degrees(np.arctan2(data[f"{part}_y"], data[f"{part}_x"]))
     return data
 
 
@@ -1593,12 +1718,171 @@ def figure_alignment_rose(fit: Dict, bin_width: float = 20.0) -> go.Figure:
     return fig
 
 
-def _definitions_for(sources: Sequence[str], roses: bool, direction_scan: bool, browser: bool) -> str:
+SLIT_PARTS = (("all", "g (pipeline plane)", THEME["muted"]), ("slit", "trends along the slits", SERIES[1]), ("ifu", "IFU part", SERIES[0]))
+SLIT_SOURCE_SYMBOLS = {"twilight": "circle", "dome": "square", "science": "diamond-open"}
+
+
+def _slit_exposures(slit: pd.DataFrame) -> pd.DataFrame:
+    """Median of the windows or sky lines of each file of a slit trends table"""
+    numeric = [c for c in slit.columns if c not in ("source", "measure", "window", "filename", "channel") and pd.api.types.is_numeric_dtype(slit[c])]
+    data = slit.groupby(["source", "filename", "channel"], as_index=False)[numeric].median()
+    for part in ("all", "slit", "ifu"):
+        data[f"{part}_g"] = np.hypot(data[f"{part}_x"], data[f"{part}_y"])
+        data[f"{part}_dir"] = np.degrees(np.arctan2(data[f"{part}_y"], data[f"{part}_x"]))
+    return data.sort_values(["mjd", "expnum"]).reset_index(drop=True)
+
+
+def _slit_profiles(data: pd.DataFrame, channel: str) -> Tuple[np.ndarray, np.ndarray]:
+    """Trends along the slits of each exposure (%), from their coefficients and the fibermap, and the fiber index along the slits"""
+    from lvmdrp.main import read_fibermap
+
+    fibermap = read_fibermap(as_table=True)
+    specid = np.asarray(fibermap["spectrographid"], dtype=int)
+    upper = np.asarray(fibermap[f"ypix_{channel}"], dtype=float) >= 2040
+    position = np.zeros(specid.size)
+    for spid in np.unique(specid):
+        select = np.where(specid == spid)[0]
+        position[select] = np.linspace(-1, 1, select.size)
+    degree = max(int(c.split("_")[1]) for c in data.columns if re.fullmatch(r"c\d+_\d+", c))
+    profiles = np.full((len(data), specid.size), np.nan)
+    for spid in np.unique(specid):
+        select = specid == spid
+        columns = [f"c{spid}_{k}" for k in range(degree + 1)]
+        if not set(columns) <= set(data.columns):
+            continue
+        coeffs = data[columns].to_numpy(float)
+        log_trend = coeffs[:, :1] * upper[select] + np.array([np.polynomial.legendre.legval(position[select], [0] + list(c[1:])) for c in coeffs])
+        trend = np.exp(log_trend)
+        profiles[:, select] = 100 * (trend / trend.mean(axis=1, keepdims=True) - 1)
+    return np.arange(specid.size), profiles
+
+
+def figure_slit_profiles(data: pd.DataFrame, channel: str) -> go.Figure:
+    """Trends along the slits of each exposure, one panel per source, colored by night"""
+    sources = [s for s in SLIT_PRODUCTS.values() if s[0] in set(data["source"])]
+    fig = make_subplots(rows=len(sources), cols=1, shared_xaxes=True, vertical_spacing=0.08,
+                        subplot_titles=[{"twilight": "Twilights (continuum)", "dome": "Dome flats (continuum)", "science": "Science frames (sky lines)"}[s]
+                                        for s, _ in sources])
+    fiber, profiles = _slit_profiles(data, channel)
+    nights = data["mjd"].to_numpy(float)
+    span = max(np.ptp(nights), 1.0)
+    for row, (source, _) in enumerate(sources, start=1):
+        for i in np.where(data["source"].to_numpy() == source)[0]:
+            color = sample_colorscale(SEQUENTIAL, [0.15 + 0.85 * (nights[i] - nights.min()) / span])[0]
+            r = data.iloc[i]
+            fig.add_trace(go.Scatter(x=fiber, y=profiles[i], mode="lines", line=dict(width=1.4, color=color), showlegend=False,
+                                     hovertemplate=f"MJD {int(r.mjd)} · exposure {int(r.expnum)}<br>fiber %{{x}}: %{{y:.2f}}%<extra></extra>"),
+                          row=row, col=1)
+        for edge in (648, 1296):
+            fig.add_vline(x=edge - 0.5, line=dict(color=THEME["axis"], width=1), row=row, col=1)
+        fig.update_yaxes(title_text="Trend (%)", row=row, col=1)
+    # color bar of the nights
+    fig.add_trace(go.Scatter(x=[None], y=[None], mode="markers", showlegend=False, hoverinfo="skip",
+                             marker=dict(colorscale=[[0, sample_colorscale(SEQUENTIAL, [0.15])[0]], [1, SEQUENTIAL[-1][1]]],
+                                         cmin=nights.min(), cmax=nights.min() + span, color=[nights.min()],
+                                         colorbar=dict(title=dict(text="MJD", side="right"), thickness=10, len=0.8, outlinewidth=0))),
+                  row=1, col=1)
+    fig.update_layout(base_layout(260 + 200 * len(sources)))
+    style_axes(fig)
+    fig.update_xaxes(title_text="Fiber along the slits (spectrographs 1 | 2 | 3)", row=len(sources), col=1)
+    return fig
+
+
+def figure_slit_split(data: pd.DataFrame, breaks: Sequence[int] = ()) -> go.Figure:
+    """Strength and direction of the pipeline plane g, of its part made by the trends along the slits and of the IFU part, against the night"""
+    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.08)
+    rank = data.groupby("mjd").cumcount().to_numpy()
+    size = data.groupby("mjd")["mjd"].transform("size").to_numpy()
+    for j, (part, label, color) in enumerate(SLIT_PARTS):
+        for source, symbol in SLIT_SOURCE_SYMBOLS.items():
+            sel = (data["source"] == source).to_numpy()
+            if not sel.any():
+                continue
+            x = data["mjd"].to_numpy(float)[sel] + 0.8 * ((rank[sel] + 1) / (size[sel] + 1) - 0.5) + 1.5 * (j - 1)
+            custom = np.stack([data["mjd"][sel].astype(int), data["expnum"][sel].astype(int)], axis=-1)
+            common = dict(mode="markers", legendgroup=part, customdata=custom,
+                          marker=dict(size=7, color=color, symbol=symbol, opacity=0.85, line=dict(width=1.2, color=color)))
+            name = f"{label} · {source}"
+            fig.add_trace(go.Scatter(x=x, y=data[f"{part}_g"][sel], name=name,
+                                     hovertemplate=f"MJD %{{customdata[0]}} · exposure %{{customdata[1]}}<br>{label} %{{y:.2f}}%<extra></extra>",
+                                     **common), row=1, col=1)
+            fig.add_trace(go.Scatter(x=x, y=data[f"{part}_dir"][sel], name=name, showlegend=False,
+                                     hovertemplate=f"MJD %{{customdata[0]}} · exposure %{{customdata[1]}}<br>{label} towards %{{y:.0f}}°<extra></extra>",
+                                     **common), row=2, col=1)
+    nights = data["mjd"].to_numpy(float)
+    pad = max(4.0, 0.03 * np.ptp(nights))
+    lo, hi = nights.min() - pad, nights.max() + pad
+    for mjd in breaks:
+        if lo <= mjd <= hi:
+            fig.add_vline(x=mjd, line=dict(color=THEME["muted"], width=1, dash="dot"))
+    fig.update_xaxes(range=[lo, hi])
+    fig.update_layout(base_layout(560))
+    style_axes(fig)
+    fig.update_yaxes(title_text="Strength (%)", rangemode="tozero", row=1, col=1)
+    fig.update_yaxes(title_text="Direction (°)", range=[-180, 180], dtick=90, row=2, col=1)
+    fig.update_xaxes(title_text="MJD", row=2, col=1)
+    return fig
+
+
+def _slit_table(data: pd.DataFrame, breaks: Sequence[int]) -> str:
+    """Median vectors of g, of the trends along the slits and of the IFU part per source and segment"""
+    data = data.assign(segment=_segments(data["mjd"].to_numpy(float), breaks))
+    rows = []
+    for (source, _), group in data.groupby(["source", "segment"], sort=False):
+        cells = [escape(source), f"{int(group.mjd.min())}–{int(group.mjd.max())}", f"{group.mjd.nunique()} / {len(group)}"]
+        for part, _, _ in SLIT_PARTS:
+            gx, gy = group[f"{part}_x"].median(), group[f"{part}_y"].median()
+            cells.append(f"{np.hypot(gx, gy):.2f} @ {np.degrees(np.arctan2(gy, gx)):.0f}°")
+        cells.append(f"{group['ifu_g'].std():.2f}" if len(group) > 1 else "")
+        rows.append(cells)
+    return html_table([("Source", "continuum of the flats, sky lines of the science frames"), ("Nights", "first and last night of the segment"),
+                       ("Nights / exp.", "nights and exposures"), ("g (%)", "plane of the pipeline fit, median vector"),
+                       ("Slit trends (%)", "part of g made by the trends along the slits, median vector"),
+                       ("IFU part (%)", "g minus the slit trends, median vector"), ("Scatter (%)", "standard deviation of the strength of the IFU part")],
+                      rows, numeric=[False, False, True, True, True, True, True])
+
+
+def slit_sections(slit: pd.DataFrame, breaks: Sequence[int], channels: str) -> Tuple[str, Dict[str, go.Figure]]:
+    """The sections of the dashboard with the trends along the slits of each channel"""
+    html, figures = "", {}
+    data = _slit_exposures(slit)
+    for channel in [c for c in channels if c in set(data["channel"])]:
+        subset = data[data["channel"] == channel].reset_index(drop=True)
+        figures[f"slitsplit|{channel}"] = figure_slit_split(subset, breaks)
+        figures[f"slitprofiles|{channel}"] = figure_slit_profiles(subset, channel)
+        last = subset[subset["source"] == subset["source"].iloc[-1]]
+        last = last[_segments(last["mjd"].to_numpy(float), breaks) == _segments(last["mjd"].to_numpy(float), breaks).max()]
+        sx, sy, ix, iy = (last[c].median() for c in ("slit_x", "slit_y", "ifu_x", "ifu_y"))
+        sources = ", ".join(f"{n} {s}" for s, n in subset.groupby("source")["filename"].nunique().items())
+        html += (f'<details class="ig"><summary><strong>Slit trends · {channel}</strong>: last segment, slit trends {np.hypot(sx, sy):.2f}% @ '
+                 f"{np.degrees(np.arctan2(sy, sx)):.0f}°, IFU part {np.hypot(ix, iy):.2f}% @ {np.degrees(np.arctan2(iy, ix)):.0f}°</summary>"
+                 f'<div class="ig-body">'
+                 f"<p>The throughput of the fibers changes smoothly along each slit (vignetting and the detector halves), and the "
+                 f"plane that the pipeline fits across the science IFU takes up part of it, because the science fibers fill blocks of the "
+                 f"slits. The sky fibers share the slits but not the science IFU, so a fit of the trends along the slits with the sky fibers "
+                 f"and a plane across the science IFU tells the two apart ({escape(sources)} exposures). The trends are part of the "
+                 f"throughput and belong in the flat field; only the IFU part is an illumination gradient, instrument or sky. In science "
+                 f"frames the sky lines see the airglow, the same across the IFU up to a small horizon gradient, so their IFU part is the "
+                 f"instrument gradient with no twilight sky.</p>"
+                 f"<h3>Split of g per source and segment</h3>{_slit_table(subset, breaks)}"
+                 f"<h3>Split of g against the night</h3><p>Pipeline plane g (gray), its part made by the trends along the slits "
+                 f"(orange) and the IFU part (blue), for twilights (filled) and science frames (open diamonds); the dotted lines are the "
+                 f"breaks.</p>"
+                 f'<div class="chart" data-fig="slitsplit|{channel}"></div>'
+                 f"<h3>Trends along the slits</h3><p>The fitted trend of each exposure along the three slits, relative to the mean of "
+                 f"each slit, colored by night. Stable trends are a property of the fibers, which the flat field keeps.</p>"
+                 f'<div class="chart" data-fig="slitprofiles|{channel}"></div>'
+                 f"</div></details>")
+    return html, figures
+
+
+def _definitions_for(sources: Sequence[str], roses: bool, direction_scan: bool, browser: bool, slit: bool = False) -> str:
     """The definitions of the quantities shown in a run: without the cards of plots that are not on the page, and without
     the sentences about sources of exposures that are not used (tagged ``<span data-sources="...">``)"""
     sources = set(sources) | ({"joint"} if len(set(sources)) > 1 else set())
     cards = {"Direction rose": roses, "Geometry of the sky gradient": direction_scan and "twilight" in sources,
-             "Maps across the IFU": browser, "Twilight I applied to other sources": "twilight" in sources and bool({"dome", "science"} & sources)}
+             "Maps across the IFU": browser, "Twilight I applied to other sources": "twilight" in sources and bool({"dome", "science"} & sources),
+             "Trends along the slits": slit}
     definitions = _without_cards(DEFINITIONS, [title for title, shown in cards.items() if not shown])
 
     def keep(match):
@@ -1661,7 +1945,7 @@ def _alignment_table(alignment: pd.DataFrame) -> str:
                       rows, numeric=[False, False, True, True, True, True])
 
 
-def qa_instrument_gradient(twilight=None, dome=None, science=None, breaks: Sequence[int] = None, channels: str = "brz",
+def qa_instrument_gradient(twilight=None, dome=None, science=None, slit=None, breaks: Sequence[int] = None, channels: str = "brz",
                            kmirror=None, skies: Dict[str, Dict] = None, epochs: Dict[int, Dict] = None, roses: bool = False,
                            direction_scan: bool = False, output_dir: str = None, name: str = "instrument_gradient") -> Dict:
     """Tests for an instrument gradient across the science IFU and writes a dashboard
@@ -1683,6 +1967,9 @@ def qa_instrument_gradient(twilight=None, dome=None, science=None, breaks: Seque
         :func:`~lvmdrp.qa.fiberflats.qa_dome_trends`, or their CSV paths.
     science : str or pandas.DataFrame, optional
         Table of :func:`science_gradients`, or its CSV path.
+    slit : str or pandas.DataFrame, optional
+        Table of :func:`slit_trend_split`, or its CSV path, for the sections of
+        the trends along the slits. Default is none.
     breaks : list[int], optional
         MJDs where the instrument gradient may jump, e.g. from
         :func:`intervention_breaks`. Default is none.
@@ -1721,8 +2008,9 @@ def qa_instrument_gradient(twilight=None, dome=None, science=None, breaks: Seque
     inputs = {"twilight": twilight, "dome": dome, "science": science}
     sources = {source: prepare_gradients(table, source, kmirror=kmirror, channels=channels)
                for source, table in inputs.items() if table is not None}
-    if not sources:
-        raise ValueError("give at least one table of gradients (twilight, dome or science)")
+    slit = pd.read_csv(slit) if isinstance(slit, (str, os.PathLike)) else slit
+    if not sources and (slit is None or slit.empty):
+        raise ValueError("give at least one table of gradients (twilight, dome or science) or of slit trends")
     breaks = sorted(int(b) for b in (breaks or []))
     skies = skies or {"default": DEFAULT_SKY,
                       "per night": {s: {column: "night" for column in terms} for s, terms in DEFAULT_SKY.items()}}
@@ -1839,12 +2127,21 @@ def qa_instrument_gradient(twilight=None, dome=None, science=None, breaks: Seque
         tiles.append((f"I · {group.capitalize()} · {channel}", f"{row.strength:.2f}% @ {row.direction:.0f}°",
                       f"last segment, {INSTRUMENT_FRAMES[row.frame][0]}; ΔBIC {none - best_bic:.0f} over no I"))
     meta = [("Sources", ", ".join(f"{s}: {d['expnum'].nunique()} exposures, {d['mjd'].nunique()} nights" for s, d in sources.items())),
+            *([("Slit trends", ", ".join(f"{source}: {n} files" for source, n in slit.groupby("source")["filename"].nunique().items()))]
+              if slit is not None and not slit.empty else []),
             ("Channels", channels), ("Breaks", _label_breaks(breaks)),
             ("Generated", datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"))]
-    intro = _introduction(list(sources))
+    intro = (_introduction(list(sources)) if sources else
+             "<p>Splits the gradient that the pipeline fits across the science IFU into the smooth throughput trends along the "
+             "slits, measured with the sky fibers, and the IFU part, the illumination gradient. Every quantity is defined under "
+             '<a href="#definitions">How the quantities are computed</a>.</p>')
     browser = epoch_browser(browser_fits, positions, epochs)
-    body = (PAGE_STYLE + ("".join(sections) or "<p>No model with an instrument gradient could be fitted.</p>")
-            + browser + _definitions_for(list(sources), roses, direction_scan, bool(browser)))
+    slit_html = ""
+    if slit is not None and not slit.empty:
+        slit_html, slit_figures = slit_sections(slit, breaks, channels)
+        figures.update(slit_figures)
+    body = (PAGE_STYLE + ("".join(sections) or ("<p>No model with an instrument gradient could be fitted.</p>" if sources else ""))
+            + slit_html + browser + _definitions_for(list(sources), roses, direction_scan, bool(browser), bool(slit_html)))
     report = write_dashboard(os.path.join(output_dir, f"{name}.html"), "LVM Instrument Gradient", "LVM DRP · fiber flats · IFU gradient",
                              intro, meta, tiles, body, figures, "lvmdrp.qa.ifu_gradient.qa_instrument_gradient")
     log.info(f"written instrument gradient dashboard to {report}")

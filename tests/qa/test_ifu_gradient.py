@@ -267,3 +267,31 @@ def test_introduction_for_the_sources_used():
     text = ig._introduction(["twilight", "dome", "science"])
     assert "the direction of the Sun for twilights and the direction of the horizon for dome flats" in text
     assert "In twilights and dome flats the K-mirror does not move, so only the science frames" in text and "(joint)" in text
+
+
+def _slit_table(n=6):
+    """Rows of slit_trend_split for twilights and science frames of channel b, before and after a break"""
+    rng = np.random.default_rng(5)
+    rows = []
+    for i in range(n):
+        for source in ("twilight", "science"):
+            mjd = 60300 + 60 * i
+            ifu = _vector(1.0 if mjd < 60465 else 3.5, 60) + rng.normal(0, 0.1, 2)
+            slit = _vector(3.0, 50) + rng.normal(0, 0.1, 2)
+            row = {"source": source, "measure": "lines" if source == "science" else "continuum", "window": "w",
+                   "filename": f"lvm{'Frame' if source == 'science' else 'TFlat'}-b-{1000 + i:08d}.fits", "expnum": 1000 + i,
+                   "mjd": mjd, "channel": "b", "ifu_x": ifu[0], "ifu_y": ifu[1], "slit_x": slit[0], "slit_y": slit[1],
+                   "all_x": ifu[0] + slit[0], "all_y": ifu[1] + slit[1]}
+            row.update({f"c{s}_{k}": c for s in (1, 2, 3) for k, c in enumerate((0.01, 0.05, -0.08, 0.02))})
+            rows.append(row)
+    return pd.DataFrame(rows)
+
+
+def test_slit_sections_split_g_per_segment():
+    html, figures = ig.slit_sections(_slit_table(), breaks=[60465], channels="brz")
+    assert set(figures) == {"slitsplit|b", "slitprofiles|b"}
+    assert "Slit trends · b" in html and "IFU part 3." in html
+    # one profile per exposure in each panel, relative to the mean of each slit
+    profiles = [t for t in figures["slitprofiles|b"].data if t.mode == "lines"]
+    assert len(profiles) == 12
+    assert abs(np.nanmean(profiles[0].y[:648])) < 1e-6
