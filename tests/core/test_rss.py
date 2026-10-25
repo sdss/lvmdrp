@@ -154,3 +154,13 @@ def test_fit_slit_trend_model_without_trends_puts_the_slit_trend_in_the_plane():
     assert plain["plane"][0] > 0.004
     assert np.allclose(plain["trend"], 1) and np.allclose(plain["coeffs"], 0)
     assert np.allclose(with_trends["coeffs"][:, 1], 0.08, atol=1e-3)
+
+
+def test_fit_slit_trend_model_returns_the_residuals_of_the_fitted_fibers():
+    from lvmdrp.core.rss import fit_slit_trend_model
+    rss, _ = _slit_rss(lambda position, ypix: np.ones_like(position), (0.004, -0.002))
+    counts = rss.coadd_flux(cwave=5050, dwave=40)
+    counts[0] = np.nan
+    model = fit_slit_trend_model(counts, rss._slitmap)
+    assert np.isnan(model["residuals"][0])
+    assert np.nanmax(np.abs(model["residuals"])) < 1e-3

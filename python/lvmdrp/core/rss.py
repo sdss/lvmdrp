@@ -3829,7 +3829,8 @@ def fit_slit_trend_model(counts, slitmap, upper=None, degree=3, with_trends=True
         spectrograph), ``plane`` (log-gradient of the science IFU plane along x
         and y, per mm), ``coeffs`` (per spectrograph, the log step of the upper
         half and the Legendre coefficients 1 to `degree`; zeros without trends)
-        and ``fitted`` (fibers kept by the clipping).
+        , ``fitted`` (fibers kept by the clipping) and ``residuals`` (log
+        residuals of each fiber, NaN for the fibers that could not be fitted).
     """
     counts = numpy.asarray(counts, dtype=float)
     telescope = numpy.array([str(t).strip() for t in slitmap["telescope"]])
@@ -3856,6 +3857,7 @@ def fit_slit_trend_model(counts, slitmap, upper=None, degree=3, with_trends=True
     A = numpy.column_stack(trend_columns + level_columns + plane_columns)
 
     fit = numpy.isin(telescope, ["Sci", "SkyE", "SkyW"]) & numpy.isfinite(counts) & (counts > 0)
+    valid = fit.copy()
     v = numpy.log(numpy.where(fit, counts, 1.0))
     # drop the levels of telescopes without fibers to fit (e.g. no sky fibers in a spectrograph)
     used = A[fit].any(axis=0)
@@ -3871,7 +3873,7 @@ def fit_slit_trend_model(counts, slitmap, upper=None, degree=3, with_trends=True
     for spid in specids:
         trend[specid == spid] /= numpy.mean(trend[specid == spid])
     trend_coeffs = coeffs[:ntrend].reshape(specids.size, degree + 1) if ntrend else numpy.zeros((specids.size, degree + 1))
-    return {"trend": trend, "plane": coeffs[-2:], "coeffs": trend_coeffs, "fitted": fit}
+    return {"trend": trend, "plane": coeffs[-2:], "coeffs": trend_coeffs, "fitted": fit, "residuals": numpy.where(valid, residuals, numpy.nan)}
 
 
 def loadRSS(in_rss):

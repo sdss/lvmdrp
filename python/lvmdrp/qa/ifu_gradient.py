@@ -414,7 +414,7 @@ def _line_counts(flux: np.ndarray, wave: np.ndarray, cwave: float, half_width: f
     return np.nansum(np.where(core, flux - continuum[:, None], 0.0), axis=1) / np.maximum(core.sum(axis=1), 1)
 
 
-def slit_trend_split(paths: Sequence[str], degree: int = 3, kmirror=None) -> pd.DataFrame:
+def slit_trend_split(paths: Sequence[str], degree: int = 3, kmirror=None, maps_dir: str = None) -> pd.DataFrame:
     """Split of the gradient across the science IFU into the trends along the slits and an IFU part, from lvmTFlat, lvmDFlat or lvmFrame files
 
     The flat field is undone (FLUX x SUPERFLAT), so the counts of each fiber
@@ -436,6 +436,12 @@ def slit_trend_split(paths: Sequence[str], degree: int = 3, kmirror=None) -> pd.
         Degree of the Legendre polynomials along the slits. Default is 3.
     kmirror : dict or str, optional
         K-mirror relation, for the sky geometry of the frames without ``POSCIPA``.
+    maps_dir : str, optional
+        Directory where the per-fiber log residuals of the fit with the trends
+        are saved, one ``{file}.npz`` per file with the ``fiberid``,
+        ``telescope``, ``xpmm`` and ``ypmm`` of the slitmap and a ``residuals``
+        array (window or sky line, fiber) with its ``windows``. For the shape
+        of the IFU part beyond a plane and local features. Not saved by default.
 
     Returns
     -------
@@ -482,6 +488,7 @@ def slit_trend_split(paths: Sequence[str], degree: int = 3, kmirror=None) -> pd.
             log.warning(f"cannot compute the sky geometry of {name} ({type(e).__name__}: {e})")
             geometry = {}
         windows = SLIT_WINDOWS[channel] if measure == "continuum" else [(w, w) for w in SLIT_SKY_LINES[channel]]
+        labels, residuals = [], []
         for lo, hi in windows:
             if measure == "continuum":
                 counts = np.nanmedian(np.where((wave >= lo) & (wave < hi), flux, np.nan), axis=1)
@@ -502,6 +509,12 @@ def slit_trend_split(paths: Sequence[str], degree: int = 3, kmirror=None) -> pd.
             for i, coeffs in enumerate(model["coeffs"]):
                 row.update({f"c{i + 1}_{k}": float(c) for k, c in enumerate(coeffs)})
             rows.append({**row, **geometry})
+            labels.append(label)
+            residuals.append(model["residuals"])
+        if maps_dir is not None:
+            os.makedirs(maps_dir, exist_ok=True)
+            np.savez_compressed(os.path.join(maps_dir, f"{name.split('.')[0]}.npz"), residuals=np.asarray(residuals, dtype=np.float32),
+                                windows=np.asarray(labels), fiberid=np.asarray(slitmap["fiberid"]), telescope=telescope, xpmm=x, ypmm=y)
         log.info(f"slit trends of {name}: {len(windows)} {'windows' if measure == 'continuum' else 'sky lines'}")
     data = pd.DataFrame(rows)
     for part in ("all", "slit", "ifu"):
