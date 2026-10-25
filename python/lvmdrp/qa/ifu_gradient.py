@@ -57,7 +57,7 @@ from plotly.subplots import make_subplots
 
 from lvmdrp import log
 from lvmdrp.qa.fiberflats import (
-    _night_sjd, _rayleigh_pvalue, _resultant_length, _wrap_angle, frame_gradients, load_calibration_epochs,
+    _header_float, _night_sjd, _rayleigh_pvalue, _resultant_length, _wrap_angle, frame_gradients, load_calibration_epochs,
     load_kmirror_relation, siderostat_field_angle, twilight_geometry,
 )
 from lvmdrp.qa.report import DIVERGING, DIVERGING_DARK, SEQUENTIAL, SERIES, THEME, base_layout, html_table, sandbox_qa_dir, style_axes, write_dashboard
@@ -401,6 +401,9 @@ SLIT_SKY_LINES = {"b": (5577.34,), "r": (6863.96, 7276.41), "z": (8885.85, 9375.
 
 # source of each product the slit trends are measured on, and whether in the continuum or in the sky lines
 SLIT_PRODUCTS = {"lvmTFlat": ("twilight", "continuum"), "lvmDFlat": ("dome", "continuum"), "lvmFrame": ("science", "lines")}
+# header values kept with the split, to look for what drives the IFU part: column, keyword
+SLIT_HEADER_FLOATS = {"exptime": "EXPTIME", "labtemp": "LABTEMP", "labhumid": "LABHUMID", "tempsci": "TEMPSCI",
+                      "kmirror": "TESCIKM", "focus": "TESCIFO", "airmass": "TESCIAM"}
 
 
 def _line_counts(flux: np.ndarray, wave: np.ndarray, cwave: float, half_width: float = 6.0, gap: float = 10.0, width: float = 10.0) -> np.ndarray:
@@ -443,7 +446,8 @@ def slit_trend_split(paths: Sequence[str], degree: int = 3, kmirror=None) -> pd.
         pipeline plane g, ``slit_x/y``: the part of the trends along the slits,
         ``ifu_x/y``: the rest), the log coefficients of the trends
         (``c{spectrograph}_{k}``, k=0 the step, 1.. the Legendre terms),
-        ``nfit`` (fibers kept) and the sky geometry of
+        ``nfit`` (fibers kept), ``obstime``, ``tileid``, the header values of
+        ``SLIT_HEADER_FLOATS`` (NaN if missing) and the sky geometry of
         :func:`lvmdrp.qa.fiberflats.twilight_geometry`.
     """
     from lvmdrp.core.rss import fit_slit_trend_model
@@ -493,7 +497,8 @@ def slit_trend_split(paths: Sequence[str], degree: int = 3, kmirror=None) -> pd.
             row = {"source": source, "measure": measure, "window": label, "filename": name, "expnum": int(header.get("EXPOSURE", 0)),
                    "mjd": _night_sjd(header, path), "channel": channel, "all_x": g_all[0], "all_y": g_all[1],
                    "slit_x": g_all[0] - g_ifu[0], "slit_y": g_all[1] - g_ifu[1], "ifu_x": g_ifu[0], "ifu_y": g_ifu[1],
-                   "nfit": int(model["fitted"].sum())}
+                   "nfit": int(model["fitted"].sum()), "obstime": str(header.get("OBSTIME", "")), "tileid": header.get("TILE_ID"),
+                   **{column: _header_float(header, key) for column, key in SLIT_HEADER_FLOATS.items()}}
             for i, coeffs in enumerate(model["coeffs"]):
                 row.update({f"c{i + 1}_{k}": float(c) for k, c in enumerate(coeffs)})
             rows.append({**row, **geometry})
