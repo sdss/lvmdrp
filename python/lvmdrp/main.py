@@ -34,7 +34,7 @@ from lvmdrp.functions.imageMethod import (preproc_raw_frame, create_master_frame
 from lvmdrp.functions.rssMethod import (determine_wavelength_solution, create_pixel_table, apply_fiberflat,
                                         resample_wavelength, shift_wave_skylines, join_spec_channels, stack_spectrographs)
 from lvmdrp.functions.skyMethod import interpolate_sky, combine_skies, quick_sky_subtraction
-from lvmdrp.functions.flatgradient import measure_cframe
+from lvmdrp.functions.flatgradient import measure_cframe, correct_cframe
 from lvmdrp.core import fluxcal
 from lvmdrp.functions.fluxCalMethod import fluxcal_standard_stars, fluxcal_sci_ifu_stars, apply_fluxcal, model_selection
 from lvmdrp.utils.metadata import (get_frames_metadata, update_metadata, get_master_metadata, extract_metadata,
@@ -1536,6 +1536,8 @@ def science_reduction(expnum: int,
                       skip_fluxcal: bool = False,
                       skip_skysub: bool = False,
                       skip_drpall: bool = False,
+                      skip_flatgrad: bool = False,
+                      flatgrad_direct: bool = False,
                       debug_mode: bool = False,
                       force_run: bool = False) -> None:
     """ Run the science reduction for a given exposure number.
@@ -1748,6 +1750,13 @@ def science_reduction(expnum: int,
         with Timer(name='Sky-line planes '+cframe_path, logger=log.info):
             measure_cframe(cframe, raise_errors=False)
 
+        # correct the large-scale flat-field error with the model of the ffactor epoch, if there is one (#268)
+        if skip_flatgrad:
+            log.info("skipping the large-scale flat-field correction")
+        else:
+            with Timer(name='Flat-field gradient '+cframe_path, logger=log.info):
+                correct_cframe(cframe, mjd=sci_mjd, drpver=drpver, from_sandbox=from_sandbox, direct=flatgrad_direct)
+
         log.info(f"writing output RSS to {os.path.basename(cframe_path)}")
         cframe.writeFitsData(cframe_path)
 
@@ -1799,7 +1808,7 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
             skip_waveres: bool = False, skip_fluxcal: bool = False, skip_skysub: bool = False,
             skip_drpall: bool = False, use_nightly_cals: bool = False, use_untagged_cals: bool = False,
             clean_ancillary: bool = False, debug_mode: bool = False, force_run: bool = False,
-            force_excluded: bool = False):
+            force_excluded: bool = False, skip_flatgrad: bool = False, flatgrad_direct: bool = False):
     """ Run the quick DRP
 
     Run the quick DRP for an MJD, or a range of MJDs. Reduces
@@ -1844,6 +1853,11 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
         Flag to force reductions even if the data was flagged as BAD by the QC pipeline, by default False
     force_excluded : bool, optional
         Flag to force reductions of exposures listed in $LVMCORE_DIR/etc/exclude-exposures.yaml, by default False
+    skip_flatgrad : bool, optional
+        Skip the large-scale flat-field correction of the lvmCFrames (applied when the model files of the
+        ffactor epoch exist), by default False
+    flatgrad_direct : bool, optional
+        Also apply the direct fit of the flat-field error left after the model, by default False
     """
     # # write the drp parameter configuration
     # write_config_file()
@@ -1875,7 +1889,9 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
                     use_untagged_cals=use_untagged_cals,
                     debug_mode=debug_mode,
                     force_run=force_run,
-                    force_excluded=force_excluded)
+                    force_excluded=force_excluded,
+                    skip_flatgrad=skip_flatgrad,
+                    flatgrad_direct=flatgrad_direct)
         return
 
     log.info(f'Processing MJD {mjd}')
@@ -1981,6 +1997,8 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
                                         skip_fluxcal=skip_fluxcal,
                                         skip_skysub=skip_skysub,
                                         skip_drpall=skip_drpall,
+                                        skip_flatgrad=skip_flatgrad,
+                                        flatgrad_direct=flatgrad_direct,
                                         clean_ancillary=clean_ancillary,
                                         use_longterm_cals=not use_nightly_cals,
                                         from_sandbox=not use_untagged_cals,

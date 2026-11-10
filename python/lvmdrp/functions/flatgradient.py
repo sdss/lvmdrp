@@ -722,3 +722,256 @@ def create_flat_models(drpall: str, epoch_mjds: Sequence[int], channels: str = '
                 os.makedirs(os.path.dirname(out[ch]), exist_ok=True)
                 write_flat_model(model, epoch, ch, out[ch], drpver=drpver)
     return paths
+
+
+# ----------------------------------------------------------------------------------------------
+# Applying the model (and optionally a direct fit of what is left) to a channel-combined frame
+# ----------------------------------------------------------------------------------------------
+
+# largest difference between the 5577 and 8399 residual planes for the direct step, %/10 mm
+DIRECT_GUARD = 1.5
+# largest difference between the r OH residual plane and the b, z mean for r OH to be used, %/10 mm
+DIRECT_RGUARD = 1.5
+# keyword prefix of the record of the correction in the header
+APPLIED_PREFIX = 'FLATGRAD'
+
+
+def channel_weights(wave: np.ndarray) -> Dict[str, np.ndarray]:
+    """Weight of each channel at each wavelength of a channel-combined frame.
+
+    1 inside a channel, with linear ramps across the b-r and r-z overlaps
+    (`lvmdrp.core.constants.SPEC_CHANNELS`).
+
+    Args:
+        wave: wavelength of each pixel, Angstrom.
+
+    Returns:
+        {channel: weight of each pixel}; the weights add up to 1 at every pixel.
+    """
+    from lvmdrp.core.constants import SPEC_CHANNELS
+    wave = np.asarray(wave, dtype=float)
+    w = {ch: np.zeros(wave.size) for ch in 'brz'}
+    br0, br1 = SPEC_CHANNELS['r'][0], SPEC_CHANNELS['b'][1]
+    rz0, rz1 = SPEC_CHANNELS['z'][0], SPEC_CHANNELS['r'][1]
+    w['b'][wave < br0] = 1.0
+    m = (wave >= br0) & (wave <= br1)
+    w['r'][m] = (wave[m] - br0) / (br1 - br0)
+    w['b'][m] = 1.0 - w['r'][m]
+    w['r'][(wave > br1) & (wave < rz0)] = 1.0
+    m = (wave >= rz0) & (wave <= rz1)
+    w['z'][m] = (wave[m] - rz0) / (rz1 - rz0)
+    w['r'][m] = 1.0 - w['z'][m]
+    w['z'][wave > rz1] = 1.0
+    return w
+
+
+def fiber_throughput(factors: np.ndarray, gx: float, gy: float, x: np.ndarray, y: np.ndarray,
+                     spec: np.ndarray) -> np.ndarray:
+    """Relative throughput of each fiber for spectrograph factors and a plane, normalized to a mean of 1.
+
+    Args:
+        factors: the three spectrograph factors (fractions, e.g. 1.01).
+        gx: x slope of the plane, % per 10 mm.
+        gy: y slope of the plane, % per 10 mm.
+        x: fiber x positions, mm.
+        y: fiber y positions, mm.
+        spec: spectrograph of each fiber (1, 2 or 3).
+
+    Returns:
+        The throughput of each fiber.
+    """
+    k = np.asarray(factors, dtype=float)[np.asarray(spec, dtype=int) - 1] * (1 + (gx * x + gy * y) / 1000)
+    return k / np.mean(k)
+
+
+def _residual_planes(flux: np.ndarray, wave: np.ndarray, x: np.ndarray, y: np.ndarray,
+                     spec: np.ndarray) -> Dict[str, Optional[Dict[str, float]]]:
+    """The planes and factors left in corrected science spectra: 5577 (b), 8399 (z), r OH sum (r)."""
+    out = {}
+    for ch in 'bzr':
+        stars = star_mask(flux, wave, ch)
+        if ch == 'r':
+            z = np.sum([line_flux(flux, wave, HELDOUT_LINES[m][1], HELDOUT_LINES[m][2])
+                        for m in HELDOUT_GROUPS['r_oh'][1]], axis=0)
+        else:
+            cwave, sides = SKYLINES[ch]
+            z = line_flux(flux, wave, (cwave - LINE_HALF_WIDTH, cwave + LINE_HALF_WIDTH), sides)
+        out[ch] = fit_plane(x, y, np.where(stars, np.nan, z), spec)
+    return out
+
+
+def apply_flat_models(rss, models: Dict[str, Dict], direct: bool = False, guard: float = DIRECT_GUARD,
+                      rguard: float = DIRECT_RGUARD,
+                      model_files: Optional[Dict[str, str]] = None) -> Optional[Dict]:
+    """Corrects the science fibers of a channel-combined frame for the large-scale flat-field error.
+
+    The model of each channel (see :func:`read_flat_model`) is evaluated from the
+    header (MJD, TESCIFO, TESCIKM), and the flux and error of the science fibers are
+    divided by its spectrograph factors times its plane (normalized to a mean of 1
+    over the science fibers), blended across the channel overlaps. With `direct`,
+    the planes left in 5577 (b), 8399 (z) and the r OH lines are then fitted and
+    divided out as well, if the b and z planes agree to within `guard`; r gets the
+    average of its r OH plane and the b, z mean if they agree to within `rguard`,
+    otherwise the b, z mean. What was applied is recorded in the header
+    (``HIERARCH FLATGRAD ...``); a frame already corrected is left as it is.
+
+    Args:
+        rss: an :class:`lvmdrp.core.rss.lvmCFrame` (1D wavelength array), changed in place.
+        models: {channel: model} for the channels b, r and z.
+        direct: also apply the direct fit of what is left.
+        guard: largest 5577 - 8399 residual plane difference for the direct step, %/10 mm.
+        rguard: largest r OH - (b, z mean) difference for r OH to be used, %/10 mm.
+        model_files: {channel: file name}, recorded in the header.
+
+    Returns:
+        A dict with the model values ('model': {channel: {component: value}}),
+        'direct' (whether the direct step was applied), 'guard', 'rmode' and the
+        residual planes ('residual'); None if the frame was not corrected.
+    """
+    hdr = rss._header
+    if hdr.get(f'{APPLIED_PREFIX} APPLIED', False):
+        log.warning('the large-scale flat-field correction was already applied; frame left as it is')
+        return None
+    missing = [ch for ch in 'brz' if ch not in models]
+    if missing:
+        log.warning(f'no flat-field error model for channel(s) {missing}; frame not corrected')
+        return None
+    mjd, focus, kmir = (hdr.get(k) for k in ('MJD', 'TESCIFO', 'TESCIKM'))
+    if any(v is None or not np.isfinite(float(v)) or float(v) <= -900 for v in (mjd, focus, kmir)):
+        log.warning(f'MJD, TESCIFO or TESCIKM missing ({mjd}, {focus}, {kmir}); frame not corrected')
+        return None
+    if rss._wave is None or np.ndim(rss._wave) != 1:
+        log.warning('the frame has no 1D wavelength array; frame not corrected')
+        return None
+
+    slitmap = rss._slitmap
+    sci = np.flatnonzero(np.asarray(slitmap['telescope']).astype(str) == 'Sci')
+    x = np.asarray(slitmap['xpmm'], dtype=float)[sci]
+    y = np.asarray(slitmap['ypmm'], dtype=float)[sci]
+    spec = np.asarray(slitmap['spectrographid'], dtype=int)[sci]
+    wave = np.asarray(rss._wave, dtype=float)
+    weights = channel_weights(wave)
+
+    values = {ch: evaluate_flat_model(models[ch], float(mjd), float(focus), float(kmir)) for ch in 'brz'}
+    corr = np.zeros((sci.size, wave.size))
+    for ch in 'brz':
+        v = values[ch]
+        f = 1 + np.array([v['f1'], v['f2'], v['f3']]) / 100
+        corr += fiber_throughput(f / f.mean(), v['gx'], v['gy'], x, y, spec)[:, None] * weights[ch][None, :]
+
+    result = {'model': values, 'direct': False, 'guard': np.nan, 'rguard': np.nan, 'rmode': 'none',
+              'residual': None}
+    if direct:
+        res = _residual_planes(rss._data[sci] / corr, wave, x, y, spec)
+        result['residual'] = res
+        nmin = 0.7 * MIN_FIBER_FRACTION * sci.size
+        if res['b'] is not None and res['z'] is not None:
+            result['guard'] = float(np.hypot(res['b']['gx'] - res['z']['gx'], res['b']['gy'] - res['z']['gy']))
+            if result['guard'] <= guard and min(res['b']['n'], res['z']['n']) >= nmin:
+                keys = ('f1', 'f2', 'f3', 'gx', 'gy')
+                rfit = {ch: res[ch] for ch in 'bz'}
+                rfit['r'] = {k: 0.5 * (res['b'][k] + res['z'][k]) for k in keys}
+                result['rmode'] = 'bz'
+                if res['r'] is not None:
+                    result['rguard'] = float(np.hypot(res['r']['gx'] - rfit['r']['gx'],
+                                                      res['r']['gy'] - rfit['r']['gy']))
+                    if result['rguard'] <= rguard and res['r']['n'] >= nmin:
+                        rfit['r'] = {k: 0.5 * (res['r'][k] + rfit['r'][k]) for k in keys}
+                        result['rmode'] = 'oh+bz'
+                cres = np.zeros_like(corr)
+                for ch in 'brz':
+                    r = rfit[ch]
+                    k = fiber_throughput(np.array([r['f1'], r['f2'], r['f3']]), r['gx'], r['gy'], x, y, spec)
+                    cres += k[:, None] * weights[ch][None, :]
+                corr = corr * cres
+                result['direct'] = True
+
+    rss._data[sci] = rss._data[sci] / corr
+    if rss._error is not None:
+        rss._error[sci] = rss._error[sci] / corr
+
+    p = APPLIED_PREFIX
+    rss.setHdrValue(f'HIERARCH {p} APPLIED', True, 'large-scale flat-field correction applied (#268)')
+    epochs = sorted({int(models[ch]['epoch']) for ch in 'brz'})
+    rss.setHdrValue(f'HIERARCH {p} EPOCH', epochs[0], 'ffactor epoch of the model')
+    for ch in 'brz':
+        name = (model_files or {}).get(ch)
+        if name:
+            import os
+            rss.setHdrValue(f'HIERARCH {p} {ch.upper()} FILE', os.path.basename(name), 'model file')
+        for comp in MODEL_COMPONENTS:
+            unit = '%' if comp.startswith('f') else '%/10mm'
+            rss.setHdrValue(f'HIERARCH {p} {ch.upper()} {comp.upper()}', round(values[ch][comp], 4),
+                            f'{ch} model {comp} [{unit}]')
+    rss.setHdrValue(f'HIERARCH {p} DIRECT', result['direct'], 'direct fit of what is left applied')
+    if direct:
+        rss.setHdrValue(f'HIERARCH {p} DGUARD', round(result['guard'], 3) if np.isfinite(result['guard']) else -1.0,
+                        '|5577 - 8399| residual plane [%/10mm]')
+        rss.setHdrValue(f'HIERARCH {p} DRGUARD',
+                        round(result['rguard'], 3) if np.isfinite(result['rguard']) else -1.0,
+                        '|r OH - mean(b, z)| residual plane [%/10mm]')
+        rss.setHdrValue(f'HIERARCH {p} DRMODE', result['rmode'], 'r direct step: oh+bz, bz or none')
+        for ch, label in (('b', '5577'), ('z', '8399'), ('r', 'r OH')):
+            r = result['residual'][ch]
+            for comp in ('gx', 'gy'):
+                rss.setHdrValue(f'HIERARCH {p} D{ch.upper()} {comp.upper()}',
+                                round(r[comp], 3) if r else -999.0, f'{label} residual plane {comp} [%/10mm]')
+    log.info('large-scale flat-field correction applied: model planes ' +
+             ', '.join(f'{ch} ({values[ch]["gx"]:.2f}, {values[ch]["gy"]:.2f})' for ch in 'brz') +
+             f' %/10mm; direct step {"applied" if result["direct"] else "not applied"}' +
+             (f' (guard {result["guard"]:.2f}, r {result["rmode"]})' if direct else ''))
+    return result
+
+
+def find_flat_models(mjd: int, drpver: Optional[str] = None, from_sandbox: bool = True,
+                     ffactor_epochs: Optional[Dict] = None) -> Dict[str, str]:
+    """Finds the model files of the ffactor epoch of an MJD.
+
+    Args:
+        mjd: MJD of the exposure.
+        drpver: DRP version, for the calibration directories of a reduction.
+        from_sandbox: look in the sandbox calibration directories ($LVM_MASTER_DIR).
+        ffactor_epochs: the ffactor epochs; default: those of lvmcore.
+
+    Returns:
+        {channel: path} of the model files that exist (empty if none).
+    """
+    import os
+    from lvmdrp.utils.paths import get_calib_paths
+    if ffactor_epochs is None:
+        from lvmdrp.functions.run_calseq import load_epochs_file
+        ffactor_epochs = load_epochs_file(epochs_kind='ffactor', verbose=False) or {}
+    if not ffactor_epochs:
+        return {}
+    calibs = get_calib_paths(mjd=mjd, version=drpver, flavors={'fiberflat_gradient'}, epochs=ffactor_epochs,
+                             from_sandbox=from_sandbox)
+    return {ch: p for ch, p in calibs.get('fiberflat_gradient', {}).items() if os.path.exists(p)}
+
+
+def correct_cframe(rss, mjd: int, drpver: Optional[str] = None, from_sandbox: bool = True,
+                   direct: bool = False) -> Optional[Dict]:
+    """Corrects a channel-combined frame with the model files of its epoch, if they exist.
+
+    Never raises: a missing model or a failure is logged and the frame is left as it is.
+
+    Args:
+        rss: an :class:`lvmdrp.core.rss.lvmCFrame`, changed in place.
+        mjd: MJD of the exposure, to find its ffactor epoch.
+        drpver: DRP version, for the calibration directories of a reduction.
+        from_sandbox: look in the sandbox calibration directories ($LVM_MASTER_DIR).
+        direct: also apply the direct fit of what is left.
+
+    Returns:
+        The dict returned by :func:`apply_flat_models`, or None if the frame was not corrected.
+    """
+    try:
+        files = find_flat_models(mjd, drpver=drpver, from_sandbox=from_sandbox)
+        if len(files) < 3:
+            log.info(f'no large-scale flat-field error model for MJD {mjd} (found {sorted(files)}); '
+                     'frame not corrected')
+            return None
+        models = {ch: read_flat_model(p) for ch, p in files.items()}
+        return apply_flat_models(rss, models, direct=direct, model_files=files)
+    except Exception as err:
+        log.warning(f'could not apply the large-scale flat-field correction: {err}')
+        return None

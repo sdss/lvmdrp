@@ -317,3 +317,131 @@ def test_create_flat_models(tmp_path):
     paths = fg.create_flat_models(drpall, EPOCHS, drpver='test', out_dir=str(out))
     assert paths[(EPOCHS[0], 'b')] == str(out / str(EPOCHS[0]) / 'lvm-mfiberflat_gradient-b.fits')
     assert all(os.path.exists(p) for p in paths.values())
+
+
+# ------------------------------------------------------------------ applying the model to a frame
+def _constant_model(channel, gx, gy, factors=FACTORS, epoch=60000):
+    """A model that predicts the same factors and plane for every exposure."""
+    f = 100 * (np.asarray(factors) / np.mean(factors) - 1)
+    coeffs = {comp: {t: 0.0 for t in fg.EPOCH_TERMS + fg.SHARED_TERMS} for comp in fg.MODEL_COMPONENTS}
+    for comp, v in zip(fg.MODEL_COMPONENTS, (f[0], f[1], f[2], gx, gy)):
+        coeffs[comp]['c0'] = v
+    return {'channel': channel, 'epoch': epoch, 'range': (60000.0, 60090.0), 'focus0': fg.FOCUS0,
+            'coeffs': coeffs}
+
+
+def _cframe(frame, header=None, gx_z=None):
+    """An RSS from the synthetic frame, with the header values the correction needs.
+
+    With `gx_z`, the science fibers redward of 7600 A get a different x slope, so b and z disagree.
+    """
+    flux, slitmap = frame
+    flux = flux.copy()
+    if gx_z is not None:
+        sci = np.asarray(slitmap['telescope']) == 'Sci'
+        x, y = np.asarray(slitmap['xpmm'])[sci], np.asarray(slitmap['ypmm'])[sci]
+        spec = np.asarray(slitmap['spectrographid'])[sci]
+        red = WAVE > 7600
+        flux[np.ix_(sci, red)] *= (_throughput(x, y, spec, gx=gx_z) / _throughput(x, y, spec))[:, None]
+    hdr = fits.Header({'MJD': 60050, 'TESCIFO': 35.4, 'TESCIKM': 10.0})
+    if header:
+        hdr.update(header)
+    return RSS(data=flux, error=0.01 * flux, wave=WAVE, slitmap=slitmap, header=hdr)
+
+
+def test_channel_weights():
+    w = fg.channel_weights(WAVE)
+    assert np.allclose(w['b'] + w['r'] + w['z'], 1.0)
+    assert w['b'][WAVE < 5000].min() == 1 and w['r'][(WAVE > 6000) & (WAVE < 7000)].min() == 1
+    assert w['z'][WAVE > 8000].min() == 1
+
+
+def test_fiber_throughput():
+    rng = np.random.default_rng(8)
+    x, y = _positions(500, rng)
+    spec = rng.integers(1, 4, size=500)
+    k = fg.fiber_throughput(FACTORS, GX, GY, x, y, spec)
+    assert np.mean(k) == pytest.approx(1.0)
+    assert np.allclose(k / _throughput(x, y, spec), np.mean(_throughput(x, y, spec)) ** -1)
+
+
+def test_apply_flat_models_removes_the_plane(frame):
+    rss = _cframe(frame)
+    sky = rss._data[np.asarray(rss._slitmap['telescope']) != 'Sci'].copy()
+    models = {ch: _constant_model(ch, GX, GY) for ch in 'brz'}
+    res = fg.apply_flat_models(rss, models, model_files={'z': '/x/lvm-mfiberflat_gradient-z.fits'})
+    assert res['model']['z']['gx'] == pytest.approx(GX)
+    after = fg.measure_skyline_planes(rss._data, WAVE, rss._slitmap, sky_fibers=False)
+    for key in ('b', 'r', 'z', 'z_oh'):
+        assert abs(after[key]['gx']) < 0.1 and abs(after[key]['gy']) < 0.1, key
+        assert after[key]['f1'] == pytest.approx(after[key]['f3'], abs=0.002)
+    # the sky fibers are not changed; the record is in the header
+    assert np.array_equal(rss._data[np.asarray(rss._slitmap['telescope']) != 'Sci'], sky)
+    assert rss._header['HIERARCH FLATGRAD APPLIED'] is True
+    assert rss._header['HIERARCH FLATGRAD Z GX'] == pytest.approx(GX)
+    assert rss._header['HIERARCH FLATGRAD Z FILE'] == 'lvm-mfiberflat_gradient-z.fits'
+    assert rss._header['HIERARCH FLATGRAD DIRECT'] is False
+
+
+def test_apply_flat_models_scales_the_error(frame):
+    rss = _cframe(frame)
+    ratio = rss._error / rss._data
+    fg.apply_flat_models(rss, {ch: _constant_model(ch, GX, GY) for ch in 'brz'})
+    assert np.allclose(rss._error / rss._data, ratio)
+
+
+def test_apply_flat_models_only_once(frame):
+    rss = _cframe(frame)
+    models = {ch: _constant_model(ch, GX, GY) for ch in 'brz'}
+    fg.apply_flat_models(rss, models)
+    once = rss._data.copy()
+    assert fg.apply_flat_models(rss, models) is None
+    assert np.array_equal(rss._data, once)
+
+
+def test_apply_flat_models_direct_step(frame):
+    rss = _cframe(frame)
+    models = {ch: _constant_model(ch, 0.5 * GX, 0.5 * GY) for ch in 'brz'}
+    res = fg.apply_flat_models(rss, models, direct=True)
+    assert res['direct'] and res['rmode'] == 'oh+bz'
+    after = fg.measure_skyline_planes(rss._data, WAVE, rss._slitmap, sky_fibers=False)
+    for key in ('b', 'r', 'z', 'z_oh'):
+        assert abs(after[key]['gx']) < 0.1 and abs(after[key]['gy']) < 0.1, key
+    assert rss._header['HIERARCH FLATGRAD DIRECT'] is True
+    assert rss._header['HIERARCH FLATGRAD DRMODE'] == 'oh+bz'
+
+
+def test_apply_flat_models_direct_guard(frame):
+    # b and z disagree by 3 %/10 mm: the direct step is not applied, the model is
+    rss = _cframe(frame, gx_z=GX + 3.0)
+    res = fg.apply_flat_models(rss, {ch: _constant_model(ch, GX, GY) for ch in 'brz'}, direct=True)
+    assert not res['direct'] and res['guard'] == pytest.approx(3.0, abs=0.2)
+    assert rss._header['HIERARCH FLATGRAD APPLIED'] is True
+    assert rss._header['HIERARCH FLATGRAD DIRECT'] is False
+
+
+def test_apply_flat_models_not_possible(frame):
+    models = {ch: _constant_model(ch, GX, GY) for ch in 'brz'}
+    rss = _cframe(frame, header={'TESCIFO': -999.0})
+    data = rss._data.copy()
+    assert fg.apply_flat_models(rss, models) is None
+    assert np.array_equal(rss._data, data)
+    assert fg.apply_flat_models(_cframe(frame), {'b': models['b']}) is None
+
+
+def test_correct_cframe(frame, tmp_path, monkeypatch):
+    rss = _cframe(frame)
+    monkeypatch.setattr(fg, 'find_flat_models', lambda *a, **k: {})
+    assert fg.correct_cframe(rss, mjd=60050) is None
+    assert 'HIERARCH FLATGRAD APPLIED' not in rss._header
+
+    table = _drpall()
+    model = fg.fit_flat_model(table, EPOCHS)
+    files = {}
+    for ch in 'brz':
+        files[ch] = str(tmp_path / f'lvm-mfiberflat_gradient-{ch}.fits')
+        fg.write_flat_model(model, EPOCHS[0], ch, files[ch])
+    monkeypatch.setattr(fg, 'find_flat_models', lambda *a, **k: files)
+    res = fg.correct_cframe(rss, mjd=60050)
+    assert res is not None and rss._header['HIERARCH FLATGRAD APPLIED'] is True
+    assert rss._header['HIERARCH FLATGRAD EPOCH'] == EPOCHS[0]
