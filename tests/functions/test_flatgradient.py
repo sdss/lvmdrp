@@ -1,6 +1,8 @@
 # encoding: utf-8
 """Tests of the sky-line measurement of the large-scale flat-field error (flatgradient)."""
 
+import os
+
 import numpy as np
 import pytest
 from astropy.io import fits
@@ -193,3 +195,125 @@ def test_skyline_plane_columns_match_cards(frame):
     assert set(columns.values()) == keywords
     assert columns['skyplane_z_gx'] == 'SKYPLANE Z GX'
     assert columns['skyplane_skyw_r_f3'] == 'SKYPLANE SKYW R F3'
+
+
+# ------------------------------------------------------------------ the model of the flat-field error
+EPOCHS = (60000, 60100)
+# true coefficients: per epoch (constant, drift t1) and shared (focus, sinK), per component
+TRUE = {'f1': {'c0': (1.0, 1.5), 't1': (0.3, -0.2), 'focus': 0.4, 'sinK': 0.2},
+        'f2': {'c0': (-0.5, -1.0), 't1': (0.0, 0.1), 'focus': -0.1, 'sinK': -0.3},
+        'gx': {'c0': (4.0, 6.0), 't1': (0.5, 0.3), 'focus': 1.0, 'sinK': 1.2},
+        'gy': {'c0': (2.0, 3.0), 't1': (-0.4, 0.6), 'focus': -4.0, 'sinK': 0.8}}
+
+
+def _true_component(comp, mjd, focus, kmir, epoch):
+    i = (np.asarray(epoch) == EPOCHS[1]).astype(int)
+    lo = np.where(i == 1, 60100.0, 60000.0)
+    u = 2 * (mjd - lo) / 90.0 - 1
+    c = TRUE[comp]
+    return (np.choose(i, c['c0']) + np.choose(i, c['t1']) * u + c['focus'] * (focus - fg.FOCUS0)
+            + c['sinK'] * np.sin(np.radians(kmir)))
+
+
+def _drpall(n=1500, seed=7, noise=0.05):
+    """A synthetic drpall table: exposures in two epochs, measured planes from the known model."""
+    import pandas as pd
+    rng = np.random.default_rng(seed)
+    epoch = rng.choice(EPOCHS, n)
+    mjd = epoch + rng.uniform(0, 90, n)
+    focus = rng.normal(35.3, 0.3, n)
+    kmir = rng.uniform(-120, 120, n)
+    d = {'expnum': np.arange(n), 'mjd': mjd, 'exptime': np.full(n, 900.0), 'drpqual': np.zeros(n, int),
+         'sci_focpos': focus, 'sci_kmpos': kmir}
+    for ch in 'brz':
+        F1 = _true_component('f1', mjd, focus, kmir, epoch) + noise * rng.standard_normal(n)
+        F2 = _true_component('f2', mjd, focus, kmir, epoch) + noise * rng.standard_normal(n)
+        F = np.column_stack([F1, F2, -F1 - F2])
+        for k in range(3):
+            d[f'skyplane_{ch}_f{k + 1}'] = 1 + F[:, k] / 100
+        for comp in ('gx', 'gy'):
+            d[f'skyplane_{ch}_{comp}'] = _true_component(comp, mjd, focus, kmir, epoch) + noise * rng.standard_normal(n)
+        d[f'skyplane_{ch}_n'] = np.full(n, 1550)
+    return pd.DataFrame(d)
+
+
+def test_model_design():
+    mjd = np.array([60010.0, 60150.0])
+    A, names = fg.model_design(mjd, np.array([35.5, 35.0]), np.array([0.0, 90.0]), np.array(EPOCHS),
+                               {60000: (60000.0, 60090.0), 60100: (60100.0, 60190.0)})
+    assert A.shape == (2, 2 * len(fg.EPOCH_TERMS) + len(fg.SHARED_TERMS))
+    assert names[:4] == ['c0_60000', 't1_60000', 't2_60000', 't3_60000']
+    assert A[0, names.index('c0_60000')] == 1 and A[0, names.index('c0_60100')] == 0
+    assert A[1, names.index('focus_hinge')] == pytest.approx(0.5)
+    assert A[1, names.index('sinK')] == pytest.approx(1.0)
+
+
+def test_fit_flat_model_recovers_model():
+    table = _drpall()
+    model = fg.fit_flat_model(table, EPOCHS)
+    for ch in 'brz':
+        assert sum(model['nexp'][ch].values()) == len(table)
+        for comp in ('f1', 'f2', 'gx', 'gy'):
+            c = model['coeffs'][ch][comp]
+            assert c['focus'] == pytest.approx(TRUE[comp]['focus'], abs=0.03)
+            assert c['sinK'] == pytest.approx(TRUE[comp]['sinK'], abs=0.03)
+            assert c['cosK'] == pytest.approx(0.0, abs=0.03)
+    # the predictions match the true model (the drift ranges come from the data, not exactly 90 days)
+    mjd = table['mjd'].to_numpy()
+    epoch = fg.assign_epochs(mjd, EPOCHS)
+    A, names = fg.model_design(mjd, table['sci_focpos'].to_numpy(), table['sci_kmpos'].to_numpy(), epoch,
+                               model['ranges'])
+    for comp in ('gx', 'gy', 'f1'):
+        pred = A @ np.array([model['coeffs']['z'][comp][n] for n in names])
+        true = _true_component(comp, mjd, table['sci_focpos'].to_numpy(), table['sci_kmpos'].to_numpy(), epoch)
+        assert np.max(np.abs(pred - true)) < 0.05
+
+
+def test_select_exposures():
+    table = _drpall(n=300)
+    table.loc[0, 'drpqual'] = 1
+    table.loc[1, 'exptime'] = 100.0
+    table.loc[2, 'sci_focpos'] = -999.0
+    table.loc[3, 'skyplane_z_gx'] = -999.9
+    table.loc[4, 'skyplane_z_gy'] += 50.0
+    table.loc[5, 'skyplane_z_n'] = 500
+    keep = fg.select_exposures(table, 'z', fg.assign_epochs(table['mjd'], EPOCHS))
+    assert not keep[:6].any()
+    assert keep[6:].mean() > 0.97
+
+
+def test_fit_flat_model_too_few_exposures():
+    with pytest.raises(ValueError):
+        fg.fit_flat_model(_drpall(n=12), EPOCHS)
+
+
+def test_write_read_evaluate(tmp_path):
+    table = _drpall()
+    model = fg.fit_flat_model(table, EPOCHS, channels='z')
+    path = tmp_path / 'lvm-mfiberflat_gradient-z.fits'
+    fg.write_flat_model(model, EPOCHS[1], 'z', str(path), drpver='test')
+    m = fg.read_flat_model(str(path))
+    assert m['channel'] == 'z' and m['epoch'] == EPOCHS[1]
+    assert m['range'] == model['ranges'][EPOCHS[1]]
+    assert fits.getheader(str(path))['DRPVER'] == 'test'
+    mjd, focus, kmir = 60150.0, 35.1, 40.0
+    A, names = fg.model_design(np.array([mjd]), np.array([focus]), np.array([kmir]), np.array([EPOCHS[1]]),
+                               model['ranges'])
+    val = fg.evaluate_flat_model(m, mjd, focus, kmir)
+    for comp in fg.MODEL_COMPONENTS:
+        assert val[comp] == pytest.approx(float(A[0] @ [model['coeffs']['z'][comp][n] for n in names]), abs=1e-9)
+    assert val['gx'] == pytest.approx(_true_component('gx', mjd, focus, kmir, EPOCHS[1]), abs=0.05)
+    # the drift is held at its end value beyond the range of the data
+    hi = m['range'][1]
+    assert fg.evaluate_flat_model(m, hi + 50, focus, kmir) == fg.evaluate_flat_model(m, hi, focus, kmir)
+
+
+def test_create_flat_models(tmp_path):
+    drpall = str(tmp_path / 'drpall-test.h5')
+    _drpall().to_hdf(drpall, key='summary', format='table')
+    out = tmp_path / 'models'
+    paths = fg.create_flat_models(drpall, EPOCHS, drpver='test', out_dir=str(out), dry_run=True)
+    assert len(paths) == 6 and not out.exists()
+    paths = fg.create_flat_models(drpall, EPOCHS, drpver='test', out_dir=str(out))
+    assert paths[(EPOCHS[0], 'b')] == str(out / str(EPOCHS[0]) / 'lvm-mfiberflat_gradient-b.fits')
+    assert all(os.path.exists(p) for p in paths.values())

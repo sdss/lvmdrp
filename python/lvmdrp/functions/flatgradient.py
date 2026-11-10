@@ -398,3 +398,327 @@ def measure_cframe(rss, write_header: bool = True, raise_errors: bool = True,
         for kw, value, comment in skyline_plane_cards(results):
             rss.setHdrValue(kw, value, comment)
     return results
+
+
+# ----------------------------------------------------------------------------------------------
+# The model of the large-scale flat-field error, fitted to the sky-line planes of many exposures
+# ----------------------------------------------------------------------------------------------
+
+# the components modelled per channel: spectrograph factors (%, relative to a mean of 1) and plane
+MODEL_COMPONENTS = ('f1', 'f2', 'f3', 'gx', 'gy')
+# terms shared by all epochs: focus (TESCIFO - focus0, its square, max(0, -focus)) and K-mirror
+SHARED_TERMS = ('focus', 'focus2', 'focus_hinge', 'sinK', 'cosK', 'sin2K', 'cos2K')
+# terms of each epoch: a constant and Legendre polynomials of degree 1-3 of the MJD within it
+EPOCH_TERMS = ('c0', 't1', 't2', 't3')
+# reference telescope focus (TESCIFO)
+FOCUS0 = 35.5
+# rejection of outlying exposures, in robust standard deviations from the epoch median
+OUTLIER_SIGMA = 6.0
+# exposures with fewer than this fraction of the usual number of fitted fibers are left out
+MIN_FIBER_FRACTION = 0.85
+
+
+def _shared_values(focus: np.ndarray, kmir: np.ndarray, focus0: float = FOCUS0) -> Dict[str, np.ndarray]:
+    """Values of the shared terms for the given focus (TESCIFO) and K-mirror angle (deg)."""
+    f = np.asarray(focus, dtype=float) - focus0
+    k = np.radians(np.asarray(kmir, dtype=float))
+    return {'focus': f, 'focus2': f * f, 'focus_hinge': np.maximum(0.0, -f),
+            'sinK': np.sin(k), 'cosK': np.cos(k), 'sin2K': np.sin(2 * k), 'cos2K': np.cos(2 * k)}
+
+
+def _epoch_values(mjd: np.ndarray, lo: float, hi: float) -> Dict[str, np.ndarray]:
+    """Values of the epoch terms for MJDs in an epoch whose data span [lo, hi]."""
+    u = np.clip(2 * (np.asarray(mjd, dtype=float) - lo) / max(1.0, hi - lo) - 1, -1, 1)
+    return {'c0': np.ones_like(u), 't1': u, 't2': 0.5 * (3 * u ** 2 - 1),
+            't3': 0.5 * (5 * u ** 3 - 3 * u)}
+
+
+def assign_epochs(mjd: np.ndarray, epoch_mjds: Sequence[int]) -> np.ndarray:
+    """Returns the epoch of each MJD: the latest epoch MJD not after it (the first epoch before all)."""
+    starts = np.array(sorted(int(e) for e in epoch_mjds))
+    i = np.clip(np.searchsorted(starts, np.asarray(mjd, dtype=float), side='right') - 1, 0, starts.size - 1)
+    return starts[i]
+
+
+def model_design(mjd: np.ndarray, focus: np.ndarray, kmir: np.ndarray, epoch: np.ndarray,
+                 ranges: Dict[int, Tuple[float, float]],
+                 focus0: float = FOCUS0) -> Tuple[np.ndarray, list]:
+    """Design matrix of the model: epoch constants and drifts, and the shared terms.
+
+    Args:
+        mjd: MJD of each exposure.
+        focus: telescope focus (TESCIFO) of each exposure.
+        kmir: K-mirror angle (TESCIKM, deg) of each exposure.
+        epoch: epoch of each exposure (see :func:`assign_epochs`).
+        ranges: the MJD range [lo, hi] of the data of each epoch.
+        focus0: reference focus.
+
+    Returns:
+        The design matrix (exposures x terms) and the term names, ``<term>_<epoch>``
+        for the epoch terms and the names in `SHARED_TERMS`.
+    """
+    epoch = np.asarray(epoch)
+    cols, names = [], []
+    for e in sorted(ranges):
+        sel = epoch == e
+        vals = _epoch_values(mjd, *ranges[e])
+        for term in EPOCH_TERMS:
+            cols.append(np.where(sel, vals[term], 0.0))
+            names.append(f'{term}_{e}')
+    shared = _shared_values(focus, kmir, focus0)
+    for term in SHARED_TERMS:
+        cols.append(shared[term])
+        names.append(term)
+    return np.vstack(cols).T, names
+
+
+def _column(table, name: str) -> np.ndarray:
+    """A column of a drpall table as floats, NaN where missing or flagged (<= -999)."""
+    if name not in table:
+        return np.full(len(table), np.nan)
+    v = np.asarray(table[name], dtype=float)
+    return np.where(v <= -999, np.nan, v)
+
+
+def model_targets(table, channel: str) -> np.ndarray:
+    """The modelled components of each exposure, from the drpall sky-line plane columns.
+
+    Args:
+        table: drpall table (pandas DataFrame or astropy Table) with the ``skyplane_*`` columns.
+        channel: 'b', 'r' or 'z'.
+
+    Returns:
+        An array (exposures x 5): the spectrograph factors in % relative to a
+        mean of 1, and gx, gy in % per 10 mm (see `MODEL_COMPONENTS`).
+    """
+    f = np.column_stack([_column(table, f'skyplane_{channel}_f{k}') for k in (1, 2, 3)])
+    with np.errstate(invalid='ignore'):
+        f = 100 * (f / np.mean(f, axis=1)[:, None] - 1)
+    return np.column_stack([f, _column(table, f'skyplane_{channel}_gx'),
+                            _column(table, f'skyplane_{channel}_gy')])
+
+
+def select_exposures(table, channel: str, epoch: np.ndarray, minexp: float = 300.0) -> np.ndarray:
+    """Selects the exposures used to fit the model of one channel.
+
+    Used: DRPQUAL 0, at least `minexp` seconds, focus and K-mirror angle known,
+    all components measured, at least `MIN_FIBER_FRACTION` of the usual number of
+    fibers fitted, and no component more than `OUTLIER_SIGMA` robust standard
+    deviations from the median of its epoch.
+
+    Args:
+        table: drpall table with the ``skyplane_*`` columns.
+        channel: 'b', 'r' or 'z'.
+        epoch: epoch of each exposure.
+        minexp: shortest exposure time used, s.
+
+    Returns:
+        True for the exposures to use.
+    """
+    V = model_targets(table, channel)
+    nfib = _column(table, f'skyplane_{channel}_n')
+    ok = np.all(np.isfinite(V), axis=1) & np.isfinite(nfib)
+    ok &= np.isfinite(_column(table, 'sci_focpos')) & np.isfinite(_column(table, 'sci_kmpos'))
+    ok &= _column(table, 'exptime') >= minexp
+    if 'drpqual' in table:
+        ok &= np.asarray(table['drpqual']) == 0
+    if not ok.any():
+        return ok
+    ok &= nfib >= MIN_FIBER_FRACTION * np.median(nfib[ok])
+    epoch = np.asarray(epoch)
+    keep = ok.copy()
+    for e in np.unique(epoch[ok]):
+        sel = ok & (epoch == e)
+        for j in range(V.shape[1]):
+            v = V[sel, j]
+            med = np.median(v)
+            sig = 1.4826 * np.median(np.abs(v - med))
+            if sig > 0:
+                keep[np.flatnonzero(sel)[np.abs(v - med) > OUTLIER_SIGMA * sig]] = False
+    return keep
+
+
+def fit_flat_model(table, epoch_mjds: Sequence[int], channels: str = 'brz', minexp: float = 300.0,
+                   focus0: float = FOCUS0) -> Dict:
+    """Fits the model of the large-scale flat-field error to the sky-line planes of many exposures.
+
+    For each channel and component, the measured value is fitted as a constant
+    and a cubic drift (Legendre polynomials in the MJD) within each epoch, plus
+    focus and K-mirror terms shared by all epochs. The model describes what is
+    left after the flats used in the reduction the table comes from.
+
+    Args:
+        table: drpall table (pandas DataFrame or astropy Table) with mjd,
+            exptime, drpqual, sci_focpos, sci_kmpos and the ``skyplane_*`` columns.
+        epoch_mjds: the first MJD of each epoch (the ffactor epochs).
+        channels: the channels to fit.
+        minexp: shortest exposure time used, s.
+        focus0: reference focus.
+
+    Returns:
+        A dict with 'focus0', 'ranges' ({epoch: (lo, hi)}, the MJD range of the
+        data of each epoch), 'nexp' ({channel: {epoch: number of exposures}}) and
+        'coeffs' ({channel: {component: {term: value}}}, terms as in
+        :func:`model_design`).
+
+    Raises:
+        ValueError: if a channel has fewer exposures than terms to fit.
+    """
+    mjd = _column(table, 'mjd')
+    focus = _column(table, 'sci_focpos')
+    kmir = _column(table, 'sci_kmpos')
+    epoch = assign_epochs(mjd, epoch_mjds)
+    usable = {ch: select_exposures(table, ch, epoch, minexp=minexp) for ch in channels}
+    anyuse = np.any(np.column_stack(list(usable.values())), axis=1)
+    ranges = {int(e): (float(mjd[anyuse & (epoch == e)].min()), float(mjd[anyuse & (epoch == e)].max()))
+              for e in np.unique(epoch[anyuse])}
+    model = {'focus0': focus0, 'ranges': ranges, 'nexp': {}, 'coeffs': {}}
+    for ch in channels:
+        use = usable[ch] & np.isin(epoch, list(ranges))
+        A, names = model_design(mjd[use], focus[use], kmir[use], epoch[use], ranges, focus0)
+        if use.sum() <= A.shape[1]:
+            raise ValueError(f'channel {ch}: {use.sum()} usable exposures for {A.shape[1]} terms')
+        V = model_targets(table, ch)[use]
+        coef, *_ = np.linalg.lstsq(A, V, rcond=None)
+        model['coeffs'][ch] = {comp: dict(zip(names, map(float, coef[:, j])))
+                               for j, comp in enumerate(MODEL_COMPONENTS)}
+        model['nexp'][ch] = {int(e): int(np.sum(epoch[use] == e)) for e in ranges}
+    return model
+
+
+def write_flat_model(model: Dict, epoch: int, channel: str, out_path: str, drpver: str = '') -> None:
+    """Writes the model of one epoch and channel as a calibration file (FITS).
+
+    The file holds everything needed to evaluate the model for that epoch: the
+    shared focus and K-mirror terms and the epoch's own constant and drift.
+
+    Args:
+        model: the dict returned by :func:`fit_flat_model`.
+        epoch: the epoch (its first MJD).
+        channel: 'b', 'r' or 'z'.
+        out_path: the output file.
+        drpver: version of the reduction the model was fitted to, recorded in the header.
+    """
+    from astropy.io import fits
+    coeffs = model['coeffs'][channel]
+    terms = list(EPOCH_TERMS) + list(SHARED_TERMS)
+    source = [f'{t}_{epoch}' if t in EPOCH_TERMS else t for t in terms]
+    cols = [fits.Column(name='term', format='12A', array=np.array(terms))]
+    for comp in MODEL_COMPONENTS:
+        cols.append(fits.Column(name=comp, format='D',
+                                array=np.array([coeffs[comp][s] for s in source])))
+    lo, hi = model['ranges'][epoch]
+    hdr = fits.Header()
+    hdr['CHANNEL'] = (channel, 'spectrograph channel')
+    hdr['EPOCH'] = (int(epoch), 'first MJD of the ffactor epoch')
+    hdr['EPOCHLO'] = (lo, 'first MJD of the data fitted in this epoch')
+    hdr['EPOCHHI'] = (hi, 'last MJD of the data fitted in this epoch')
+    hdr['FOCUS0'] = (model['focus0'], 'reference telescope focus (TESCIFO)')
+    hdr['NEXP'] = (model['nexp'][channel][epoch], 'exposures fitted in this epoch')
+    hdr['NEXPALL'] = (sum(model['nexp'][channel].values()), 'exposures fitted in all epochs')
+    hdr['DRPVER'] = (drpver, 'DRP version of the frames fitted')
+    hdr['COMMENT'] = ('Large-scale flat-field error left after the flats used (sdss/lvmdrp#268): '
+                      'f1-f3 spectrograph factors in % (mean 1), gx, gy plane in % per 10 mm. '
+                      'Value = sum over terms of coefficient x term value; see '
+                      'lvmdrp.functions.flatgradient.evaluate_flat_model.')
+    hdus = fits.HDUList([fits.PrimaryHDU(header=hdr), fits.BinTableHDU.from_columns(cols, name='COEFFS')])
+    hdus.writeto(out_path, overwrite=True)
+
+
+def read_flat_model(path: str) -> Dict:
+    """Reads a calibration file written by :func:`write_flat_model`.
+
+    Args:
+        path: the file.
+
+    Returns:
+        A dict with 'channel', 'epoch', 'range' (lo, hi), 'focus0' and 'coeffs'
+        ({component: {term: value}}, terms as in `EPOCH_TERMS` and `SHARED_TERMS`).
+    """
+    from astropy.io import fits
+    with fits.open(path) as hdus:
+        hdr = hdus[0].header
+        tab = hdus['COEFFS'].data
+        terms = [t.strip() for t in tab['term']]
+        coeffs = {comp: dict(zip(terms, map(float, tab[comp]))) for comp in MODEL_COMPONENTS}
+    return {'channel': hdr['CHANNEL'], 'epoch': int(hdr['EPOCH']), 'range': (hdr['EPOCHLO'], hdr['EPOCHHI']),
+            'focus0': float(hdr['FOCUS0']), 'coeffs': coeffs}
+
+
+def evaluate_flat_model(model: Dict, mjd: float, focus: float, kmir: float) -> Dict[str, float]:
+    """Evaluates a model read by :func:`read_flat_model` for one exposure.
+
+    The drift is held at its end values outside the MJD range of the data fitted.
+
+    Args:
+        model: the dict returned by :func:`read_flat_model`.
+        mjd: MJD of the exposure.
+        focus: telescope focus (TESCIFO).
+        kmir: K-mirror angle (TESCIKM, deg).
+
+    Returns:
+        {component: value}: the factors in % (relative to a mean of 1) and gx, gy
+        in % per 10 mm.
+    """
+    vals = dict(_epoch_values(np.atleast_1d(mjd), *model['range']))
+    vals.update(_shared_values(np.atleast_1d(focus), np.atleast_1d(kmir), model['focus0']))
+    return {comp: float(sum(c * vals[t][0] for t, c in model['coeffs'][comp].items()))
+            for comp in MODEL_COMPONENTS}
+
+
+def read_drpall(drpall: str):
+    """Reads a drpall summary file (HDF5 or FITS) into a pandas DataFrame."""
+    import pandas as pd
+    if drpall.endswith('.h5'):
+        return pd.read_hdf(drpall, key='summary')
+    from astropy.table import Table
+    tab = Table.read(drpall)
+    return tab[[c for c in tab.colnames if len(tab[c].shape) <= 1]].to_pandas()
+
+
+def create_flat_models(drpall: str, epoch_mjds: Sequence[int], channels: str = 'brz', drpver: str = '',
+                       out_dir: Optional[str] = None, from_sandbox: bool = True,
+                       minexp: float = 300.0, dry_run: bool = False) -> Dict[Tuple[int, str], str]:
+    """Fits the flat-field error model to a drpall file and writes one calibration file per epoch and channel.
+
+    Args:
+        drpall: the drpall file (HDF5 or FITS) of the reduction to fit, with
+            the ``skyplane_*`` columns.
+        epoch_mjds: the first MJD of each epoch (the ffactor epochs).
+        channels: the channels to fit.
+        drpver: DRP version of the reduction, recorded in the files and used to
+            find the calibration directory when `from_sandbox` is False.
+        out_dir: write ``<out_dir>/<epoch>/lvm-mfiberflat_gradient-<channel>.fits`` instead
+            of into the calibration directories.
+        from_sandbox: write into the sandbox calibration directories
+            ($LVM_MASTER_DIR) rather than those of the `drpver` reduction.
+        minexp: shortest exposure time used, s.
+        dry_run: fit and log the result, but write nothing.
+
+    Returns:
+        {(epoch, channel): path} of the files written (or that would be written).
+    """
+    import os
+    from lvmdrp.utils.paths import get_calib_paths
+
+    table = read_drpall(drpall)
+    log.info(f'fitting the flat-field error model to {len(table)} exposures in {drpall}')
+    model = fit_flat_model(table, epoch_mjds, channels=channels, minexp=minexp)
+    paths = {}
+    for epoch in sorted(model['ranges']):
+        if out_dir is not None:
+            out = {ch: os.path.join(out_dir, str(epoch), f'lvm-mfiberflat_gradient-{ch}.fits') for ch in channels}
+        else:
+            calibs = get_calib_paths(mjd=epoch, version=drpver or None, cameras='*',
+                                     flavors={'fiberflat_gradient'}, from_sandbox=from_sandbox)
+            out = calibs['fiberflat_gradient']
+        for ch in channels:
+            paths[(epoch, ch)] = out[ch]
+            c = model['coeffs'][ch]
+            log.info(f'epoch {epoch} channel {ch}: {model["nexp"][ch][epoch]} exposures, '
+                     f'constant gx {c["gx"][f"c0_{epoch}"]:.2f}, gy {c["gy"][f"c0_{epoch}"]:.2f} %/10mm '
+                     f'-> {out[ch]}')
+            if not dry_run:
+                os.makedirs(os.path.dirname(out[ch]), exist_ok=True)
+                write_flat_model(model, epoch, ch, out[ch], drpver=drpver)
+    return paths

@@ -458,6 +458,33 @@ def fiberflat_corrections(mjd, mjd_list, mjd_range, channels, calibration_epochs
                                           skip_done=skip_done, undo_correction=undo_correction, display_plots=False, dry_run=dry_run)
 
 
+@cli.command('fit-fiberflat-gradient', short_help='Fit the large-scale flat-field error model to the sky-line planes in a drpall file', context_settings=dict(show_default=True))
+@click.option('--drpall', type=str, default=None, help='drpall file (HDF5 or FITS) with the skyplane_* columns; default: that of --drpver')
+@click.option('--drpver', type=str, default=None, help='DRP version of the reduction to fit; default: the current version')
+@click.option('--channels', type=str, default='brz', help='spectrograph channels to fit')
+@click.option('--ffactor-epochs-file', type=str, default=None, help='path to a fiber flat factors epoch file')
+@click.option('--out-dir', type=str, default=None, help='write <out-dir>/<epoch>/lvm-mfiberflat_gradient-<channel>.fits instead of into the calibration directories')
+@click.option('--to-redux', is_flag=True, default=False, help='write into the calibration directories of the --drpver reduction instead of the sandbox')
+@click.option('--minexp', type=float, default=300.0, help='shortest exposure time used, in seconds')
+@click.option('--dry-run', is_flag=True, default=False, help='fit and report, but write nothing')
+def fit_fiberflat_gradient(drpall, drpver, channels, ffactor_epochs_file, out_dir, to_redux, minexp, dry_run):
+    """Fit the model of the large-scale flat-field error (sdss/lvmdrp#268)
+
+    The model (spectrograph factors and a plane across the science IFU, as a constant and drift per
+    ffactor epoch plus focus and K-mirror terms) is fitted to the sky-line planes measured in the
+    lvmCFrames of a reduction and written as one lvm-mfiberflat_gradient-<channel>.fits file per epoch.
+    """
+    from lvmdrp import __version__, path
+    from lvmdrp.functions.flatgradient import create_flat_models
+
+    drpver = drpver or __version__
+    if drpall is None:
+        drpall = path.full('lvm_drpall', drpver=drpver).replace('.fits', '.h5')
+    ffactor_epochs = load_epochs_file(epochs_kind='ffactor', epochs_path=ffactor_epochs_file, verbose=False)
+    create_flat_models(drpall, sorted(ffactor_epochs), channels=channels, drpver=drpver, out_dir=out_dir,
+                       from_sandbox=not to_redux, minexp=minexp, dry_run=dry_run)
+
+
 @cli.command('ffactors-experiment', short_help='Run a fiber flat-field factor experiment with given parameters', context_settings=dict(show_default=True))
 @click.option('-m', '--mjd', type=int, help='an MJD to reduce')
 @click.option('-l', '--mjd-list', type=IntListType(), help='a list of specific MJDs to reduce')
@@ -1177,6 +1204,7 @@ calibrations.add_command(qa_wavelengths_cli)
 calibrations.add_command(qa_arc_sky_cli)
 calibrations.add_command(fiberflat_corrections)
 calibrations.add_command(ffactors_experiment)
+calibrations.add_command(fit_fiberflat_gradient)
 calibrations.add_command(cluster_calibs)
 calibrations.add_command(create_pixelflats_tag)
 calibrations.add_command(create_longterm_tag)
