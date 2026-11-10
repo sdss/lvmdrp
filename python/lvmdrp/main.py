@@ -34,6 +34,7 @@ from lvmdrp.functions.imageMethod import (preproc_raw_frame, create_master_frame
 from lvmdrp.functions.rssMethod import (determine_wavelength_solution, create_pixel_table, apply_fiberflat,
                                         resample_wavelength, shift_wave_skylines, join_spec_channels, stack_spectrographs)
 from lvmdrp.functions.skyMethod import interpolate_sky, combine_skies, quick_sky_subtraction
+from lvmdrp.functions.flatgradient import measure_cframe
 from lvmdrp.core import fluxcal
 from lvmdrp.functions.fluxCalMethod import fluxcal_standard_stars, fluxcal_sci_ifu_stars, apply_fluxcal, model_selection
 from lvmdrp.utils.metadata import (get_frames_metadata, update_metadata, get_master_metadata, extract_metadata,
@@ -1741,7 +1742,14 @@ def science_reduction(expnum: int,
             return
 
         with Timer(name='Join Channels '+cframe_path, logger=log.info):
-            join_spec_channels(in_fframes=fframe_paths, out_cframe=cframe_path, use_weights=True)
+            cframe = join_spec_channels(in_fframes=fframe_paths, out_cframe=None, use_weights=True)
+
+        # measure the large-scale flat-field error from the sky lines (header keywords only, #268)
+        with Timer(name='Sky-line planes '+cframe_path, logger=log.info):
+            measure_cframe(cframe, raise_errors=False)
+
+        log.info(f"writing output RSS to {os.path.basename(cframe_path)}")
+        cframe.writeFitsData(cframe_path)
 
     if skip_skysub:
         log.info("skipping sky subtraction")

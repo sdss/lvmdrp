@@ -31,6 +31,7 @@ from typing import Dict, Optional, Sequence, Tuple
 
 import numpy as np
 
+from lvmdrp import log
 from lvmdrp.core.fit_profile import IFUGradient
 
 # fitted lines: arm -> (line center, side bands), Angstrom
@@ -344,7 +345,31 @@ def skyline_plane_cards(results: Dict[str, Optional[Dict[str, float]]],
     return cards
 
 
-def measure_cframe(rss, write_header: bool = True, **kwargs) -> Dict[str, Optional[Dict[str, float]]]:
+def skyline_plane_columns(prefix: str = 'SKYPLANE') -> Dict[str, str]:
+    """Returns the drpall column name of each header keyword of :func:`skyline_plane_cards`.
+
+    Column names are lowercase, e.g. ``skyplane_z_gx`` for
+    ``HIERARCH SKYPLANE Z GX`` and ``skyplane_skye_b_f1`` for
+    ``HIERARCH SKYPLANE SKYE B F1``.
+
+    Args:
+        prefix: the first word of the keywords.
+
+    Returns:
+        A dict {column name: header keyword}, with the keyword as
+        :func:`astropy.io.fits.Header.get` expects it (without ``HIERARCH``).
+    """
+    columns = {}
+    for key, (name, _) in _HEADER_NAMES.items():
+        items = _SKY_ITEMS if key.startswith('sky') else _PLANE_ITEMS
+        for _, kw, _ in items:
+            keyword = f'{prefix} {name} {kw}'
+            columns[keyword.lower().replace(' ', '_')] = keyword
+    return columns
+
+
+def measure_cframe(rss, write_header: bool = True, raise_errors: bool = True,
+                   **kwargs) -> Optional[Dict[str, Optional[Dict[str, float]]]]:
     """Measures the sky-line planes of a channel-combined frame (lvmCFrame).
 
     Args:
@@ -352,14 +377,23 @@ def measure_cframe(rss, write_header: bool = True, **kwargs) -> Dict[str, Option
             wavelength array and a slitmap).
         write_header: write the results to the header of `rss`
             (see :func:`skyline_plane_cards`).
+        raise_errors: if False, a failed measurement is logged as a warning
+            and None is returned, so that a reduction can continue.
         **kwargs: passed to :func:`measure_skyline_planes`.
 
     Returns:
-        The dict returned by :func:`measure_skyline_planes`.
+        The dict returned by :func:`measure_skyline_planes`, or None if the
+        measurement failed and `raise_errors` is False.
     """
-    if rss._wave is None or np.ndim(rss._wave) != 1:
-        raise ValueError('measure_cframe needs a frame with a 1D wavelength array')
-    results = measure_skyline_planes(rss._data, rss._wave, rss._slitmap, **kwargs)
+    try:
+        if rss._wave is None or np.ndim(rss._wave) != 1:
+            raise ValueError('measure_cframe needs a frame with a 1D wavelength array')
+        results = measure_skyline_planes(rss._data, rss._wave, rss._slitmap, **kwargs)
+    except Exception as err:
+        if raise_errors:
+            raise
+        log.warning(f'could not measure the sky-line planes: {err}')
+        return None
     if write_header:
         for kw, value, comment in skyline_plane_cards(results):
             rss.setHdrValue(kw, value, comment)

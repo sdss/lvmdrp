@@ -2,7 +2,9 @@
 #
 
 import importlib
+import pandas as pd
 import pytest
+from astropy.io import fits
 
 from lvmdrp import path
 import lvmdrp.utils.metadata
@@ -68,7 +70,25 @@ def test_collect_header_data(make_framefits):
                'mod_rms_senb': 2.0e-14, 'mod_rms_senr': 2.0e-14, 'mod_rms_senz': 2.0e-14,
                'fluxcal': "MOD"}
 
-    assert hdr_data == expdata
+    assert {k: hdr_data[k] for k in expdata} == expdata
+    # the sky-line plane columns are there, empty for a frame without the keywords
+    skyplane = {k: v for k, v in hdr_data.items() if k.startswith('skyplane_')}
+    assert len(skyplane) == 59 and all(v is None for v in skyplane.values())
+    assert set(hdr_data) == set(expdata) | set(skyplane)
+
+
+def test_collect_header_data_skyplane(make_framefits):
+    """ test the sky-line plane keywords are collected when present """
+    sframe = make_framefits(tileid=1054755, mjd=60297, expnum=9533)
+    with fits.open(sframe, mode='update') as hdulist:
+        hdulist[0].header['HIERARCH SKYPLANE Z GX'] = 6.25
+        hdulist[0].header['HIERARCH SKYPLANE SKYE B F1'] = 1.02
+        hdulist[0].header['HIERARCH SKYPLANE ZOH N'] = 1400
+    hdr_data = _collect_header_data(sframe)
+    assert hdr_data['skyplane_z_gx'] == 6.25
+    assert hdr_data['skyplane_skye_b_f1'] == 1.02
+    assert hdr_data['skyplane_zoh_n'] == 1400
+    assert hdr_data['skyplane_z_gy'] is None
 
 
 
@@ -90,3 +110,7 @@ def test_update_summary_file(make_fits, make_framefits):
     drpall = drpall.replace('.fits', '.h5')
 
     assert path.exists('', full=drpall)
+    # the sky-line plane columns are written as floats, with -999 where missing
+    summary = pd.read_hdf(drpall, key='summary')
+    assert summary['skyplane_z_gx'].dtype == 'float64'
+    assert (summary['skyplane_z_gx'] == -999).all()

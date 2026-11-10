@@ -11,7 +11,7 @@ This document records the main changes to the drp code.
 
 - Bumped ``skycalc_cli`` to 1.5, which no longer imports the deprecated ``pkg_resources``; removes the setuptools warning on every ``drp`` call and the ``ModuleNotFoundError`` with setuptools>=81 (#257)
 - Replaced lvmdrp's own ``pkg_resources.parse_version`` with ``packaging.version.parse``
-- Added ``functions.flatgradient`` to measure the large-scale flat-field error of the science IFU from sky lines in lvmCFrames: spectrograph factors and a plane per line (5577, 6364, 8399 and held-out OH lines), and the spectrograph factors in the sky IFUs; results can be written as ``SKYPLANE`` header keywords (#268)
+- Added ``functions.flatgradient`` to measure the large-scale flat-field error of the science IFU from sky lines in lvmCFrames: spectrograph factors and a plane per line (5577, 6364, 8399 and held-out OH lines), and the spectrograph factors in the sky IFUs; the results are written as ``SKYPLANE`` header keywords of every lvmCFrame made by ``science_reduction`` (a failed measurement is logged and does not stop the reduction), and copied to the drpall as ``skyplane_*`` columns (-999 for frames without them) (#268)
 
 
 1.3.2 (02-09-2026)

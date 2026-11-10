@@ -176,3 +176,20 @@ def test_measure_cframe_needs_1d_wave(frame):
     rss = RSS(data=flux, wave=np.tile(WAVE, (flux.shape[0], 1)), slitmap=slitmap, header=fits.Header())
     with pytest.raises(ValueError):
         fg.measure_cframe(rss)
+
+
+def test_measure_cframe_failure_does_not_raise(frame):
+    flux, slitmap = frame
+    rss = RSS(data=flux, wave=np.tile(WAVE, (flux.shape[0], 1)), slitmap=slitmap, header=fits.Header())
+    assert fg.measure_cframe(rss, raise_errors=False) is None
+    assert 'HIERARCH SKYPLANE Z GX' not in rss._header
+
+
+def test_skyline_plane_columns_match_cards(frame):
+    flux, slitmap = frame
+    res = fg.measure_skyline_planes(flux, WAVE, slitmap)
+    keywords = {kw.replace('HIERARCH ', '') for kw, _, _ in fg.skyline_plane_cards(res)}
+    columns = fg.skyline_plane_columns()
+    assert set(columns.values()) == keywords
+    assert columns['skyplane_z_gx'] == 'SKYPLANE Z GX'
+    assert columns['skyplane_skyw_r_f3'] == 'SKYPLANE SKYW R F3'

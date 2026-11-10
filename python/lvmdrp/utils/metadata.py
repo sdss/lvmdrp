@@ -1554,6 +1554,13 @@ def put_reduction_stage(
         store.close()
 
 
+def _skyline_plane_columns() -> dict:
+    """ The drpall columns of the sky-line plane header keywords (see lvmdrp.functions.flatgradient) """
+    # imported here, to keep lvmdrp.utils free of a module-level dependency on lvmdrp.functions
+    from lvmdrp.functions.flatgradient import skyline_plane_columns
+    return skyline_plane_columns()
+
+
 def _collect_header_data(filename: str) -> dict:
     """ Collect the relevant header information from a file
 
@@ -1603,6 +1610,9 @@ def _collect_header_data(filename: str) -> dict:
                         'moon_phase': 'SKY MOON_PHASE', 'moon_fli': 'SKY MOON_FLI',
                         'sun_alt': 'SKY SUN_ALT', 'moon_alt': 'SKY MOON_ALT'
                         }
+
+    # sky-line planes of the large-scale flat-field error (lvmdrp.functions.flatgradient)
+    hdr_dict_mapping.update(_skyline_plane_columns())
 
     with fits.open(filename) as hdulist:
         hdr = hdulist['PRIMARY'].header
@@ -1681,8 +1691,10 @@ def update_summary_file(filename: str, tileid: int = None, mjd: int = None, expn
     hdr_data['calib_mjd'] = master_mjd
     hdr_data['drpver'] = drpver
 
-    # add new columns
-    df = row.assign(**hdr_data)
+    # add new columns (all at once, so that the frame is not fragmented)
+    hdr_cols = pd.DataFrame({k: [v] * len(row) for k, v in hdr_data.items()}, index=row.index)
+    df = pd.concat([row.drop(columns=[c for c in hdr_cols if c in row]), hdr_cols], axis=1)
+    df = df[list(row.columns) + [c for c in hdr_cols if c not in row]]
 
     # explicitly set some column dtypes to try and handle cases with null data
     # sci, skye, skye keys
@@ -1691,6 +1703,8 @@ def update_summary_file(filename: str, tileid: int = None, mjd: int = None, expn
     dtypes = {f'{i}_{j}': 'float64' for i, j in itertools.product(tels, keys)}
     dtypes.update({colname: 'float64' for colname in ('moon_ra', 'moon_dec', 'moon_phase', 'moon_fli', 'sun_alt', 'moon_alt', 'sci_pa')})
     dtypes['calib_mjd'] = 'int64'
+    # sky-line planes: missing in frames reduced before they were measured
+    dtypes.update({colname: 'float64' for colname in _skyline_plane_columns()})
     df = df.astype(dtypes)
 
     # replace empty strings in object column with None
