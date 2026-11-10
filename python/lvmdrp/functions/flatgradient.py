@@ -975,3 +975,307 @@ def correct_cframe(rss, mjd: int, drpver: Optional[str] = None, from_sandbox: bo
     except Exception as err:
         log.warning(f'could not apply the large-scale flat-field correction: {err}')
         return None
+
+
+# ----------------------------------------------------------------------------------------------
+# Flats from the twilights: the instrument gradient of each epoch, with the twilight sky modelled
+# ----------------------------------------------------------------------------------------------
+
+# Sun altitude (degrees) at which the twilight sky term is zero: its amplitude grows linearly with depth below it
+TWILIGHT_SUN_ALT_REF = -3.0
+
+
+def twilight_planes(summary, channel: str) -> Dict[str, np.ndarray]:
+    """The gradient measured in each twilight exposure, and its sky geometry.
+
+    Args:
+        summary: per-exposure twilight table (pandas DataFrame), as written by
+            ``drp calibrations qa-twilights --trends``: columns expnum, channel,
+            mjd, gcoeff1-4 (the gradient that stage 1 removed from the
+            per-exposure flat), sun_alt and dir_sun (the direction towards the
+            Sun across the science IFU, degrees from +x towards +y).
+        channel: 'b', 'r' or 'z'.
+
+    Returns:
+        A dict of arrays over the usable exposures of the channel: expnum, mjd,
+        gx and gy (% per 10 mm), depth (degrees of the Sun below
+        `TWILIGHT_SUN_ALT_REF`), ux and uy (the unit vector towards the Sun).
+    """
+    tab = summary[summary['channel'].astype(str) == channel]
+    # the coefficients are not normalized (they can be large and negative); only their ratios matter
+    g = {k: np.asarray(tab[f'gcoeff{k}'], dtype=float) if f'gcoeff{k}' in tab else np.full(len(tab), np.nan)
+         for k in (1, 2, 3, 4)}
+    with np.errstate(divide='ignore', invalid='ignore'):
+        gx, gy = 1000 * g[3] / g[1], 1000 * g[2] / g[1]
+    sun_alt = _column(tab, 'sun_alt')
+    dir_sun = np.radians(_column(tab, 'dir_sun'))
+    mjd = _column(tab, 'mjd')
+    ok = np.isfinite(gx) & np.isfinite(gy) & np.isfinite(sun_alt) & np.isfinite(dir_sun) & np.isfinite(mjd)
+    ok &= g[1] != 0
+    return {'expnum': np.asarray(tab['expnum'], dtype=int)[ok], 'mjd': mjd[ok], 'gx': gx[ok], 'gy': gy[ok],
+            'depth': TWILIGHT_SUN_ALT_REF - sun_alt[ok], 'ux': np.cos(dir_sun[ok]), 'uy': np.sin(dir_sun[ok])}
+
+
+def fit_twilight_model(summary, epoch_mjds: Sequence[int], channels: str = 'brz',
+                       clip: Optional[float] = None) -> Dict:
+    """Fits the instrument gradient of each epoch to the twilight exposures.
+
+    The gradient measured in each twilight exposure is modelled as a constant
+    plane per epoch (the instrument gradient) plus a twilight sky gradient
+    towards the Sun, with an amplitude that is linear in the depth of the Sun
+    below `TWILIGHT_SUN_ALT_REF` (two coefficients per channel, shared by all
+    epochs), as in the twilight model of the instrument-gradient QA. Of the variants tested
+    on the 1.3.2 science sky lines, this one gave the flattest frames; a drift
+    within an epoch, a focus term or clipping of outlying twilights did not
+    help. With `clip`, exposures more than `clip` robust standard deviations
+    from the fit are rejected and the fit repeated.
+
+    Args:
+        summary: per-exposure twilight table (see :func:`twilight_planes`).
+        epoch_mjds: the first MJD of each epoch (the ffactor epochs).
+        channels: the channels to fit.
+        clip: clipping threshold, in robust standard deviations (default: no clipping).
+
+    Returns:
+        A dict with 'planes' ({channel: {epoch: (gx, gy)}}, % per 10 mm), 'sun'
+        ({channel: (amplitude at the reference depth, amplitude per degree of
+        depth)}, % per 10 mm), 'nexp'
+        ({channel: {epoch: number of twilights}}), 'rejected' ({channel: expnums})
+        and 'rms' ({channel: rms residual, % per 10 mm}).
+
+    Raises:
+        ValueError: if a channel has no usable twilight exposures.
+    """
+    out = {'planes': {}, 'sun': {}, 'nexp': {}, 'rejected': {}, 'rms': {}}
+    for ch in channels:
+        tw = twilight_planes(summary, ch)
+        n = tw['mjd'].size
+        if n == 0:
+            raise ValueError(f'channel {ch}: no usable twilight exposures')
+        epoch = assign_epochs(tw['mjd'], epoch_mjds)
+        epochs = sorted(set(int(e) for e in epoch))
+        use = np.ones(n, dtype=bool)
+        for _ in range(2 if clip else 1):
+            cols = []
+            for e in epochs:
+                sel = (epoch == e).astype(float)
+                cols.append(np.r_[sel, np.zeros(n)])
+                cols.append(np.r_[np.zeros(n), sel])
+            cols.append(np.r_[tw['ux'], tw['uy']])
+            cols.append(np.r_[tw['depth'] * tw['ux'], tw['depth'] * tw['uy']])
+            A = np.column_stack(cols)
+            T = np.r_[tw['gx'], tw['gy']]
+            rows = np.r_[use, use]
+            coef, *_ = np.linalg.lstsq(A[rows], T[rows], rcond=None)
+            res = T - A @ coef
+            dist = np.hypot(res[:n], res[n:])
+            sig = 1.4826 * np.median(np.abs(dist[use] - np.median(dist[use])))
+            new = dist < np.median(dist[use]) + clip * sig if (clip and sig > 0) else use
+            if np.array_equal(new, use):
+                break
+            use = new
+        out['planes'][ch] = {e: (float(coef[2 * i]), float(coef[2 * i + 1])) for i, e in enumerate(epochs)}
+        out['sun'][ch] = (float(coef[-2]), float(coef[-1]))
+        out['nexp'][ch] = {e: int(np.sum(use & (epoch == e))) for e in epochs}
+        out['rejected'][ch] = sorted(int(x) for x in tw['expnum'][~use])
+        out['rms'][ch] = float(np.sqrt(np.mean(dist[use] ** 2)))
+    return out
+
+
+def _write_flat(mflat, out_path: str) -> None:
+    """Writes a flat, replacing a symbolic link at `out_path` (never writing through it)."""
+    import os
+    if os.path.islink(out_path):
+        os.remove(out_path)
+    mflat.writeFitsData(out_path)
+
+
+def apply_twilight_gradient(in_mflat: str, gx: float, gy: float, epoch: int,
+                            out_mflat: Optional[str] = None, write_output: bool = False):
+    """Puts the instrument gradient of the twilights into a master twilight fiber flat.
+
+    The science fibers of the flat are multiplied by the plane
+    ``1 + (gx * x + gy * y) / 1000`` (normalized to a mean of 1 over them); the
+    other fibers are not changed. The plane is recorded in the header
+    (``<CH> FIBERFLAT TWIGRAD``, ``TWIGX``, ``TWIGY``, ``TWIEPOCH``); a flat that
+    already has it is left as it is.
+
+    Args:
+        in_mflat: the master twilight fiber flat (lvm-mfiberflat_twilight-<channel>.fits).
+        gx: x slope of the plane, % per 10 mm.
+        gy: y slope of the plane, % per 10 mm.
+        epoch: the epoch the plane was fitted for, recorded in the header.
+        out_mflat: where to write the result (default: `in_mflat`); a symbolic
+            link there is replaced by the file, never written through.
+        write_output: write the result.
+
+    Returns:
+        The flat (an RSS) and whether it was changed.
+    """
+    from lvmdrp.core.rss import RSS
+    mflat = RSS.from_file(in_mflat)
+    ch = str(mflat._header['CCD'])[0].upper()
+    out_mflat = out_mflat or in_mflat
+    if mflat._header.get(f'{ch} FIBERFLAT TWIGRAD', False):
+        log.info(f'{in_mflat}: the twilight gradient is already in the flat, nothing to do')
+        return mflat, False
+    sci = np.flatnonzero(np.asarray(mflat._slitmap['telescope']).astype(str) == 'Sci')
+    x = np.asarray(mflat._slitmap['xpmm'], dtype=float)[sci]
+    y = np.asarray(mflat._slitmap['ypmm'], dtype=float)[sci]
+    plane = 1 + (gx * x + gy * y) / 1000
+    plane /= np.mean(plane)
+    mflat._data[sci] = mflat._data[sci] * plane[:, None]
+    if mflat._error is not None:
+        mflat._error[sci] = mflat._error[sci] * plane[:, None]
+    mflat.setHdrValue(f'HIERARCH {ch} FIBERFLAT TWIGRAD', True, 'twilight instrument gradient in flat (#268)')
+    mflat.setHdrValue(f'HIERARCH {ch} FIBERFLAT TWIGX', round(float(gx), 4), 'twilight gradient x [%/10mm]')
+    mflat.setHdrValue(f'HIERARCH {ch} FIBERFLAT TWIGY', round(float(gy), 4), 'twilight gradient y [%/10mm]')
+    mflat.setHdrValue(f'HIERARCH {ch} FIBERFLAT TWIEPOCH', int(epoch), 'ffactor epoch of the gradient')
+    if write_output:
+        log.info(f'writing {out_mflat} with the twilight gradient ({gx:.2f}, {gy:.2f}) %/10mm')
+        _write_flat(mflat, out_mflat)
+    return mflat, True
+
+
+def undo_twilight_gradient(in_mflat: str, write_output: bool = False):
+    """Takes the twilight gradient recorded by :func:`apply_twilight_gradient` out of a master flat.
+
+    Args:
+        in_mflat: the master twilight fiber flat.
+        write_output: overwrite `in_mflat` with the result.
+
+    Returns:
+        The flat (an RSS) and whether it was changed.
+    """
+    from lvmdrp.core.rss import RSS
+    mflat = RSS.from_file(in_mflat)
+    ch = str(mflat._header['CCD'])[0].upper()
+    if not mflat._header.get(f'{ch} FIBERFLAT TWIGRAD', False):
+        log.info(f'{in_mflat}: no twilight gradient in the flat, nothing to undo')
+        return mflat, False
+    gx, gy = float(mflat._header[f'{ch} FIBERFLAT TWIGX']), float(mflat._header[f'{ch} FIBERFLAT TWIGY'])
+    sci = np.flatnonzero(np.asarray(mflat._slitmap['telescope']).astype(str) == 'Sci')
+    x = np.asarray(mflat._slitmap['xpmm'], dtype=float)[sci]
+    y = np.asarray(mflat._slitmap['ypmm'], dtype=float)[sci]
+    plane = 1 + (gx * x + gy * y) / 1000
+    plane /= np.mean(plane)
+    mflat._data[sci] = mflat._data[sci] / plane[:, None]
+    if mflat._error is not None:
+        mflat._error[sci] = mflat._error[sci] / plane[:, None]
+    mflat.setHdrValue(f'HIERARCH {ch} FIBERFLAT TWIGRAD', False, 'twilight instrument gradient in flat (#268)')
+    if write_output:
+        log.info(f'writing {in_mflat} without the twilight gradient')
+        _write_flat(mflat, in_mflat)
+    return mflat, True
+
+
+def link_calibration_tree(src_root: str, dst_root: str) -> int:
+    """Makes a copy of a calibration directory tree made of symbolic links.
+
+    Every file under `src_root` gets a symbolic link at the same place under
+    `dst_root` (directories are created); existing entries are left as they are.
+    A calibration file can then be replaced in the new tree, by removing its link
+    and writing the file, without touching the original.
+
+    Args:
+        src_root: the calibration directory (e.g. $LVM_MASTER_DIR).
+        dst_root: the new calibration directory.
+
+    Returns:
+        The number of links made.
+    """
+    import os
+    src_root, dst_root = os.path.abspath(src_root), os.path.abspath(dst_root)
+    if dst_root == src_root or dst_root.startswith(src_root + os.sep):
+        raise ValueError(f'the new calibration directory {dst_root} must be outside {src_root}')
+    nlinks = 0
+    for dirpath, _, filenames in os.walk(src_root):
+        target = os.path.join(dst_root, os.path.relpath(dirpath, src_root))
+        os.makedirs(target, exist_ok=True)
+        for name in filenames:
+            dst = os.path.join(target, name)
+            if not os.path.lexists(dst):
+                os.symlink(os.path.join(dirpath, name), dst)
+                nlinks += 1
+    return nlinks
+
+
+def create_twilight_gradients(summary_path: str, ffactor_epochs: Dict, calibration_epochs: Dict,
+                              channels: str = 'brz', out_calib_dir: Optional[str] = None, in_place: bool = False,
+                              drpver: Optional[str] = None, from_sandbox: bool = True,
+                              undo: bool = False, dry_run: bool = False) -> Dict:
+    """Fits the twilight instrument gradient of each ffactor epoch and puts it into the master twilight flats.
+
+    Every calibration epoch gets the plane of the ffactor epoch it belongs to.
+    By default the original flats are not changed: with `out_calib_dir`, a new
+    calibration tree is made there (symbolic links to every file of the sandbox
+    calibration directory, see :func:`link_calibration_tree`) and the new flats
+    replace their links, so the old and the new calibrations can both be used
+    (``LVM_MASTER_DIR``). Changing the original flats needs `in_place`.
+
+    Args:
+        summary_path: per-exposure twilight table (CSV), from ``drp calibrations qa-twilights --trends``.
+        ffactor_epochs: the ffactor epochs.
+        calibration_epochs: the calibration epochs, whose master flats get the gradient.
+        channels: the channels to process.
+        out_calib_dir: the new calibration directory (sandbox layout).
+        in_place: change the original flats instead.
+        drpver: DRP version, for the calibration directories of a reduction (with `in_place`).
+        from_sandbox: use the sandbox calibration directory ($LVM_MASTER_DIR) rather than those of `drpver`.
+        undo: take the twilight gradient out of the flats instead (in `out_calib_dir`, or in place).
+        dry_run: fit and log, but change no file.
+
+    Returns:
+        The fit (see :func:`fit_twilight_model`), or {} with `undo`.
+
+    Raises:
+        ValueError: without `out_calib_dir` or `in_place`, or with both, or with
+            `out_calib_dir` and the calibrations of a reduction.
+    """
+    import os
+    import pandas as pd
+    from lvmdrp.core.constants import MASTERS_DIR
+    from lvmdrp.utils.paths import get_calib_paths
+
+    if (out_calib_dir is None) == (not in_place):
+        raise ValueError('give either a new calibration directory (out_calib_dir) or in_place, not both')
+    if out_calib_dir is not None and not from_sandbox:
+        raise ValueError('a new calibration directory can only be made from the sandbox calibrations')
+
+    fit = {}
+    if not undo:
+        summary = pd.read_csv(summary_path)
+        fit = fit_twilight_model(summary, sorted(ffactor_epochs), channels=channels)
+        for ch in channels:
+            sun0, sun1 = fit['sun'][ch]
+            log.info(f'channel {ch}: twilight sky term {sun0:.2f} + {sun1:.3f} x depth %/10mm, '
+                     f'rms {fit["rms"][ch]:.2f}')
+            for e, (gx, gy) in fit['planes'][ch].items():
+                log.info(f'  epoch {e}: gradient ({gx:.2f}, {gy:.2f}) %/10mm from {fit["nexp"][ch][e]} twilights')
+    if out_calib_dir is not None and not dry_run:
+        n = link_calibration_tree(MASTERS_DIR, out_calib_dir)
+        log.info(f'new calibration tree {out_calib_dir}: {n} links to {MASTERS_DIR}')
+
+    for cal in sorted(calibration_epochs):
+        epoch = int(assign_epochs([cal], sorted(ffactor_epochs))[0])
+        flats = get_calib_paths(mjd=cal, version=drpver, flavors={'fiberflat_twilight'},
+                                from_sandbox=from_sandbox).get('fiberflat_twilight', {})
+        for ch in channels:
+            src = flats.get(ch)
+            if src is None or not os.path.exists(src):
+                log.warning(f'master twilight flat for calibration epoch {cal}, channel {ch} not found, skipping')
+                continue
+            dst = src if in_place else os.path.join(out_calib_dir, os.path.relpath(src, MASTERS_DIR))
+            if undo:
+                log.info(f'{"would take" if dry_run else "taking"} the twilight gradient out of {dst}')
+                if not dry_run:
+                    undo_twilight_gradient(dst, write_output=True)
+                continue
+            if epoch not in fit['planes'][ch]:
+                log.warning(f'no twilights for ffactor epoch {epoch} (calibration epoch {cal}), channel {ch}, skipping')
+                continue
+            gx, gy = fit['planes'][ch][epoch]
+            log.info(f'{"would put" if dry_run else "putting"} ({gx:.2f}, {gy:.2f}) %/10mm into {dst}')
+            if not dry_run:
+                apply_twilight_gradient(src, gx, gy, epoch, out_mflat=dst, write_output=True)
+    return fit

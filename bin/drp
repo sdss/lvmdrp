@@ -496,6 +496,39 @@ def fit_fiberflat_gradient(drpall, drpver, channels, ffactor_epochs_file, out_di
                        from_sandbox=not to_redux, minexp=minexp, dry_run=dry_run)
 
 
+@cli.command('twilight-gradient', short_help='Put the instrument gradient fitted to the twilights into the master twilight flats', context_settings=dict(show_default=True))
+@click.option('--twilight-summary', type=str, required=True, help='per-exposure twilight table (CSV) from drp calibrations qa-twilights --trends')
+@click.option('--out-calib-dir', type=str, default=None, help='new calibration directory: symbolic links to the sandbox calibrations, with the new twilight flats; the original flats are not changed')
+@click.option('--in-place', is_flag=True, default=False, help='change the original master twilight flats instead')
+@click.option('--channels', type=str, default='brz', help='spectrograph channels to process')
+@click.option('--calibration-epochs-file', type=str, default=None, help='path to a calibrations epoch file')
+@click.option('--ffactor-epochs-file', type=str, default=None, help='path to a fiber flat factors epoch file')
+@click.option('--drpver', type=str, default=None, help='with --in-place --to-redux, the DRP version whose calibrations are changed')
+@click.option('--to-redux', is_flag=True, default=False, help='with --in-place, change the calibrations of --drpver instead of the sandbox')
+@click.option('--undo', is_flag=True, default=False, help='take the twilight gradient out of the flats instead')
+@click.option('--dry-run', is_flag=True, default=False, help='fit and report, but change no file')
+def twilight_gradient(twilight_summary, out_calib_dir, in_place, channels, calibration_epochs_file, ffactor_epochs_file,
+                      drpver, to_redux, undo, dry_run):
+    """Put the instrument gradient of the twilights into the master twilight flats (sdss/lvmdrp#268)
+
+    The gradient removed from each twilight exposure by stage 1 is fitted as a constant plane per ffactor epoch
+    plus a twilight sky gradient towards the Sun, and the plane of each epoch is put into the science fibers of the
+    master twilight flats of its calibration epochs. By default a new calibration directory is made (--out-calib-dir)
+    and the original flats are left as they are, so that both calibrations can be used (LVM_MASTER_DIR).
+    """
+    from lvmdrp.functions.flatgradient import create_twilight_gradients
+
+    if (out_calib_dir is None) == (not in_place):
+        raise click.UsageError('give either --out-calib-dir or --in-place')
+    if to_redux and not in_place:
+        raise click.UsageError('--to-redux needs --in-place')
+    calibration_epochs = load_epochs_file(epochs_kind='calibration', epochs_path=calibration_epochs_file, verbose=False)
+    ffactor_epochs = load_epochs_file(epochs_kind='ffactor', epochs_path=ffactor_epochs_file, verbose=False)
+    create_twilight_gradients(twilight_summary, ffactor_epochs, calibration_epochs, channels=channels,
+                              out_calib_dir=out_calib_dir, in_place=in_place, drpver=drpver,
+                              from_sandbox=not to_redux, undo=undo, dry_run=dry_run)
+
+
 @cli.command('ffactors-experiment', short_help='Run a fiber flat-field factor experiment with given parameters', context_settings=dict(show_default=True))
 @click.option('-m', '--mjd', type=int, help='an MJD to reduce')
 @click.option('-l', '--mjd-list', type=IntListType(), help='a list of specific MJDs to reduce')
@@ -1216,6 +1249,7 @@ calibrations.add_command(qa_arc_sky_cli)
 calibrations.add_command(fiberflat_corrections)
 calibrations.add_command(ffactors_experiment)
 calibrations.add_command(fit_fiberflat_gradient)
+calibrations.add_command(twilight_gradient)
 calibrations.add_command(cluster_calibs)
 calibrations.add_command(create_pixelflats_tag)
 calibrations.add_command(create_longterm_tag)

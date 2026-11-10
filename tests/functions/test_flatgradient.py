@@ -451,3 +451,117 @@ def test_flatgrad_test_copy_names():
     from lvmdrp.main import _flatgrad_name
     assert _flatgrad_name('/a/lvmCFrame-00044604.fits') == '/a/lvmCFrame-00044604.flatgrad.fits'
     assert _flatgrad_name('/a/lvmSFrame-00044604.fits.gz') == '/a/lvmSFrame-00044604.flatgrad.fits.gz'
+
+
+# ------------------------------------------------------------------ flats from the twilights
+TWI = {60000: (3.0, 5.0), 60100: (4.0, 7.0)}
+SUN = (1.5, -0.15)
+
+
+def _twilight_summary(n=200, seed=11, noise=0.2):
+    """A synthetic twilight table: planes from the known per-epoch gradient plus the Sun term."""
+    import pandas as pd
+    rng = np.random.default_rng(seed)
+    epoch = rng.choice(EPOCHS, n)
+    mjd = epoch + rng.uniform(0, 90, n)
+    sun_alt = rng.uniform(-12, -2, n)
+    dir_sun = rng.uniform(-180, 180, n)
+    depth = fg.TWILIGHT_SUN_ALT_REF - sun_alt
+    ux, uy = np.cos(np.radians(dir_sun)), np.sin(np.radians(dir_sun))
+    amp = SUN[0] + SUN[1] * depth
+    gx = np.array([TWI[e][0] for e in epoch]) + amp * ux + noise * rng.standard_normal(n)
+    gy = np.array([TWI[e][1] for e in epoch]) + amp * uy + noise * rng.standard_normal(n)
+    # stage 1 records unnormalized coefficients, possibly large and negative: only ratios matter
+    g1 = rng.choice([0.5, 13.8, -7.5e4], n)
+    rows = []
+    for ch in 'rz':
+        rows.append(pd.DataFrame({'expnum': np.arange(n), 'channel': ch, 'mjd': mjd, 'sun_alt': sun_alt,
+                                  'dir_sun': dir_sun, 'gcoeff1': g1, 'gcoeff2': g1 * gy / 1000,
+                                  'gcoeff3': g1 * gx / 1000, 'gcoeff4': 0.0}))
+    return pd.concat(rows, ignore_index=True)
+
+
+def test_twilight_planes():
+    summary = _twilight_summary()
+    tw = fg.twilight_planes(summary, 'z')
+    assert tw['mjd'].size == 200
+    assert np.all(tw['depth'] == fg.TWILIGHT_SUN_ALT_REF - summary[summary.channel == 'z']['sun_alt'].to_numpy())
+    assert fg.twilight_planes(summary, 'b')['mjd'].size == 0
+
+
+def test_fit_twilight_model():
+    fit = fg.fit_twilight_model(_twilight_summary(), EPOCHS, channels='rz')
+    for ch in 'rz':
+        for e, (gx, gy) in TWI.items():
+            assert fit['planes'][ch][e] == pytest.approx((gx, gy), abs=0.1)
+        assert fit['sun'][ch] == pytest.approx(SUN, abs=0.1)
+        assert sum(fit['nexp'][ch].values()) == 200 and fit['rejected'][ch] == []
+    with pytest.raises(ValueError):
+        fg.fit_twilight_model(_twilight_summary(), EPOCHS, channels='b')
+
+
+def _write_flat(path, frame):
+    flux, slitmap = frame
+    flat = np.ones_like(flux)
+    RSS(data=flat, error=0.01 * flat, wave=WAVE, slitmap=slitmap, header=fits.Header({'CCD': 'z1'})).writeFitsData(str(path))
+
+
+def test_apply_undo_twilight_gradient(frame, tmp_path):
+    path = tmp_path / 'lvm-mfiberflat_twilight-z.fits'
+    _write_flat(path, frame)
+    out = tmp_path / 'new.fits'
+    _, changed = fg.apply_twilight_gradient(str(path), GX, GY, 60100, out_mflat=str(out), write_output=True)
+    assert changed
+    new, old = RSS.from_file(str(out)), RSS.from_file(str(path))
+    sci = np.asarray(new._slitmap['telescope']).astype(str) == 'Sci'
+    x, y = np.asarray(new._slitmap['xpmm'])[sci], np.asarray(new._slitmap['ypmm'])[sci]
+    plane = 1 + (GX * x + GY * y) / 1000
+    assert np.allclose(new._data[sci, 0] / old._data[sci, 0], plane / plane.mean())
+    assert np.array_equal(new._data[~sci], old._data[~sci])
+    assert new._header['Z FIBERFLAT TWIGRAD'] is True and new._header['Z FIBERFLAT TWIEPOCH'] == 60100
+    # never twice, and undone exactly
+    assert not fg.apply_twilight_gradient(str(out), GX, GY, 60100)[1]
+    _, undone = fg.undo_twilight_gradient(str(out), write_output=True)
+    assert undone and np.allclose(RSS.from_file(str(out))._data, old._data)
+
+
+def test_new_flat_replaces_a_link_not_its_target(frame, tmp_path):
+    src = tmp_path / 'calib' / '60100'
+    src.mkdir(parents=True)
+    _write_flat(src / 'lvm-mfiberflat_twilight-z.fits', frame)
+    (src / 'lvm-mbias-z1.fits').write_text('bias')
+    before = (src / 'lvm-mfiberflat_twilight-z.fits').read_bytes()
+    assert fg.link_calibration_tree(str(tmp_path / 'calib'), str(tmp_path / 'new')) == 2
+    dst = tmp_path / 'new' / '60100' / 'lvm-mfiberflat_twilight-z.fits'
+    assert dst.is_symlink()
+    fg.apply_twilight_gradient(str(src / 'lvm-mfiberflat_twilight-z.fits'), GX, GY, 60100, out_mflat=str(dst),
+                               write_output=True)
+    assert not dst.is_symlink() and (tmp_path / 'new' / '60100' / 'lvm-mbias-z1.fits').is_symlink()
+    assert (src / 'lvm-mfiberflat_twilight-z.fits').read_bytes() == before
+    with pytest.raises(ValueError):
+        fg.link_calibration_tree(str(tmp_path / 'calib'), str(tmp_path / 'calib' / 'inside'))
+
+
+def test_create_twilight_gradients(frame, tmp_path, monkeypatch):
+    import lvmdrp.core.constants
+    import lvmdrp.utils.paths
+    calib = tmp_path / 'calib'
+    for cal in (60000, 60050, 60100):
+        (calib / str(cal)).mkdir(parents=True)
+        _write_flat(calib / str(cal) / 'lvm-mfiberflat_twilight-z.fits', frame)
+    monkeypatch.setattr(lvmdrp.core.constants, 'MASTERS_DIR', str(calib))
+    monkeypatch.setattr(lvmdrp.utils.paths, 'get_calib_paths', lambda mjd, **k: {
+        'fiberflat_twilight': {'z': str(calib / str(mjd) / 'lvm-mfiberflat_twilight-z.fits')}})
+    summary = tmp_path / 'twilights.csv'
+    _twilight_summary().to_csv(summary, index=False)
+    epochs = {e: {} for e in EPOCHS}
+    cals = {60000: {}, 60050: {}, 60100: {}}
+    with pytest.raises(ValueError):
+        fg.create_twilight_gradients(str(summary), epochs, cals, channels='z')
+    new = tmp_path / 'new'
+    fit = fg.create_twilight_gradients(str(summary), epochs, cals, channels='z', out_calib_dir=str(new))
+    for cal, e in ((60000, 60000), (60050, 60000), (60100, 60100)):
+        h = fits.getheader(str(new / str(cal) / 'lvm-mfiberflat_twilight-z.fits'))
+        assert h['Z FIBERFLAT TWIEPOCH'] == e
+        assert h['Z FIBERFLAT TWIGX'] == pytest.approx(fit['planes']['z'][e][0], abs=1e-3)
+        assert 'Z FIBERFLAT TWIGRAD' not in fits.getheader(str(calib / str(cal) / 'lvm-mfiberflat_twilight-z.fits'))
