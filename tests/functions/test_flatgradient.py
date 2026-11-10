@@ -445,3 +445,9 @@ def test_correct_cframe(frame, tmp_path, monkeypatch):
     res = fg.correct_cframe(rss, mjd=60050)
     assert res is not None and rss._header['HIERARCH FLATGRAD APPLIED'] is True
     assert rss._header['HIERARCH FLATGRAD EPOCH'] == EPOCHS[0]
+
+
+def test_flatgrad_test_copy_names():
+    from lvmdrp.main import _flatgrad_name
+    assert _flatgrad_name('/a/lvmCFrame-00044604.fits') == '/a/lvmCFrame-00044604.flatgrad.fits'
+    assert _flatgrad_name('/a/lvmSFrame-00044604.fits.gz') == '/a/lvmSFrame-00044604.flatgrad.fits.gz'
