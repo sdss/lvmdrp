@@ -67,7 +67,7 @@ from lvmdrp.core.constants import (
     CALIBRATION_NEEDS,
     SKYLINES_FIBERFLAT,
     CONTINUUM_FIBERFLAT,
-    MASTERS_DIR,
+    get_masters_dir,
     PIXELSHIFTS_PATH)
 from lvmdrp.core.tracemask import TraceMask
 from lvmdrp.core.image import loadImage
@@ -971,7 +971,7 @@ def _link_pixelmasks():
         log.info(f"link to pixel flats and masks already exists, {pixelmasks_version_path}")
         return
 
-    pixelmasks_path = os.path.join(MASTERS_DIR, "pixelmasks")
+    pixelmasks_path = os.path.join(get_masters_dir(), "pixelmasks")
     log.info(f"linking pixel flats and masks to {pixelmasks_version_path}")
     os.symlink(src=pixelmasks_path,
                 dst=pixelmasks_version_path,

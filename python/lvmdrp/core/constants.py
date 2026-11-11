@@ -6,7 +6,9 @@
 # @License: BSD 3-Clause
 # @Copyright: SDSS-V LVM
 
+import functools
 import os
+import subprocess
 
 from lvmdrp.utils import get_env_lib_directory
 
@@ -68,8 +70,72 @@ SKYCORR_CONFIG_PATH = os.path.join(CONFIG_PATH, "third_configs", "skycorr_config
 # ephemeris path
 EPHEMERIS_DIR = os.path.join(os.getenv("LVMCORE_DIR"), "etc")
 
-# fiducial calibrations directory
-MASTERS_DIR = os.getenv("LVM_MASTER_DIR")
+# fiducial calibrations directory: read from $LVM_MASTER_DIR when it is needed (not at import),
+# so that it can be changed for a run (drp run --calib-dir, see sdss/lvmdrp#272)
+def get_masters_dir():
+    """Returns the calibration directory in use ($LVM_MASTER_DIR)."""
+    return os.getenv("LVM_MASTER_DIR")
+
+
+def set_masters_dir(calib_dir):
+    """Sets the calibration directory for the rest of the run.
+
+    Sets $LVM_MASTER_DIR, which is what the calibration paths are built from,
+    so that the choice holds even when something else (e.g. an sdss tree setup
+    in a calling tool) has changed the environment before.
+
+    Args:
+        calib_dir: the calibration directory, laid out as $LVM_MASTER_DIR
+            (<mjd>/lvm-m<kind>-<camera>.fits, pixelmasks/, stellar_models/, ...).
+
+    Returns:
+        The absolute path set.
+
+    Raises:
+        FileNotFoundError: if `calib_dir` is not a directory.
+    """
+    calib_dir = os.path.abspath(os.path.expanduser(calib_dir))
+    if not os.path.isdir(calib_dir):
+        raise FileNotFoundError(f"calibration directory {calib_dir} not found")
+    os.environ["LVM_MASTER_DIR"] = calib_dir
+    return calib_dir
+
+
+@functools.lru_cache(maxsize=None)
+def _git_version(repo_dir):
+    """Returns the commit of a git checkout (12 characters, -dirty if tracked files differ), or 'unknown'."""
+    if not repo_dir or not os.path.isdir(repo_dir):
+        return "unknown"
+    try:
+        run = functools.partial(subprocess.run, cwd=repo_dir, capture_output=True, text=True, timeout=30)
+        head = run(["git", "rev-parse", "--short=12", "HEAD"])
+        if head.returncode != 0:
+            return "unknown"
+        dirty = run(["git", "diff", "--quiet", "HEAD", "--"]).returncode != 0
+        return head.stdout.strip() + ("-dirty" if dirty else "")
+    except (OSError, subprocess.SubprocessError):
+        return "unknown"
+
+
+def get_lvmcore_version():
+    """Returns the lvmcore commit in use ($LVMCORE_DIR), to record with the products.
+
+    lvmcore holds the calibration and ffactor epochs, the exposure excludes, the header
+    fixes and other inputs that change independently of lvmdrp, so the commit is needed
+    to reproduce a reduction (sdss/lvmdrp#272).
+
+    Returns:
+        The commit hash (12 characters), with '-dirty' if tracked files differ from it,
+        or 'unknown' if $LVMCORE_DIR is not a git checkout.
+    """
+    return _git_version(os.getenv("LVMCORE_DIR"))
+
+
+def __getattr__(name):
+    # MASTERS_DIR is kept for code outside lvmdrp; inside it, use get_masters_dir()
+    if name == "MASTERS_DIR":
+        return get_masters_dir()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 # path for pixel shifts table
 PIXELSHIFTS_PATH = os.path.join(os.getenv("LVMCORE_DIR"), "etc", "pixel_shifts.parquet")

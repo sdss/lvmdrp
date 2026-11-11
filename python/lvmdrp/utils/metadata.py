@@ -19,7 +19,7 @@ from astropy.table import Table
 from filelock import FileLock, Timeout
 from tqdm import tqdm
 
-from lvmdrp.core.constants import CALIBRATION_NEEDS, ARC_LAMPS, CON_LAMPS, CAMERAS
+from lvmdrp.core.constants import CALIBRATION_NEEDS, ARC_LAMPS, CON_LAMPS, CAMERAS, get_masters_dir, get_lvmcore_version
 from lvmdrp.utils.bitmask import (
     QualityFlag,
     ReductionStage,
@@ -1679,6 +1679,8 @@ def update_summary_file(filename: str, tileid: int = None, mjd: int = None, expn
     hdr_data['location'] = location
     hdr_data['agcam_location'] = gdr_location
     hdr_data['calib_mjd'] = master_mjd
+    hdr_data['calibdir'] = get_masters_dir() or ''
+    hdr_data['lvmcore'] = get_lvmcore_version()
     hdr_data['drpver'] = drpver
 
     # add new columns

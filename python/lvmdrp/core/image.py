@@ -24,6 +24,7 @@ import osqp
 
 from lvmdrp import log
 from lvmdrp.core.constants import CON_LAMPS, ARC_LAMPS, LVM_NBLOCKS, LVM_BLOCKSIZE, LVM_REFERENCE_COLUMN
+from lvmdrp.core.constants import get_masters_dir, get_lvmcore_version
 from lvmdrp.core.plot import plt, plot_fiber_residuals, plot_exposed_std
 from lvmdrp.core.fit_profile import gaussians, PROFILES
 from lvmdrp.core.apertures import Apertures
@@ -1509,6 +1510,8 @@ class Image(Header):
             if self._header is not None:
                 hdu[0].header = self.getHeader()
                 hdu[0].header['DRPVER'] = drpver
+                hdu[0].header['CALIBDIR'] = (get_masters_dir() or '', 'calibration directory')
+                hdu[0].header['LVMCORE'] = (get_lvmcore_version(), 'lvmcore commit')
                 hdu[0].update_header()
             hdu[0].scale(bzero=0, bscale=1)
 

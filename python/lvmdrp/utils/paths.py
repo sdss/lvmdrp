@@ -7,7 +7,7 @@ import pandas as pd
 
 from typing import List, Union
 
-from lvmdrp.core.constants import CALIBRATION_PRODUCTS, CAMERAS, MASTERS_DIR
+from lvmdrp.core.constants import CALIBRATION_PRODUCTS, CAMERAS, get_masters_dir
 from lvmdrp import log, path, __version__ as drpver
 from lvmdrp.utils.convert import tileid_grp
 from lvmdrp.utils import metadata as md
@@ -29,8 +29,9 @@ def get_master_mjd(sci_mjd: int) -> int:
     int
         the master calibration MJD
     """
-    masters_dir = sorted([f for f in os.listdir(MASTERS_DIR)
-                          if os.path.isdir(os.path.join(MASTERS_DIR, f))])
+    masters_root = get_masters_dir()
+    masters_dir = sorted([f for f in os.listdir(masters_root)
+                          if os.path.isdir(os.path.join(masters_root, f))])
     masters_dir = [f for f in masters_dir if f.isdigit()]
     target_master = list(filter(lambda f: sci_mjd >= int(f), masters_dir))
     return int(target_master[-1])
@@ -126,7 +127,7 @@ def get_calib_paths(mjd, version=None, cameras="*", flavors=CALIBRATION_PRODUCTS
     # define root path to pixel flats and masks
     # TODO: remove this once sdss-tree are updated with the corresponding species
     if from_sandbox:
-        pixelmasks_path = os.path.join(MASTERS_DIR, "pixelmasks")
+        pixelmasks_path = os.path.join(get_masters_dir(), "pixelmasks")
         path_species = "lvm_calib"
     else:
         pixelmasks_path = os.path.join(os.getenv('LVM_SPECTRO_REDUX'), f"{version}/{tilegrp}/{tileid}/pixelmasks")
