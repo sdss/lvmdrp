@@ -172,13 +172,14 @@ def cli():
 @click.option('--force-excluded', is_flag=True, default=False, help='force reduction of exposures listed in $LVMCORE_DIR/etc/exclude-exposures.yaml')
 @click.option('--use-nightly-cals', is_flag=True, default=False, help='Use nightly calibrations from same MJD as science frame(s). This option implies --use-untagged-cals')
 @click.option('--use-untagged-cals', is_flag=True, default=False, help='Use calibrations from the untagged (not sandbox) directory')
+@click.option('--calib-dir', type=str, default=None, help='Calibration directory to use instead of $LVM_MASTER_DIR (same layout); takes precedence over the environment')
 @cloup.constraint(mutually_exclusive, ['mjd', 'mjd_list', 'mjd_range'])
 # @cloup.constraint(RequireExactly(1), ['mjd', 'mjd_list', 'mjd_range'])
 @cloup.constraint(mutually_exclusive, ['expnum', 'exp_list', 'exp_range'])
 def run(mjd, mjd_list, mjd_range, with_cals, no_sci, expnum, exp_list, exp_range, exp_file, fluxcal_method,
         skip_2d, skip_1d, skip_wavecal, skip_waveres, skip_fluxcal, skip_skysub, skip_drpall, skip_flatgrad, flatgrad_direct,
         from_cframe, new_cframe, clean_ancillary, debug_mode, force_run, force_excluded, use_nightly_cals,
-        use_untagged_cals):
+        use_untagged_cals, calib_dir):
     """ Run the DRP reduction for a given MJD or range of MJDs
 
     Run the DRP for an MJD or range of MJDs.  Various flags and options are available
@@ -217,7 +218,8 @@ def run(mjd, mjd_list, mjd_range, with_cals, no_sci, expnum, exp_list, exp_range
             skip_flatgrad=skip_flatgrad,
             flatgrad_direct=flatgrad_direct,
             from_cframe=from_cframe,
-            new_cframe=new_cframe)
+            new_cframe=new_cframe,
+            calib_dir=calib_dir)
 
 
 # register full DRP command

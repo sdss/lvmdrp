@@ -28,7 +28,7 @@ from astropy.coordinates import SkyCoord, EarthLocation, AltAz
 from astropy import units as u
 
 from lvmdrp import log
-from lvmdrp.core.constants import LVM_ELEVATION, LVM_LON, LVM_LAT, MASTERS_DIR, STELLAR_TEMP_PATH
+from lvmdrp.core.constants import LVM_ELEVATION, LVM_LON, LVM_LAT, STELLAR_TEMP_PATH, get_masters_dir
 from lvmdrp.core.tracemask import TraceMask
 from lvmdrp.utils.paths import get_calib_paths
 from lvmdrp.core.spectrum1d import Spectrum1D, convolution_matrix
@@ -493,7 +493,7 @@ def get_stellar_params(source_ids):
     # Read Calibration GAIA stars table and create index on source_id for quick
     # record retrieval
     # https://sdss-wiki.atlassian.net/wiki/spaces/LVM/pages/14460157/Calibration+Stars
-    params_path = pathlib.Path(MASTERS_DIR) / "stellar_models" / "lvm-many_Gaia_stars_5-9_ftype_v4-all.fits"
+    params_path = pathlib.Path(get_masters_dir()) / "stellar_models" / "lvm-many_Gaia_stars_5-9_ftype_v4-all.fits"
 
     SOURCE_IDS = ", ".join(map(str, source_ids))
     COLUMN_NAMES = ["source_id", "teff_gspspec", "logg_gspspec", "mh_gspspec"]
@@ -545,7 +545,7 @@ def gaia_ids_without_xp_continuous(source_ids):
         a Gaia XP continuous spectrum. IDs absent from the local table are not
         included, since their availability is unknown.
     """
-    params_path = pathlib.Path(MASTERS_DIR) / "stellar_models" / "lvm-many_Gaia_stars_5-9_ftype_v4-all.fits"
+    params_path = pathlib.Path(get_masters_dir()) / "stellar_models" / "lvm-many_Gaia_stars_5-9_ftype_v4-all.fits"
 
     gaia_stars = Table.read(params_path, format='fits').to_pandas()
     gaia_stars = gaia_stars.filter(items=["source_id", "has_xp_continuous"])
@@ -906,7 +906,7 @@ def get_worst_resolution(delta_fwhm=1.0):
     """Get worst possible resolution + delta_fwhm from available LVM long-term calibrations
     """
     # get all available calibration epochs
-    calib_mjds = sorted([int(p) for p in os.listdir(MASTERS_DIR) if p.isdigit() and int(p) >= 60177])
+    calib_mjds = sorted([int(p) for p in os.listdir(get_masters_dir()) if p.isdigit() and int(p) >= 60177])
 
     worst_res = 0
     for calib_mjd in calib_mjds:
@@ -1237,7 +1237,7 @@ class TelluricCalculator:
     def _load_sky_model(self, skymodel_path=None):
         """Load the Palace Sky Model transmission table."""
         if skymodel_path is None:
-            model_path = os.path.join(MASTERS_DIR, 'stellar_models', 'lvm-model_transmission_Palace_SkyModel_step0.2-all.fits')
+            model_path = os.path.join(get_masters_dir(), 'stellar_models', 'lvm-model_transmission_Palace_SkyModel_step0.2-all.fits')
         else:
             model_path = skymodel_path
 

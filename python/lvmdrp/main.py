@@ -22,7 +22,7 @@ from astropy.io import fits
 from astropy.table import Table
 from astropy.time import Time
 from astropy.wcs import WCS
-from lvmdrp.core.constants import CAMERAS, SPEC_CHANNELS, MASTERS_DIR
+from lvmdrp.core.constants import CAMERAS, SPEC_CHANNELS, get_masters_dir, set_masters_dir, get_lvmcore_version
 from lvmdrp.core.rss import RSS, lvmCFrame
 from lvmdrp.functions.astrometryMethod import add_astrometry
 from lvmdrp.functions.imageMethod import (preproc_raw_frame, create_master_frame,
@@ -951,6 +951,8 @@ def combine_channels(tileid: int, mjd: int, expnum: int, imagetype: str):
     hdr['SPEC'] = ', '.join([f"sp{specid+1}" for specid in range(3)])
     hdr['FILENAME'] = pathlib.Path(cframe_path).name
     hdr['DRPVER'] = drpver
+    hdr['CALIBDIR'] = (get_masters_dir() or '', 'calibration directory')
+    hdr['LVMCORE'] = (get_lvmcore_version(), 'lvmcore commit')
 
     # remove the wcs from the primary header; add it to flux header
     [hdr.pop(i, None) for i in wcs.to_header().keys()]
@@ -1746,7 +1748,7 @@ def science_reduction(expnum: int,
                                 camera=channel, imagetype=sci_imagetyp, expnum=expnum) for channel in "brz"]
 
         # #The model stellar atmosphere spectra selection
-        model_selection(hsci_all_bands, GAIA_CACHE_DIR=MASTERS_DIR + '/gaia_cache')
+        model_selection(hsci_all_bands, GAIA_CACHE_DIR=os.path.join(get_masters_dir(), 'gaia_cache'))
 
         for channel in "brz":
             hsci_path = path.full('lvm_anc', mjd=sci_mjd, tileid=sci_tileid, drpver=drpver,
@@ -1755,8 +1757,8 @@ def science_reduction(expnum: int,
             #  and field stars found in the sci ifu
             # mode='GAIA' -> old behavior; 'model' -> new version with the spectra from the Pollux library
             with Timer(name='Fluxcal '+hsci_path, logger=log.info):
-                fluxcal_standard_stars(hsci_path, GAIA_CACHE_DIR=MASTERS_DIR+'/gaia_cache')
-                fluxcal_sci_ifu_stars(hsci_path, GAIA_CACHE_DIR=MASTERS_DIR+'/gaia_cache')
+                fluxcal_standard_stars(hsci_path, GAIA_CACHE_DIR=os.path.join(get_masters_dir(), 'gaia_cache'))
+                fluxcal_sci_ifu_stars(hsci_path, GAIA_CACHE_DIR=os.path.join(get_masters_dir(), 'gaia_cache'))
 
                 # flux-calibrate each channel
                 fframe_path = path.full("lvm_frame", mjd=sci_mjd, drpver=drpver, tileid=sci_tileid, expnum=sci_expnum, kind=f'FFrame-{channel}')
@@ -1856,7 +1858,8 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
             skip_drpall: bool = False, use_nightly_cals: bool = False, use_untagged_cals: bool = False,
             clean_ancillary: bool = False, debug_mode: bool = False, force_run: bool = False,
             force_excluded: bool = False, skip_flatgrad: bool = False, flatgrad_direct: bool = False,
-            from_cframe: bool = False, new_cframe: bool = False):
+            from_cframe: bool = False, new_cframe: bool = False,
+            calib_dir: str = None):
     """ Run the quick DRP
 
     Run the quick DRP for an MJD, or a range of MJDs. Reduces
@@ -1912,9 +1915,24 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
     new_cframe : bool, optional
         With from_cframe, write the corrected frames as new ``.flatgrad.fits`` files next to the originals
         and leave the originals and the drpall as they are (for testing), by default False
+    calib_dir : str, optional
+        Calibration directory to use instead of $LVM_MASTER_DIR, laid out as $LVM_MASTER_DIR
+        (e.g. a copy or a tree of links with some calibrations replaced), by default None
     """
     # # write the drp parameter configuration
     # write_config_file()
+
+    # the calibration directory: set here, so that it holds whatever the environment says
+    if calib_dir is not None:
+        if use_untagged_cals:
+            log.warning("calib_dir is not used for untagged (or nightly) calibrations")
+        try:
+            calib_dir = set_masters_dir(calib_dir)
+        except FileNotFoundError as err:
+            log.error(str(err))
+            return
+    log.info(f"calibration directory: {get_masters_dir()}")
+    log.info(f"lvmcore: {os.getenv('LVMCORE_DIR')} at commit {get_lvmcore_version()}")
 
     if mjd is None and expnum is None:
         log.error("you must provide either an exposure number `expnum` or an MJD `mjd`. None was given")
@@ -2147,7 +2165,7 @@ def create_drpall(drp_version: str = None, overwrite: bool = False, output_dir: 
 
 def cache_std_xp_spectra(mjds: Union[int, str, list], ignore_cache: bool = False, dry_run: bool = False) -> None:
     log.info("start of Gaia XP spectra caching for science field flux calibration")
-    gaia_cache_dir = os.path.join(os.getenv("LVM_MASTER_DIR"), "gaia_cache")
+    gaia_cache_dir = os.path.join(get_masters_dir(), "gaia_cache")
     # parse MJDs
     mjds = parse_mjds(mjds)
     if isinstance(mjds, int):
@@ -2198,7 +2216,7 @@ def cache_sci_xp_spectra(mjds: Union[int, str, list], min_acquired=999, ignore_c
         lists exposures that will be targeted
     """
     log.info("start of Gaia XP spectra caching for science field flux calibration")
-    gaia_cache_dir = os.path.join(os.getenv("LVM_MASTER_DIR"), "gaia_cache")
+    gaia_cache_dir = os.path.join(get_masters_dir(), "gaia_cache")
     # parse MJDs
     mjds = parse_mjds(mjds)
     if isinstance(mjds, int):

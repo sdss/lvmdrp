@@ -1234,13 +1234,14 @@ def create_twilight_gradients(summary_path: str, ffactor_epochs: Dict, calibrati
     """
     import os
     import pandas as pd
-    from lvmdrp.core.constants import MASTERS_DIR
+    from lvmdrp.core.constants import get_masters_dir
     from lvmdrp.utils.paths import get_calib_paths
 
     if (out_calib_dir is None) == (not in_place):
         raise ValueError('give either a new calibration directory (out_calib_dir) or in_place, not both')
     if out_calib_dir is not None and not from_sandbox:
         raise ValueError('a new calibration directory can only be made from the sandbox calibrations')
+    masters_dir = get_masters_dir()
 
     fit = {}
     if not undo:
@@ -1253,8 +1254,8 @@ def create_twilight_gradients(summary_path: str, ffactor_epochs: Dict, calibrati
             for e, (gx, gy) in fit['planes'][ch].items():
                 log.info(f'  epoch {e}: gradient ({gx:.2f}, {gy:.2f}) %/10mm from {fit["nexp"][ch][e]} twilights')
     if out_calib_dir is not None and not dry_run:
-        n = link_calibration_tree(MASTERS_DIR, out_calib_dir)
-        log.info(f'new calibration tree {out_calib_dir}: {n} links to {MASTERS_DIR}')
+        n = link_calibration_tree(masters_dir, out_calib_dir)
+        log.info(f'new calibration tree {out_calib_dir}: {n} links to {masters_dir}')
 
     for cal in sorted(calibration_epochs):
         epoch = int(assign_epochs([cal], sorted(ffactor_epochs))[0])
@@ -1265,7 +1266,7 @@ def create_twilight_gradients(summary_path: str, ffactor_epochs: Dict, calibrati
             if src is None or not os.path.exists(src):
                 log.warning(f'master twilight flat for calibration epoch {cal}, channel {ch} not found, skipping')
                 continue
-            dst = src if in_place else os.path.join(out_calib_dir, os.path.relpath(src, MASTERS_DIR))
+            dst = src if in_place else os.path.join(out_calib_dir, os.path.relpath(src, masters_dir))
             if undo:
                 log.info(f'{"would take" if dry_run else "taking"} the twilight gradient out of {dst}')
                 if not dry_run:

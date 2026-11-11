@@ -549,7 +549,7 @@ def test_create_twilight_gradients(frame, tmp_path, monkeypatch):
     for cal in (60000, 60050, 60100):
         (calib / str(cal)).mkdir(parents=True)
         _write_flat(calib / str(cal) / 'lvm-mfiberflat_twilight-z.fits', frame)
-    monkeypatch.setattr(lvmdrp.core.constants, 'MASTERS_DIR', str(calib))
+    monkeypatch.setenv('LVM_MASTER_DIR', str(calib))
     monkeypatch.setattr(lvmdrp.utils.paths, 'get_calib_paths', lambda mjd, **k: {
         'fiberflat_twilight': {'z': str(calib / str(mjd) / 'lvm-mfiberflat_twilight-z.fits')}})
     summary = tmp_path / 'twilights.csv'

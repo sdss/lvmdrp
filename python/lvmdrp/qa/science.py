@@ -50,7 +50,7 @@ from scipy.stats import binned_statistic
 
 from lvmdrp import log, path, __version__ as drpver
 from lvmdrp.core import fluxcal
-from lvmdrp.core.constants import (CAMERAS, LVM_BLOCKSIZE, LVM_REFERENCE_COLUMN, MASTERS_DIR, REF_SKYLINES,
+from lvmdrp.core.constants import (CAMERAS, LVM_BLOCKSIZE, LVM_REFERENCE_COLUMN, REF_SKYLINES, get_masters_dir,
                                    SKYLINES_FIBERFLAT, CONTINUUM_FIBERFLAT, SPEC_CHANNELS)
 from lvmdrp.core.rss import RSS, lvmCFrame
 from lvmdrp.core.tracemask import TraceMask
@@ -1345,7 +1345,7 @@ def qa_science_exposure(expnum, cameras=CAMERAS, parts=QA_PARTS, sky_lines=None,
     if "fluxcal" in parts:
         cframe_path = products.final("CFrame")
         if cframe_path is not None:
-            cache_dir = os.path.join(MASTERS_DIR, "gaia_cache")
+            cache_dir = os.path.join(get_masters_dir(), "gaia_cache")
             with fits.open(cframe_path, memmap=True) as hdus:
                 header = hdus["PRIMARY"].header
                 stars = standard_stars(header, Table.read(hdus["SLITMAP"]))
