@@ -30,8 +30,8 @@ class PassBand(Spectrum1D):
         self.__init__(data, wave)
 
     def effectiveWave(self):
-        a = numpy.trapz(self._data * self._wave)
-        b = numpy.trapz(self._data / self._wave)
+        a = numpy.trapezoid(self._data * self._wave)
+        b = numpy.trapezoid(self._data / self._wave)
         eff_wave = numpy.sqrt(a / b)
 
         return eff_wave
@@ -50,42 +50,42 @@ class PassBand(Spectrum1D):
 
         if spec._mask is not None:
             goodpix = numpy.logical_and(numpy.logical_not(spec._mask), total_cut)
-            flux = numpy.trapz(
+            flux = numpy.trapezoid(
                 spec._data[goodpix] * new_trans[goodpix] * spec._wave[goodpix],
                 spec._wave[goodpix],
-            ) / numpy.trapz(
+            ) / numpy.trapezoid(
                 new_trans[goodpix] * spec._wave[goodpix], spec._wave[goodpix]
             )
         else:
-            flux = numpy.trapz(
+            flux = numpy.trapezoid(
                 spec._data[total_cut] * new_trans[total_cut] * spec._wave[total_cut],
                 spec._wave[total_cut],
-            ) / numpy.trapz(
+            ) / numpy.trapezoid(
                 new_trans[total_cut] * spec._wave[total_cut], spec._wave[total_cut]
             )
             # print spec._wave[total_cut], spec._data[total_cut]
         if spec._error is not None:
             if spec._mask is not None:
                 error = numpy.sqrt(
-                    numpy.trapz(
+                    numpy.trapezoid(
                         spec._error[goodpix] ** 2
                         * new_trans[goodpix]
                         * spec._wave[goodpix],
                         spec._wave[goodpix],
                     )
-                    / numpy.trapz(
+                    / numpy.trapezoid(
                         new_trans[goodpix] * spec._wave[goodpix], spec._wave[goodpix]
                     )
                 )
             else:
                 error = numpy.sqrt(
-                    numpy.trapz(
+                    numpy.trapezoid(
                         spec._error[total_cut] ** 2
                         * new_trans[total_cut]
                         * spec._wave[total_cut],
                         spec._wave[total_cut],
                     )
-                    / numpy.trapz(
+                    / numpy.trapezoid(
                         new_trans[total_cut] * spec._wave[total_cut],
                         spec._wave[total_cut],
                     )

@@ -5,8 +5,8 @@
 
 import os
 import sys
+import sysconfig
 from setuptools import Extension, setup
-from distutils import sysconfig
 
 
 FAST_MEDIAN_PATH = 'cextern/fast_median/src'

@@ -271,7 +271,7 @@ def _choose_cc_peak(cc, shifts, min_shift, max_shift):
         # plt.vlines(shifts[mask][p-2], 0, 1, ls="--", color="k")
         # plt.vlines(shifts[mask][p+3], 0, 1, ls="--", color="k")
         # mask = (shifts >= p-7) & (shifts <= p+7)
-        # guess = [numpy.trapz(cc[mask], shifts[mask]), p, 1.0, 0.0]
+        # guess = [numpy.trapezoid(cc[mask], shifts[mask]), p, 1.0, 0.0]
         # bound_lower = [0.0, p+min_shift, 2, -numpy.inf]
         # bound_upper = [numpy.inf, p+max_shift, 5, numpy.inf]
         # best_gauss = fit_profile.Gaussian_const(guess)
@@ -436,7 +436,7 @@ def _cross_match_float(
 
     # Fit Gaussian around maximum cross-correlation peak
     mask = (best_shifts >= best_shift+gauss_window[0]) & (best_shifts <= best_shift+gauss_window[1])
-    guess = [numpy.trapz(best_cross_corr[mask], best_shifts[mask]), best_shift, 1.0, 0.0]
+    guess = [numpy.trapezoid(best_cross_corr[mask], best_shifts[mask]), best_shift, 1.0, 0.0]
     bound_lower = [0.0, best_shift+min_shift, gauss_sigmas[0], -numpy.inf]
     bound_upper = [numpy.inf, best_shift+max_shift, gauss_sigmas[1], numpy.inf]
     best_gauss = fit_profile.Gaussian_const(guess)
@@ -566,7 +566,7 @@ def _fiber_cc_match(
 
     # Fit Gaussian around maximum cross-correlation peak
     mask = (shifts >= min_shift+best_shift) & (shifts <= max_shift+best_shift)
-    guess = [numpy.trapz(best_cross_corr[mask], best_shifts[mask]), best_shift, 1.0, 0.0]
+    guess = [numpy.trapezoid(best_cross_corr[mask], best_shifts[mask]), best_shift, 1.0, 0.0]
     bound_lower = [0.0, best_shift+min_shift, gauss_sigmas[0], -numpy.inf]
     bound_upper = [numpy.inf, best_shift+max_shift, gauss_sigmas[1], numpy.inf]
     best_gauss = fit_profile.Gaussian_const(guess)

@@ -11,6 +11,11 @@ This document records the main changes to the drp code.
 
 - Bumped ``skycalc_cli`` to 1.5, which no longer imports the deprecated ``pkg_resources``; removes the setuptools warning on every ``drp`` call and the ``ModuleNotFoundError`` with setuptools>=81 (#257)
 - Replaced lvmdrp's own ``pkg_resources.parse_version`` with ``packaging.version.parse``
+- Upgraded to Python 3.12 (from 3.10) and NumPy 2.x (from <2.0)
+- Fixed NumPy 2.0 removed-API breakages: ``numpy.trapz``, ``numpy.in1d``, ``numpy.row_stack``,
+  and a scalar-array-assignment strictness change in science flux calibration
+- Fixed a ``setup.py`` build failure under Python 3.12 caused by the removal of ``distutils``
+  from the standard library
 
 
 1.3.2 (02-09-2026)

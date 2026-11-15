@@ -4,7 +4,17 @@ The LVM DRP is based in a collection of routines from [Py3D](https://github.com/
 
 ## Prerequisites
 
-This code is being developed/tested in an Ubuntu-based OS, using **Python 3.10**. We recommend you use a Python environment manager such as Anaconda or similar, in order to work on the same python version and to avoid cluttering the OS's python installation. We assume you are a member of the [Github sdss organization](https://github.com/sdss). We also assume that you have an SSH key set up on your local machine and registered in your Github account. If not, please follow [these instructions](https://docs.github.com/en/authentication/connecting-to-github-with-ssh/adding-a-new-ssh-key-to-your-github-account) to set up one.
+This code is being developed/tested in an Ubuntu-based OS, using **Python 3.12** (3.10 and
+3.11 are also supported). We recommend you use a Python
+environment manager such as Anaconda or similar, in order to work on the same python version
+and to avoid cluttering the OS's python installation. We assume you are a member of the
+[Github sdss organization](https://github.com/sdss). We also assume that you have an SSH key
+set up on your local machine and registered in your Github account. If not, please follow
+[these instructions](https://docs.github.com/en/authentication/connecting-to-github-with-ssh/adding-a-new-ssh-key-to-your-github-account) to set up one.
+
+You will also need a working C/C++ compiler toolchain (Xcode Command Line Tools on macOS,
+`build-essential`/`gcc` on Linux) — the DRP builds a small C++ extension (`fast_median`) as
+part of installation.
 
 To properly install and run the DRP you'll need to follow these steps first:
 
@@ -36,7 +46,7 @@ To properly install and run the DRP you'll need to follow these steps first:
 3. Create a new python environment. This is optional, but strongly recommended. With conda this is done like this:
 
     ```bash
-    conda create -n lvmdrp python=3.10
+    conda create -n lvmdrp python=3.12
     ```
 
 4. Make sure you are in the intended python environment and directory:
