@@ -7,6 +7,7 @@
 
 import os
 import re
+import subprocess
 
 import numpy as np
 import pandas as pd
@@ -17,10 +18,24 @@ from lvmdrp.core.constants import add_provenance, get_lvmdrp_version
 from lvmdrp.core.header import metadata_frames_table, read_frames_extension, write_frames_extension
 
 
-def test_lvmdrp_version_of_checkout():
-    # the tests run from a git checkout of lvmdrp
+def test_lvmdrp_version_of_checkout(tmp_path, monkeypatch):
+    # a git repository standing in for the lvmdrp checkout (CI installs lvmdrp as a package)
+    repo = tmp_path / 'lvmdrp'
+    repo.mkdir()
+    (repo / 'setup.cfg').write_text('[metadata]\n')
+    git = ['git', '-c', 'user.name=test', '-c', 'user.email=test@example.com']
+    subprocess.run(['git', 'init', '-q'], cwd=repo, check=True)
+    subprocess.run(git + ['add', '.'], cwd=repo, check=True)
+    subprocess.run(git + ['commit', '-q', '-m', 'first'], cwd=repo, check=True)
+    head = subprocess.run(['git', 'rev-parse', '--short=12', 'HEAD'], cwd=repo, check=True,
+                          capture_output=True, text=True).stdout.strip()
+    monkeypatch.setattr(constants, 'LVMDRP_REPO_DIR', str(repo))
     constants._git_version.cache_clear()
-    assert re.fullmatch(r'[0-9a-f]{12}(-dirty)?', get_lvmdrp_version())
+    assert re.fullmatch(r'[0-9a-f]{12}', get_lvmdrp_version())
+    assert get_lvmdrp_version() == head
+    (repo / 'setup.cfg').write_text('[metadata]\nname = changed\n')
+    constants._git_version.cache_clear()
+    assert get_lvmdrp_version() == head + '-dirty'
 
 
 def test_lvmdrp_version_not_git(tmp_path, monkeypatch):
