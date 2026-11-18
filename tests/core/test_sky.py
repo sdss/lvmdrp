@@ -109,5 +109,9 @@ def test_sky_pars_header(make_framefits):
     }
 
     #using approx since the sh_hght calc can be slightly different depending on where lvmdrp is run
+    # (strings compared exactly: pytest >= 9.2 rejects approx with a relative tolerance on them)
     for key, value in test_sky_pars.items():
-        assert test_sky_pars[key][0] == approx(exp_sky_pars[key][0], rel=1e-3)
+        if isinstance(exp_sky_pars[key][0], str):
+            assert test_sky_pars[key][0] == exp_sky_pars[key][0]
+        else:
+            assert test_sky_pars[key][0] == approx(exp_sky_pars[key][0], rel=1e-3)
