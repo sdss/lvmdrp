@@ -34,6 +34,60 @@ def individual_frames_table(headers):
         ])
     return frames
 
+
+def metadata_frames_table(frames):
+    """Returns the FRAMES table of the camera frames in a metadata table
+
+    Same columns as :func:`individual_frames_table`, from the raw frames metadata
+    (lvmdrp.utils.metadata) instead of the headers; its ``mjd`` column is already the
+    SJD. Rows are sorted by exposure number and camera.
+
+    Parameters
+    ----------
+    frames : pandas.DataFrame
+        Metadata of the camera frames, with columns tileid, mjd, expnum, spec, camera, exptime
+
+    Returns
+    -------
+    astropy.table.Table
+        Table with columns TILEID, MJD, EXPNUM, SPEC, CAMERA and EXPTIME
+    """
+    frames = frames.sort_values(["expnum", "camera"])
+    table = Table(names=["TILEID", "MJD", "EXPNUM", "SPEC", "CAMERA", "EXPTIME"], dtype=(int, int, int, str, str, float))
+    for frame in frames.to_dict("records"):
+        table.add_row([frame.get("tileid", 11111), frame["mjd"], frame["expnum"], frame.get("spec", ""),
+                       frame["camera"], frame.get("exptime", np.nan)])
+    return table
+
+
+def write_frames_extension(filename, frames):
+    """Adds (or replaces) the FRAMES extension of a FITS file
+
+    For products whose writer has no FRAMES extension of its own (the master fiber
+    flats). NFRAMES in the primary header is set to the number of exposures.
+
+    Parameters
+    ----------
+    filename : str
+        FITS file to update
+    frames : astropy.table.Table
+        FRAMES table (:func:`individual_frames_table`, :func:`metadata_frames_table`)
+    """
+    with pyfits.open(filename, mode="update") as hdul:
+        if "FRAMES" in hdul:
+            del hdul["FRAMES"]
+        hdul.append(pyfits.BinTableHDU(frames, name="FRAMES"))
+        hdul[0].header["NFRAMES"] = (len(set(frames["EXPNUM"])), "Number of exposures combined")
+
+
+def read_frames_extension(filename):
+    """Returns the FRAMES table of a FITS file, or None if it has none"""
+    with pyfits.open(filename) as hdul:
+        if "FRAMES" not in hdul or hdul["FRAMES"].data is None:
+            return None
+        return Table(hdul["FRAMES"].data)
+
+
 class Header(object):
     def __init__(self, header=None, origin=None):
         """

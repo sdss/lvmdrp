@@ -22,7 +22,8 @@ from astropy.io import fits
 from astropy.table import Table
 from astropy.time import Time
 from astropy.wcs import WCS
-from lvmdrp.core.constants import CAMERAS, SPEC_CHANNELS, get_masters_dir, set_masters_dir, get_lvmcore_version
+from lvmdrp.core.constants import (CAMERAS, SPEC_CHANNELS, get_masters_dir, set_masters_dir, get_lvmcore_version,
+                                    get_lvmdrp_version, add_provenance)
 from lvmdrp.core.rss import RSS, lvmCFrame
 from lvmdrp.functions.astrometryMethod import add_astrometry
 from lvmdrp.functions.imageMethod import (preproc_raw_frame, create_master_frame,
@@ -951,8 +952,7 @@ def combine_channels(tileid: int, mjd: int, expnum: int, imagetype: str):
     hdr['SPEC'] = ', '.join([f"sp{specid+1}" for specid in range(3)])
     hdr['FILENAME'] = pathlib.Path(cframe_path).name
     hdr['DRPVER'] = drpver
-    hdr['CALIBDIR'] = (get_masters_dir() or '', 'calibration directory')
-    hdr['LVMCORE'] = (get_lvmcore_version(), 'lvmcore commit')
+    add_provenance(hdr)
 
     # remove the wcs from the primary header; add it to flux header
     [hdr.pop(i, None) for i in wcs.to_header().keys()]
@@ -1933,6 +1933,7 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
             return
     log.info(f"calibration directory: {get_masters_dir()}")
     log.info(f"lvmcore: {os.getenv('LVMCORE_DIR')} at commit {get_lvmcore_version()}")
+    log.info(f"lvmdrp: commit {get_lvmdrp_version()}")
 
     if mjd is None and expnum is None:
         log.error("you must provide either an exposure number `expnum` or an MJD `mjd`. None was given")

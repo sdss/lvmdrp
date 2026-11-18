@@ -1082,12 +1082,21 @@ def fit_twilight_model(summary, epoch_mjds: Sequence[int], channels: str = 'brz'
     return out
 
 
-def _write_flat(mflat, out_path: str) -> None:
-    """Writes a flat, replacing a symbolic link at `out_path` (never writing through it)."""
+def _write_flat(mflat, out_path: str, in_path: Optional[str] = None) -> None:
+    """Writes a flat, replacing a symbolic link at `out_path` (never writing through it).
+
+    The FRAMES extension of `in_path` (the flat that was read; default `out_path`) is
+    carried over, since the RSS writer does not keep it.
+    """
     import os
+    from lvmdrp.core.header import read_frames_extension, write_frames_extension
+    src = in_path or out_path
+    frames = read_frames_extension(src) if os.path.isfile(src) else None
     if os.path.islink(out_path):
         os.remove(out_path)
     mflat.writeFitsData(out_path)
+    if frames is not None:
+        write_frames_extension(out_path, frames)
 
 
 def apply_twilight_gradient(in_mflat: str, gx: float, gy: float, epoch: int,
@@ -1133,7 +1142,7 @@ def apply_twilight_gradient(in_mflat: str, gx: float, gy: float, epoch: int,
     mflat.setHdrValue(f'HIERARCH {ch} FIBERFLAT TWIEPOCH', int(epoch), 'ffactor epoch of the gradient')
     if write_output:
         log.info(f'writing {out_mflat} with the twilight gradient ({gx:.2f}, {gy:.2f}) %/10mm')
-        _write_flat(mflat, out_mflat)
+        _write_flat(mflat, out_mflat, in_path=in_mflat)
     return mflat, True
 
 

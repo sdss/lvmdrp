@@ -70,6 +70,7 @@ from lvmdrp.core.constants import (
     get_masters_dir,
     PIXELSHIFTS_PATH)
 from lvmdrp.core.tracemask import TraceMask
+from lvmdrp.core.header import metadata_frames_table, write_frames_extension
 from lvmdrp.core.image import loadImage
 from lvmdrp.core.rss import RSS
 from lvmdrp.core.fit_profile import gaussians, IFUGradient
@@ -1660,7 +1661,7 @@ def _fit_fiber_model(frames, camera, mjd, kind="longterm", cent_guess_ncolumns=1
         "sigmas": TraceMask.create_empty(data_dim=(LVM_NFIBERS, LVM_NCOLS), slitmap=SLITMAP, samples_columns=columns)
     }
 
-    models = []
+    models, traced_headers = [], []
     exposed_stds, unexposed_stds = get_sequence_iterator(frames, camera)
     for expnum, (std_fiberid, block_idxs) in exposed_stds.items():
         frame = frames.query("expnum == @expnum").squeeze()
@@ -1712,6 +1713,7 @@ def _fit_fiber_model(frames, camera, mjd, kind="longterm", cent_guess_ncolumns=1
 
         # store blocks models
         models.append(model)
+        traced_headers.append(img._header.copy())
 
     for name, fibers_param in fibers_params.items():
         fibers_param.setHeader(img._header)
@@ -1723,6 +1725,8 @@ def _fit_fiber_model(frames, camera, mjd, kind="longterm", cent_guess_ncolumns=1
         fibers_param._mask[untraced_fibers] = True
         # interpolate master traces in missing fibers
         fibers_param.interpolate_data(axis="Y", reset_mask=True)
+        # list the traced exposures in the FRAMES extension
+        fibers_param.setIndividualFrames(traced_headers)
 
         fibers_param.writeFitsData(path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, camera=camera, kind=f"{prefix}{name}"))
 
@@ -1968,14 +1972,20 @@ def _fit_exposure_fiberflats(frames: pd.DataFrame, channel: str, mjd: int, calib
 
 
 def _combine_fiberflat_sequence(channel: str, calibs: dict, xflat_paths: List[str], fflat_paths: List[str],
-                                lvmflat_paths: List[str], mflat_path: str) -> None:
-    """Combine the per-exposure fiber flats of a channel into a master fiber flat and write the lvmFlat products"""
+                                lvmflat_paths: List[str], mflat_path: str, frames: pd.DataFrame = None) -> None:
+    """Combine the per-exposure fiber flats of a channel into a master fiber flat and write the lvmFlat products
+
+    With `frames` (the metadata of the camera frames of the sequence), the frames of the
+    channel are listed in the FRAMES extension of the master flat.
+    """
     calibs_grp = {flavor: group_calib_paths(calibs[flavor]) for flavor in ("centroids", "sigmas", "wave", "lsf")}
     combine_twilight_sequence(
         in_twilights=xflat_paths,
         in_fflats=fflat_paths, out_mflat=mflat_path, out_lvmflats=lvmflat_paths,
         in_cents=calibs_grp["centroids"][channel], in_widths=calibs_grp["sigmas"][channel],
         in_waves=calibs_grp["wave"][channel], in_lsfs=calibs_grp["lsf"][channel])
+    if frames is not None:
+        write_frames_extension(mflat_path, metadata_frames_table(frames.loc[frames.camera.str.startswith(channel)]))
 
 
 def choose_dome_sequence(frames: pd.DataFrame, channels: str = "brz", kind: str = "longterm", ring: str = "primary") -> pd.DataFrame:
@@ -2130,7 +2140,7 @@ def create_dome_fiberflats(mjd: int, epochs: dict[int, dict] = None, cals_mjd: i
         # combine individual fiberflats into master fiberflat
         mflat_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd,
                                kind="mfiberflat_dome" if kind == "longterm" else "nfiberflat_dome", camera=channel)
-        _combine_fiberflat_sequence(channel, calibs, xflat_paths, fflat_paths, lvmflat_paths, mflat_path)
+        _combine_fiberflat_sequence(channel, calibs, xflat_paths, fflat_paths, lvmflat_paths, mflat_path, frames=sequence)
 
 
 def create_twilight_fiberflats(mjd: int, epochs: dict[int, dict] = None, cals_mjd: int = None, channels: str = "brz",
@@ -2225,7 +2235,7 @@ def create_twilight_fiberflats(mjd: int, epochs: dict[int, dict] = None, cals_mj
 
         # combine individual fiberflats into master fiberflat
         mflat_path = path.full("lvm_master", drpver=drpver, tileid=11111, mjd=mjd, kind="mfiberflat_twilight", camera=channel)
-        _combine_fiberflat_sequence(channel, calibs, xtwi_paths, fflat_paths, lvmflat_paths, mflat_path)
+        _combine_fiberflat_sequence(channel, calibs, xtwi_paths, fflat_paths, lvmflat_paths, mflat_path, frames=frames)
 
 
 def create_fiberflats_corrections(

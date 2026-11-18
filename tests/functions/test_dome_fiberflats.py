@@ -62,7 +62,7 @@ def test_create_dome_fiberflats(monkeypatch, tmp_path):
         expnums = sorted(sequence.expnum.unique())
         return ([f"x{e}" for e in expnums], [f"f{e}" for e in expnums], [f"{product}-{channel}-{e}" for e in expnums])
     monkeypatch.setattr(rc, "_fit_exposure_fiberflats", fake_fit)
-    monkeypatch.setattr(rc, "_combine_fiberflat_sequence", lambda *args: calls["combine"].append(args))
+    monkeypatch.setattr(rc, "_combine_fiberflat_sequence", lambda *args, **kwargs: calls["combine"].append(args))
 
     epochs = {60255: {"flavors": {"dome": "60255, 60256"}}}
     rc.create_dome_fiberflats(mjd=60255, epochs=epochs, channels="bz", kind="longterm")

@@ -131,6 +131,43 @@ def get_lvmcore_version():
     return _git_version(os.getenv("LVMCORE_DIR"))
 
 
+# root of the lvmdrp checkout (python/lvmdrp/core/constants.py -> repository)
+LVMDRP_REPO_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
+
+def get_lvmdrp_version():
+    """Returns the lvmdrp commit in use, to record with the products.
+
+    DRPVER is a version label (the package version, or $LVMDRP_VERSION, which can be
+    any name), so the commit is recorded as well to know which code made a product.
+
+    Returns:
+        The commit hash (12 characters), with '-dirty' if tracked files differ from it,
+        or 'unknown' if lvmdrp is not run from a git checkout (e.g. an installed package).
+    """
+    if not os.path.exists(os.path.join(LVMDRP_REPO_DIR, ".git")):
+        return "unknown"
+    return _git_version(LVMDRP_REPO_DIR)
+
+
+def add_provenance(header):
+    """Records in a FITS header what is needed, besides DRPVER, to reproduce a product.
+
+    Sets CALIBDIR (the calibration directory), LVMCORE (the lvmcore commit) and LVMDRP
+    (the lvmdrp commit).
+
+    Args:
+        header: an astropy.io.fits.Header, changed in place.
+
+    Returns:
+        The same header.
+    """
+    header["CALIBDIR"] = (get_masters_dir() or "", "calibration directory")
+    header["LVMCORE"] = (get_lvmcore_version(), "lvmcore commit")
+    header["LVMDRP"] = (get_lvmdrp_version(), "lvmdrp commit")
+    return header
+
+
 def __getattr__(name):
     # MASTERS_DIR is kept for code outside lvmdrp; inside it, use get_masters_dir()
     if name == "MASTERS_DIR":
