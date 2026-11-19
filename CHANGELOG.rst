@@ -11,6 +11,7 @@ This document records the main changes to the drp code.
 
 - Bumped ``skycalc_cli`` to 1.5, which no longer imports the deprecated ``pkg_resources``; removes the setuptools warning on every ``drp`` call and the ``ModuleNotFoundError`` with setuptools>=81 (#257)
 - Replaced lvmdrp's own ``pkg_resources.parse_version`` with ``packaging.version.parse``
+- Optimal extraction is about 5x faster with identical results: ``FiberProfileCache`` now reads the two cumulative sums each pixel needs directly from the profile cache, instead of copying every oversampled row of the selected profiles for each column, which took about 80% of the extraction time (about 40% of a science reduction, and most of the arc and twilight extraction in the calibration sequence)
 
 
 1.3.2 (02-09-2026)
