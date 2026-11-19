@@ -92,6 +92,23 @@ def test_star_mask_flags_bright_fibers():
     assert mask.mean() < 0.1
 
 
+def test_star_mask_with_throughput():
+    # a strong gradient: without the throughput, the percentile cut rejects fibers by position
+    rng = np.random.default_rng(2)
+    x, y = _positions(1000, rng)
+    thr = 1 + 30 * x / 1000
+    flux = thr[:, None] * (1 + 0.005 * rng.standard_normal((1000, WAVE.size)))
+    flux[[5, 50, 500]] += 50.0
+    plain = fg.star_mask(flux, WAVE, 'b')
+    flat = fg.star_mask(flux, WAVE, 'b', throughput=thr)
+    assert plain[[5, 50, 500]].all() and flat[[5, 50, 500]].all()
+    others = np.ones(1000, dtype=bool)
+    others[[5, 50, 500]] = False
+    # rejected non-stars: at the IFU edges without the throughput, anywhere with it
+    assert np.mean(np.abs(x[plain & others])) > 10
+    assert abs(np.mean(x[flat & others])) < 2
+
+
 def test_fit_plane_recovers_plane_and_factors():
     rng = np.random.default_rng(2)
     x, y = _positions(1500, rng)
@@ -171,6 +188,24 @@ def test_measure_cframe_writes_header(frame):
     res = fg.measure_cframe(rss)
     assert rss._header['HIERARCH SKYPLANE Z GY'] == pytest.approx(res['z']['gy'], abs=1e-5)
     assert rss._header['HIERARCH SKYPLANE ZOH N'] == res['z_oh']['n']
+
+
+def test_measure_cframe_leaves_out_masked_pixels(frame):
+    # cosmic rays in the 8399 window of fibers on one side of the IFU, masked: they must not count
+    flux, slitmap = frame
+    clean = fg.measure_skyline_planes(flux, WAVE, slitmap)['z']
+    flux = flux.copy()
+    mask = np.zeros(flux.shape, dtype=bool)
+    sci = np.flatnonzero((np.asarray(slitmap['telescope']) == 'Sci') & (np.asarray(slitmap['xpmm']) > 5))[:60]
+    pix = np.flatnonzero(np.abs(WAVE - 8399.18) < 1.0)
+    flux[np.ix_(sci, pix)] += 3.0
+    mask[np.ix_(sci, pix)] = True
+    rss = RSS(data=flux, mask=mask, wave=WAVE, slitmap=slitmap, header=fits.Header())
+    res = fg.measure_cframe(rss)
+    assert res['z']['gx'] == pytest.approx(clean['gx'], abs=0.05)
+    assert res['z']['n'] <= clean['n'] - 50
+    # the frame itself is not changed
+    assert np.isfinite(rss._data[np.ix_(sci, pix)]).all()
 
 
 def test_measure_cframe_needs_1d_wave(frame):
@@ -267,6 +302,79 @@ def test_fit_flat_model_recovers_model():
         pred = A @ np.array([model['coeffs']['z'][comp][n] for n in names])
         true = _true_component(comp, mjd, table['sci_focpos'].to_numpy(), table['sci_kmpos'].to_numpy(), epoch)
         assert np.max(np.abs(pred - true)) < 0.05
+
+
+def _true_shared():
+    """The true shared terms of the synthetic model, as fit_flat_model takes them to hold fixed."""
+    out = {}
+    for ch in 'brz':
+        out[ch] = {}
+        for comp in fg.MODEL_COMPONENTS:
+            c = TRUE.get(comp, {})
+            f3 = comp == 'f3'
+            out[ch][comp] = {t: 0.0 for t in fg.SHARED_TERMS}
+            for t in ('focus', 'sinK'):
+                out[ch][comp][t] = (-TRUE['f1'][t] - TRUE['f2'][t]) if f3 else c.get(t, 0.0)
+    return out
+
+
+def test_fit_flat_model_shared_fixed():
+    # a few exposures per epoch: the epoch constants alone, with the shared terms held at the truth
+    table = _drpall(n=120, seed=3)
+    shared = _true_shared()
+    model = fg.fit_flat_model(table, EPOCHS, shared=shared, epoch_terms=('c0', 't1'))
+    assert model['shared_fixed']
+    for ch in 'brz':
+        c = model['coeffs'][ch]
+        assert c['gy']['focus'] == TRUE['gy']['focus'] and c['gx']['sinK'] == TRUE['gx']['sinK']
+        for i, e in enumerate(EPOCHS):
+            # the drift is centred on the data range, close to 0..90 days; constant within the noise
+            assert c['gx'][f'c0_{e}'] == pytest.approx(TRUE['gx']['c0'][i], abs=0.1)
+            assert c['gy'][f't1_{e}'] == pytest.approx(TRUE['gy']['t1'][i], abs=0.1)
+            assert c['gx'][f't2_{e}'] == 0.0 and c['gx'][f't3_{e}'] == 0.0
+    # held at wrong shared terms, the constants absorb what they can't describe
+    wrong = _true_shared()
+    for ch in 'brz':
+        wrong[ch]['gy']['focus'] = 0.0
+    m2 = fg.fit_flat_model(table, EPOCHS, shared=wrong, epoch_terms=('c0',))
+    assert m2['coeffs']['z']['gy']['focus'] == 0.0
+
+
+def test_read_shared_terms_and_write(tmp_path):
+    table = _drpall()
+    model = fg.fit_flat_model(table, EPOCHS)
+    files = {}
+    for ch in 'brz':
+        files[ch] = str(tmp_path / f'lvm-mfiberflat_gradient-{ch}.fits')
+        fg.write_flat_model(model, EPOCHS[0], ch, files[ch])
+    shared = fg.read_shared_terms(files)
+    assert shared['z']['gy']['focus'] == pytest.approx(model['coeffs']['z']['gy']['focus'])
+    assert set(shared['b']['f1']) == set(fg.SHARED_TERMS)
+    m = fg.fit_flat_model(_drpall(n=200, seed=5), EPOCHS, shared=shared, epoch_terms=('c0',))
+    m['shared_from'] = '/some/models'
+    out = str(tmp_path / 'fixed-z.fits')
+    fg.write_flat_model(m, EPOCHS[1], 'z', out)
+    hdr = fits.getheader(out)
+    assert hdr['SHAREDFX'] is True and hdr['SHAREDFR'] == '/some/models'
+    assert fg.read_flat_model(out)['coeffs']['gy']['t1'] == 0.0
+
+
+def test_find_flat_models_calibration_epochs(tmp_path, monkeypatch):
+    from lvmdrp.utils import paths as lpaths
+    calls = {}
+
+    def fake(mjd, **kwargs):
+        calls.update(kwargs)
+        return {'fiberflat_gradient': {ch: str(tmp_path / f'lvm-mfiberflat_gradient-{ch}.fits') for ch in 'brz'}}
+
+    monkeypatch.setattr(lpaths, 'get_calib_paths', fake)
+    assert fg.find_flat_models(60516, epochs_kind='calibration') == {}
+    for ch in 'brz':
+        (tmp_path / f'lvm-mfiberflat_gradient-{ch}.fits').write_text('')
+    assert len(fg.find_flat_models(60516, epochs_kind='calibration')) == 3
+    assert 'epochs' not in calls
+    with pytest.raises(ValueError):
+        fg.find_flat_models(60516, epochs_kind='nightly')
 
 
 def test_select_exposures():
@@ -451,6 +559,154 @@ def test_flatgrad_test_copy_names():
     from lvmdrp.main import _flatgrad_name
     assert _flatgrad_name('/a/lvmCFrame-00044604.fits') == '/a/lvmCFrame-00044604.flatgrad.fits'
     assert _flatgrad_name('/a/lvmSFrame-00044604.fits.gz') == '/a/lvmSFrame-00044604.flatgrad.fits.gz'
+
+
+# ------------------------------------------------------------------ correcting the lvmFrames
+def _coeffs(gx=GX, gy=GY, factors=FACTORS):
+    f = 100 * (np.asarray(factors) / np.mean(factors) - 1)
+    return {'f1': f[0], 'f2': f[1], 'f3': f[2], 'gx': gx, 'gy': gy}
+
+
+def _measured_header(frame_rss, extra=None):
+    """The lvmCFrame header of a frame: its sky-line planes (SKYPLANE keywords), MJD, focus, K-mirror."""
+    res = fg.measure_skyline_planes(frame_rss._data, WAVE, frame_rss._slitmap)
+    hdr = fits.Header({'MJD': 60050, 'TESCIFO': 35.4, 'TESCIKM': 10.0})
+    for kw, value, comment in fg.skyline_plane_cards(res):
+        hdr[kw] = (value, comment)
+    hdr.update(extra or {})
+    return hdr
+
+
+def test_frame_correction(frame):
+    _, slitmap = frame
+    c = fg.frame_correction(slitmap, _coeffs())
+    sci = np.asarray(slitmap['telescope']) == 'Sci'
+    spec = np.asarray(slitmap['spectrographid'])
+    f = FACTORS / FACTORS.mean()
+    # the factors on every fiber, the plane (mean 1) only on the science fibers
+    assert np.allclose(c[~sci], f[spec[~sci] - 1])
+    plane = c[sci] / f[spec[sci] - 1]
+    assert np.mean(plane) == pytest.approx(1.0)
+    x, y = np.asarray(slitmap['xpmm'])[sci], np.asarray(slitmap['ypmm'])[sci]
+    expected = 1 + (GX * x + GY * y) / 1000
+    assert np.allclose(plane, expected / expected.mean())
+
+
+def test_apply_frame_correction_replaces_and_removes(frame):
+    rss = _cframe(frame)
+    rss._superflat = np.full_like(rss._data, 2.0)
+    data0, raw = rss._data.copy(), rss._data * rss._superflat
+    fg.apply_frame_correction(rss, 'b', _coeffs(1.0, 2.0), source='direct', info={'RMODE': ('bz', 'r mode')})
+    assert rss._header['HIERARCH FFCORR APPLIED'] is True
+    assert rss._header['HIERARCH FFCORR B GX'] == pytest.approx(1.0)
+    assert rss._header['HIERARCH FFCORR SOURCE'] == 'direct'
+    assert rss._header['HIERARCH FFCORR RMODE'] == 'bz'
+    assert fg.read_frame_correction(rss._header, 'b')['gy'] == pytest.approx(2.0)
+    # a second correction replaces the first: the same as applying it to the original frame
+    fg.apply_frame_correction(rss, 'b', _coeffs())
+    expected = data0 / fg.frame_correction(rss._slitmap, _coeffs())[:, None]
+    assert np.allclose(rss._data, expected, rtol=1e-5)
+    # the superflat stays the flat applied: data x superflat unchanged
+    assert np.allclose(rss._data * rss._superflat, raw, rtol=1e-5)
+    # removing it returns the original frame
+    fg.apply_frame_correction(rss, 'b', None)
+    assert np.allclose(rss._data, data0, rtol=1e-5)
+    assert rss._header['HIERARCH FFCORR APPLIED'] is False
+    assert fg.read_frame_correction(rss._header, 'b') is None
+    assert 'HIERARCH FFCORR B GX' not in rss._header
+
+
+def test_frame_coefficients_direct_without_model(frame):
+    hdr = _measured_header(_cframe(frame))
+    res = fg.frame_coefficients(hdr, direct=True)
+    assert res['mode'] == 'direct' and res['rmode'] == 'oh+bz' and res['model'] is None
+    true = _coeffs()
+    for ch in 'brz':
+        for k in true:
+            assert res['coeffs'][ch][k] == pytest.approx(true[k], abs=0.05), (ch, k)
+    # without the direct step and without a model, nothing to apply
+    assert fg.frame_coefficients(hdr, direct=False) is None
+    assert fg.frame_coefficients(fits.Header({'MJD': 60050}), direct=True) is None
+
+
+def test_frame_coefficients_with_model(frame):
+    hdr = _measured_header(_cframe(frame))
+    models = {ch: _constant_model(ch, 0.5 * GX, 0.5 * GY) for ch in 'brz'}
+    res = fg.frame_coefficients(hdr, models=models, direct=True)
+    assert res['mode'] == 'direct' and res['rmode'] == 'oh+bz'
+    assert res['model']['z']['gx'] == pytest.approx(0.5 * GX)
+    for ch in 'brz':
+        assert res['coeffs'][ch]['gx'] == pytest.approx(GX, abs=0.05)
+        assert res['coeffs'][ch]['f1'] == pytest.approx(_coeffs()['f1'], abs=0.05)
+    # the model alone
+    res = fg.frame_coefficients(hdr, models=models, direct=False)
+    assert res['mode'] == 'model' and res['coeffs']['r']['gx'] == pytest.approx(0.5 * GX)
+    # b and z disagree by 3 %/10 mm: the guard keeps the model
+    res = fg.frame_coefficients(_measured_header(_cframe(frame, gx_z=GX + 3.0)), models=models, direct=True)
+    assert res['mode'] == 'model' and res['guard'] == pytest.approx(3.0, abs=0.2)
+    assert res['coeffs']['b']['gx'] == pytest.approx(0.5 * GX)
+
+
+def test_frame_correction_end_to_end_and_rerun(frame):
+    """Measure, correct every fiber, measure again: nothing left; a rerun gives the same frame."""
+    rss = _cframe(frame)
+    res = fg.frame_coefficients(_measured_header(rss), direct=True)
+    # one RSS stands in for the three channels: correct it with the b coefficients
+    fg.apply_frame_correction(rss, 'b', res['coeffs']['b'], source=res['mode'])
+    once = rss._data.copy()
+    after = fg.measure_skyline_planes(rss._data, WAVE, rss._slitmap)
+    for key in ('b', 'z', 'z_oh'):
+        assert abs(after[key]['gx']) < 0.1 and abs(after[key]['gy']) < 0.1, key
+        assert after[key]['f1'] == pytest.approx(after[key]['f3'], abs=0.002)
+    # the sky fibers got the factors too
+    for ifu in ('skye_b', 'skyw_z'):
+        assert after[ifu]['f1'] == pytest.approx(after[ifu]['f3'], abs=0.003), ifu
+    # a rerun: the remeasured residual combined with the correction in the frame gives the same total
+    previous = {'b': fg.read_frame_correction(rss._header, 'b')}
+    res2 = fg.frame_coefficients(_measured_header(rss), previous=previous, direct=True)
+    for k in ('f1', 'f2', 'f3', 'gx', 'gy'):
+        assert res2['coeffs']['b'][k] == pytest.approx(res['coeffs']['b'][k], abs=0.02), k
+    fg.apply_frame_correction(rss, 'b', res2['coeffs']['b'])
+    assert np.allclose(rss._data, once, rtol=2e-4)
+
+
+def test_correct_frames(frame, tmp_path, monkeypatch):
+    """correct_frames reads the lvmCFrame header and the lvmFrames, corrects and writes them."""
+    rss = _cframe(frame)
+    cframe_path = str(tmp_path / 'lvmCFrame-00000001.fits')
+    fits.PrimaryHDU(header=_measured_header(rss)).writeto(cframe_path)
+    paths = {ch: str(tmp_path / f'lvmFrame-{ch}-00000001.fits') for ch in 'brz'}
+    for p in paths.values():
+        open(p, 'w').close()
+    written = {}
+
+    class _Frame:
+        def __init__(self):
+            self._data, self._error = rss._data.copy(), rss._error.copy()
+            self._slitmap, self._header, self._superflat = rss._slitmap, fits.Header(), None
+
+        def setHdrValue(self, kw, value, comment):
+            self._header[kw] = (value, comment)
+
+        def writeFitsData(self, out):
+            written[out] = self
+
+    from lvmdrp.core import rss as rssmod
+    monkeypatch.setattr(rssmod.lvmFrame, 'from_file', staticmethod(lambda p: _Frame()))
+    monkeypatch.setattr(fg, 'find_flat_models', lambda *a, **k: {})
+    res = fg.correct_frames(paths, cframe_path, mjd=60050, direct=True)
+    assert res['mode'] == 'direct' and sorted(written) == sorted(paths.values())
+    zf = written[paths['z']]
+    assert zf._header['HIERARCH FFCORR APPLIED'] is True and zf._header['HIERARCH FFCORR EPOCH'] == -1
+    assert zf._header['HIERARCH FFCORR Z GX'] == pytest.approx(GX, abs=0.05)
+    # no model and no direct step: nothing is written
+    written.clear()
+    assert fg.correct_frames(paths, cframe_path, mjd=60050, direct=False) is None and not written
+    # no lvmCFrame, or no sky-line planes in it
+    assert fg.correct_frames(paths, str(tmp_path / 'none.fits'), mjd=60050) is None
+    bare = str(tmp_path / 'bare.fits')
+    fits.PrimaryHDU().writeto(bare)
+    assert fg.correct_frames(paths, bare, mjd=60050) is None
 
 
 # ------------------------------------------------------------------ flats from the twilights

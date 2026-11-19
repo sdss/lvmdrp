@@ -107,17 +107,22 @@ def line_flux(flux: np.ndarray, wave: np.ndarray, window: Tuple[float, float],
 
 
 def star_mask(flux: np.ndarray, wave: np.ndarray, arm: str,
-              percentiles: Tuple[float, float] = STAR_PERCENTILES) -> np.ndarray:
+              percentiles: Tuple[float, float] = STAR_PERCENTILES,
+              throughput: Optional[np.ndarray] = None) -> np.ndarray:
     """Flags fibers dominated by stars or other bright sources.
 
     Fibers whose median continuum near `STAR_CONTINUUM[arm]` is outside the
-    given percentiles of all fibers, or not finite, are flagged.
+    given percentiles of all fibers, or not finite, are flagged. With
+    `throughput`, the continuum is divided by it first, so that a large-scale
+    gradient in the frame doesn't decide which fibers fall outside the
+    percentiles.
 
     Args:
         flux: fluxes, fibers x wavelength.
         wave: wavelength of each pixel, Angstrom.
         arm: 'b', 'r' or 'z'.
         percentiles: lower and upper percentile of the continuum kept.
+        throughput: relative throughput of each fiber, or None.
 
     Returns:
         True for the fibers to reject.
@@ -126,6 +131,8 @@ def star_mask(flux: np.ndarray, wave: np.ndarray, arm: str,
     sel = _window(wave, cwave - STAR_CONTINUUM_HALF_WIDTH, cwave + STAR_CONTINUUM_HALF_WIDTH)
     with np.errstate(all='ignore'):
         cont = np.nanmedian(flux[:, sel].astype(float), axis=1)
+        if throughput is not None:
+            cont = cont / np.asarray(throughput, dtype=float)
     ok = np.isfinite(cont)
     if not ok.any():
         return np.ones(flux.shape[0], dtype=bool)
@@ -277,6 +284,13 @@ def measure_skyline_planes(flux: np.ndarray, wave: np.ndarray, slitmap,
         stars[arm] = star_mask(sflux, wave, arm)
         z = line_flux(sflux, wave, (cwave - LINE_HALF_WIDTH, cwave + LINE_HALF_WIDTH), sides)
         out[arm] = fit_plane(x, y, np.where(stars[arm], np.nan, z), spec)
+        if out[arm] is not None:
+            # stars again, with the continuum flattened by the fit: otherwise a large gradient
+            # decides which fibers fall outside the percentiles, which biases the plane
+            k = fiber_throughput(np.array([out[arm][f] for f in ('f1', 'f2', 'f3')]),
+                                 out[arm]['gx'], out[arm]['gy'], x, y, spec)
+            stars[arm] = star_mask(sflux, wave, arm, throughput=k)
+            out[arm] = fit_plane(x, y, np.where(stars[arm], np.nan, z), spec)
 
     if heldout:
         for name, (arm, members) in HELDOUT_GROUPS.items():
@@ -388,7 +402,13 @@ def measure_cframe(rss, write_header: bool = True, raise_errors: bool = True,
     try:
         if rss._wave is None or np.ndim(rss._wave) != 1:
             raise ValueError('measure_cframe needs a frame with a 1D wavelength array')
-        results = measure_skyline_planes(rss._data, rss._wave, rss._slitmap, **kwargs)
+        flux = rss._data
+        mask = getattr(rss, '_mask', None)
+        if mask is not None and np.shape(mask) == np.shape(flux) and np.any(mask):
+            # masked pixels (cosmic rays, bad columns) are NaN in the written frame; leave out
+            # the fibers they touch here too, so that the measurement is that of the product
+            flux = np.where(mask, np.nan, flux)
+        results = measure_skyline_planes(flux, rss._wave, rss._slitmap, **kwargs)
     except Exception as err:
         if raise_errors:
             raise
@@ -442,7 +462,8 @@ def assign_epochs(mjd: np.ndarray, epoch_mjds: Sequence[int]) -> np.ndarray:
 
 def model_design(mjd: np.ndarray, focus: np.ndarray, kmir: np.ndarray, epoch: np.ndarray,
                  ranges: Dict[int, Tuple[float, float]],
-                 focus0: float = FOCUS0) -> Tuple[np.ndarray, list]:
+                 focus0: float = FOCUS0,
+                 epoch_terms: Sequence[str] = EPOCH_TERMS) -> Tuple[np.ndarray, list]:
     """Design matrix of the model: epoch constants and drifts, and the shared terms.
 
     Args:
@@ -452,6 +473,7 @@ def model_design(mjd: np.ndarray, focus: np.ndarray, kmir: np.ndarray, epoch: np
         epoch: epoch of each exposure (see :func:`assign_epochs`).
         ranges: the MJD range [lo, hi] of the data of each epoch.
         focus0: reference focus.
+        epoch_terms: the epoch terms to include (a subset of `EPOCH_TERMS`).
 
     Returns:
         The design matrix (exposures x terms) and the term names, ``<term>_<epoch>``
@@ -462,7 +484,7 @@ def model_design(mjd: np.ndarray, focus: np.ndarray, kmir: np.ndarray, epoch: np
     for e in sorted(ranges):
         sel = epoch == e
         vals = _epoch_values(mjd, *ranges[e])
-        for term in EPOCH_TERMS:
+        for term in epoch_terms:
             cols.append(np.where(sel, vals[term], 0.0))
             names.append(f'{term}_{e}')
     shared = _shared_values(focus, kmir, focus0)
@@ -539,7 +561,8 @@ def select_exposures(table, channel: str, epoch: np.ndarray, minexp: float = 300
 
 
 def fit_flat_model(table, epoch_mjds: Sequence[int], channels: str = 'brz', minexp: float = 300.0,
-                   focus0: float = FOCUS0) -> Dict:
+                   focus0: float = FOCUS0, shared: Optional[Dict[str, Dict[str, Dict[str, float]]]] = None,
+                   epoch_terms: Sequence[str] = EPOCH_TERMS) -> Dict:
     """Fits the model of the large-scale flat-field error to the sky-line planes of many exposures.
 
     For each channel and component, the measured value is fitted as a constant
@@ -554,12 +577,20 @@ def fit_flat_model(table, epoch_mjds: Sequence[int], channels: str = 'brz', mine
         channels: the channels to fit.
         minexp: shortest exposure time used, s.
         focus0: reference focus.
+        shared: the shared focus and K-mirror terms to hold fixed, {channel:
+            {component: {term: value}}} (e.g. from :func:`read_shared_terms`);
+            only the epoch terms are then fitted. The shared terms describe how
+            the error changes with the state of the telescope, which doesn't
+            depend on the flats, so they carry over from a fit to many more
+            exposures; the epoch terms take up what the flats leave.
+        epoch_terms: the epoch terms fitted (a subset of `EPOCH_TERMS`; e.g.
+            ``('c0',)`` for a few nights per epoch); the others are zero.
 
     Returns:
         A dict with 'focus0', 'ranges' ({epoch: (lo, hi)}, the MJD range of the
-        data of each epoch), 'nexp' ({channel: {epoch: number of exposures}}) and
+        data of each epoch), 'nexp' ({channel: {epoch: number of exposures}}),
         'coeffs' ({channel: {component: {term: value}}}, terms as in
-        :func:`model_design`).
+        :func:`model_design`) and 'shared_fixed' (whether the shared terms were held).
 
     Raises:
         ValueError: if a channel has fewer exposures than terms to fit.
@@ -572,18 +603,46 @@ def fit_flat_model(table, epoch_mjds: Sequence[int], channels: str = 'brz', mine
     anyuse = np.any(np.column_stack(list(usable.values())), axis=1)
     ranges = {int(e): (float(mjd[anyuse & (epoch == e)].min()), float(mjd[anyuse & (epoch == e)].max()))
               for e in np.unique(epoch[anyuse])}
-    model = {'focus0': focus0, 'ranges': ranges, 'nexp': {}, 'coeffs': {}}
+    model = {'focus0': focus0, 'ranges': ranges, 'nexp': {}, 'coeffs': {}, 'shared_fixed': shared is not None}
     for ch in channels:
         use = usable[ch] & np.isin(epoch, list(ranges))
-        A, names = model_design(mjd[use], focus[use], kmir[use], epoch[use], ranges, focus0)
+        A, names = model_design(mjd[use], focus[use], kmir[use], epoch[use], ranges, focus0,
+                                epoch_terms=epoch_terms)
+        V = model_targets(table, ch)[use]
+        if shared is not None:
+            nshared = len(SHARED_TERMS)
+            fixed = np.array([[shared[ch][comp][t] for comp in MODEL_COMPONENTS] for t in SHARED_TERMS])
+            V = V - A[:, -nshared:] @ fixed
+            A, names = A[:, :-nshared], names[:-nshared]
         if use.sum() <= A.shape[1]:
             raise ValueError(f'channel {ch}: {use.sum()} usable exposures for {A.shape[1]} terms')
-        V = model_targets(table, ch)[use]
         coef, *_ = np.linalg.lstsq(A, V, rcond=None)
-        model['coeffs'][ch] = {comp: dict(zip(names, map(float, coef[:, j])))
-                               for j, comp in enumerate(MODEL_COMPONENTS)}
+        coeffs = {comp: dict(zip(names, map(float, coef[:, j]))) for j, comp in enumerate(MODEL_COMPONENTS)}
+        for comp in MODEL_COMPONENTS:
+            for e in ranges:
+                for t in EPOCH_TERMS:
+                    coeffs[comp].setdefault(f'{t}_{e}', 0.0)
+            if shared is not None:
+                coeffs[comp].update({t: float(shared[ch][comp][t]) for t in SHARED_TERMS})
+        model['coeffs'][ch] = coeffs
         model['nexp'][ch] = {int(e): int(np.sum(epoch[use] == e)) for e in ranges}
     return model
+
+
+def read_shared_terms(paths: Dict[str, str]) -> Dict[str, Dict[str, Dict[str, float]]]:
+    """The shared focus and K-mirror terms of existing model files, to hold fixed in :func:`fit_flat_model`.
+
+    Args:
+        paths: {channel: model file} (see :func:`write_flat_model`).
+
+    Returns:
+        {channel: {component: {term: value}}} for the terms in `SHARED_TERMS`.
+    """
+    out = {}
+    for ch, p in paths.items():
+        coeffs = read_flat_model(p)['coeffs']
+        out[ch] = {comp: {t: coeffs[comp][t] for t in SHARED_TERMS} for comp in MODEL_COMPONENTS}
+    return out
 
 
 def write_flat_model(model: Dict, epoch: int, channel: str, out_path: str, drpver: str = '') -> None:
@@ -610,13 +669,16 @@ def write_flat_model(model: Dict, epoch: int, channel: str, out_path: str, drpve
     lo, hi = model['ranges'][epoch]
     hdr = fits.Header()
     hdr['CHANNEL'] = (channel, 'spectrograph channel')
-    hdr['EPOCH'] = (int(epoch), 'first MJD of the ffactor epoch')
+    hdr['EPOCH'] = (int(epoch), 'first MJD of the model epoch')
     hdr['EPOCHLO'] = (lo, 'first MJD of the data fitted in this epoch')
     hdr['EPOCHHI'] = (hi, 'last MJD of the data fitted in this epoch')
     hdr['FOCUS0'] = (model['focus0'], 'reference telescope focus (TESCIFO)')
     hdr['NEXP'] = (model['nexp'][channel][epoch], 'exposures fitted in this epoch')
     hdr['NEXPALL'] = (sum(model['nexp'][channel].values()), 'exposures fitted in all epochs')
     hdr['DRPVER'] = (drpver, 'DRP version of the frames fitted')
+    hdr['SHAREDFX'] = (bool(model.get('shared_fixed', False)), 'shared focus/K-mirror terms held fixed')
+    if model.get('shared_from'):
+        hdr['SHAREDFR'] = (str(model['shared_from'])[-68:], 'where the fixed shared terms come from')
     hdr['COMMENT'] = ('Large-scale flat-field error left after the flats used (sdss/lvmdrp#268): '
                       'f1-f3 spectrograph factors in % (mean 1), gx, gy plane in % per 10 mm. '
                       'Value = sum over terms of coefficient x term value; see '
@@ -678,7 +740,8 @@ def read_drpall(drpall: str):
 
 def create_flat_models(drpall: str, epoch_mjds: Sequence[int], channels: str = 'brz', drpver: str = '',
                        out_dir: Optional[str] = None, from_sandbox: bool = True,
-                       minexp: float = 300.0, dry_run: bool = False) -> Dict[Tuple[int, str], str]:
+                       minexp: float = 300.0, dry_run: bool = False, shared_from: Optional[str] = None,
+                       epoch_terms: Sequence[str] = EPOCH_TERMS) -> Dict[Tuple[int, str], str]:
     """Fits the flat-field error model to a drpall file and writes one calibration file per epoch and channel.
 
     Args:
@@ -694,6 +757,9 @@ def create_flat_models(drpall: str, epoch_mjds: Sequence[int], channels: str = '
             ($LVM_MASTER_DIR) rather than those of the `drpver` reduction.
         minexp: shortest exposure time used, s.
         dry_run: fit and log the result, but write nothing.
+        shared_from: a directory with ``lvm-mfiberflat_gradient-<channel>.fits`` files
+            whose shared focus and K-mirror terms are held fixed (see :func:`fit_flat_model`).
+        epoch_terms: the epoch terms fitted.
 
     Returns:
         {(epoch, channel): path} of the files written (or that would be written).
@@ -703,7 +769,17 @@ def create_flat_models(drpall: str, epoch_mjds: Sequence[int], channels: str = '
 
     table = read_drpall(drpall)
     log.info(f'fitting the flat-field error model to {len(table)} exposures in {drpall}')
-    model = fit_flat_model(table, epoch_mjds, channels=channels, minexp=minexp)
+    shared = None
+    if shared_from is not None:
+        files = {ch: os.path.join(shared_from, f'lvm-mfiberflat_gradient-{ch}.fits') for ch in channels}
+        missing = [f for f in files.values() if not os.path.isfile(f)]
+        if missing:
+            raise FileNotFoundError(f'model files for the shared terms not found: {missing}')
+        shared = read_shared_terms(files)
+        log.info(f'holding the shared focus and K-mirror terms fixed at those of {shared_from}')
+    model = fit_flat_model(table, epoch_mjds, channels=channels, minexp=minexp, shared=shared,
+                           epoch_terms=epoch_terms)
+    model['shared_from'] = shared_from
     paths = {}
     for epoch in sorted(model['ranges']):
         if out_dir is not None:
@@ -924,20 +1000,28 @@ def apply_flat_models(rss, models: Dict[str, Dict], direct: bool = False, guard:
 
 
 def find_flat_models(mjd: int, drpver: Optional[str] = None, from_sandbox: bool = True,
-                     ffactor_epochs: Optional[Dict] = None) -> Dict[str, str]:
-    """Finds the model files of the ffactor epoch of an MJD.
+                     ffactor_epochs: Optional[Dict] = None, epochs_kind: str = 'ffactor') -> Dict[str, str]:
+    """Finds the model files of the epoch of an MJD.
 
     Args:
         mjd: MJD of the exposure.
         drpver: DRP version, for the calibration directories of a reduction.
         from_sandbox: look in the sandbox calibration directories ($LVM_MASTER_DIR).
         ffactor_epochs: the ffactor epochs; default: those of lvmcore.
+        epochs_kind: 'ffactor' (the model of the ffactor epoch, for flats with the
+            stage-2 factors) or 'calibration' (the model in the calibration
+            directory of the exposure's calibration epoch, next to its twilight flats).
 
     Returns:
         {channel: path} of the model files that exist (empty if none).
     """
     import os
     from lvmdrp.utils.paths import get_calib_paths
+    if epochs_kind == 'calibration':
+        calibs = get_calib_paths(mjd=mjd, version=drpver, flavors={'fiberflat_gradient'}, from_sandbox=from_sandbox)
+        return {ch: p for ch, p in calibs.get('fiberflat_gradient', {}).items() if os.path.exists(p)}
+    if epochs_kind != 'ffactor':
+        raise ValueError(f"epochs_kind must be 'ffactor' or 'calibration', not {epochs_kind!r}")
     if ffactor_epochs is None:
         from lvmdrp.functions.run_calseq import load_epochs_file
         ffactor_epochs = load_epochs_file(epochs_kind='ffactor', verbose=False) or {}
@@ -975,6 +1059,365 @@ def correct_cframe(rss, mjd: int, drpver: Optional[str] = None, from_sandbox: bo
     except Exception as err:
         log.warning(f'could not apply the large-scale flat-field correction: {err}')
         return None
+
+
+# ----------------------------------------------------------------------------------------------
+# Correcting the lvmFrames: all fibers, per channel, before the sky and the flux calibration
+# ----------------------------------------------------------------------------------------------
+
+# keyword prefix of the record of the correction of an lvmFrame
+FRAME_PREFIX = 'FFCORR'
+
+
+def correction_columns() -> Dict[str, Tuple[str, str]]:
+    """The drpall columns of the large-scale flat-field corrections recorded in the frame headers.
+
+    Both records are included: ``FFCORR`` (the correction of the lvmFrames, all
+    fibers, see :func:`apply_frame_correction`) and ``FLATGRAD`` (the correction of
+    the science fibers of the lvmCFrame, see :func:`apply_flat_models`). Column
+    names are lowercase, e.g. ``ffcorr_z_gx`` for ``HIERARCH FFCORR Z GX`` and
+    ``flatgrad_db_gx`` for ``HIERARCH FLATGRAD DB GX``. Flags (APPLIED, DIRECT)
+    become 1 or 0.
+
+    Returns:
+        {column name: (header keyword without ``HIERARCH``, dtype)}, dtype 'float64' or 'str'.
+    """
+    cols = {}
+
+    def add(prefix, kw, dtype='float64'):
+        keyword = f'{prefix} {kw}'
+        cols[keyword.lower().replace(' ', '_')] = (keyword, dtype)
+
+    for prefix in (FRAME_PREFIX, APPLIED_PREFIX):
+        add(prefix, 'APPLIED')
+        add(prefix, 'EPOCH')
+        for ch in 'BRZ':
+            for comp in MODEL_COMPONENTS:
+                add(prefix, f'{ch} {comp.upper()}')
+    add(FRAME_PREFIX, 'SOURCE', 'str')
+    add(FRAME_PREFIX, 'RMODE', 'str')
+    add(FRAME_PREFIX, 'GUARD')
+    add(FRAME_PREFIX, 'RGUARD')
+    add(APPLIED_PREFIX, 'DIRECT')
+    add(APPLIED_PREFIX, 'DGUARD')
+    add(APPLIED_PREFIX, 'DRGUARD')
+    add(APPLIED_PREFIX, 'DRMODE', 'str')
+    for ch in 'BZR':
+        for comp in ('GX', 'GY'):
+            add(APPLIED_PREFIX, f'D{ch} {comp}')
+    return cols
+
+
+def frame_correction(slitmap, coeffs: Dict[str, float]) -> np.ndarray:
+    """The divisor of each fiber of one channel for the large-scale flat-field correction.
+
+    The spectrograph factors apply to every fiber (science, sky and standard); the
+    plane only to the science fibers, normalized to a mean of 1 over the good ones,
+    so that the plane doesn't change the level of the science IFU relative to the
+    other fibers.
+
+    Args:
+        slitmap: the slitmap table, with columns telescope, spectrographid, xpmm,
+            ypmm and (optionally) fibstatus.
+        coeffs: f1, f2, f3 (% relative to a mean of 1) and gx, gy (% per 10 mm),
+            as in `MODEL_COMPONENTS`.
+
+    Returns:
+        The divisor of each fiber.
+    """
+    spec = np.asarray(slitmap['spectrographid'], dtype=int)
+    sci = np.asarray(slitmap['telescope']).astype(str) == 'Sci'
+    f = 1 + np.array([coeffs['f1'], coeffs['f2'], coeffs['f3']], dtype=float) / 100
+    corr = (f / f.mean())[spec - 1]
+    x = np.asarray(slitmap['xpmm'], dtype=float)
+    y = np.asarray(slitmap['ypmm'], dtype=float)
+    plane = 1 + (coeffs['gx'] * x + coeffs['gy'] * y) / 1000
+    good = sci & np.isfinite(plane)
+    if 'fibstatus' in slitmap.colnames:
+        good &= np.asarray(slitmap['fibstatus'], dtype=int) == 0
+    corr[sci] *= plane[sci] / np.mean(plane[good])
+    return corr
+
+
+def read_frame_correction(header, channel: str) -> Optional[Dict[str, float]]:
+    """The correction recorded in an lvmFrame header by :func:`apply_frame_correction`.
+
+    Args:
+        header: the header of the lvmFrame.
+        channel: 'b', 'r' or 'z'.
+
+    Returns:
+        {component: value} as in `MODEL_COMPONENTS`, or None if no correction is applied.
+    """
+    if not header.get(f'{FRAME_PREFIX} APPLIED', False):
+        return None
+    try:
+        return {comp: float(header[f'{FRAME_PREFIX} {channel.upper()} {comp.upper()}'])
+                for comp in MODEL_COMPONENTS}
+    except KeyError:
+        return None
+
+
+def apply_frame_correction(frame, channel: str, coeffs: Optional[Dict[str, float]],
+                           source: str = '', info: Optional[Dict] = None) -> np.ndarray:
+    """Applies the large-scale flat-field correction to one channel's lvmFrame, replacing any earlier one.
+
+    A correction already recorded in the header is divided out first, so the frame
+    can be corrected again (or, with `coeffs` None, returned to the flat alone). The
+    flux and error are divided by :func:`frame_correction`, and the SUPERFLAT
+    extension is multiplied by it, so that it remains the flat applied.
+
+    Args:
+        frame: an :class:`lvmdrp.core.rss.lvmFrame`, changed in place.
+        channel: 'b', 'r' or 'z'.
+        coeffs: f1, f2, f3 (%) and gx, gy (% per 10 mm); None to remove the correction.
+        source: how the coefficients were obtained (e.g. 'direct', 'model'), recorded.
+        info: other values to record, {keyword part: (value, comment)}.
+
+    Returns:
+        The factor by which each fiber was divided (1 where nothing changed).
+    """
+    hdr = frame._header
+    slitmap = frame._slitmap
+    total = np.ones(len(slitmap))
+    old = read_frame_correction(hdr, channel)
+    if old is not None:
+        total /= frame_correction(slitmap, old)
+    if coeffs is not None:
+        total *= frame_correction(slitmap, coeffs)
+
+    dtype = frame._data.dtype
+    frame._data = (frame._data / total[:, None]).astype(dtype)
+    if frame._error is not None:
+        frame._error = (frame._error / total[:, None]).astype(frame._error.dtype)
+    superflat = getattr(frame, '_superflat', None)
+    if superflat is not None:
+        frame._superflat = (superflat * total[:, None]).astype(superflat.dtype)
+
+    p, ch = FRAME_PREFIX, channel.upper()
+    frame.setHdrValue(f'HIERARCH {p} APPLIED', coeffs is not None,
+                      'large-scale flat-field correction applied (#268)')
+    if coeffs is None:
+        for comp in MODEL_COMPONENTS:
+            hdr.remove(f'HIERARCH {p} {ch} {comp.upper()}', ignore_missing=True)
+        log.info(f'large-scale flat-field correction of channel {channel} removed')
+        return total
+    frame.setHdrValue(f'HIERARCH {p} SOURCE', source, 'how the correction was obtained')
+    for comp in MODEL_COMPONENTS:
+        unit = '% (mean 1), all fibers' if comp.startswith('f') else '%/10mm, Sci fibers'
+        frame.setHdrValue(f'HIERARCH {p} {ch} {comp.upper()}', round(float(coeffs[comp]), 5),
+                          f'{channel} correction {comp} [{unit}]')
+    for key, (value, comment) in (info or {}).items():
+        frame.setHdrValue(f'HIERARCH {p} {key}', value, comment)
+    log.info(f'large-scale flat-field correction of channel {channel} ({source}): factors '
+             f'{coeffs["f1"]:.2f} {coeffs["f2"]:.2f} {coeffs["f3"]:.2f} %, plane '
+             f'{coeffs["gx"]:.2f} {coeffs["gy"]:.2f} %/10mm')
+    return total
+
+
+def _measured_plane(header, name: str) -> Optional[Dict[str, float]]:
+    """A sky-line plane from the SKYPLANE keywords of a header, factors in % (mean 1); None if missing."""
+    try:
+        f = np.array([float(header[f'SKYPLANE {name} F{k}']) for k in (1, 2, 3)])
+        gx, gy = float(header[f'SKYPLANE {name} GX']), float(header[f'SKYPLANE {name} GY'])
+        n = int(header[f'SKYPLANE {name} N'])
+    except (KeyError, TypeError, ValueError):
+        return None
+    vals = np.append(f, [gx, gy])
+    if n <= 0 or not np.all(np.isfinite(vals)) or np.any(vals <= -999) or np.any(f <= 0):
+        return None
+    f = 100 * (f / f.mean() - 1)
+    return {'f1': f[0], 'f2': f[1], 'f3': f[2], 'gx': gx, 'gy': gy, 'n': n}
+
+
+def _combine(first: Dict[str, float], second: Dict[str, float]) -> Dict[str, float]:
+    """Two corrections in sequence: the factors multiplied (renormalized to a mean of 1), the planes added."""
+    f = np.array([(1 + first[k] / 100) * (1 + second[k] / 100) for k in ('f1', 'f2', 'f3')])
+    f = 100 * (f / f.mean() - 1)
+    return {'f1': f[0], 'f2': f[1], 'f3': f[2], 'gx': first['gx'] + second['gx'],
+            'gy': first['gy'] + second['gy']}
+
+
+def _difference(total: Dict[str, float], part: Dict[str, float]) -> Dict[str, float]:
+    """What is left of `total` after `part`: the inverse of :func:`_combine`."""
+    f = np.array([(1 + total[k] / 100) / (1 + part[k] / 100) for k in ('f1', 'f2', 'f3')])
+    f = 100 * (f / f.mean() - 1)
+    return {'f1': f[0], 'f2': f[1], 'f3': f[2], 'gx': total['gx'] - part['gx'], 'gy': total['gy'] - part['gy']}
+
+
+def frame_coefficients(header, models: Optional[Dict[str, Dict]] = None,
+                       previous: Optional[Dict[str, Optional[Dict[str, float]]]] = None,
+                       direct: bool = True, guard: float = DIRECT_GUARD, rguard: float = DIRECT_RGUARD,
+                       min_fibers: int = 0) -> Optional[Dict]:
+    """The large-scale flat-field correction of each channel of one exposure, for its lvmFrames.
+
+    The sky-line planes measured in the exposure's lvmCFrame (the ``SKYPLANE``
+    keywords of :func:`measure_cframe`) are what the lvmFrames' correction at the
+    time (`previous`, none for frames with the flat alone) left, so the total
+    measured error of a channel is the previous correction combined with them. The
+    lines used are 5577 (b), 8399 (z) and the summed r OH lines (r).
+
+    - With `models` and `direct`: the residuals are the measured errors minus the
+      models (evaluated from MJD, TESCIFO and TESCIKM). If the b and z residual
+      planes agree to within `guard`, b and z take their measured errors, and r the
+      model plus the mean of the b and z residuals, averaged with its own r OH
+      residual if that agrees to within `rguard`. Otherwise the models are used.
+    - With `models` alone: the models.
+    - With `direct` and no models (a new epoch): b and z take their measured
+      errors; r its r OH factors (6364 if r OH is missing) and the mean of the b
+      and z planes, averaged with the r OH plane if it agrees to within `rguard`.
+      There is no guard.
+
+    Args:
+        header: the lvmCFrame header, with the SKYPLANE keywords, MJD, TESCIFO and TESCIKM.
+        models: {channel: model} as read by :func:`read_flat_model`, or None.
+        previous: {channel: correction applied to the lvmFrames} (see
+            :func:`read_frame_correction`), or None.
+        direct: use the exposure's own measurements.
+        guard: largest b - z residual plane difference for the direct step, %/10 mm.
+        rguard: largest r OH - (b, z mean) plane difference for r OH to be used, %/10 mm.
+        min_fibers: fewest fibers in the b and z plane fits for the direct step.
+
+    Returns:
+        A dict with 'coeffs' ({channel: {component: value}}), 'mode' ('direct' or
+        'model'), 'rmode' ('oh+bz', 'bz', 'oh', '6364' or 'none'), 'guard' and
+        'rguard' (NaN where not computed), 'model' ({channel: values} or None) and
+        'measured' ({line: total error} or None for each of b, z, r_oh, r); None if
+        no correction is possible.
+    """
+    previous = previous or {}
+    names = {'b': 'B', 'z': 'Z', 'r_oh': 'ROH', 'r': 'R'}
+    measured = {}
+    for key, name in names.items():
+        m = _measured_plane(header, name)
+        prev = previous.get(key[0])
+        measured[key] = _combine(prev, m) if (m is not None and prev is not None) else m
+        if m is not None:
+            measured[key]['n'] = m['n']
+    out = {'mode': 'model', 'rmode': 'none', 'guard': np.nan, 'rguard': np.nan, 'model': None,
+           'measured': measured}
+
+    values = None
+    if models is not None:
+        mjd, focus, kmir = (header.get(k) for k in ('MJD', 'TESCIFO', 'TESCIKM'))
+        if any(v is None or not np.isfinite(float(v)) or float(v) <= -900 for v in (mjd, focus, kmir)):
+            log.warning(f'MJD, TESCIFO or TESCIKM missing ({mjd}, {focus}, {kmir}); model not used')
+        elif any(ch not in models for ch in 'brz'):
+            log.warning(f'no flat-field error model for some channels ({sorted(models)}); model not used')
+        else:
+            values = {ch: evaluate_flat_model(models[ch], float(mjd), float(focus), float(kmir)) for ch in 'brz'}
+    out['model'] = values
+
+    b, z, roh = measured['b'], measured['z'], measured['r_oh']
+    have_bz = b is not None and z is not None and min(b['n'], z['n']) >= min_fibers
+    keys = ('f1', 'f2', 'f3', 'gx', 'gy')
+    if direct and have_bz and values is not None:
+        res = {ch: _difference(measured[key], values[ch]) for ch, key in (('b', 'b'), ('z', 'z'))}
+        out['guard'] = float(np.hypot(res['b']['gx'] - res['z']['gx'], res['b']['gy'] - res['z']['gy']))
+        if out['guard'] <= guard:
+            rres = {k: 0.5 * (res['b'][k] + res['z'][k]) for k in keys}
+            out['rmode'] = 'bz'
+            if roh is not None and roh['n'] >= min_fibers:
+                own = _difference(roh, values['r'])
+                out['rguard'] = float(np.hypot(own['gx'] - rres['gx'], own['gy'] - rres['gy']))
+                if out['rguard'] <= rguard:
+                    rres = {k: 0.5 * (own[k] + rres[k]) for k in keys}
+                    out['rmode'] = 'oh+bz'
+            out['coeffs'] = {'b': {k: b[k] for k in keys}, 'z': {k: z[k] for k in keys},
+                             'r': _combine(values['r'], rres)}
+            out['mode'] = 'direct'
+            return out
+    if values is not None:
+        out['coeffs'] = {ch: dict(values[ch]) for ch in 'brz'}
+        return out
+    if not direct or not have_bz:
+        log.warning('no flat-field error model, and ' +
+                    ('the direct step not asked for' if not direct else 'no b and z sky-line planes') +
+                    '; no correction')
+        return None
+    rown = roh if roh is not None else measured['r']
+    if rown is None:
+        log.warning('no r sky-line plane (r OH or 6364); no correction')
+        return None
+    plane = {k: 0.5 * (b[k] + z[k]) for k in ('gx', 'gy')}
+    out['rmode'] = 'bz'
+    out['rguard'] = float(np.hypot(rown['gx'] - plane['gx'], rown['gy'] - plane['gy']))
+    if out['rguard'] <= rguard:
+        plane = {k: 0.5 * (rown[k] + plane[k]) for k in ('gx', 'gy')}
+        out['rmode'] = 'oh+bz' if roh is not None else '6364+bz'
+    out['coeffs'] = {'b': {k: b[k] for k in keys}, 'z': {k: z[k] for k in keys},
+                     'r': {**{k: rown[k] for k in ('f1', 'f2', 'f3')}, **plane}}
+    out['mode'] = 'direct'
+    log.info('no flat-field error model: direct step from the exposure alone, without the guard')
+    return out
+
+
+def correct_frames(frame_paths: Dict[str, str], cframe_path: str, mjd: int, drpver: Optional[str] = None,
+                   from_sandbox: bool = True, direct: bool = True,
+                   epochs_kind: str = 'calibration') -> Optional[Dict]:
+    """Corrects the lvmFrames of one exposure for the large-scale flat-field error, in place.
+
+    The correction is taken from the sky-line planes in the header of the exposure's
+    lvmCFrame and the model files of its epoch, if they exist (see
+    :func:`frame_coefficients`), and applied to every fiber of each channel's
+    lvmFrame (see :func:`apply_frame_correction`), replacing any earlier correction.
+    The steps after the lvmFrames (sky interpolation, resampling, flux calibration,
+    joining, sky subtraction) have to be run again afterwards.
+
+    Args:
+        frame_paths: {channel: lvmFrame path} for b, r and z.
+        cframe_path: the exposure's lvmCFrame, with the SKYPLANE keywords.
+        mjd: MJD of the exposure, to find the model files.
+        drpver: DRP version, for the calibration directories of a reduction.
+        from_sandbox: look for the model files in the sandbox calibration directories.
+        direct: use the exposure's own measurements (see :func:`frame_coefficients`).
+        epochs_kind: where the model files are looked for (see :func:`find_flat_models`);
+            by default the calibration epoch, since the model describes what the
+            twilight flats of that epoch leave.
+
+    Returns:
+        The dict returned by :func:`frame_coefficients`, or None if nothing was corrected.
+    """
+    import os
+    from astropy.io import fits
+    from lvmdrp.core.rss import lvmFrame
+
+    if not os.path.isfile(cframe_path):
+        log.error(f'no lvmCFrame with the sky-line planes: {cframe_path}')
+        return None
+    header = fits.getheader(cframe_path)
+    if 'SKYPLANE Z GX' not in header:
+        log.error(f'no sky-line planes (SKYPLANE keywords) in {cframe_path}')
+        return None
+    missing = [p for p in frame_paths.values() if not os.path.isfile(p)]
+    if len(frame_paths) < 3 or missing:
+        log.error(f'lvmFrames missing: {missing or sorted(frame_paths)}')
+        return None
+
+    files = find_flat_models(mjd, drpver=drpver, from_sandbox=from_sandbox, epochs_kind=epochs_kind)
+    models = {ch: read_flat_model(p) for ch, p in files.items()} if len(files) == 3 else None
+    if models is None:
+        log.info(f'no large-scale flat-field error model for MJD {mjd} (found {sorted(files)})')
+    frames = {ch: lvmFrame.from_file(p) for ch, p in frame_paths.items()}
+    previous = {ch: read_frame_correction(frames[ch]._header, ch) for ch in frames}
+    nsci = int(np.sum(np.asarray(frames['b']._slitmap['telescope']).astype(str) == 'Sci'))
+    result = frame_coefficients(header, models=models, previous=previous, direct=direct,
+                                min_fibers=int(0.7 * MIN_FIBER_FRACTION * nsci))
+    if result is None:
+        return None
+    info = {'RMODE': (result['rmode'], 'r: oh+bz, bz, 6364+bz or none'),
+            'GUARD': (round(result['guard'], 3) if np.isfinite(result['guard']) else -1.0,
+                      '|b - z| residual plane [%/10mm]'),
+            'RGUARD': (round(result['rguard'], 3) if np.isfinite(result['rguard']) else -1.0,
+                       '|r OH - mean(b, z)| plane [%/10mm]'),
+            'EPOCH': (int(models['b']['epoch']) if models else -1, 'epoch of the model (-1: none)')}
+    for ch, p in frame_paths.items():
+        cinfo = dict(info)
+        if models:
+            cinfo[f'{ch.upper()} FILE'] = (os.path.basename(files[ch]), 'model file')
+        apply_frame_correction(frames[ch], ch, result['coeffs'][ch], source=result['mode'], info=cinfo)
+        frames[ch].writeFitsData(p)
+    return result
 
 
 # ----------------------------------------------------------------------------------------------

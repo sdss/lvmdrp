@@ -35,7 +35,7 @@ from lvmdrp.functions.imageMethod import (preproc_raw_frame, create_master_frame
 from lvmdrp.functions.rssMethod import (determine_wavelength_solution, create_pixel_table, apply_fiberflat,
                                         resample_wavelength, shift_wave_skylines, join_spec_channels, stack_spectrographs)
 from lvmdrp.functions.skyMethod import interpolate_sky, combine_skies, quick_sky_subtraction
-from lvmdrp.functions.flatgradient import measure_cframe, correct_cframe
+from lvmdrp.functions.flatgradient import measure_cframe, correct_cframe, correct_frames
 from lvmdrp.core import fluxcal
 from lvmdrp.functions.fluxCalMethod import fluxcal_standard_stars, fluxcal_sci_ifu_stars, apply_fluxcal, model_selection
 from lvmdrp.utils.metadata import (get_frames_metadata, update_metadata, get_master_metadata, extract_metadata,
@@ -1549,6 +1549,7 @@ def science_reduction(expnum: int,
                       skip_flatgrad: bool = False,
                       flatgrad_direct: bool = False,
                       from_cframe: bool = False,
+                      from_frame: bool = False,
                       new_cframe: bool = False,
                       debug_mode: bool = False,
                       force_run: bool = False) -> None:
@@ -1561,14 +1562,35 @@ def science_reduction(expnum: int,
     ``new_cframe`` as well, the corrected frames are written next to the originals
     as ``lvmCFrame-<expnum>.flatgrad.fits`` and ``lvmSFrame-<expnum>.flatgrad.fits``,
     the originals are left as they are, and the drpall is not updated (for testing).
+
+    With ``from_frame``, the reduction starts from the existing lvmFrames: every fiber
+    of each channel is corrected for the large-scale flat-field error measured in the
+    sky lines of the existing lvmCFrame, with the model of the epoch if there is one
+    (``flatgrad_direct`` uses the exposure's own measurements; see
+    :func:`lvmdrp.functions.flatgradient.correct_frames`). A correction already in the
+    lvmFrames is replaced, not added to. The steps after the lvmFrames are then run
+    again (sky interpolation, resampling, flux calibration, joining, sky subtraction,
+    drpall), and the lvmCFrame correction is not applied.
     """
 
     if new_cframe and not from_cframe:
         log.error("new_cframe only applies when starting from an existing lvmCFrame (from_cframe)")
         return
+    if from_cframe and from_frame:
+        log.error("from_cframe and from_frame are alternatives")
+        return
+    if new_cframe and from_frame:
+        log.error("new_cframe only applies when starting from an existing lvmCFrame (from_cframe)")
+        return
     if from_cframe:
         log.info("starting from the existing lvmCFrame: skipping all steps before it")
         skip_2d = skip_1d = skip_wavecal = skip_waveres = skip_fluxcal = True
+    if from_frame:
+        log.info("starting from the existing lvmFrames: skipping all steps before them")
+        skip_2d = skip_1d = skip_wavecal = True
+        if not skip_flatgrad:
+            log.info("the correction goes into the lvmFrames: the lvmCFrame correction is not applied")
+            skip_flatgrad = True
 
     if debug_mode:
         aperture_extraction = True
@@ -1718,6 +1740,16 @@ def science_reduction(expnum: int,
             with Timer(name='Thermal Shifts '+frame_path, logger=log.info):
                 shift_wave_skylines(in_frame=frame_path, out_frame=frame_path)
 
+    if from_frame:
+        frame_paths = {channel: path.full('lvm_frame', mjd=sci_mjd, tileid=sci_tileid, drpver=drpver,
+                                          expnum=sci_expnum, kind=f'Frame-{channel}') for channel in 'brz'}
+        with Timer(name='Frame correction '+cframe_path, logger=log.info):
+            corrected = correct_frames(frame_paths, cframe_path, mjd=sci_mjd, drpver=drpver,
+                                       from_sandbox=from_sandbox, direct=flatgrad_direct)
+        if corrected is None:
+            log.error(f'the lvmFrames of exposure {sci_expnum} were not corrected; stopping')
+            return
+
     if skip_waveres:
             log.info("skipping wavelength resampling and spline sky extrapolation")
     else:
@@ -1858,7 +1890,7 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
             skip_drpall: bool = False, use_nightly_cals: bool = False, use_untagged_cals: bool = False,
             clean_ancillary: bool = False, debug_mode: bool = False, force_run: bool = False,
             force_excluded: bool = False, skip_flatgrad: bool = False, flatgrad_direct: bool = False,
-            from_cframe: bool = False, new_cframe: bool = False,
+            from_cframe: bool = False, from_frame: bool = False, new_cframe: bool = False,
             calib_dir: str = None):
     """ Run the quick DRP
 
@@ -1912,6 +1944,11 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
     from_cframe : bool, optional
         Start from the existing lvmCFrames: measure, correct the flat-field gradient and replace them,
         then redo the sky subtraction and the drpall update, by default False
+    from_frame : bool, optional
+        Start from the existing lvmFrames: correct every fiber for the large-scale flat-field error
+        measured in the lvmCFrame (with the model of the epoch, if there is one), then redo the sky
+        interpolation, resampling, flux calibration, joining, sky subtraction and the drpall update,
+        by default False
     new_cframe : bool, optional
         With from_cframe, write the corrected frames as new ``.flatgrad.fits`` files next to the originals
         and leave the originals and the drpall as they are (for testing), by default False
@@ -1966,6 +2003,7 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
                     skip_flatgrad=skip_flatgrad,
                     flatgrad_direct=flatgrad_direct,
                     from_cframe=from_cframe,
+                    from_frame=from_frame,
                     new_cframe=new_cframe)
         return
 
@@ -2075,6 +2113,7 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
                                         skip_flatgrad=skip_flatgrad,
                                         flatgrad_direct=flatgrad_direct,
                                         from_cframe=from_cframe,
+                                        from_frame=from_frame,
                                         new_cframe=new_cframe,
                                         clean_ancillary=clean_ancillary,
                                         use_longterm_cals=not use_nightly_cals,

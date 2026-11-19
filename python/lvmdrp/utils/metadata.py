@@ -1561,6 +1561,12 @@ def _skyline_plane_columns() -> dict:
     return skyline_plane_columns()
 
 
+def _correction_columns() -> dict:
+    """ The drpall columns of the flat-field corrections in the frame headers: {column: (keyword, dtype)} """
+    from lvmdrp.functions.flatgradient import correction_columns
+    return correction_columns()
+
+
 def _collect_header_data(filename: str) -> dict:
     """ Collect the relevant header information from a file
 
@@ -1613,6 +1619,8 @@ def _collect_header_data(filename: str) -> dict:
 
     # sky-line planes of the large-scale flat-field error (lvmdrp.functions.flatgradient)
     hdr_dict_mapping.update(_skyline_plane_columns())
+    # the large-scale flat-field corrections applied to the exposure
+    hdr_dict_mapping.update({k: v[0] for k, v in _correction_columns().items()})
 
     with fits.open(filename) as hdulist:
         hdr = hdulist['PRIMARY'].header
@@ -1708,6 +1716,12 @@ def update_summary_file(filename: str, tileid: int = None, mjd: int = None, expn
     dtypes['calib_mjd'] = 'int64'
     # sky-line planes: missing in frames reduced before they were measured
     dtypes.update({colname: 'float64' for colname in _skyline_plane_columns()})
+    # flat-field corrections: missing in frames not corrected; flags as 1/0
+    corrections = _correction_columns()
+    dtypes.update({colname: 'float64' for colname, (_, dt) in corrections.items() if dt == 'float64'})
+    for colname, (_, dt) in corrections.items():
+        if dt == 'str':
+            df[colname] = df[colname].fillna('None').astype(str)
     df = df.astype(dtypes)
 
     # replace empty strings in object column with None
@@ -1730,6 +1744,7 @@ def update_summary_file(filename: str, tileid: int = None, mjd: int = None, expn
     min_itemsize = {'skye_name': 20, 'skyw_name': 20, 'location': 120, 'agcam_location': 120,
                     'object': 24, 'filename': 120, 'obstime': 23, 'drpver': 15,
                     'fluxcal': 5, 'sci_astsrc': 15, 'skye_astsrc': 15, 'skyw_astsrc': 15}
+    min_itemsize.update({colname: 12 for colname, (_, dt) in corrections.items() if dt == 'str'})
 
     # write to pytables hdf5
     try:
