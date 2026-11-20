@@ -3455,6 +3455,15 @@ class Image(Header):
         img_original._mask = numpy.zeros(img._dim, dtype=bool)
         img._mask = numpy.zeros(img._dim, dtype=bool)
 
+        # Laplacian of the input image; the input does not change inside the loop (only `out`
+        # does), so this is the same in every iteration and is computed once
+        sub = img.subsampleImg()  # subsample image
+        conv = sub.convolveImg(LA_kernel)  # convolve subsampled image with kernel
+        select_neg = conv < 0
+        conv.replace_subselect(select_neg, data=0)  # replace all negative values with 0
+        Lap = conv.rebin(2, 2)  # rebin the data to original resolution
+        del sub, conv
+
         # start iteration
         out = img
         for i in range(iterations):
@@ -3467,11 +3476,6 @@ class Image(Header):
             noise.replace_subselect(select_neg2, data=0)
             noise = (noise + rdnoise ** 2).sqrt()
 
-            sub = img.subsampleImg()  # subsample image
-            conv = sub.convolveImg(LA_kernel)  # convolve subsampled image with kernel
-            select_neg = conv < 0
-            conv.replace_subselect(select_neg, data=0)  # replace all negative values with 0
-            Lap = conv.rebin(2, 2)  # rebin the data to original resolution
             S = Lap/(noise*2)  # normalize Laplacian image by the noise
             S_prime = S-S.medianImg((5, 5))  # cleaning of the normalized Laplacian image
 
