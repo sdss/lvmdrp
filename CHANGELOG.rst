@@ -11,6 +11,7 @@ This document records the main changes to the drp code.
 
 - Bumped ``skycalc_cli`` to 1.5, which no longer imports the deprecated ``pkg_resources``; removes the setuptools warning on every ``drp`` call and the ``ModuleNotFoundError`` with setuptools>=81 (#257)
 - Replaced lvmdrp's own ``pkg_resources.parse_version`` with ``packaging.version.parse``
+- ``drp``, ``pix2wave`` and ``envcheck`` are now ``console_scripts`` entry points (code moved from ``bin/`` to ``lvmdrp.cli``) instead of scripts: pip copied scripts into the environment at install time, so an editable install kept running an old ``drp`` against newer library code after a ``git pull`` or ``git checkout`` (e.g. ``ImportError: cannot import name ...``) until it was reinstalled
 
 
 1.3.2 (02-09-2026)
