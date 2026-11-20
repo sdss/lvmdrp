@@ -738,20 +738,14 @@ def convolution_matrix(kernel, normalize=True):
 
     kernelLength = kernel.shape[1]
 
-    rowIdxFirst = numpy.floor(kernelLength / 2)
-    rowIdxLast  = rowIdxFirst + nrows
-
-    vI = []
-    vJ = []
-    vV = []
-    for jj in range(nrows):
-        kernel_row = kernel[jj] / numpy.sum(kernel[jj])
-        for ii in range(kernelLength):
-            if (ii + jj >= rowIdxFirst) and (ii + jj < rowIdxLast):
-                # Valid otuput matrix row index
-                vI.append(int(ii + jj - rowIdxFirst))
-                vJ.append(int(jj))
-                vV.append(kernel_row[ii])
+    # entry (jj, ii) of the kernel goes to row jj and column jj + ii - kernelLength // 2,
+    # keeping only the columns inside the matrix
+    rowIdxFirst = kernelLength // 2
+    vJ = numpy.repeat(numpy.arange(nrows), kernelLength)
+    vI = (numpy.arange(nrows)[:, None] + numpy.arange(kernelLength)[None, :] - rowIdxFirst).ravel()
+    vV = (kernel / numpy.sum(kernel, axis=1, keepdims=True)).ravel()
+    valid = (vI >= 0) & (vI < nrows)
+    vI, vJ, vV = vI[valid], vJ[valid], vV[valid]
 
     # vI, vJ = numpy.where(kernel>1e-5)
     # vV = kernel[vI, vJ]
@@ -2821,7 +2815,7 @@ class Spectrum1D(Header):
         # setup kernel
         pixels = numpy.ceil(3 * max(sigmas))
         pixels = numpy.arange(-pixels, pixels)
-        kernel = numpy.asarray([numpy.exp(-0.5 * (pixels / sigmas[iw]) ** 2) for iw in range(wave.size)])
+        kernel = numpy.exp(-0.5 * (pixels[None, :] / sigmas[:, None]) ** 2)
         kernel = convolution_matrix(kernel)
         new_data = kernel @ data
 
