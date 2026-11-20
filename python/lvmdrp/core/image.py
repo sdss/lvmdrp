@@ -2287,11 +2287,13 @@ class Image(Header):
             colors_y = plt.cm.coolwarm(numpy.linspace(0, 1, self._data.shape[1]))
             x_pixels = numpy.arange(model_data.shape[1])
             y_pixels = numpy.arange(model_data.shape[0])
-            for iy in y_pixels:
-                axs["xma"].plot(x_pixels, model_data[iy], ",", color=colors_x[iy], alpha=0.2)
+            # the model is smooth, so about 400 rows and columns show it as well as all of them;
+            # drawing one line per row and column made this figure most of the stray-light time
+            for iy in y_pixels[::max(1, y_pixels.size // 400)]:
+                axs["xma"].plot(x_pixels, model_data[iy], ",", color=colors_x[iy], alpha=0.5)
             axs["xma"].step(x_pixels, numpy.sqrt(bn.nanmedian(self._error**2, axis=0)), lw=1, color="0.8", where="mid")
-            for ix in x_pixels:
-                axs["yma"].plot(model_data[:, ix], y_pixels, ",", color=colors_y[ix], alpha=0.2)
+            for ix in x_pixels[::max(1, x_pixels.size // 400)]:
+                axs["yma"].plot(model_data[:, ix], y_pixels, ",", color=colors_y[ix], alpha=0.5)
             axs["yma"].step(numpy.sqrt(bn.nanmedian(self._error, axis=1)), y_pixels, lw=1, color="0.8", where="mid")
 
             for i in range(len(strips)):
@@ -2308,7 +2310,18 @@ class Image(Header):
                 ylims = axs["res"][i].get_ylim()
                 f = numpy.abs(ylims).max()*0.03
 
-                axs["res"][i].errorbar(x_strips[i], data_, yerr=error_, fmt=",", color="0.7", ecolor="0.7", lw=1, zorder=-1)
+                # the data, and the envelope of data -/+ error in each column as a band (one error
+                # bar per pixel, hundreds of thousands, took most of the time of this figure)
+                axs["res"][i].plot(x_strips[i], data_, ",", color="0.7", zorder=-1)
+                cols, inv = numpy.unique(x_strips[i], return_inverse=True)
+                with numpy.errstate(invalid="ignore"):
+                    lo = numpy.full(cols.size, numpy.inf)
+                    hi = numpy.full(cols.size, -numpy.inf)
+                    numpy.fmin.at(lo, inv, data_ - error_)
+                    numpy.fmax.at(hi, inv, data_ + error_)
+                lo[~numpy.isfinite(lo)] = numpy.nan
+                hi[~numpy.isfinite(hi)] = numpy.nan
+                axs["res"][i].fill_between(cols, lo, hi, color="0.7", lw=0, zorder=-2, step="mid")
                 axs["res"][i].plot(x_strips[i], residuals*f, ",", color="0.2")
                 axs["res"][i].step(x_strips[i].mean(0), mu*f, "-", color="0.2", lw=1, where="mid")
                 axs["res"][i].axhline(-f, ls=":", lw=1, color="0.4")

@@ -13,6 +13,7 @@ This document records the main changes to the drp code.
 - Replaced lvmdrp's own ``pkg_resources.parse_version`` with ``packaging.version.parse``
 - Optimal extraction is about 5x faster with identical results: ``FiberProfileCache`` now reads the two cumulative sums each pixel needs directly from the profile cache, instead of copying every oversampled row of the selected profiles for each column, which took about 80% of the extraction time (about 40% of a science reduction, and most of the arc and twilight extraction in the calibration sequence)
 - Cosmic-ray rejection (``Image.reject_cosmics``) is 10-20% faster with identical results: the Laplacian of the input image, which does not change between iterations, is computed once instead of in each of the 5 iterations
+- Stray-light subtraction is about 2.5x faster with identical results: its QA figure (``fit_straylight``), which took about 80% of the time, now draws about 400 rows and columns of the smooth model instead of all of them, and the per-pixel error bars of the fitted strips as one band per column
 
 
 1.3.2 (02-09-2026)
