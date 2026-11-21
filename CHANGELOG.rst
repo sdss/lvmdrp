@@ -15,6 +15,7 @@ This document records the main changes to the drp code.
 - Cosmic-ray rejection (``Image.reject_cosmics``) is 10-20% faster with identical results: the Laplacian of the input image, which does not change between iterations, is computed once instead of in each of the 5 iterations
 - Stray-light subtraction is about 2.5x faster with identical results: its QA figure (``fit_straylight``), which took about 80% of the time, now draws about 400 rows and columns of the smooth model instead of all of them, and the per-pixel error bars of the fitted strips as one band per column
 - LSF matching of the twilight and dome flats (``match_resolution``) is about 20x faster with identical results: ``convolution_matrix`` builds the sparse convolution matrix with array operations instead of a Python loop over every matrix entry, and ``flatten_lsf`` builds its Gaussian kernels in one array operation; this step took about 6 minutes of each twilight exposure in the calibration sequence
+- ``drp``, ``pix2wave`` and ``envcheck`` are now ``console_scripts`` entry points (code moved from ``bin/`` to ``lvmdrp.cli``) instead of scripts: pip copied scripts into the environment at install time, so an editable install kept running an old ``drp`` against newer library code after a ``git pull`` or ``git checkout`` (e.g. ``ImportError: cannot import name ...``) until it was reinstalled
 
 
 1.3.2 (02-09-2026)

@@ -469,7 +469,8 @@ class SolveWavelength:
             exit(0)
 
 
-if __name__ == "__main__":
+def main():
+    """Command line entry point of pix2wave"""
     parser = argparse.ArgumentParser(
         prog=os.path.basename(sys.argv[0]),
         description="build a table for mapping pixels to wavelengths",
@@ -548,7 +549,7 @@ if __name__ == "__main__":
     fig.canvas.mpl_connect("close_event", solve_wave.on_close)
 
     # change cursor
-    cursor = MultiCursor(
+    cursor = MultiCursor(  # noqa: F841 (the widget only works while a reference to it is kept)
         fig.canvas,
         (axes[0], axes[1]),
         color="0.7",
@@ -559,3 +560,7 @@ if __name__ == "__main__":
     )
 
     plt.show()
+
+
+if __name__ == "__main__":
+    main()
