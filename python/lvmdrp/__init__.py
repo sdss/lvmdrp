@@ -47,7 +47,15 @@ for kw in ['LVM_MASTER_DIR', 'LVM_SANDBOX', 'LVMCORE_DIR', 'SAS_BASE_DIR']:
         os.environ[kw] = existing_lvmconf_path[kw]
 
 
-__version__ = os.getenv("LVMDRP_VERSION") or get_package_version(path=__file__, package_name=NAME)
+def version_label(env_value=None, config_value=None, package_value=None):
+    """The DRP version label (DRPVER, the redux directory): $LVMDRP_VERSION, else
+    ``drpver`` in lvmdrp.yaml (so that a branch can carry its own label), else the
+    package version."""
+    return env_value or config_value or package_value
+
+
+__version__ = version_label(os.getenv("LVMDRP_VERSION"), (config or {}).get("drpver"),
+                            get_package_version(path=__file__, package_name=NAME))
 
 
 # NOTE: taken from https://stackoverflow.com/questions/14989858/get-the-current-git-hash-in-a-python-script

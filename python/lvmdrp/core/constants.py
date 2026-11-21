@@ -101,6 +101,66 @@ def set_masters_dir(calib_dir):
     return calib_dir
 
 
+def configured_calib_dir(config=None):
+    """Returns the calibration directory named by ``calib_dir`` in lvmdrp.yaml, or None.
+
+    A branch can name its own calibration set this way, so that checking out the
+    branch also selects its calibrations. A relative path is taken from
+    $SAS_BASE_DIR/sdsswork/lvm/ (e.g. ``sandbox/calib_2.0.0dev``), so that the same
+    entry works on every machine.
+
+    Args:
+        config: the lvmdrp configuration (a mapping); default: ``lvmdrp.config``.
+
+    Returns:
+        The absolute path, or None if lvmdrp.yaml names none.
+    """
+    if config is None:
+        from lvmdrp import config
+    calib_dir = (config or {}).get("calib_dir")
+    if not calib_dir:
+        return None
+    calib_dir = os.path.expanduser(str(calib_dir))
+    if not os.path.isabs(calib_dir):
+        calib_dir = os.path.join(os.getenv("SAS_BASE_DIR", ""), "sdsswork", "lvm", calib_dir)
+    return os.path.abspath(calib_dir)
+
+
+def calib_dir_in_args(args):
+    """Whether a command line (a list of arguments) gives --calib-dir."""
+    return any(a == "--calib-dir" or a.startswith("--calib-dir=") for a in args)
+
+
+def apply_configured_calib_dir(config=None, explicit=False):
+    """Uses the calibration directory of lvmdrp.yaml for the run, if it names one.
+
+    Called when a ``drp`` command starts. The order of precedence is: --calib-dir on
+    the command line (`explicit`), then ``calib_dir`` in lvmdrp.yaml, then
+    $LVM_MASTER_DIR. A directory named in lvmdrp.yaml that does not exist is an
+    error, not a reason to fall back to $LVM_MASTER_DIR, which would quietly reduce
+    with other calibrations (sdss/lvmdrp#272).
+
+    Args:
+        config: the lvmdrp configuration; default: ``lvmdrp.config``.
+        explicit: True if the command line gives --calib-dir, which then takes precedence.
+
+    Returns:
+        The directory set, or None if lvmdrp.yaml names none (or --calib-dir is given).
+
+    Raises:
+        FileNotFoundError: if the directory named in lvmdrp.yaml does not exist.
+    """
+    if explicit:
+        return None
+    calib_dir = configured_calib_dir(config)
+    if calib_dir is None:
+        return None
+    if not os.path.isdir(calib_dir):
+        raise FileNotFoundError(f"calibration directory {calib_dir}, named by calib_dir in lvmdrp.yaml, "
+                                "not found: create it, or give --calib-dir")
+    return set_masters_dir(calib_dir)
+
+
 @functools.lru_cache(maxsize=None)
 def _git_version(repo_dir):
     """Returns the commit of a git checkout (12 characters, -dirty if tracked files differ), or 'unknown'."""

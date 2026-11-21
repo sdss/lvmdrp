@@ -139,9 +139,27 @@ class WaveRange(click.ParamType):
             self.fail(f'{value} is not a valid input', param, ctx)
 
 
-@click.group('drp', short_help='CLI for the LVM data reduction')
-def cli():
-    pass
+class DrpGroup(click.Group):
+    """The drp group, keeping the subcommand's arguments for the group callback (click clears them)."""
+    def invoke(self, ctx):
+        ctx.meta['drp_args'] = [*getattr(ctx, '_protected_args', []), *ctx.args]
+        return super().invoke(ctx)
+
+
+@click.group('drp', cls=DrpGroup, short_help='CLI for the LVM data reduction')
+@click.pass_context
+def cli(ctx):
+    # a calibration directory named in lvmdrp.yaml replaces $LVM_MASTER_DIR, unless --calib-dir is given
+    from lvmdrp import log
+    from lvmdrp.core.constants import apply_configured_calib_dir, calib_dir_in_args, get_masters_dir
+    explicit = calib_dir_in_args(ctx.meta.get('drp_args', []))
+    try:
+        configured = apply_configured_calib_dir(explicit=explicit)
+    except FileNotFoundError as err:
+        raise click.ClickException(str(err)) from err
+    log.info(f'DRP version label {drpver}; calibration directory '
+             f'{"given by --calib-dir" if explicit else get_masters_dir()}'
+             f'{" (from lvmdrp.yaml)" if configured else ""}')
 
 
 @cloup.command(short_help='Run the DRP reduction', show_constraints=True)

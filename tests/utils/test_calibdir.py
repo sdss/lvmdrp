@@ -70,6 +70,49 @@ def test_run_drp_calib_dir_missing(calib_tree):
     assert get_masters_dir() == before
 
 
+def test_configured_calib_dir(tmp_path, monkeypatch):
+    """ calib_dir in lvmdrp.yaml: none, relative to $SAS_BASE_DIR/sdsswork/lvm, or absolute """
+    monkeypatch.setenv('SAS_BASE_DIR', str(tmp_path))
+    assert constants.configured_calib_dir({}) is None
+    assert constants.configured_calib_dir({'calib_dir': None}) is None
+    assert constants.configured_calib_dir({'calib_dir': 'sandbox/calib_x'}) == \
+        str(tmp_path / 'sdsswork' / 'lvm' / 'sandbox' / 'calib_x')
+    assert constants.configured_calib_dir({'calib_dir': str(tmp_path / 'abs')}) == str(tmp_path / 'abs')
+
+
+def test_apply_configured_calib_dir(calib_tree, monkeypatch):
+    """ the directory of lvmdrp.yaml is used, unless --calib-dir is given; a missing one is an error """
+    before = get_masters_dir()
+    assert constants.apply_configured_calib_dir({}) is None and get_masters_dir() == before
+    cfg = {'calib_dir': str(calib_tree)}
+    assert constants.apply_configured_calib_dir(cfg, explicit=True) is None and get_masters_dir() == before
+    assert constants.apply_configured_calib_dir(cfg) == str(calib_tree) and get_masters_dir() == str(calib_tree)
+    monkeypatch.setenv('LVM_MASTER_DIR', before)
+    with pytest.raises(FileNotFoundError, match='lvmdrp.yaml'):
+        constants.apply_configured_calib_dir({'calib_dir': str(calib_tree / 'nothere')})
+    assert get_masters_dir() == before
+
+
+def test_calib_dir_in_args():
+    assert constants.calib_dir_in_args(['run', '-e', '1', '--calib-dir', '/x'])
+    assert constants.calib_dir_in_args(['run', '--calib-dir=/x'])
+    assert not constants.calib_dir_in_args(['run', '-e', '1'])
+
+
+def test_version_label():
+    """ $LVMDRP_VERSION, else drpver in lvmdrp.yaml, else the package version """
+    from lvmdrp import version_label
+    assert version_label('env', 'cfg', '1.3.3dev') == 'env'
+    assert version_label(None, 'cfg', '1.3.3dev') == 'cfg'
+    assert version_label('', None, '1.3.3dev') == '1.3.3dev'
+
+
+def test_lvmdrp_yaml_has_calib_dir_and_drpver():
+    """ lvmdrp.yaml has both entries (empty in dev; a branch such as xdev may set them) """
+    from lvmdrp import config
+    assert 'calib_dir' in config and 'drpver' in config
+
+
 def test_safe_hdf_append_new_column(tmp_path):
     # a drpall written before the calibdir column existed can still be appended to
     h5 = str(tmp_path / 'drpall.h5')
