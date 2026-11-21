@@ -20,6 +20,7 @@ from matplotlib.gridspec import GridSpec
 import bottleneck as bn
 from lvmdrp import log
 from lvmdrp.core.constants import SPEC_CHANNELS
+from lvmdrp.core.header import read_frames_extension, write_frames_extension
 from lvmdrp.core.tracemask import TraceMask
 from lvmdrp.core.spectrum1d import Spectrum1D
 from lvmdrp.core.rss import RSS, lvmFrame
@@ -751,7 +752,10 @@ def do_ffactor_correction(in_mflat, coeffs, factor, sky_cwave, dwave, coadd_meth
 
     if write_output:
         log.info(f"writing corrected master fiberflat to {in_mflat}")
+        frames = read_frames_extension(in_mflat)
         mflat.writeFitsData(in_mflat)
+        if frames is not None:
+            write_frames_extension(in_mflat, frames)
 
     return mflat, flatfield_corr, was_corrected
 
@@ -802,6 +806,9 @@ def undo_ffactor_correction(in_mflat, write_output=False):
 
     if write_output:
         log.info(f"writing uncorrected master fiberflat to {in_mflat}")
+        frames = read_frames_extension(in_mflat)
         mflat.writeFitsData(in_mflat)
+        if frames is not None:
+            write_frames_extension(in_mflat, frames)
 
     return mflat, flatfield_corr, was_corrected

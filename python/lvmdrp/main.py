@@ -22,8 +22,9 @@ from astropy.io import fits
 from astropy.table import Table
 from astropy.time import Time
 from astropy.wcs import WCS
-from lvmdrp.core.constants import CAMERAS, SPEC_CHANNELS, MASTERS_DIR
-from lvmdrp.core.rss import RSS
+from lvmdrp.core.constants import (CAMERAS, SPEC_CHANNELS, get_masters_dir, set_masters_dir, get_lvmcore_version,
+                                    get_lvmdrp_version, add_provenance)
+from lvmdrp.core.rss import RSS, lvmCFrame
 from lvmdrp.functions.astrometryMethod import add_astrometry
 from lvmdrp.functions.imageMethod import (preproc_raw_frame, create_master_frame,
                                           create_pixelmask, detrend_frame,
@@ -34,6 +35,7 @@ from lvmdrp.functions.imageMethod import (preproc_raw_frame, create_master_frame
 from lvmdrp.functions.rssMethod import (determine_wavelength_solution, create_pixel_table, apply_fiberflat,
                                         resample_wavelength, shift_wave_skylines, join_spec_channels, stack_spectrographs)
 from lvmdrp.functions.skyMethod import interpolate_sky, combine_skies, quick_sky_subtraction
+from lvmdrp.functions.flatgradient import measure_cframe, correct_cframe, correct_frames
 from lvmdrp.core import fluxcal
 from lvmdrp.functions.fluxCalMethod import fluxcal_standard_stars, fluxcal_sci_ifu_stars, apply_fluxcal, model_selection
 from lvmdrp.utils.metadata import (get_frames_metadata, update_metadata, get_master_metadata, extract_metadata,
@@ -950,6 +952,7 @@ def combine_channels(tileid: int, mjd: int, expnum: int, imagetype: str):
     hdr['SPEC'] = ', '.join([f"sp{specid+1}" for specid in range(3)])
     hdr['FILENAME'] = pathlib.Path(cframe_path).name
     hdr['DRPVER'] = drpver
+    add_provenance(hdr)
 
     # remove the wcs from the primary header; add it to flux header
     [hdr.pop(i, None) for i in wcs.to_header().keys()]
@@ -1521,6 +1524,14 @@ def reduce_1d(mjd, calibrations, expnums=None, cameras=CAMERAS, replace_with_nan
                 create_pixel_table(in_rss=xframe_path, out_rss=wframe_path, in_waves=mwave_paths, in_lsfs=mlsf_paths)
 
 
+def _flatgrad_name(filename: str) -> str:
+    """ The name of a test copy of a frame corrected for the flat-field gradient: <name>.flatgrad.fits[.gz] """
+    for ext in ('.fits.gz', '.fits'):
+        if filename.endswith(ext):
+            return filename[:-len(ext)] + '.flatgrad' + ext
+    return filename + '.flatgrad'
+
+
 def science_reduction(expnum: int,
                       use_longterm_cals: bool = True, from_sandbox: bool = True,
                       sky_weights: Tuple[float, float] = None,
@@ -1535,10 +1546,51 @@ def science_reduction(expnum: int,
                       skip_fluxcal: bool = False,
                       skip_skysub: bool = False,
                       skip_drpall: bool = False,
+                      skip_flatgrad: bool = False,
+                      flatgrad_direct: bool = False,
+                      from_cframe: bool = False,
+                      from_frame: bool = False,
+                      new_cframe: bool = False,
                       debug_mode: bool = False,
                       force_run: bool = False) -> None:
     """ Run the science reduction for a given exposure number.
+
+    With ``from_cframe``, the reduction starts from the existing lvmCFrame: the
+    sky-line planes are measured (unless already in its header), the large-scale
+    flat-field correction is applied (unless ``skip_flatgrad``), the lvmCFrame is
+    replaced, and the sky subtraction and drpall update follow as usual. With
+    ``new_cframe`` as well, the corrected frames are written next to the originals
+    as ``lvmCFrame-<expnum>.flatgrad.fits`` and ``lvmSFrame-<expnum>.flatgrad.fits``,
+    the originals are left as they are, and the drpall is not updated (for testing).
+
+    With ``from_frame``, the reduction starts from the existing lvmFrames: every fiber
+    of each channel is corrected for the large-scale flat-field error measured in the
+    sky lines of the existing lvmCFrame, with the model of the epoch if there is one
+    (``flatgrad_direct`` uses the exposure's own measurements; see
+    :func:`lvmdrp.functions.flatgradient.correct_frames`). A correction already in the
+    lvmFrames is replaced, not added to. The steps after the lvmFrames are then run
+    again (sky interpolation, resampling, flux calibration, joining, sky subtraction,
+    drpall), and the lvmCFrame correction is not applied.
     """
+
+    if new_cframe and not from_cframe:
+        log.error("new_cframe only applies when starting from an existing lvmCFrame (from_cframe)")
+        return
+    if from_cframe and from_frame:
+        log.error("from_cframe and from_frame are alternatives")
+        return
+    if new_cframe and from_frame:
+        log.error("new_cframe only applies when starting from an existing lvmCFrame (from_cframe)")
+        return
+    if from_cframe:
+        log.info("starting from the existing lvmCFrame: skipping all steps before it")
+        skip_2d = skip_1d = skip_wavecal = skip_waveres = skip_fluxcal = True
+    if from_frame:
+        log.info("starting from the existing lvmFrames: skipping all steps before them")
+        skip_2d = skip_1d = skip_wavecal = True
+        if not skip_flatgrad:
+            log.info("the correction goes into the lvmFrames: the lvmCFrame correction is not applied")
+            skip_flatgrad = True
 
     if debug_mode:
         aperture_extraction = True
@@ -1688,6 +1740,16 @@ def science_reduction(expnum: int,
             with Timer(name='Thermal Shifts '+frame_path, logger=log.info):
                 shift_wave_skylines(in_frame=frame_path, out_frame=frame_path)
 
+    if from_frame:
+        frame_paths = {channel: path.full('lvm_frame', mjd=sci_mjd, tileid=sci_tileid, drpver=drpver,
+                                          expnum=sci_expnum, kind=f'Frame-{channel}') for channel in 'brz'}
+        with Timer(name='Frame correction '+cframe_path, logger=log.info):
+            corrected = correct_frames(frame_paths, cframe_path, mjd=sci_mjd, drpver=drpver,
+                                       from_sandbox=from_sandbox, direct=flatgrad_direct)
+        if corrected is None:
+            log.error(f'the lvmFrames of exposure {sci_expnum} were not corrected; stopping')
+            return
+
     if skip_waveres:
             log.info("skipping wavelength resampling and spline sky extrapolation")
     else:
@@ -1718,7 +1780,7 @@ def science_reduction(expnum: int,
                                 camera=channel, imagetype=sci_imagetyp, expnum=expnum) for channel in "brz"]
 
         # #The model stellar atmosphere spectra selection
-        model_selection(hsci_all_bands, GAIA_CACHE_DIR=MASTERS_DIR + '/gaia_cache')
+        model_selection(hsci_all_bands, GAIA_CACHE_DIR=os.path.join(get_masters_dir(), 'gaia_cache'))
 
         for channel in "brz":
             hsci_path = path.full('lvm_anc', mjd=sci_mjd, tileid=sci_tileid, drpver=drpver,
@@ -1727,8 +1789,8 @@ def science_reduction(expnum: int,
             #  and field stars found in the sci ifu
             # mode='GAIA' -> old behavior; 'model' -> new version with the spectra from the Pollux library
             with Timer(name='Fluxcal '+hsci_path, logger=log.info):
-                fluxcal_standard_stars(hsci_path, GAIA_CACHE_DIR=MASTERS_DIR+'/gaia_cache')
-                fluxcal_sci_ifu_stars(hsci_path, GAIA_CACHE_DIR=MASTERS_DIR+'/gaia_cache')
+                fluxcal_standard_stars(hsci_path, GAIA_CACHE_DIR=os.path.join(get_masters_dir(), 'gaia_cache'))
+                fluxcal_sci_ifu_stars(hsci_path, GAIA_CACHE_DIR=os.path.join(get_masters_dir(), 'gaia_cache'))
 
                 # flux-calibrate each channel
                 fframe_path = path.full("lvm_frame", mjd=sci_mjd, drpver=drpver, tileid=sci_tileid, expnum=sci_expnum, kind=f'FFrame-{channel}')
@@ -1741,7 +1803,43 @@ def science_reduction(expnum: int,
             return
 
         with Timer(name='Join Channels '+cframe_path, logger=log.info):
-            join_spec_channels(in_fframes=fframe_paths, out_cframe=cframe_path, use_weights=True)
+            cframe = join_spec_channels(in_fframes=fframe_paths, out_cframe=None, use_weights=True)
+
+        # measure the large-scale flat-field error from the sky lines (header keywords only, #268)
+        with Timer(name='Sky-line planes '+cframe_path, logger=log.info):
+            measure_cframe(cframe, raise_errors=False)
+
+        # correct the large-scale flat-field error with the model of the ffactor epoch, if there is one (#268)
+        if skip_flatgrad:
+            log.info("skipping the large-scale flat-field correction")
+        else:
+            with Timer(name='Flat-field gradient '+cframe_path, logger=log.info):
+                correct_cframe(cframe, mjd=sci_mjd, drpver=drpver, from_sandbox=from_sandbox, direct=flatgrad_direct)
+
+        log.info(f"writing output RSS to {os.path.basename(cframe_path)}")
+        cframe.writeFitsData(cframe_path)
+
+    if from_cframe:
+        if not os.path.isfile(cframe_path):
+            log.error(f"no lvmCFrame to start from: {cframe_path}")
+            return
+        cframe = lvmCFrame.from_file(cframe_path)
+        if 'HIERARCH SKYPLANE Z GX' not in cframe._header:
+            with Timer(name='Sky-line planes '+cframe_path, logger=log.info):
+                measure_cframe(cframe, raise_errors=False)
+        if skip_flatgrad:
+            log.info("skipping the large-scale flat-field correction")
+        else:
+            with Timer(name='Flat-field gradient '+cframe_path, logger=log.info):
+                correct_cframe(cframe, mjd=sci_mjd, drpver=drpver, from_sandbox=from_sandbox, direct=flatgrad_direct)
+        if new_cframe:
+            cframe_path = _flatgrad_name(cframe_path)
+            sframe_path = _flatgrad_name(sframe_path)
+            if not skip_drpall:
+                log.info("writing new lvmCFrame and lvmSFrame files: the drpall summary file is not updated")
+                skip_drpall = True
+        log.info(f"writing output RSS to {os.path.basename(cframe_path)}")
+        cframe.writeFitsData(cframe_path)
 
     if skip_skysub:
         log.info("skipping sky subtraction")
@@ -1791,7 +1889,9 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
             skip_waveres: bool = False, skip_fluxcal: bool = False, skip_skysub: bool = False,
             skip_drpall: bool = False, use_nightly_cals: bool = False, use_untagged_cals: bool = False,
             clean_ancillary: bool = False, debug_mode: bool = False, force_run: bool = False,
-            force_excluded: bool = False):
+            force_excluded: bool = False, skip_flatgrad: bool = False, flatgrad_direct: bool = False,
+            from_cframe: bool = False, from_frame: bool = False, new_cframe: bool = False,
+            calib_dir: str = None):
     """ Run the quick DRP
 
     Run the quick DRP for an MJD, or a range of MJDs. Reduces
@@ -1836,9 +1936,41 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
         Flag to force reductions even if the data was flagged as BAD by the QC pipeline, by default False
     force_excluded : bool, optional
         Flag to force reductions of exposures listed in $LVMCORE_DIR/etc/exclude-exposures.yaml, by default False
+    skip_flatgrad : bool, optional
+        Skip the large-scale flat-field correction of the lvmCFrames (applied when the model files of the
+        ffactor epoch exist), by default False
+    flatgrad_direct : bool, optional
+        Also apply the direct fit of the flat-field error left after the model, by default False
+    from_cframe : bool, optional
+        Start from the existing lvmCFrames: measure, correct the flat-field gradient and replace them,
+        then redo the sky subtraction and the drpall update, by default False
+    from_frame : bool, optional
+        Start from the existing lvmFrames: correct every fiber for the large-scale flat-field error
+        measured in the lvmCFrame (with the model of the epoch, if there is one), then redo the sky
+        interpolation, resampling, flux calibration, joining, sky subtraction and the drpall update,
+        by default False
+    new_cframe : bool, optional
+        With from_cframe, write the corrected frames as new ``.flatgrad.fits`` files next to the originals
+        and leave the originals and the drpall as they are (for testing), by default False
+    calib_dir : str, optional
+        Calibration directory to use instead of $LVM_MASTER_DIR, laid out as $LVM_MASTER_DIR
+        (e.g. a copy or a tree of links with some calibrations replaced), by default None
     """
     # # write the drp parameter configuration
     # write_config_file()
+
+    # the calibration directory: set here, so that it holds whatever the environment says
+    if calib_dir is not None:
+        if use_untagged_cals:
+            log.warning("calib_dir is not used for untagged (or nightly) calibrations")
+        try:
+            calib_dir = set_masters_dir(calib_dir)
+        except FileNotFoundError as err:
+            log.error(str(err))
+            return
+    log.info(f"calibration directory: {get_masters_dir()}")
+    log.info(f"lvmcore: {os.getenv('LVMCORE_DIR')} at commit {get_lvmcore_version()}")
+    log.info(f"lvmdrp: commit {get_lvmdrp_version()}")
 
     if mjd is None and expnum is None:
         log.error("you must provide either an exposure number `expnum` or an MJD `mjd`. None was given")
@@ -1867,7 +1999,12 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
                     use_untagged_cals=use_untagged_cals,
                     debug_mode=debug_mode,
                     force_run=force_run,
-                    force_excluded=force_excluded)
+                    force_excluded=force_excluded,
+                    skip_flatgrad=skip_flatgrad,
+                    flatgrad_direct=flatgrad_direct,
+                    from_cframe=from_cframe,
+                    from_frame=from_frame,
+                    new_cframe=new_cframe)
         return
 
     log.info(f'Processing MJD {mjd}')
@@ -1973,6 +2110,11 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
                                         skip_fluxcal=skip_fluxcal,
                                         skip_skysub=skip_skysub,
                                         skip_drpall=skip_drpall,
+                                        skip_flatgrad=skip_flatgrad,
+                                        flatgrad_direct=flatgrad_direct,
+                                        from_cframe=from_cframe,
+                                        from_frame=from_frame,
+                                        new_cframe=new_cframe,
                                         clean_ancillary=clean_ancillary,
                                         use_longterm_cals=not use_nightly_cals,
                                         from_sandbox=not use_untagged_cals,
@@ -2063,7 +2205,7 @@ def create_drpall(drp_version: str = None, overwrite: bool = False, output_dir: 
 
 def cache_std_xp_spectra(mjds: Union[int, str, list], ignore_cache: bool = False, dry_run: bool = False) -> None:
     log.info("start of Gaia XP spectra caching for science field flux calibration")
-    gaia_cache_dir = os.path.join(os.getenv("LVM_MASTER_DIR"), "gaia_cache")
+    gaia_cache_dir = os.path.join(get_masters_dir(), "gaia_cache")
     # parse MJDs
     mjds = parse_mjds(mjds)
     if isinstance(mjds, int):
@@ -2114,7 +2256,7 @@ def cache_sci_xp_spectra(mjds: Union[int, str, list], min_acquired=999, ignore_c
         lists exposures that will be targeted
     """
     log.info("start of Gaia XP spectra caching for science field flux calibration")
-    gaia_cache_dir = os.path.join(os.getenv("LVM_MASTER_DIR"), "gaia_cache")
+    gaia_cache_dir = os.path.join(get_masters_dir(), "gaia_cache")
     # parse MJDs
     mjds = parse_mjds(mjds)
     if isinstance(mjds, int):

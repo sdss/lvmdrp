@@ -19,7 +19,7 @@ from astropy.table import Table
 from filelock import FileLock, Timeout
 from tqdm import tqdm
 
-from lvmdrp.core.constants import CALIBRATION_NEEDS, ARC_LAMPS, CON_LAMPS, CAMERAS
+from lvmdrp.core.constants import CALIBRATION_NEEDS, ARC_LAMPS, CON_LAMPS, CAMERAS, get_masters_dir, get_lvmcore_version, get_lvmdrp_version
 from lvmdrp.utils.bitmask import (
     QualityFlag,
     ReductionStage,
@@ -1554,6 +1554,19 @@ def put_reduction_stage(
         store.close()
 
 
+def _skyline_plane_columns() -> dict:
+    """ The drpall columns of the sky-line plane header keywords (see lvmdrp.functions.flatgradient) """
+    # imported here, to keep lvmdrp.utils free of a module-level dependency on lvmdrp.functions
+    from lvmdrp.functions.flatgradient import skyline_plane_columns
+    return skyline_plane_columns()
+
+
+def _correction_columns() -> dict:
+    """ The drpall columns of the flat-field corrections in the frame headers: {column: (keyword, dtype)} """
+    from lvmdrp.functions.flatgradient import correction_columns
+    return correction_columns()
+
+
 def _collect_header_data(filename: str) -> dict:
     """ Collect the relevant header information from a file
 
@@ -1603,6 +1616,11 @@ def _collect_header_data(filename: str) -> dict:
                         'moon_phase': 'SKY MOON_PHASE', 'moon_fli': 'SKY MOON_FLI',
                         'sun_alt': 'SKY SUN_ALT', 'moon_alt': 'SKY MOON_ALT'
                         }
+
+    # sky-line planes of the large-scale flat-field error (lvmdrp.functions.flatgradient)
+    hdr_dict_mapping.update(_skyline_plane_columns())
+    # the large-scale flat-field corrections applied to the exposure
+    hdr_dict_mapping.update({k: v[0] for k, v in _correction_columns().items()})
 
     with fits.open(filename) as hdulist:
         hdr = hdulist['PRIMARY'].header
@@ -1679,10 +1697,15 @@ def update_summary_file(filename: str, tileid: int = None, mjd: int = None, expn
     hdr_data['location'] = location
     hdr_data['agcam_location'] = gdr_location
     hdr_data['calib_mjd'] = master_mjd
+    hdr_data['calibdir'] = get_masters_dir() or ''
+    hdr_data['lvmcore'] = get_lvmcore_version()
+    hdr_data['lvmdrp'] = get_lvmdrp_version()
     hdr_data['drpver'] = drpver
 
-    # add new columns
-    df = row.assign(**hdr_data)
+    # add new columns (all at once, so that the frame is not fragmented)
+    hdr_cols = pd.DataFrame({k: [v] * len(row) for k, v in hdr_data.items()}, index=row.index)
+    df = pd.concat([row.drop(columns=[c for c in hdr_cols if c in row]), hdr_cols], axis=1)
+    df = df[list(row.columns) + [c for c in hdr_cols if c not in row]]
 
     # explicitly set some column dtypes to try and handle cases with null data
     # sci, skye, skye keys
@@ -1691,6 +1714,14 @@ def update_summary_file(filename: str, tileid: int = None, mjd: int = None, expn
     dtypes = {f'{i}_{j}': 'float64' for i, j in itertools.product(tels, keys)}
     dtypes.update({colname: 'float64' for colname in ('moon_ra', 'moon_dec', 'moon_phase', 'moon_fli', 'sun_alt', 'moon_alt', 'sci_pa')})
     dtypes['calib_mjd'] = 'int64'
+    # sky-line planes: missing in frames reduced before they were measured
+    dtypes.update({colname: 'float64' for colname in _skyline_plane_columns()})
+    # flat-field corrections: missing in frames not corrected; flags as 1/0
+    corrections = _correction_columns()
+    dtypes.update({colname: 'float64' for colname, (_, dt) in corrections.items() if dt == 'float64'})
+    for colname, (_, dt) in corrections.items():
+        if dt == 'str':
+            df[colname] = df[colname].fillna('None').astype(str)
     df = df.astype(dtypes)
 
     # replace empty strings in object column with None
@@ -1713,6 +1744,7 @@ def update_summary_file(filename: str, tileid: int = None, mjd: int = None, expn
     min_itemsize = {'skye_name': 20, 'skyw_name': 20, 'location': 120, 'agcam_location': 120,
                     'object': 24, 'filename': 120, 'obstime': 23, 'drpver': 15,
                     'fluxcal': 5, 'sci_astsrc': 15, 'skye_astsrc': 15, 'skyw_astsrc': 15}
+    min_itemsize.update({colname: 12 for colname, (_, dt) in corrections.items() if dt == 'str'})
 
     # write to pytables hdf5
     try:

@@ -38,7 +38,7 @@ from lvmdrp.core.sky import get_sky_mask_uves, get_z_continuum_mask
 from lvmdrp import log
 
 from lvmdrp.core.plot import plt, create_subplots, save_fig
-from lvmdrp.core.constants import MASTERS_DIR
+from lvmdrp.core.constants import get_masters_dir
 
 description = "provides flux calibration tasks"
 
@@ -965,7 +965,7 @@ def model_selection(in_rss, GAIA_CACHE_DIR=None, width=3, plot=True):
     # TODO: find a place under the calib directory structure for the stellar models
     # TODO: telluric list should go in lvmcore
     # models_dir = '/Users/amejia/Downloads/stellar_models/'
-    models_dir = os.path.join(MASTERS_DIR, "stellar_models")
+    models_dir = os.path.join(get_masters_dir(), "stellar_models")
     telluric_file = os.path.join(os.getenv("LVMCORE_DIR"), 'etc', 'telluric_lines.txt')  # wavelength regions with Telluric
     # absorptions based on KPNO data (unknown source) with a 1% transmission threshold this file is used as a mask for
     # the fit of standard stars - from Alfredo.

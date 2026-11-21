@@ -1701,6 +1701,8 @@ def quick_sky_subtraction(in_cframe, out_sframe, skymethod: str = 'farlines_near
     skytable = path.full('lvm_anc', mjd=mjd, tileid=tileid, drpver=drpver,
                          kind='sky', camera='brz', imagetype='table', expnum=expnum)
 
+    # the ancillary directory may be missing, e.g. when starting from a cleaned-up reduction
+    os.makedirs(os.path.dirname(skytable), exist_ok=True)
     sky_hdu.writeto(skytable, overwrite=True)
 
     # print("writing lvmSFrame")
@@ -1715,7 +1717,10 @@ def quick_sky_subtraction(in_cframe, out_sframe, skymethod: str = 'farlines_near
 
     #creating skyQA plots
     QA_path = os.path.join(os.path.dirname(out_sframe), "qa")
-    outfile = QA_path +f'/skyQA_{expnum}'
+    os.makedirs(QA_path, exist_ok=True)
+    # a test copy of a frame corrected for the flat-field gradient gets its own QA plot
+    suffix = '.flatgrad' if '.flatgrad.' in os.path.basename(out_sframe) else ''
+    outfile = QA_path +f'/skyQA_{expnum}{suffix}'
     run_qa(out_sframe, outfile)
 
 

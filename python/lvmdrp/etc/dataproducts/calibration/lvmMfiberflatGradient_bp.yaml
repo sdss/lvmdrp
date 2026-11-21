@@ -1,0 +1,73 @@
+name: lvmMfiberflatGradient
+short: model of the large-scale flat-field error of the science IFU, for one ffactor epoch and channel
+description: |
+  Coefficients of the model of the large-scale flat-field error left after the flats used in a reduction
+  (sdss/lvmdrp#268): three spectrograph factors (f1-f3, in % relative to a mean of 1) and a plane across the
+  science IFU (gx, gy, in % per 10 mm), each a sum of terms: a constant and a cubic drift (Legendre
+  polynomials t1-t3 of the MJD within the epoch, held at the end values outside the range of the data
+  fitted) of the epoch, and focus (TESCIFO - FOCUS0, its square, max(0, -focus)) and K-mirror (sin, cos of
+  TESCIKM and 2 TESCIKM) terms shared by all epochs. Fitted jointly to the sky-line planes (skyplane_*
+  drpall columns) of all exposures of a reduction; each file holds the shared terms and its epoch's own.
+created_by: flatgradient.create_flat_models (drp calibrations fit-fiberflat-gradient)
+used_by: null
+location: $LVM_SPECTRO_REDUX/[DRPVER]/[TILEGRP]/11111/[MJD]/calib/, or $LVM_MASTER_DIR/[MJD]/ in the sandbox
+naming_convention: |
+  lvm-mfiberflat_gradient-[CHANNEL].fits, where [CHANNEL] is b, r or z and [MJD] is the first MJD of the
+  ffactor epoch.
+hdu0:
+  name: PRIMARY
+  description: the primary header metadata
+  is_image: true
+  header:
+  - key: CHANNEL
+    comment: spectrograph channel
+  - key: EPOCH
+    comment: first MJD of the ffactor epoch
+  - key: EPOCHLO
+    comment: first MJD of the data fitted in this epoch
+  - key: EPOCHHI
+    comment: last MJD of the data fitted in this epoch
+  - key: FOCUS0
+    comment: reference telescope focus (TESCIFO)
+  - key: NEXP
+    comment: exposures fitted in this epoch
+  - key: NEXPALL
+    comment: exposures fitted in all epochs
+  - key: DRPVER
+    comment: DRP version of the frames fitted
+hdu1:
+  name: COEFFS
+  description: coefficient of each term for each modelled component
+  is_image: false
+  shape: BINARY FITS TABLE
+  columns:
+    TERM:
+      name: term
+      type: char[12]
+      unit: null
+      description: c0, t1, t2, t3 (this epoch), focus, focus2, focus_hinge, sinK, cosK, sin2K, cos2K (shared)
+    F1:
+      name: f1
+      type: float64
+      unit: percent
+      description: factor of spectrograph 1, relative to a mean of 1
+    F2:
+      name: f2
+      type: float64
+      unit: percent
+      description: factor of spectrograph 2, relative to a mean of 1
+    F3:
+      name: f3
+      type: float64
+      unit: percent
+      description: factor of spectrograph 3, relative to a mean of 1
+    GX:
+      name: gx
+      type: float64
+      unit: percent / 10 mm
+      description: x slope of the plane across the science IFU
+    GY:
+      name: gy
+      type: float64
+      unit: percent / 10 mm
+      description: y slope of the plane across the science IFU

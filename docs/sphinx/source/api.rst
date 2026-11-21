@@ -167,6 +167,16 @@ pixelflats
    :undoc-members:
    :show-inheritance:
 
+.. _api-flatgradient:
+
+flatgradient
+^^^^^^^^^^^^
+
+.. automodule:: lvmdrp.functions.flatgradient
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 QA
 --
 

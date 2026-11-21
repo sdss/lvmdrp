@@ -162,18 +162,25 @@ def cli():
 @click.option('-fl', '--skip-fluxcal', is_flag=True, default=False, help='Skip flux calibration')
 @click.option('-sk', '--skip-skysub', is_flag=True, default=False, help='Skip sky subtraction')
 @click.option('-da', '--skip-drpall', is_flag=True, default=False, help='Skip create/update drpall summary file')
+@click.option('--skip-flatgrad', is_flag=True, default=False, help='Skip the large-scale flat-field correction of the lvmCFrames')
+@click.option('--flatgrad-direct', is_flag=True, default=False, help='Also apply the direct fit of the flat-field error left after the model')
+@click.option('--from-cframe', is_flag=True, default=False, help='Start from the existing lvmCFrames: measure, correct the flat-field gradient and replace them, then redo the sky subtraction and the drpall')
+@click.option('--from-frame', is_flag=True, default=False, help='Start from the existing lvmFrames: correct all fibers for the flat-field error measured in the lvmCFrame (and the model, if any), then redo the sky, resampling, flux calibration, joining, sky subtraction and the drpall')
+@click.option('--new-cframe', is_flag=True, default=False, help='With --from-cframe, write the corrected frames as new .flatgrad.fits files and leave the originals and the drpall as they are (for testing)')
 @click.option('-c', '--clean-ancillary', is_flag=True, default=False, help='Remove ancillary paths after run')
 @click.option('-d', '--debug-mode', is_flag=True, default=False, help='Set debug mode on to run using aperture extraction and skip CR rejection')
 @click.option('--force-run', is_flag=True, default=False, help='force reduction even if the exposure was flagged as BAD by the QC pipeline')
 @click.option('--force-excluded', is_flag=True, default=False, help='force reduction of exposures listed in $LVMCORE_DIR/etc/exclude-exposures.yaml')
 @click.option('--use-nightly-cals', is_flag=True, default=False, help='Use nightly calibrations from same MJD as science frame(s). This option implies --use-untagged-cals')
 @click.option('--use-untagged-cals', is_flag=True, default=False, help='Use calibrations from the untagged (not sandbox) directory')
+@click.option('--calib-dir', type=str, default=None, help='Calibration directory to use instead of $LVM_MASTER_DIR (same layout); takes precedence over the environment')
 @cloup.constraint(mutually_exclusive, ['mjd', 'mjd_list', 'mjd_range'])
 # @cloup.constraint(RequireExactly(1), ['mjd', 'mjd_list', 'mjd_range'])
 @cloup.constraint(mutually_exclusive, ['expnum', 'exp_list', 'exp_range'])
 def run(mjd, mjd_list, mjd_range, with_cals, no_sci, expnum, exp_list, exp_range, exp_file, fluxcal_method,
-        skip_2d, skip_1d, skip_wavecal, skip_waveres, skip_fluxcal, skip_skysub, skip_drpall, clean_ancillary, debug_mode, force_run,
-        force_excluded, use_nightly_cals, use_untagged_cals):
+        skip_2d, skip_1d, skip_wavecal, skip_waveres, skip_fluxcal, skip_skysub, skip_drpall, skip_flatgrad, flatgrad_direct,
+        from_cframe, from_frame, new_cframe, clean_ancillary, debug_mode, force_run, force_excluded, use_nightly_cals,
+        use_untagged_cals, calib_dir):
     """ Run the DRP reduction for a given MJD or range of MJDs
 
     Run the DRP for an MJD or range of MJDs.  Various flags and options are available
@@ -192,6 +199,10 @@ def run(mjd, mjd_list, mjd_range, with_cals, no_sci, expnum, exp_list, exp_range
 
     if use_nightly_cals:
         use_untagged_cals = True
+    if new_cframe and not from_cframe:
+        raise click.UsageError('--new-cframe only applies with --from-cframe')
+    if from_frame and from_cframe:
+        raise click.UsageError('--from-frame and --from-cframe are alternatives')
 
     run_drp(mjd=mjd, expnum=expnum, no_sci=no_sci, with_cals=with_cals, fluxcal_method=fluxcal_method,
             skip_2d=skip_2d,
@@ -206,7 +217,13 @@ def run(mjd, mjd_list, mjd_range, with_cals, no_sci, expnum, exp_list, exp_range
             use_untagged_cals=use_untagged_cals,
             debug_mode=debug_mode,
             force_run=force_run,
-            force_excluded=force_excluded)
+            force_excluded=force_excluded,
+            skip_flatgrad=skip_flatgrad,
+            flatgrad_direct=flatgrad_direct,
+            from_cframe=from_cframe,
+            from_frame=from_frame,
+            new_cframe=new_cframe,
+            calib_dir=calib_dir)
 
 
 # register full DRP command
@@ -456,6 +473,81 @@ def fiberflat_corrections(mjd, mjd_list, mjd_range, channels, calibration_epochs
         for channel in channels:
             create_fiberflats_corrections(mjd=mjd, channel=channel, ffactor_epochs=ffactor_epochs, calibration_epochs=calibration_epochs,
                                           skip_done=skip_done, undo_correction=undo_correction, display_plots=False, dry_run=dry_run)
+
+
+@cli.command('fit-fiberflat-gradient', short_help='Fit the large-scale flat-field error model to the sky-line planes in a drpall file', context_settings=dict(show_default=True))
+@click.option('--drpall', type=str, default=None, help='drpall file (HDF5 or FITS) with the skyplane_* columns; default: that of --drpver')
+@click.option('--drpver', type=str, default=None, help='DRP version of the reduction to fit; default: the current version')
+@click.option('--channels', type=str, default='brz', help='spectrograph channels to fit')
+@click.option('--ffactor-epochs-file', type=str, default=None, help='path to a fiber flat factors epoch file')
+@click.option('--out-dir', type=str, default=None, help='write <out-dir>/<epoch>/lvm-mfiberflat_gradient-<channel>.fits instead of into the calibration directories')
+@click.option('--to-redux', is_flag=True, default=False, help='write into the calibration directories of the --drpver reduction instead of the sandbox')
+@click.option('--minexp', type=float, default=300.0, help='shortest exposure time used, in seconds')
+@click.option('--dry-run', is_flag=True, default=False, help='fit and report, but write nothing')
+@click.option('--epochs', 'epochs_kind', type=click.Choice(['ffactor', 'calibration']), default='ffactor', help='model epochs: the ffactor epochs (flats with stage-2 factors) or the calibration epochs (twilight flats alone, with drp run --from-frame)')
+@click.option('--calib-epochs-file', type=str, default=None, help='path to a calibration epochs file (with --epochs calibration)')
+@click.option('--shared-from', type=str, default=None, help='directory with lvm-mfiberflat_gradient-<channel>.fits files whose focus and K-mirror terms are held fixed; only the epoch terms are fitted')
+@click.option('--epoch-terms', type=str, default='c0,t1,t2,t3', help='epoch terms to fit: a constant c0 and Legendre drift terms t1-t3 (e.g. c0 for a few nights per epoch)')
+def fit_fiberflat_gradient(drpall, drpver, channels, ffactor_epochs_file, out_dir, to_redux, minexp, dry_run,
+                           epochs_kind, calib_epochs_file, shared_from, epoch_terms):
+    """Fit the model of the large-scale flat-field error (sdss/lvmdrp#268)
+
+    The model (spectrograph factors and a plane across the science IFU, as a constant and drift per
+    ffactor epoch plus focus and K-mirror terms) is fitted to the sky-line planes measured in the
+    lvmCFrames of a reduction and written as one lvm-mfiberflat_gradient-<channel>.fits file per epoch.
+    """
+    from lvmdrp import __version__, path
+    from lvmdrp.functions.flatgradient import create_flat_models
+
+    drpver = drpver or __version__
+    if drpall is None:
+        drpall = path.full('lvm_drpall', drpver=drpver).replace('.fits', '.h5')
+    if epochs_kind == 'calibration':
+        epochs = load_epochs_file(epochs_kind='calibration', epochs_path=calib_epochs_file, verbose=False)
+    else:
+        epochs = load_epochs_file(epochs_kind='ffactor', epochs_path=ffactor_epochs_file, verbose=False)
+    if not epochs:
+        raise click.ClickException(f'no {epochs_kind} epochs found')
+    terms = tuple(t.strip() for t in epoch_terms.split(','))
+    bad = [t for t in terms if t not in ('c0', 't1', 't2', 't3')]
+    if bad or 'c0' not in terms:
+        raise click.UsageError(f'--epoch-terms must include c0 and only c0, t1, t2, t3 (got {epoch_terms})')
+    create_flat_models(drpall, sorted(int(e) for e in epochs), channels=channels, drpver=drpver, out_dir=out_dir,
+                       from_sandbox=not to_redux, minexp=minexp, dry_run=dry_run, shared_from=shared_from,
+                       epoch_terms=terms)
+
+
+@cli.command('twilight-gradient', short_help='Put the instrument gradient fitted to the twilights into the master twilight flats', context_settings=dict(show_default=True))
+@click.option('--twilight-summary', type=str, required=True, help='per-exposure twilight table (CSV) from drp calibrations qa-twilights --trends')
+@click.option('--out-calib-dir', type=str, default=None, help='new calibration directory: symbolic links to the sandbox calibrations, with the new twilight flats; the original flats are not changed')
+@click.option('--in-place', is_flag=True, default=False, help='change the original master twilight flats instead')
+@click.option('--channels', type=str, default='brz', help='spectrograph channels to process')
+@click.option('--calibration-epochs-file', type=str, default=None, help='path to a calibrations epoch file')
+@click.option('--ffactor-epochs-file', type=str, default=None, help='path to a fiber flat factors epoch file')
+@click.option('--drpver', type=str, default=None, help='with --in-place --to-redux, the DRP version whose calibrations are changed')
+@click.option('--to-redux', is_flag=True, default=False, help='with --in-place, change the calibrations of --drpver instead of the sandbox')
+@click.option('--undo', is_flag=True, default=False, help='take the twilight gradient out of the flats instead')
+@click.option('--dry-run', is_flag=True, default=False, help='fit and report, but change no file')
+def twilight_gradient(twilight_summary, out_calib_dir, in_place, channels, calibration_epochs_file, ffactor_epochs_file,
+                      drpver, to_redux, undo, dry_run):
+    """Put the instrument gradient of the twilights into the master twilight flats (sdss/lvmdrp#268)
+
+    The gradient removed from each twilight exposure by stage 1 is fitted as a constant plane per ffactor epoch
+    plus a twilight sky gradient towards the Sun, and the plane of each epoch is put into the science fibers of the
+    master twilight flats of its calibration epochs. By default a new calibration directory is made (--out-calib-dir)
+    and the original flats are left as they are, so that both calibrations can be used (LVM_MASTER_DIR).
+    """
+    from lvmdrp.functions.flatgradient import create_twilight_gradients
+
+    if (out_calib_dir is None) == (not in_place):
+        raise click.UsageError('give either --out-calib-dir or --in-place')
+    if to_redux and not in_place:
+        raise click.UsageError('--to-redux needs --in-place')
+    calibration_epochs = load_epochs_file(epochs_kind='calibration', epochs_path=calibration_epochs_file, verbose=False)
+    ffactor_epochs = load_epochs_file(epochs_kind='ffactor', epochs_path=ffactor_epochs_file, verbose=False)
+    create_twilight_gradients(twilight_summary, ffactor_epochs, calibration_epochs, channels=channels,
+                              out_calib_dir=out_calib_dir, in_place=in_place, drpver=drpver,
+                              from_sandbox=not to_redux, undo=undo, dry_run=dry_run)
 
 
 @cli.command('ffactors-experiment', short_help='Run a fiber flat-field factor experiment with given parameters', context_settings=dict(show_default=True))
@@ -1177,6 +1269,8 @@ calibrations.add_command(qa_wavelengths_cli)
 calibrations.add_command(qa_arc_sky_cli)
 calibrations.add_command(fiberflat_corrections)
 calibrations.add_command(ffactors_experiment)
+calibrations.add_command(fit_fiberflat_gradient)
+calibrations.add_command(twilight_gradient)
 calibrations.add_command(cluster_calibs)
 calibrations.add_command(create_pixelflats_tag)
 calibrations.add_command(create_longterm_tag)

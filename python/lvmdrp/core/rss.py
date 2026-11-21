@@ -16,6 +16,7 @@ from astropy import units as u
 
 from lvmdrp import log
 from lvmdrp.core.constants import LVM_ELEVATION, LVM_LAT, LVM_LON, CONFIG_PATH, CON_LAMPS, ARC_LAMPS
+from lvmdrp.core.constants import add_provenance
 from lvmdrp.core.apertures import Aperture
 from lvmdrp.core.cube import Cube
 from lvmdrp.core.image import _percentile_normalize
@@ -3762,6 +3763,7 @@ class RSS(FiberRows):
         os.makedirs(os.path.dirname(out_rss), exist_ok=True)
         hdus[0].header["FILENAME"] = os.path.basename(out_rss)
         hdus[0].header['DRPVER'] = drpver
+        add_provenance(hdus[0].header)
         hdus[0].scale(bzero=0, bscale=1)
         hdus.writeto(out_rss, overwrite=True, output_verify="silentfix")
 
@@ -3894,6 +3896,7 @@ class lvmFrame(lvmBaseProduct):
         os.makedirs(os.path.dirname(out_file), exist_ok=True)
         self._template[0].header["FILENAME"] = os.path.basename(out_file)
         self._template[0].header['DRPVER'] = drpver
+        add_provenance(self._template[0].header)
         self._template[0].scale(bzero=0, bscale=1)
         self._template.writeto(out_file, overwrite=True)
 
@@ -4121,6 +4124,7 @@ class lvmFFrame(lvmBaseProduct):
         os.makedirs(os.path.dirname(out_file), exist_ok=True)
         self._template[0].header["FILENAME"] = os.path.basename(out_file)
         self._template[0].header['DRPVER'] = drpver
+        add_provenance(self._template[0].header)
         self._template[0].scale(bzero=0, bscale=1)
         self._template.writeto(out_file, overwrite=True)
 
@@ -4215,6 +4219,7 @@ class lvmCFrame(lvmBaseProduct):
         os.makedirs(os.path.dirname(out_file), exist_ok=True)
         self._template[0].header["FILENAME"] = os.path.basename(out_file)
         self._template[0].header['DRPVER'] = drpver
+        add_provenance(self._template[0].header)
         self._template[0].scale(bzero=0, bscale=1)
         self._template.writeto(out_file, overwrite=True)
 
@@ -4296,6 +4301,7 @@ class lvmSFrame(lvmBaseProduct):
         os.makedirs(os.path.dirname(out_file), exist_ok=True)
         self._template[0].header["FILENAME"] = os.path.basename(out_file)
         self._template[0].header['DRPVER'] = drpver
+        add_provenance(self._template[0].header)
         self._template[0].scale(bzero=0, bscale=1)
         self._template.writeto(out_file, overwrite=True)
 
