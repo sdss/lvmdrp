@@ -43,6 +43,13 @@ def mock_sas(tmp_path_factory, session_mocker):
     os.environ = os_copy
 
 
+@pytest.fixture(autouse=True)
+def no_configured_calib_dir(monkeypatch):
+    """ Ignore a calibration directory named in lvmdrp.yaml (as a branch such as xdev may),
+    so that the tests behave the same on every branch; tests of it pass their own config """
+    monkeypatch.setitem(lvmdrp.config, 'calib_dir', None)
+
+
 @pytest.fixture(scope='module')
 def datadir():
     """ fixture factory to create an empty data directory for an mjd """
