@@ -27,11 +27,14 @@ measured in the fibers of each sky IFU, which see the factors but not the
 plane across the science IFU.
 """
 
+import hashlib
+from datetime import datetime, timezone
 from typing import Dict, Optional, Sequence, Tuple
 
 import numpy as np
 
 from lvmdrp import log
+from lvmdrp.core.constants import get_lvmcore_version, get_lvmdrp_version
 from lvmdrp.core.fit_profile import IFUGradient
 
 # fitted lines: arm -> (line center, side bands), Angstrom
@@ -645,6 +648,29 @@ def read_shared_terms(paths: Dict[str, str]) -> Dict[str, Dict[str, Dict[str, fl
     return out
 
 
+def model_id(epoch: int, channel: str, terms: Sequence[str], coeffs: Dict, source: Sequence[str]) -> str:
+    """A short identifier of a model, from its epoch, channel and coefficients.
+
+    Model files always have the same name, so a refit replaces a file without changing
+    its name; the identifier, recorded in the model file and in every frame it
+    corrects, tells the versions apart.
+
+    Args:
+        epoch: the epoch (its first MJD).
+        channel: 'b', 'r' or 'z'.
+        terms: the term names, in the order of the file.
+        coeffs: {component: {source term: coefficient}}, as in :func:`fit_flat_model`.
+        source: the key in `coeffs` of each term in `terms`.
+
+    Returns:
+        12 hexadecimal characters.
+    """
+    text = f'{int(epoch)} {channel} ' + ' '.join(
+        f'{t}:' + ','.join(f'{coeffs[comp][s]:.10e}' for comp in MODEL_COMPONENTS)
+        for t, s in zip(terms, source))
+    return hashlib.sha1(text.encode()).hexdigest()[:12]
+
+
 def write_flat_model(model: Dict, epoch: int, channel: str, out_path: str, drpver: str = '') -> None:
     """Writes the model of one epoch and channel as a calibration file (FITS).
 
@@ -679,6 +705,19 @@ def write_flat_model(model: Dict, epoch: int, channel: str, out_path: str, drpve
     hdr['SHAREDFX'] = (bool(model.get('shared_fixed', False)), 'shared focus/K-mirror terms held fixed')
     if model.get('shared_from'):
         hdr['SHAREDFR'] = (str(model['shared_from'])[-68:], 'where the fixed shared terms come from')
+    # how the model was made, so that it can be reproduced
+    fit = model.get('provenance', {})
+    if fit.get('drpall'):
+        hdr['DRPALL'] = (str(fit['drpall'])[-68:], 'drpall file fitted')
+    if fit.get('epoch_terms'):
+        hdr['EPTERMS'] = (','.join(fit['epoch_terms']), 'epoch terms fitted')
+    if fit.get('minexp') is not None:
+        hdr['MINEXP'] = (float(fit['minexp']), 'shortest exposure time fitted [s]')
+    hdr['FITDATE'] = (datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S'), 'UTC date of the fit')
+    hdr['LVMDRP'] = (get_lvmdrp_version(), 'lvmdrp commit of the fit')
+    hdr['LVMCORE'] = (get_lvmcore_version(), 'lvmcore commit of the fit')
+    hdr['MODELID'] = (model_id(epoch, channel, terms, coeffs, source),
+                      'identifier of this model (hash of its coefficients)')
     hdr['COMMENT'] = ('Large-scale flat-field error left after the flats used (sdss/lvmdrp#268): '
                       'f1-f3 spectrograph factors in % (mean 1), gx, gy plane in % per 10 mm. '
                       'Value = sum over terms of coefficient x term value; see '
@@ -704,7 +743,7 @@ def read_flat_model(path: str) -> Dict:
         terms = [t.strip() for t in tab['term']]
         coeffs = {comp: dict(zip(terms, map(float, tab[comp]))) for comp in MODEL_COMPONENTS}
     return {'channel': hdr['CHANNEL'], 'epoch': int(hdr['EPOCH']), 'range': (hdr['EPOCHLO'], hdr['EPOCHHI']),
-            'focus0': float(hdr['FOCUS0']), 'coeffs': coeffs}
+            'focus0': float(hdr['FOCUS0']), 'coeffs': coeffs, 'modelid': str(hdr.get('MODELID', ''))}
 
 
 def evaluate_flat_model(model: Dict, mjd: float, focus: float, kmir: float) -> Dict[str, float]:
@@ -780,6 +819,7 @@ def create_flat_models(drpall: str, epoch_mjds: Sequence[int], channels: str = '
     model = fit_flat_model(table, epoch_mjds, channels=channels, minexp=minexp, shared=shared,
                            epoch_terms=epoch_terms)
     model['shared_from'] = shared_from
+    model['provenance'] = {'drpall': os.path.abspath(drpall), 'epoch_terms': list(epoch_terms), 'minexp': minexp}
     paths = {}
     for epoch in sorted(model['ranges']):
         if out_dir is not None:
@@ -975,6 +1015,8 @@ def apply_flat_models(rss, models: Dict[str, Dict], direct: bool = False, guard:
         if name:
             import os
             rss.setHdrValue(f'HIERARCH {p} {ch.upper()} FILE', os.path.basename(name), 'model file')
+        if models[ch].get('modelid'):
+            rss.setHdrValue(f'HIERARCH {p} {ch.upper()} MODELID', models[ch]['modelid'], 'model identifier')
         for comp in MODEL_COMPONENTS:
             unit = '%' if comp.startswith('f') else '%/10mm'
             rss.setHdrValue(f'HIERARCH {p} {ch.upper()} {comp.upper()}', round(values[ch][comp], 4),
@@ -1094,6 +1136,10 @@ def correction_columns() -> Dict[str, Tuple[str, str]]:
         for ch in 'BRZ':
             for comp in MODEL_COMPONENTS:
                 add(prefix, f'{ch} {comp.upper()}')
+    for prefix in (FRAME_PREFIX, APPLIED_PREFIX):
+        for ch in 'BRZ':
+            add(prefix, f'{ch} FILE', 'str')
+            add(prefix, f'{ch} MODELID', 'str')
     add(FRAME_PREFIX, 'SOURCE', 'str')
     add(FRAME_PREFIX, 'RMODE', 'str')
     add(FRAME_PREFIX, 'GUARD')
@@ -1415,6 +1461,8 @@ def correct_frames(frame_paths: Dict[str, str], cframe_path: str, mjd: int, drpv
         cinfo = dict(info)
         if models:
             cinfo[f'{ch.upper()} FILE'] = (os.path.basename(files[ch]), 'model file')
+            if models[ch].get('modelid'):
+                cinfo[f'{ch.upper()} MODELID'] = (models[ch]['modelid'], 'model identifier')
         apply_frame_correction(frames[ch], ch, result['coeffs'][ch], source=result['mode'], info=cinfo)
         frames[ch].writeFitsData(p)
     return result
