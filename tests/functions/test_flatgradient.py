@@ -425,6 +425,34 @@ def test_create_flat_models(tmp_path):
     paths = fg.create_flat_models(drpall, EPOCHS, drpver='test', out_dir=str(out))
     assert paths[(EPOCHS[0], 'b')] == str(out / str(EPOCHS[0]) / 'lvm-mfiberflat_gradient-b.fits')
     assert all(os.path.exists(p) for p in paths.values())
+    # how each model was made is recorded in its file
+    hdr = fits.getheader(paths[(EPOCHS[0], 'b')])
+    assert hdr['DRPALL'] == drpall[-68:]
+    assert hdr['EPTERMS'] == ','.join(fg.EPOCH_TERMS) and hdr['MINEXP'] == 300.0
+    for key in ('FITDATE', 'LVMDRP', 'LVMCORE'):
+        assert hdr[key]
+    assert len(hdr['MODELID']) == 12
+    assert fg.read_flat_model(paths[(EPOCHS[0], 'b')])['modelid'] == hdr['MODELID']
+
+
+def test_model_id_tells_models_apart():
+    table = _drpall()
+    model = fg.fit_flat_model(table, EPOCHS, channels='bz')
+    terms = list(fg.EPOCH_TERMS) + list(fg.SHARED_TERMS)
+    source = [f'{t}_{EPOCHS[0]}' if t in fg.EPOCH_TERMS else t for t in terms]
+    ident = fg.model_id(EPOCHS[0], 'z', terms, model['coeffs']['z'], source)
+    assert ident == fg.model_id(EPOCHS[0], 'z', terms, model['coeffs']['z'], source)
+    assert ident != fg.model_id(EPOCHS[0], 'b', terms, model['coeffs']['b'], source)
+    refit = fg.fit_flat_model(table.iloc[5:], EPOCHS, channels='z')
+    assert ident != fg.model_id(EPOCHS[0], 'z', terms, refit['coeffs']['z'], source)
+
+
+def test_correction_columns_record_the_model():
+    cols = fg.correction_columns()
+    for prefix in ('ffcorr', 'flatgrad'):
+        for ch in 'brz':
+            assert cols[f'{prefix}_{ch}_file'][1] == 'str'
+            assert cols[f'{prefix}_{ch}_modelid'] == (f'{prefix.upper()} {ch.upper()} MODELID', 'str')
 
 
 # ------------------------------------------------------------------ applying the model to a frame
@@ -553,6 +581,9 @@ def test_correct_cframe(frame, tmp_path, monkeypatch):
     res = fg.correct_cframe(rss, mjd=60050)
     assert res is not None and rss._header['HIERARCH FLATGRAD APPLIED'] is True
     assert rss._header['HIERARCH FLATGRAD EPOCH'] == EPOCHS[0]
+    for ch in 'brz':
+        assert rss._header[f'HIERARCH FLATGRAD {ch.upper()} FILE'] == f'lvm-mfiberflat_gradient-{ch}.fits'
+        assert rss._header[f'HIERARCH FLATGRAD {ch.upper()} MODELID'] == fits.getheader(files[ch])['MODELID']
 
 
 def test_flatgrad_test_copy_names():
@@ -699,6 +730,20 @@ def test_correct_frames(frame, tmp_path, monkeypatch):
     zf = written[paths['z']]
     assert zf._header['HIERARCH FFCORR APPLIED'] is True and zf._header['HIERARCH FFCORR EPOCH'] == -1
     assert zf._header['HIERARCH FFCORR Z GX'] == pytest.approx(GX, abs=0.05)
+    # with a model, each lvmFrame records the model file and its identifier
+    model = fg.fit_flat_model(_drpall(), EPOCHS)
+    files = {}
+    for ch in 'brz':
+        files[ch] = str(tmp_path / f'lvm-mfiberflat_gradient-{ch}.fits')
+        fg.write_flat_model(model, EPOCHS[0], ch, files[ch])
+    monkeypatch.setattr(fg, 'find_flat_models', lambda *a, **k: files)
+    written.clear()
+    assert fg.correct_frames(paths, cframe_path, mjd=60050, direct=False) is not None
+    for ch in 'brz':
+        hdr = written[paths[ch]]._header
+        assert hdr[f'HIERARCH FFCORR {ch.upper()} FILE'] == f'lvm-mfiberflat_gradient-{ch}.fits'
+        assert hdr[f'HIERARCH FFCORR {ch.upper()} MODELID'] == fits.getheader(files[ch])['MODELID']
+    monkeypatch.setattr(fg, 'find_flat_models', lambda *a, **k: {})
     # no model and no direct step: nothing is written
     written.clear()
     assert fg.correct_frames(paths, cframe_path, mjd=60050, direct=False) is None and not written

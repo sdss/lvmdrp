@@ -76,7 +76,7 @@ def test_collect_header_data(make_framefits):
     assert len(skyplane) == 59 and all(v is None for v in skyplane.values())
     # and the flat-field correction columns, empty too
     corr = {k: v for k, v in hdr_data.items() if k.startswith(('ffcorr_', 'flatgrad_'))}
-    assert len(corr) == 48 and all(v is None for v in corr.values())
+    assert len(corr) == 60 and all(v is None for v in corr.values())
     assert set(hdr_data) == set(expdata) | set(skyplane) | set(corr)
 
 
@@ -115,13 +115,20 @@ def test_update_summary_file(make_fits, make_framefits):
     """ test we can update the summary file """
 
     data = [dict(tileid=1054755, mjd=60297, expnum=9532),
-            dict(tileid=1022456, mjd=60300, expnum=9540)]
+            dict(tileid=1022456, mjd=60300, expnum=9540),
+            dict(tileid=1022456, mjd=60301, expnum=9541)]
     for item in data:
         # setup
         make_fits(tileid=item['tileid'], mjd=item['mjd'], cameras=['b1', 'b2', 'b3'], expnum=item['expnum'])
         get_frames_metadata(item['mjd'])
 
         sframe = make_framefits(**item)
+        if item['expnum'] == 9541:
+            # a frame corrected with a model, written after frames without: the file name must fit
+            with fits.open(sframe, mode='update') as hdulist:
+                hdulist[0].header['HIERARCH FFCORR APPLIED'] = True
+                hdulist[0].header['HIERARCH FFCORR Z FILE'] = 'lvm-mfiberflat_gradient-z.fits'
+                hdulist[0].header['HIERARCH FFCORR Z MODELID'] = '0123456789ab'
         update_summary_file(sframe, tileid=item['tileid'], mjd=item['mjd'],
                             expnum=item['expnum'], master_mjd=60255)
 
@@ -136,3 +143,7 @@ def test_update_summary_file(make_fits, make_framefits):
     # and the flat-field correction columns: floats with -999, strings with 'None'
     assert summary['ffcorr_z_gx'].dtype == 'float64' and (summary['ffcorr_z_gx'] == -999).all()
     assert (summary['ffcorr_source'] == 'None').all()
+    # and the model file and identifier of the corrected frame
+    row = summary[summary['expnum'] == 9541].iloc[0]
+    assert row['ffcorr_z_file'] == 'lvm-mfiberflat_gradient-z.fits' and row['ffcorr_z_modelid'] == '0123456789ab'
+    assert (summary[summary['expnum'] != 9541]['ffcorr_z_file'] == 'None').all()
