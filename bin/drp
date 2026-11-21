@@ -551,25 +551,57 @@ def fit_fiberflat_gradient(drpall, drpver, channels, ffactor_epochs_file, out_di
 @click.option('--flats-from', type=str, default=None, help='version label of the reduction whose stage-1 twilight flats are copied in (drp calibrations fiberflats -e)')
 @click.option('-e', '--epoch', type=IntListType(), default=None, help='epochs whose flats are copied; default: all with flats in --flats-from')
 @click.option('--dry-run', is_flag=True, default=False, help='report what would be done, change nothing')
-def build_calib_set(out_dir, source_dir, flats_from, epoch, dry_run):
+@click.option('--checksum', is_flag=True, default=False, help='record the MD5 checksum of every file in MANIFEST.csv (reads every file once)')
+@click.option('--accept-changes', is_flag=True, default=False, help='go ahead although the set differs from its MANIFEST.csv (something changed underneath it), and record the new state')
+def build_calib_set(out_dir, source_dir, flats_from, epoch, dry_run, checksum, accept_changes):
     """Build or update a calibration set (sdss/lvmdrp#268, #272)
 
     Every file of the source set gets a symbolic link in the new set, except entries the new set already
     has (so copies made earlier stay), and the Gaia cache is shared. With --flats-from, the stage-1 master
     twilight flats of that reduction are copied in place of their links. The source set is never changed;
     each run is recorded in README.txt in the new set. Reductions use the set with drp run --calib-dir, or
-    calib_dir in lvmdrp.yaml.
+    calib_dir in lvmdrp.yaml. Every build writes MANIFEST.csv (what each link points to, size, time); a
+    later build stops if the set differs from it (drp calibrations check-calib-set), unless --accept-changes.
     """
-    from lvmdrp.utils.calibset import build_calibration_set
+    from lvmdrp.utils.calibset import CalibrationSetChanged, build_calibration_set
     if epoch and not flats_from:
         raise click.UsageError('--epoch needs --flats-from')
     try:
         result = build_calibration_set(out_dir, source_dir=source_dir, flats_from=flats_from, epochs=epoch,
-                                       dry_run=dry_run)
+                                       dry_run=dry_run, checksum=checksum, accept_changes=accept_changes)
+    except CalibrationSetChanged as err:
+        raise click.ClickException(f'{err}. Check with drp calibrations check-calib-set; '
+                                   'give --accept-changes to go ahead') from err
     except (ValueError, FileNotFoundError) as err:
         raise click.ClickException(str(err)) from err
     if result['missing']:
         raise click.ClickException(f'no stage-1 twilight flats in {flats_from} for epochs {result["missing"]}')
+
+
+@cli.command('check-calib-set', short_help='Check a calibration set against its MANIFEST.csv', context_settings=dict(show_default=True))
+@click.option('--set', 'set_dir', type=str, default=None, help='the calibration set; default: the calibration directory in use (lvmdrp.yaml calib_dir, else $LVM_MASTER_DIR)')
+@click.option('--checksum', is_flag=True, default=False, help='compare checksums too, where the manifest has them (reads every file)')
+def check_calib_set(set_dir, checksum):
+    """Check a calibration set against its manifest (sdss/lvmdrp#280)
+
+    Lists the files that changed (a link pointing elsewhere, a different size or time, or checksum), went
+    missing, or were added since the set was last built with drp calibrations build-calib-set. Exits with
+    an error if anything differs, so that it can guard a reduction script.
+    """
+    from lvmdrp import log
+    from lvmdrp.core.constants import get_masters_dir
+    from lvmdrp.utils.calibset import check_calibration_set
+    set_dir = set_dir or get_masters_dir()
+    diff = check_calibration_set(set_dir, checksum=checksum)
+    if diff is None:
+        raise click.ClickException(f'{set_dir} has no MANIFEST.csv (made by drp calibrations build-calib-set)')
+    for kind, paths in diff.items():
+        for p in paths:
+            log.warning(f'{kind}: {p}')
+    if any(diff.values()):
+        raise click.ClickException(f'{set_dir} differs from its manifest: '
+                                   + ', '.join(f'{len(v)} {k}' for k, v in diff.items() if v))
+    log.info(f'{set_dir} agrees with its manifest')
 
 
 @cli.command('twilight-gradient', short_help='Put the instrument gradient fitted to the twilights into the master twilight flats', context_settings=dict(show_default=True))
@@ -1348,6 +1380,7 @@ calibrations.add_command(ffactors_experiment)
 calibrations.add_command(fit_fiberflat_gradient)
 calibrations.add_command(twilight_gradient)
 calibrations.add_command(build_calib_set)
+calibrations.add_command(check_calib_set)
 calibrations.add_command(cluster_calibs)
 calibrations.add_command(create_pixelflats_tag)
 calibrations.add_command(create_longterm_tag)
