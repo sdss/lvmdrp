@@ -1689,10 +1689,12 @@ def link_calibration_tree(src_root: str, dst_root: str) -> int:
     if dst_root == src_root or dst_root.startswith(src_root + os.sep):
         raise ValueError(f'the new calibration directory {dst_root} must be outside {src_root}')
     nlinks = 0
-    for dirpath, _, filenames in os.walk(src_root):
+    for dirpath, dirnames, filenames in os.walk(src_root):
         target = os.path.join(dst_root, os.path.relpath(dirpath, src_root))
         os.makedirs(target, exist_ok=True)
-        for name in filenames:
+        # os.walk doesn't descend into linked directories: link them as directories
+        names = filenames + [d for d in dirnames if os.path.islink(os.path.join(dirpath, d))]
+        for name in names:
             dst = os.path.join(target, name)
             if not os.path.lexists(dst):
                 os.symlink(os.path.join(dirpath, name), dst)
