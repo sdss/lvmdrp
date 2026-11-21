@@ -111,3 +111,42 @@ def test_link_calibration_tree_links_linked_directories(source_set, tmp_path):
     out = tmp_path / 'calib_links'
     link_calibration_tree(str(source_set), str(out))
     assert os.path.islink(out / 'sky_models') and (out / 'sky_models' / 'model.fits').read_text() == 'm'
+
+
+def test_manifest_records_the_set(source_set, tmp_path):
+    out = tmp_path / 'calib_m'
+    _stage1_flats('cstest6', 60465)
+    calibset.build_calibration_set(str(out), source_dir=str(source_set), flats_from='cstest6', checksum=True)
+    rows = calibset.read_manifest(str(out))
+    link = rows[os.path.join('60511', 'lvm-mbias-b1.fits')]
+    assert link['type'] == 'link' and link['target'] == os.path.realpath(source_set / '60511' / 'lvm-mbias-b1.fits')
+    assert link['size'] == str(len('master')) and len(link['md5']) == 32
+    assert rows[os.path.join('60465', 'lvm-mfiberflat_twilight-b.fits')]['type'] == 'file'
+    # the set's own records and the Gaia cache are left out
+    assert not any(p.startswith(('gaia_cache', 'README', 'MANIFEST')) for p in rows)
+    assert calibset.check_calibration_set(str(out)) == {'changed': [], 'missing': [], 'added': []}
+
+
+def test_check_finds_changes_underneath(source_set, tmp_path):
+    out = tmp_path / 'calib_c'
+    calibset.build_calibration_set(str(out), source_dir=str(source_set), checksum=True)
+    # a master replaced in the source set (same size, so only the checksum or time tells)
+    master = source_set / '60465' / 'lvm-mwave-r2.fits'
+    master.write_text('MASTER')
+    os.utime(master, (1e9, 1e9))
+    (source_set / '60511' / 'lvm-mlsf-b3.fits').unlink()
+    (out / '60511' / 'extra.fits').write_text('x')
+    diff = calibset.check_calibration_set(str(out), checksum=True)
+    assert diff['changed'] == [os.path.join('60465', 'lvm-mwave-r2.fits')]
+    assert diff['missing'] == [os.path.join('60511', 'lvm-mlsf-b3.fits')]
+    assert diff['added'] == [os.path.join('60511', 'extra.fits')]
+    # a new build stops, unless the changes are accepted, which records the new state
+    with pytest.raises(calibset.CalibrationSetChanged, match='differs from its manifest'):
+        calibset.build_calibration_set(str(out), source_dir=str(source_set))
+    calibset.build_calibration_set(str(out), source_dir=str(source_set), accept_changes=True)
+    assert 'accepted changes' in (out / 'README.txt').read_text()
+    assert not any(calibset.check_calibration_set(str(out)).values())
+
+
+def test_check_without_manifest(source_set, tmp_path):
+    assert calibset.check_calibration_set(str(source_set)) is None

@@ -10,6 +10,8 @@ an existing one, with copies of the new files (the stage-1 twilight flats, the f
 models) in place of their links, so that the existing set is never changed.
 """
 
+import csv
+import hashlib
 import os
 import shutil
 from datetime import datetime, timezone
@@ -21,6 +23,109 @@ from lvmdrp import log
 STAGE1_MASTERS = ('bias', 'centroids', 'sigmas', 'model', 'wave', 'lsf')
 CAMERAS = tuple(f'{c}{s}' for c in 'brz' for s in (1, 2, 3))
 README = 'README.txt'
+# the record of every file of a set (what each link points to, size, time, optional checksum),
+# so that a change underneath the set (a master replaced in the source) can be found (sdss/lvmdrp#280)
+MANIFEST = 'MANIFEST.csv'
+MANIFEST_COLUMNS = ('path', 'type', 'target', 'size', 'mtime', 'md5')
+# left out of the manifest: the set's own records, and the Gaia cache (large, only added to, shared)
+MANIFEST_SKIP = (README, MANIFEST, 'gaia_cache')
+
+
+def _md5(path: str, chunk: int = 1 << 20) -> str:
+    h = hashlib.md5()
+    with open(path, 'rb') as f:
+        for block in iter(lambda: f.read(chunk), b''):
+            h.update(block)
+    return h.hexdigest()
+
+
+def manifest_entries(set_dir: str, checksum: bool = False) -> Dict[str, Dict[str, str]]:
+    """Describes every file of a calibration set as it is now.
+
+    Args:
+        set_dir: the calibration set.
+        checksum: also compute the MD5 checksum of each file (reads every file once).
+
+    Returns:
+        {path relative to the set: {'type': 'link' or 'file', 'target': the file a link
+        resolves to ('' for a file), 'size', 'mtime' (of the file itself, links followed;
+        '' for a broken link), 'md5' ('' unless `checksum`)}}.
+    """
+    set_dir = os.path.abspath(set_dir)
+    entries = {}
+    for dirpath, dirnames, filenames in os.walk(set_dir):
+        rel_dir = os.path.relpath(dirpath, set_dir)
+        if rel_dir == os.curdir:
+            dirnames[:] = [d for d in dirnames if d not in MANIFEST_SKIP]
+        # linked directories are not walked: describe them as links
+        names = filenames + [d for d in dirnames if os.path.islink(os.path.join(dirpath, d))]
+        for name in names:
+            rel = os.path.normpath(os.path.join(rel_dir, name))
+            if rel in MANIFEST_SKIP:
+                continue
+            full = os.path.join(dirpath, name)
+            is_link = os.path.islink(full)
+            entry = {'type': 'link' if is_link else 'file', 'target': os.path.realpath(full) if is_link else '',
+                     'size': '', 'mtime': '', 'md5': ''}
+            if os.path.exists(full):
+                st = os.stat(full)
+                entry['size'], entry['mtime'] = str(st.st_size), f'{st.st_mtime:.3f}'
+                if checksum and os.path.isfile(full):
+                    entry['md5'] = _md5(full)
+            entries[rel] = entry
+    return entries
+
+
+def write_manifest(set_dir: str, checksum: bool = False) -> int:
+    """Writes MANIFEST.csv of a calibration set (see :func:`manifest_entries`); returns the number of rows."""
+    entries = manifest_entries(set_dir, checksum=checksum)
+    with open(os.path.join(set_dir, MANIFEST), 'w', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(MANIFEST_COLUMNS)
+        for rel in sorted(entries):
+            writer.writerow([rel] + [entries[rel][c] for c in MANIFEST_COLUMNS[1:]])
+    return len(entries)
+
+
+def read_manifest(set_dir: str) -> Optional[Dict[str, Dict[str, str]]]:
+    """Reads MANIFEST.csv of a calibration set, or returns None if it has none."""
+    path = os.path.join(set_dir, MANIFEST)
+    if not os.path.isfile(path):
+        return None
+    with open(path, newline='') as f:
+        return {row['path']: {c: row[c] for c in MANIFEST_COLUMNS[1:]} for row in csv.DictReader(f)}
+
+
+def check_calibration_set(set_dir: str, checksum: bool = False) -> Optional[Dict[str, List[str]]]:
+    """Compares a calibration set with its manifest.
+
+    A file counts as changed if a link now points elsewhere, or its size or time
+    differs, or (with `checksum`, where the manifest has one) its checksum differs.
+
+    Args:
+        set_dir: the calibration set.
+        checksum: compare checksums too, where the manifest has them.
+
+    Returns:
+        None if the set has no manifest; otherwise {'changed', 'missing' (in the manifest,
+        gone or a broken link now), 'added' (not in the manifest)}: lists of paths
+        relative to the set, all empty if nothing changed.
+    """
+    recorded = read_manifest(set_dir)
+    if recorded is None:
+        return None
+    want_md5 = checksum and any(e['md5'] for e in recorded.values())
+    now = manifest_entries(set_dir, checksum=want_md5)
+    result = {'changed': [], 'missing': [], 'added': sorted(set(now) - set(recorded))}
+    for rel, old in sorted(recorded.items()):
+        new = now.get(rel)
+        if new is None or (old['size'] and not new['size']):
+            result['missing'].append(rel)
+            continue
+        keys = ['type', 'target', 'size', 'mtime'] + (['md5'] if want_md5 and old['md5'] else [])
+        if any(old[k] != new[k] for k in keys):
+            result['changed'].append(rel)
+    return result
 
 
 def default_source_dir() -> str:
@@ -102,8 +207,18 @@ def stage1_epochs(drpver: str) -> List[int]:
                   if d.isdigit() and all(os.path.isfile(stage1_flat(drpver, int(d), ch)) for ch in 'brz'))
 
 
+class CalibrationSetChanged(RuntimeError):
+    """A calibration set differs from its manifest: something changed underneath it."""
+
+    def __init__(self, set_dir: str, diff: Dict[str, List[str]]):
+        self.diff = diff
+        lines = [f'{k}: {len(v)} ({", ".join(v[:5])}{", ..." if len(v) > 5 else ""})' for k, v in diff.items() if v]
+        super().__init__(f'calibration set {set_dir} differs from its manifest; ' + '; '.join(lines))
+
+
 def build_calibration_set(out_dir: str, source_dir: Optional[str] = None, flats_from: Optional[str] = None,
-                          epochs: Optional[Sequence[int]] = None, dry_run: bool = False) -> Dict:
+                          epochs: Optional[Sequence[int]] = None, dry_run: bool = False,
+                          checksum: bool = False, accept_changes: bool = False) -> Dict:
     """Builds (or updates) a calibration set from an existing one, with new twilight flats.
 
     Every file of `source_dir` gets a symbolic link at the same place in `out_dir`, except
@@ -119,14 +234,23 @@ def build_calibration_set(out_dir: str, source_dir: Optional[str] = None, flats_
         flats_from: version label of the reduction whose stage-1 twilight flats are copied in.
         epochs: the epochs whose flats are copied; default: all with flats in `flats_from`.
         dry_run: report what would be done, change nothing.
+        checksum: record the MD5 checksum of every file in the manifest (reads every file once).
+        accept_changes: go ahead although the set differs from its manifest (and record the
+            new state); otherwise that is an error.
 
     Returns:
-        A dict with 'links' (number made), 'copied' (paths of the flats copied) and 'missing'
-        (epochs asked for without the three flats).
+        A dict with 'links' (number made), 'copied' (paths of the flats copied), 'missing'
+        (epochs asked for without the three flats) and 'check' (the comparison with the
+        manifest before the build, None for a new set).
 
     Raises:
         ValueError: if `out_dir` is `source_dir` or inside it.
         FileNotFoundError: if `source_dir` doesn't exist.
+        CalibrationSetChanged: if the set differs from its manifest and not `accept_changes`.
+
+    Every build ends by writing ``MANIFEST.csv`` (:func:`write_manifest`): what each link
+    points to, with size and time, so that :func:`check_calibration_set` (``drp calibrations
+    check-calib-set``) can tell later whether anything changed underneath the set.
     """
     from lvmdrp.core.constants import get_lvmcore_version, get_lvmdrp_version
     from lvmdrp.functions.flatgradient import link_calibration_tree
@@ -139,7 +263,14 @@ def build_calibration_set(out_dir: str, source_dir: Optional[str] = None, flats_
     if real_out == real_src or real_out.startswith(real_src + os.sep):
         raise ValueError(f'the new calibration set {out_dir} must not be {source_dir} or inside it')
 
-    result = {'links': 0, 'copied': [], 'missing': []}
+    result = {'links': 0, 'copied': [], 'missing': [], 'check': None}
+    if os.path.isdir(out_dir):
+        result['check'] = check_calibration_set(out_dir, checksum=checksum)
+        if result['check'] and any(result['check'].values()):
+            err = CalibrationSetChanged(out_dir, result['check'])
+            if not accept_changes:
+                raise err
+            log.warning(f'{err}; going ahead (accept_changes)')
     if flats_from:
         available = stage1_epochs(flats_from)
         wanted = sorted(int(e) for e in epochs) if epochs else available
@@ -187,4 +318,9 @@ def build_calibration_set(out_dir: str, source_dir: Optional[str] = None, flats_
                     f'{" ".join(map(str, todo))}\n')
         if result['missing']:
             f.write(f'  epochs asked for without stage-1 flats: {" ".join(map(str, result["missing"]))}\n')
+        if result['check'] and any(result['check'].values()):
+            f.write('  accepted changes underneath the set: '
+                    + '; '.join(f'{k} {len(v)}' for k, v in result['check'].items() if v) + '\n')
+    nrows = write_manifest(out_dir, checksum=checksum)
+    log.info(f'{MANIFEST}: {nrows} files recorded{" with checksums" if checksum else ""}')
     return result
