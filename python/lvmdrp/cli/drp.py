@@ -498,25 +498,35 @@ def fiberflat_corrections(mjd, mjd_list, mjd_range, channels, calibration_epochs
 @click.option('--drpver', type=str, default=None, help='DRP version of the reduction to fit; default: the current version')
 @click.option('--channels', type=str, default='brz', help='spectrograph channels to fit')
 @click.option('--ffactor-epochs-file', type=str, default=None, help='path to a fiber flat factors epoch file')
-@click.option('--out-dir', type=str, default=None, help='write <out-dir>/<epoch>/lvm-mfiberflat_gradient-<channel>.fits instead of into the calibration directories')
-@click.option('--to-redux', is_flag=True, default=False, help='write into the calibration directories of the --drpver reduction instead of the sandbox')
+@click.option('--out-dir', type=str, default=None, help='write <out-dir>/<epoch>/lvm-mfiberflat_gradient-<channel>.fits (e.g. the calibration set the models are for)')
+@click.option('--to-redux', is_flag=True, default=False, help='write into the calibration directories of the --drpver reduction')
+@click.option('--to-calib-dir', is_flag=True, default=False, help='write into the calibration directory in use (lvmdrp.yaml calib_dir, else $LVM_MASTER_DIR)')
 @click.option('--minexp', type=float, default=300.0, help='shortest exposure time used, in seconds')
 @click.option('--dry-run', is_flag=True, default=False, help='fit and report, but write nothing')
 @click.option('--epochs', 'epochs_kind', type=click.Choice(['ffactor', 'calibration']), default='ffactor', help='model epochs: the ffactor epochs (flats with stage-2 factors) or the calibration epochs (twilight flats alone, with drp run --from-frame)')
 @click.option('--calib-epochs-file', type=str, default=None, help='path to a calibration epochs file (with --epochs calibration)')
 @click.option('--shared-from', type=str, default=None, help='directory with lvm-mfiberflat_gradient-<channel>.fits files whose focus and K-mirror terms are held fixed; only the epoch terms are fitted')
 @click.option('--epoch-terms', type=str, default='c0,t1,t2,t3', help='epoch terms to fit: a constant c0 and Legendre drift terms t1-t3 (e.g. c0 for a few nights per epoch)')
-def fit_fiberflat_gradient(drpall, drpver, channels, ffactor_epochs_file, out_dir, to_redux, minexp, dry_run,
-                           epochs_kind, calib_epochs_file, shared_from, epoch_terms):
+def fit_fiberflat_gradient(drpall, drpver, channels, ffactor_epochs_file, out_dir, to_redux, to_calib_dir, minexp,
+                           dry_run, epochs_kind, calib_epochs_file, shared_from, epoch_terms):
     """Fit the model of the large-scale flat-field error (sdss/lvmdrp#268)
 
     The model (spectrograph factors and a plane across the science IFU, as a constant and drift per
     ffactor epoch plus focus and K-mirror terms) is fitted to the sky-line planes measured in the
     lvmCFrames of a reduction and written as one lvm-mfiberflat_gradient-<channel>.fits file per epoch.
+    Where they are written has to be given (--out-dir, --to-redux or --to-calib-dir): every reduction
+    with that calibration set applies them.
     """
     from lvmdrp import __version__, path
+    from lvmdrp.core.constants import get_masters_dir
     from lvmdrp.functions.flatgradient import create_flat_models
 
+    ndest = sum([out_dir is not None, to_redux, to_calib_dir])
+    if ndest > 1 or (ndest == 0 and not dry_run):
+        raise click.UsageError('give where the models go: one of --out-dir DIR, --to-redux or --to-calib-dir')
+    if to_calib_dir:
+        from lvmdrp import log
+        log.info(f'writing the models into the calibration directory in use, {get_masters_dir()}')
     drpver = drpver or __version__
     if drpall is None:
         drpall = path.full('lvm_drpall', drpver=drpver).replace('.fits', '.h5')
@@ -533,6 +543,33 @@ def fit_fiberflat_gradient(drpall, drpver, channels, ffactor_epochs_file, out_di
     create_flat_models(drpall, sorted(int(e) for e in epochs), channels=channels, drpver=drpver, out_dir=out_dir,
                        from_sandbox=not to_redux, minexp=minexp, dry_run=dry_run, shared_from=shared_from,
                        epoch_terms=terms)
+
+
+@cli.command('build-calib-set', short_help='Build a calibration set: links to an existing set, with new stage-1 twilight flats', context_settings=dict(show_default=True))
+@click.option('--out', 'out_dir', type=str, required=True, help='the calibration set to build or update (e.g. $SAS_BASE_DIR/sdsswork/lvm/sandbox/calib_2.0.0dev)')
+@click.option('--from', 'source_dir', type=str, default=None, help='the set to link from; default: $SAS_BASE_DIR/sdsswork/lvm/sandbox/calib')
+@click.option('--flats-from', type=str, default=None, help='version label of the reduction whose stage-1 twilight flats are copied in (drp calibrations fiberflats -e)')
+@click.option('-e', '--epoch', type=IntListType(), default=None, help='epochs whose flats are copied; default: all with flats in --flats-from')
+@click.option('--dry-run', is_flag=True, default=False, help='report what would be done, change nothing')
+def build_calib_set(out_dir, source_dir, flats_from, epoch, dry_run):
+    """Build or update a calibration set (sdss/lvmdrp#268, #272)
+
+    Every file of the source set gets a symbolic link in the new set, except entries the new set already
+    has (so copies made earlier stay), and the Gaia cache is shared. With --flats-from, the stage-1 master
+    twilight flats of that reduction are copied in place of their links. The source set is never changed;
+    each run is recorded in README.txt in the new set. Reductions use the set with drp run --calib-dir, or
+    calib_dir in lvmdrp.yaml.
+    """
+    from lvmdrp.utils.calibset import build_calibration_set
+    if epoch and not flats_from:
+        raise click.UsageError('--epoch needs --flats-from')
+    try:
+        result = build_calibration_set(out_dir, source_dir=source_dir, flats_from=flats_from, epochs=epoch,
+                                       dry_run=dry_run)
+    except (ValueError, FileNotFoundError) as err:
+        raise click.ClickException(str(err)) from err
+    if result['missing']:
+        raise click.ClickException(f'no stage-1 twilight flats in {flats_from} for epochs {result["missing"]}')
 
 
 @cli.command('twilight-gradient', short_help='Put the instrument gradient fitted to the twilights into the master twilight flats', context_settings=dict(show_default=True))
@@ -637,9 +674,30 @@ def ffactors_experiment(mjd, mjd_list, mjd_range, drpver, channel, b_skyline, r_
 @click.option('--skip-combination', is_flag=True, default=False, help='skip combining calibrations into master frame')
 @click.option('-s', '--skip-done', is_flag=True, default=False, help='flag to skip reduction steps that have already been done')
 @click.option("--dry-run", is_flag=True, default=False, help="Shows useful information about the current setup without actually running reductions")
-@cloup.constraint(mutually_exclusive, ['mjd', 'mjd_list', 'mjd_range'])
-@cloup.constraint(RequireExactly(1), ['mjd', 'mjd_list', 'mjd_range'])
-def fiberflats(mjd, mjd_list, mjd_range, kind, epochs_file, channels, skip_sequence_selection, skip_combination, skip_done, dry_run):
+@click.option('-e', '--epoch', type=IntListType(), default=None, help='calibration epochs (e.g. 60465,60511): the master twilight flats of each epoch from its twilight nights in the epochs file, with the masters of the calibration directory in use linked into the reduction tree first')
+@cloup.constraint(mutually_exclusive, ['mjd', 'mjd_list', 'mjd_range', 'epoch'])
+@cloup.constraint(RequireExactly(1), ['mjd', 'mjd_list', 'mjd_range', 'epoch'])
+def fiberflats(mjd, mjd_list, mjd_range, kind, epochs_file, channels, skip_sequence_selection, skip_combination, skip_done, dry_run, epoch):
+
+    if epoch:
+        # stage 1 of whole calibration epochs, with their twilight nights (sdss/lvmdrp#268)
+        from lvmdrp.core.constants import get_masters_dir
+        from lvmdrp.utils.calibset import link_epoch_masters
+        if kind != 'twilight':
+            raise click.UsageError('--epoch is for the twilight flats (-k twilight)')
+        epochs = load_epochs_file(epochs_kind="calibration", epochs_path=epochs_file, verbose=False)
+        unknown = [e for e in epoch if e not in epochs]
+        if unknown:
+            raise click.UsageError(f'not calibration epochs: {unknown}')
+        calib_dir = get_masters_dir()
+        for e in epoch:
+            _, missing = link_epoch_masters(calib_dir, drpver, e, dry_run=dry_run)
+            if missing and not dry_run:
+                raise click.ClickException(f'epoch {e}: {len(missing)} masters missing in {calib_dir}, e.g. {missing[0]}')
+            create_twilight_fiberflats(mjd=e, epochs=epochs, cals_mjd=e, channels=channels,
+                                       skip_sequence_selection=skip_sequence_selection,
+                                       skip_combination=skip_combination, skip_done=skip_done, dry_run=dry_run)
+        return
 
     # parse MJDs
     mjds = parse_mjds(mjd=mjd or mjd_list or mjd_range or None)
@@ -1289,6 +1347,7 @@ calibrations.add_command(fiberflat_corrections)
 calibrations.add_command(ffactors_experiment)
 calibrations.add_command(fit_fiberflat_gradient)
 calibrations.add_command(twilight_gradient)
+calibrations.add_command(build_calib_set)
 calibrations.add_command(cluster_calibs)
 calibrations.add_command(create_pixelflats_tag)
 calibrations.add_command(create_longterm_tag)
