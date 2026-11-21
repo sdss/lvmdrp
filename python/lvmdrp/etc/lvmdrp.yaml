@@ -3,9 +3,9 @@
 # branch can carry its own calibration set; relative paths are taken from $SAS_BASE_DIR/sdsswork/lvm/
 # (e.g. sandbox/calib_2.0.0dev). drp run --calib-dir takes precedence; a directory named here that does
 # not exist stops the command. Empty: $LVM_MASTER_DIR (sdss/lvmdrp#272)
-calib_dir: null
+calib_dir: sandbox/calib_2.0.0dev
 # version label (DRPVER, the redux directory) when $LVMDRP_VERSION is not set. Empty: the package version
-drpver: null
+drpver: 2.0.0dev
 quick: false
 reduction_steps:
   preproc_raw_frame:
