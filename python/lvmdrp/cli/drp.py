@@ -5,6 +5,7 @@
 import os
 import pathlib
 import shutil
+import sys
 from itertools import groupby
 from typing import List
 
@@ -16,8 +17,9 @@ import bottleneck as bn
 from astropy.stats import biweight_location
 
 from lvmdrp.core.constants import CAMERAS, CALIBRATION_MAPPINGS, CALIBRATION_TYPES, LVM_REFERENCE_COLUMN, SKYLINES_FIBERFLAT
-from lvmdrp import __version__ as drpver
-from lvmdrp.main import run_drp, reduce_file, check_daily_mjd, parse_mjds, read_expfile, create_drpall, cache_std_xp_spectra, cache_sci_xp_spectra
+from lvmdrp import log, __version__ as drpver
+from lvmdrp.main import (run_drp, run_outcomes, reduce_file, check_daily_mjd, parse_mjds, parse_expnums, read_expfile,
+                         create_drpall, cache_std_xp_spectra, cache_sci_xp_spectra)
 from lvmdrp.functions.skyMethod import configureSkyModel_drp
 from lvmdrp.utils.metadata import get_frames_metadata, get_master_metadata
 from lvmdrp.utils.cluster import run_cluster, run_cluster_cals
@@ -204,6 +206,10 @@ def run(mjd, mjd_list, mjd_range, with_cals, no_sci, expnum, exp_list, exp_range
     Run the DRP for an MJD or range of MJDs.  Various flags and options are available
     for filtering on calibration or science frames, or specific exposures.
 
+    Ends with one line counting the science exposures done, skipped (excluded, or flagged BAD)
+    and failed, and exits with 0 if none failed or was skipped, 3 if some were skipped but none
+    failed, and 1 if any failed (an error, a reduction stopped early, or an exposure asked for
+    but not found).
     """
     if exp_file is not None:
         expnum = read_expfile(exp_file)
@@ -222,7 +228,7 @@ def run(mjd, mjd_list, mjd_range, with_cals, no_sci, expnum, exp_list, exp_range
     if from_frame and from_cframe:
         raise click.UsageError('--from-frame and --from-cframe are alternatives')
 
-    run_drp(mjd=mjd, expnum=expnum, no_sci=no_sci, with_cals=with_cals, fluxcal_method=fluxcal_method,
+    outcomes = run_drp(mjd=mjd, expnum=expnum, no_sci=no_sci, with_cals=with_cals, fluxcal_method=fluxcal_method,
             skip_2d=skip_2d,
             skip_1d=skip_1d,
             skip_wavecal=skip_wavecal,
@@ -242,6 +248,15 @@ def run(mjd, mjd_list, mjd_range, with_cals, no_sci, expnum, exp_list, exp_range
             from_frame=from_frame,
             new_cframe=new_cframe,
             calib_dir=calib_dir)
+
+    requested = parse_expnums(expnum) if expnum else None
+    if isinstance(requested, tuple):     # an open range: nothing to check against
+        requested = None
+    groups, code = run_outcomes(outcomes, requested=requested)
+    parts = [f'{len(groups[k])} {k}' + (f' ({", ".join(map(str, groups[k]))})' if k != 'done' and groups[k] else '')
+             for k in ('done', 'skipped', 'failed')]
+    log.info(f'drp run: science exposures {"; ".join(parts)}')
+    sys.exit(code)
 
 
 # register full DRP command
@@ -1287,7 +1302,7 @@ def qaqual_bad_hdrfix(mjd, mjd_list, mjd_range, expnum, expnum_list, expnum_rang
         create_qaqual_bad_hdrfix(mjd=mjd, expnums=expnums)
 
 
-@cli.command('cluster', short_help='Submit a Utah cluster run', context_settings=dict(show_default=True))
+@cli.command('cluster', short_help='Batch run a calibration routine, through Slurm or locally (--local)', context_settings=dict(show_default=True))
 @click.option('-l', '--mjd-list', type=int, default=None, multiple=True, help='a list of specific MJDs to reduce')
 @click.option('-r', '--mjd-range', type=str, default=None, help='a range of MJDs to reduce')
 @click.option('--from-epochs', is_flag=True, default=False, help="Use fiducial or given epochs file to produce long-term calibrations")
@@ -1301,7 +1316,17 @@ def qaqual_bad_hdrfix(mjd, mjd_list, mjd_range, expnum, expnum_list, expnum_rang
 @click.option('-v', '--verbose', is_flag=True, type=bool, default=False, help='flag to display full epochs file at the start of the run')
 @click.option('--drp-options', type=str, default="", help="pass options to drp run command")
 @click.option("--dry-run", is_flag=True, default=False, help="Logs useful information abaut the current setup without actually reducing, by default False")
-def cluster_calibs(mjd_list, mjd_range, from_epochs, epochs_file, routine, nodes, ppn, walltime, alloc, submit, verbose, drp_options, dry_run):
+@click.option('--local', is_flag=True, default=False, help='run the jobs on this machine, --np at a time, instead of submitting them to Slurm')
+@click.option('--np', 'nproc', type=int, default=30, help='with --local: the number of jobs running at once')
+@click.option('--log-dir', type=str, default='logs', help='with --local: directory for one log per job and summary.txt (one line per finished job)')
+@click.option('--stagger', type=float, default=20.0, help='with --local: seconds between the starts of the first --np jobs')
+def cluster_calibs(mjd_list, mjd_range, from_epochs, epochs_file, routine, nodes, ppn, walltime, alloc, submit, verbose, drp_options, dry_run,
+                   local, nproc, log_dir, stagger):
+    """ Run a calibration routine for several MJDs (or all calibration epochs): through Slurm, or locally with --local
+
+    One job per MJD (drp calibrations <routine> -m <mjd>). Locally, --np jobs run at once, each
+    with its log in --log-dir; the command exits with 1 if any job failed.
+    """
 
     mjds = parse_mjds(mjd=mjd_list or mjd_range or None)
     # if no MJD, get fiducial calibration epochs
@@ -1313,8 +1338,10 @@ def cluster_calibs(mjd_list, mjd_range, from_epochs, epochs_file, routine, nodes
             verbose=verbose)
         mjds = sorted(list(epochs.keys()))
 
-    run_cluster_cals(mjds, from_epochs=from_epochs, nodes=nodes, ppn=ppn, walltime=walltime, alloc=alloc, submit=submit,
-                     routine=routine, drp_options=drp_options, dry_run=dry_run)
+    code = run_cluster_cals(mjds, from_epochs=from_epochs, nodes=nodes, ppn=ppn, walltime=walltime, alloc=alloc,
+                            submit=submit, routine=routine, drp_options=drp_options, dry_run=dry_run,
+                            local=local, np=nproc, log_dir=log_dir, stagger=stagger)
+    sys.exit(code)
 
 
 @click.group('calibrations', short_help="Calibrations pipeline. Handles the creation, tagging and bookkeeping of calibration frames")
@@ -1435,7 +1462,7 @@ def get_calibs(kind, mjd, camera):
     a.commit()
 
 
-@cli.command('cluster', short_help='Submit a Utah cluster run', context_settings=dict(show_default=True))
+@cli.command('cluster', short_help='Batch run the DRP, through Slurm or locally (--local)', context_settings=dict(show_default=True))
 @click.option('-l', '--mjd-list', type=int, default=None, multiple=True, help='a list of specific MJDs to reduce')
 @click.option('-r', '--mjd-range', type=str, default=None, help='a range of MJDs to reduce')
 @click.option('-e', '--expnum', type=int, help='an exposure number to reduce')
@@ -1449,8 +1476,22 @@ def get_calibs(kind, mjd, camera):
 @click.option('-s', '--submit', is_flag=True, type=bool, default=True, help='flag to submit the job or not')
 @click.option('--drp-options', type=str, default="", help="pass options to drp run command")
 @click.option("--dry-run", is_flag=True, default=False, help="Logs useful information abaut the current setup without actually reducing, by default False")
-def cluster(mjd_list, mjd_range, expnum, exp_list, exp_range, exp_file, nodes, ppn, walltime, alloc, submit, drp_options, dry_run):
-    """ Submit a Utah cluster job to batch run the DRP by MJD """
+@click.option('--local', is_flag=True, default=False, help='run the jobs on this machine, --np at a time, instead of submitting them to Slurm')
+@click.option('--np', 'nproc', type=int, default=30, help='with --local: the number of jobs running at once')
+@click.option('--log-dir', type=str, default='logs', help='with --local: directory for one log per job and summary.txt (one line per finished job)')
+@click.option('--stagger', type=float, default=20.0, help='with --local: seconds between the starts of the first --np jobs')
+@click.option('--skip-metadata', is_flag=True, default=False, help="don't regenerate the metadata of the exposures' nights before the jobs start")
+@click.option('--skip-summary', is_flag=True, default=False, help="with --local: don't make the drpall after the jobs end")
+def cluster(mjd_list, mjd_range, expnum, exp_list, exp_range, exp_file, nodes, ppn, walltime, alloc, submit, drp_options, dry_run,
+            local, nproc, log_dir, stagger, skip_metadata, skip_summary):
+    """ Batch run the DRP by exposure or by MJD: through Slurm, or locally with --local
+
+    One drp run per exposure (or per night), always with --skip-drpall. With exposures, the
+    metadata of their nights is regenerated first, one night at a time. Locally, --np jobs run at
+    once, each with its log in --log-dir (and one line per finished job in summary.txt there), then
+    the drpall is made once; the command exits as drp run does (0 all done, 3 some skipped, 1 any
+    failed). Through Slurm, make the drpall with drp summary when the jobs have ended.
+    """
 
     # filter the mjds
     expnums = expnum or exp_list or exp_range or exp_file or None
@@ -1459,8 +1500,10 @@ def cluster(mjd_list, mjd_range, expnum, exp_list, exp_range, exp_file, nodes, p
         mjds = parse_mjds(mjds)
 
     # submit the cluster job
-    run_cluster(mjds=mjds, expnums=expnums, nodes=nodes, ppn=ppn, walltime=walltime, alloc=alloc, submit=submit,
-                drp_options=drp_options, dry_run=dry_run)
+    code = run_cluster(mjds=mjds, expnums=expnums, nodes=nodes, ppn=ppn, walltime=walltime, alloc=alloc, submit=submit,
+                       drp_options=drp_options, dry_run=dry_run, local=local, np=nproc, log_dir=log_dir,
+                       stagger=stagger, metadata=not skip_metadata, summary=not skip_summary)
+    sys.exit(code)
 
 
 @cli.command('summary', short_help='Creates the drpall summary file for the given version of the pipeline')

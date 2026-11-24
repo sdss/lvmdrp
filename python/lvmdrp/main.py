@@ -1552,7 +1552,7 @@ def science_reduction(expnum: int,
                       from_frame: bool = False,
                       new_cframe: bool = False,
                       debug_mode: bool = False,
-                      force_run: bool = False) -> None:
+                      force_run: bool = False) -> bool:
     """ Run the science reduction for a given exposure number.
 
     With ``from_cframe``, the reduction starts from the existing lvmCFrame: the
@@ -1571,6 +1571,10 @@ def science_reduction(expnum: int,
     lvmFrames is replaced, not added to. The steps after the lvmFrames are then run
     again (sky interpolation, resampling, flux calibration, joining, sky subtraction,
     drpall), and the lvmCFrame correction is not applied.
+
+    Returns:
+        True if the reduction reached its end; None if it stopped early (an error or
+        missing input, logged), which :func:`run_drp` counts as a failed exposure.
     """
 
     if new_cframe and not from_cframe:
@@ -1881,6 +1885,8 @@ def science_reduction(expnum: int,
             except Exception as e:
                 log.warning(f"error while removing {ancillary_dir}: {e}")
 
+    return True
+
 
 def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
             with_cals: bool = False, no_sci: bool = False,
@@ -1891,7 +1897,7 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
             clean_ancillary: bool = False, debug_mode: bool = False, force_run: bool = False,
             force_excluded: bool = False, skip_flatgrad: bool = False, flatgrad_direct: bool = False,
             from_cframe: bool = False, from_frame: bool = False, new_cframe: bool = False,
-            calib_dir: str = None):
+            calib_dir: str = None) -> dict:
     """ Run the quick DRP
 
     Run the quick DRP for an MJD, or a range of MJDs. Reduces
@@ -1955,6 +1961,14 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
     calib_dir : str, optional
         Calibration directory to use instead of $LVM_MASTER_DIR, laid out as $LVM_MASTER_DIR
         (e.g. a copy or a tree of links with some calibrations replaced), by default None
+
+    Returns
+    -------
+    dict
+        the outcome of each science exposure considered, {expnum: 'done' | 'skipped' | 'failed'}:
+        'skipped' for exposures left out on purpose (excluded, or flagged BAD by the QC pipeline),
+        'failed' for an exception or a reduction that stopped before its end. Exposures that were
+        asked for but not found in the metadata are absent (see :func:`run_outcomes`).
     """
     # # write the drp parameter configuration
     # write_config_file()
@@ -1967,25 +1981,39 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
             calib_dir = set_masters_dir(calib_dir)
         except FileNotFoundError as err:
             log.error(str(err))
-            return
+            return {}
     log.info(f"calibration directory: {get_masters_dir()}")
     log.info(f"lvmcore: {os.getenv('LVMCORE_DIR')} at commit {get_lvmcore_version()}")
     log.info(f"lvmdrp: commit {get_lvmdrp_version()}")
 
     if mjd is None and expnum is None:
         log.error("you must provide either an exposure number `expnum` or an MJD `mjd`. None was given")
-        return
+        return {}
 
     if mjd is None:
-        # parse expnums and get MJDs
-        mjds = mjd_from_expnum(expnum)
+        # parse expnums and get their MJDs, once each; exposures without raw data are left out
+        # (and reported as failed by run_outcomes)
+        exps = parse_expnums(expnum)
+        if isinstance(exps, tuple):
+            log.error(f"a closed range of exposure numbers is required, {expnum} given instead")
+            return {}
+        mjds = set()
+        for exp in exps:
+            try:
+                mjds.add(mjd_from_expnum(int(exp))[0])
+            except ValueError as err:
+                log.error(f"{err}")
+        mjds = sorted(mjds)
+        if not mjds:
+            return {}
     else:
         # parse the input MJD and loop over all reductions
         mjds = parse_mjds(mjd)
 
     if isinstance(mjds, list):
+        outcomes = {}
         for mjd in mjds:
-            run_drp(mjd=mjd, expnum=expnum, with_cals=with_cals, no_sci=no_sci,
+            outcomes |= run_drp(mjd=mjd, expnum=expnum, with_cals=with_cals, no_sci=no_sci,
                     fluxcal_method=fluxcal_method,
                     skip_2d=skip_2d,
                     skip_1d=skip_1d,
@@ -2005,7 +2033,7 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
                     from_cframe=from_cframe,
                     from_frame=from_frame,
                     new_cframe=new_cframe)
-        return
+        return outcomes
 
     log.info(f'Processing MJD {mjd}')
 
@@ -2014,7 +2042,7 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
     log.info(f'MJD processing path: {mjd_path}')
     if not mjd_path.is_dir():
         log.warning(f'{mjd = } is not valid raw data directory.')
-        return
+        return {}
 
     # update metadata if there are new paths to cache
     update_metadata(mjd=mjd)
@@ -2029,18 +2057,28 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
         sub = filter_expnum(sub, expnum)
         if sub.empty:
             log.error(f"exposure {expnum = } not found in metadata for MJD = {mjd}")
-            return
+            return {}
+
+    # science exposures before the exclusions and the quality cut, to report those left out
+    outcomes = {}
+
+    def _skip_removed(before, after, reason):
+        for exp in sorted(_science_expnums(before) - _science_expnums(after)):
+            log.warning(f"skipping exposure {exp}: {reason}")
+            outcomes[exp] = 'skipped'
 
     # remove excluded exposures
     if force_excluded:
         log.warning("forcing reduction of exposures listed in the exclude list, if any")
     else:
         excludes = load_excludes()
-        sub = remove_excluded_frames(sub, excludes)
+        kept = remove_excluded_frames(sub, excludes)
+        _skip_removed(sub, kept, 'listed in the exclude list')
+        sub = kept
         if sub.empty:
             log.error(f"no frames found for MJD {mjd} after removing excluded exposures")
             log.error("use `force_excluded=True` (`--force-excluded` in the CLI) to reduce them anyway")
-            return
+            return outcomes
 
     # remove bad or test quality frames
     if force_run and (sub.qaqual == "BAD").all():
@@ -2050,14 +2088,18 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
         log.warning(f"We advice you to look for a good quality exposure of the same {tileid = }")
     else:
         try:
-            sub = sub[(sub['qaqual'] == 'GOOD')]
+            good = sub[(sub['qaqual'] == 'GOOD')]
         except KeyError:
             log.error("error while getting qaqual field in metadata.")
             log.error(f"Please try running `drp metadata regenerate -m {mjd}` before trying reducing your exposure again.")
-            return
+            for exp in _science_expnums(sub):
+                outcomes[exp] = 'failed'
+            return outcomes
+        _skip_removed(sub, good, "flagged as 'BAD' by the raw data quality pipeline")
+        sub = good
         if sub.empty:
             log.error(f"exposure {expnum = } was flagged as 'BAD' by the raw data quality pipeline")
-            return
+            return outcomes
 
     # sort the frames
     sub = sub.sort_values(['expnum', 'camera'])
@@ -2101,7 +2143,7 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
             for expnum in sci['expnum'].unique():
                 with Timer(name=f'Reduction EXPNUM {expnum}', logger=log.info):
                     try:
-                        science_reduction(expnum,
+                        completed = science_reduction(expnum,
                                         fluxcal_method=fluxcal_method,
                                         skip_2d=skip_2d,
                                         skip_1d=skip_1d,
@@ -2126,11 +2168,61 @@ def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
                         trace = traceback.format_exc()
                         update_error_file(tileid, mjd, expnum, trace)
                         log.info(f"the log file can be found here: {logfile_path}")
+                        outcomes[int(expnum)] = 'failed'
                         continue
+                    if completed is True:
+                        outcomes[int(expnum)] = 'done'
+                    else:
+                        log.error(f'the reduction of exposure {expnum} stopped before its end')
+                        outcomes[int(expnum)] = 'failed'
 
         # create done status on successful run
         if not status_file_exists(tileid, mjd, status='error'):
             create_status_file(tileid, mjd, status='done')
+
+    return outcomes
+
+
+def _science_expnums(frames: pd.DataFrame) -> set:
+    """Returns the exposure numbers of the science frames in a metadata table"""
+    if frames.empty or 'imagetyp' not in frames.columns:
+        return set()
+    return {int(exp) for exp in frames.loc[frames['imagetyp'] == 'object', 'expnum'].unique()}
+
+
+#: exit codes of ``drp run``: all done (or nothing to do), at least one failure, none failed but some skipped
+RUN_EXIT_CODES = {'done': 0, 'failed': 1, 'skipped': 3}
+
+
+def run_outcomes(outcomes: dict, requested: list = None) -> Tuple[dict, int]:
+    """Summarises the outcomes of :func:`run_drp` and gives the exit code of ``drp run``
+
+    Parameters
+    ----------
+    outcomes : dict
+        {expnum: 'done' | 'skipped' | 'failed'}, as returned by :func:`run_drp`
+    requested : list, optional
+        the exposure numbers asked for; any without an outcome (not found) counts as failed
+
+    Returns
+    -------
+    dict
+        {'done': [...], 'skipped': [...], 'failed': [...]}, sorted exposure numbers
+    int
+        the exit code: 1 if any failed, else 3 if any was skipped, else 0
+    """
+    outcomes = dict(outcomes)
+    for exp in requested or []:
+        if int(exp) not in outcomes:
+            outcomes[int(exp)] = 'failed'
+    groups = {kind: sorted(e for e, o in outcomes.items() if o == kind) for kind in ('done', 'skipped', 'failed')}
+    if groups['failed']:
+        code = RUN_EXIT_CODES['failed']
+    elif groups['skipped']:
+        code = RUN_EXIT_CODES['skipped']
+    else:
+        code = RUN_EXIT_CODES['done']
+    return groups, code
 
 
 def create_drpall(drp_version: str = None, overwrite: bool = False, output_dir: str = None) -> None:
