@@ -16,10 +16,6 @@ jobs:
         python-version: ["3.10", "3.11", "3.12"]
         allow_failure: [false]
         os: [ubuntu-latest]
-        include:
-          - python: "3.12"
-            os: ubuntu-latest
-            allow_failure: true
 
     steps:
     - uses: actions/checkout@v4
