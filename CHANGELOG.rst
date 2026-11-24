@@ -11,11 +11,6 @@ This document records the main changes to the drp code.
 
 - Bumped ``skycalc_cli`` to 1.5, which no longer imports the deprecated ``pkg_resources``; removes the setuptools warning on every ``drp`` call and the ``ModuleNotFoundError`` with setuptools>=81 (#257)
 - Replaced lvmdrp's own ``pkg_resources.parse_version`` with ``packaging.version.parse``
-- ``drp``, ``pix2wave`` and ``envcheck`` are now ``console_scripts`` entry points (code moved from ``bin/`` to ``lvmdrp.cli``) instead of scripts: pip copied scripts into the environment at install time, so an editable install kept running an old ``drp`` against newer library code after a ``git pull`` or ``git checkout`` (e.g. ``ImportError: cannot import name ...``) until it was reinstalled
-- ``drp cluster`` and ``drp calibrations cluster`` can run their jobs on the current machine with ``--local --np N`` (one log per job and a one-line-per-job ``summary.txt`` in ``--log-dir``) instead of submitting them to Slurm; both kinds of run execute the same list of ``drp`` commands. ``drp cluster`` with exposures regenerates the metadata of their nights first, one night at a time (#235), and a local run makes the drpall once at the end
-- ``drp run`` reports the science exposures done, skipped (excluded, or flagged BAD) and failed, and exits with 0 (all done), 3 (some skipped, none failed) or 1 (any failed, including a reduction stopped early or an exposure not found); it used to exit 0 even when a reduction raised an error. ``run_drp`` returns ``{expnum: outcome}`` and ``science_reduction`` returns True when it reaches its end
-- ``drp run`` with several exposures (``-el``, ``-er``, ``-F``) reduced every exposure once per exposure of its night (each night was visited once per exposure); each night is now visited once, and an exposure without raw data is reported and counted as failed instead of stopping the whole run
-- ``drp calibrations cluster`` passes ``--from-epochs`` only to the routines that take it (``long-term``); the ``fiberflats`` jobs failed with it
 
 
 1.3.2 (02-09-2026)
