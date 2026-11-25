@@ -1,6 +1,14 @@
 # Local Volume Mapper (LVM) Data Reduction Pipeline (DRP)
 
-The LVM DRP is based in a collection of routines from [Py3D](https://github.com/brandherd/Py3D).
+The LVM DRP reduces the raw data of the Local Volume Mapper into calibrated, sky-subtracted spectra. It also makes the master calibrations it needs. It is based on a collection of routines from [Py3D](https://github.com/brandherd/Py3D).
+
+This page covers installing the DRP, reducing science exposures, running batches at Utah, and making calibrations. Longer descriptions are in [`docs/sphinx/source`](docs/sphinx/source), which GitHub displays directly:
+
+- [Pipeline overview](docs/sphinx/source/Overview.rst): every step of a science reduction and the products it writes
+- [Directory structure](docs/sphinx/source/DirectoryStructure.rst): where the inputs, calibrations and products are
+- [Calibrations](docs/sphinx/source/Calibration.rst): how the master calibrations are made and selected
+- [Summary file](docs/sphinx/source/SummaryFile.rst): the drpall file, column by column
+- [Installation](docs/sphinx/source/Installation.rst): installation, in more detail
 
 ## Prerequisites
 
@@ -104,7 +112,7 @@ drp get-calibs
 
 ## Running the DRP
 
-Say you want to reduce all expsure within `<mjd>`. You can do it by running in the shell the following:
+To reduce all the science exposures of a night `<mjd>`, run:
 
 ```bash
 drp run -m <mjd>
@@ -116,19 +124,26 @@ or you can reduce a single exposure number by running:
 drp run -e <expnum>
 ```
 
-or a list of exposure numbers in a file `<expnum_file>`, by running:
+or several exposures: a list (`-el <expnum> -el <expnum>`), a range (`-er <first>-<last>`) or a file with one exposure number per line (`-F <expnum_file>`):
 
 ```bash
 drp run -F <expnum_file>
 ```
 
-You can also skip reduction steps if you carried those steps already by running:
+You can skip steps that have already been done, for example:
 
-```
+```bash
 drp run -e <expnum> -2d -1d -wc -fl -sk -da
 ```
 
-which would skip the 2D reduction, the 1D reduction, the wavelength calibration and fiber flat-fielding, flux calibration, the sky subtraction and drpall summary generation. See the list of reduction steps below for more details on what each of those steps do.
+skips the 2D reduction, the 1D reduction, the wavelength calibration and fiber flat-fielding, flux calibration, the sky subtraction and the drpall summary. The flags are listed with the reduction steps below.
+
+Other useful options:
+
+- `-f <method>`: the flux calibration: `MOD` (default; standard stars matched to model spectra), `STD` (standard stars), `SCI` (field stars in the science IFU) or `NONE`
+- `-c`, `--clean-ancillary`: remove the intermediate products (the `ancillary` folder) once the exposure is done
+- `--force-run`: also reduce exposures flagged BAD by the raw-data QA, which are otherwise skipped
+- `--force-excluded`: also reduce exposures listed in `$LVMCORE_DIR/etc/exclude-exposures.yaml`, which are otherwise skipped
 
 More options are available, you can see them by running:
 
@@ -150,12 +165,13 @@ The `drp run` will reduce your target exposure. Here is a list of reduction step
 - Wavelength calibration and fiber flat-fielding steps (`-wc` flag):
   - **Spectrograph combination**: row-stacking of spectrograph fibers
   - **Wavelength calibration**: pixel-to-wavelength mapping and LSF function per fiber
-  - **Fiberflat**: flatfielding (fiber level) using twilight fiberflats
+  - **Fiberflat**: flatfielding (fiber level) using the master twilight fiberflat of the calibration epoch, including its spectrograph factors (see [Making calibrations](#making-calibrations))
   - **Wavelength refinement**: refines the wavelength solution by matching the sky line positions, takes into account fiber thermal shifts in the wavelength direction, only used to subtract sky from standard fibers
-  - **Sky fibers interpolation**: sky fibers interpolation along fiber ID by fitting the supersampled sky spectrum, per sky telescope
-  - **Wavelength resampling**: wavelength resampling to a common grid (~0.5 Angstrom)
+- Wavelength resampling steps (`-wr` flag):
+  - **Sky fibers interpolation**: sky fibers interpolation along fiber ID by fitting the supersampled sky spectrum, per sky telescope; the two sky telescopes are then combined with configurable weights
+  - **Wavelength resampling**: wavelength resampling to a common grid (0.5 Angstrom)
 - Flux calibration steps (`-fl` flag):
-  - **Flux calibration**: calculates sensitivity curves for each standard star exposed and flux-calibrate the science fibers using the average sensitivity
+  - **Flux calibration**: sensitivity curves from the standard stars and from field stars in the science IFU (reference spectra from Gaia XP, cached in `$LVM_MASTER_DIR/gaia_cache`), with a telluric correction; the method chosen with `-f` is applied to the science fibers
   - **Channel combination**: stitching together spectrographs' channels
 - Sky subtraction steps (`-sk` flag):
   - **Sky subtraction**: final sky subtraction separating sky lines and continuum and combining into master sky in a predefined way
@@ -167,6 +183,8 @@ The main outputs will be stored in the SAS directory:
 ```bash
 $SAS_BASE_DIR/sdsswork/lvm/spectro/redux/<drpver>/<tilegrp>/<tileid>/<mjd>/
 ```
+
+where `<drpver>` is `$LVMDRP_VERSION` if it is set, otherwise the version of the installed package (see step 8 of [Contributing](#contributing-to-lvm-drp-development)). The calibrations are read from `$LVM_MASTER_DIR`.
 
 where you should find your `lvmCFrame-<expnum:08d>.fits` file, the `raw_metadata.hdf5` file and the `ancillary` folder. Within `ancillary` you'll find files following the naming conventions:
 
@@ -183,6 +201,54 @@ The main products of the pipeline:
 - `lvmCFrame-<expnum:08d>.fits`: channel combined flux calibrated frame
 - `lvmSFrame-<expnum:08>.fits`: sky subtracted frame
 - `drpall-<drpver>.h5`: summary file of the reductions using `<drpver>` version of the DRP
+
+To check a reduction step by step, `drp qa-science -e <expnum>` writes an HTML dashboard (detrending, stray light, fiber and sky-line shifts, the IFU, flux calibration, sky subtraction).
+
+## Batch runs at Utah
+
+At Utah, `drp cluster` submits a Slurm job that runs `drp run` for each night or exposure given:
+
+```bash
+drp cluster -F <expnum_file> --drp-options "<options for drp run>"
+drp cluster -r <first_mjd>-<last_mjd> -n <nodes> -p <cores_per_node> -w <walltime>
+```
+
+Each job runs with `--skip-drpall`, so that the jobs don't write the summary file at the same time. Once the jobs are done, make the summary file in one go:
+
+```bash
+drp summary --drp-version <drpver>
+```
+
+(`--output-dir` writes it elsewhere, e.g. without write access to the SAS redux directory.)
+
+## Making calibrations
+
+Most users download the calibrations (see [Setup Calibration Files](#setup-calibration-files)). This section is for making them; [Calibration.rst](docs/sphinx/source/Calibration.rst) describes each master and how it is made.
+
+The master calibrations are made per **calibration epoch**: a range of nights that share one set of masters. The epochs, and the nights whose exposures each master uses, are defined in `$LVMCORE_DIR/calibrations/calibration-epochs.yaml` (check it with `drp calibrations validate-epochs`).
+
+1. **The masters of an epoch** (bias, fiber traces, wavelength and LSF, twilight fiberflats):
+
+    ```bash
+    drp calibrations long-term -m <epoch> --from-epochs --dry-run    # lists the exposures each master will use
+    drp calibrations long-term -m <epoch> --from-epochs
+    ```
+
+    The masters are written to `$SAS_BASE_DIR/sdsswork/lvm/spectro/redux/<drpver>/0011XX/11111/<epoch>/calib/`, with QA plots in its `qa/` folder. `-b`, `-t`, `-w`, `-f` skip the bias, traces, wavelengths or twilight flats; each step uses the masters before it, so redoing one means redoing the ones after it. `-s` skips steps already done. A full epoch takes about two days on one Utah node.
+
+2. **The spectrograph factors of the twilight fiberflats.** The factors between the three spectrographs, and an IFU gradient, are measured from reduced science exposures of each fiber-flat factor epoch (`$LVMCORE_DIR/calibrations/fiberflat-factor-epochs.yaml`) and applied to the twilight fiberflats:
+
+    ```bash
+    drp calibrations fiberflat-corrections -m <epoch>
+    ```
+
+    `--undo-correction` removes them again.
+
+3. **Tagging.** `drp calibrations create-tag -m <epoch> --version <version>` copies the masters into `$LVM_MASTER_DIR/<epoch>/` (normally `sandbox/calib`, which the DRP reads), **replacing the files there**, and then snapshots that epoch into `sandbox/calib_<version>/<epoch>/`.
+
+Several epochs can be run as one Slurm job: `drp calibrations cluster --routine long-term --from-epochs -r <first>-<last>`.
+
+The calibrations have their own QA commands: `drp calibrations qa-wavelengths`, `qa-arc-sky`, `qa-twilights`, `qa-domes`, `qa-fiberflats`, `qa-pixelflats`, `qa-raw-pixelflats`; `drp calibrations <command> --help` describes each.
 
 ## ESO sky routines installation and configuration
 
@@ -209,14 +275,7 @@ If you follow the examples below, you will have access to the above mentioned si
 
 ## Examples
 
-You will find tutorial notebooks to run different DRP routines in the [examples](https://github.com/sdss/lvmdrp/tree/master/examples) folder. Here is you will find Jupyter Notebooks that illustrate different tasks in the DRP:
-
-- [Basic Calibration](): reduction of calibration images: bias, dark and pixel flats; as well as reduction of arcs and fiber flats.
-- [Wavelength Calibration](): automatic pixel to wavelength mapping and wavelength and LSF fitting.
-- [Flux Calibration](): conversion of the extracted spectra from electrons to flux calibrated spectra.
-- [Sky Module](https://github.com/sdss/lvmdrp/tree/master/examples/sky_module): several procedures to sky-subtract science spectra.
-
-In each of the links above you will find a short description of what's going on in each example and also the order in which those are intended to be followed.
+The [examples](examples) folder has Jupyter notebooks that illustrate tasks in the DRP. Most were written for earlier versions (the [calibration](examples/calibration) notebooks in 2023, the [sky module](examples/sky_module) in 2024) and may not run with the current code.
 
 ## Contributing to LVM-DRP development
 
@@ -233,10 +292,11 @@ For those willing to contribute by coding, there are some steps to streamline th
     pip install -e .'[dev]'
     ```
 
-2. Before you start coding on a new feature/bug-fix, make sure your **local** `master` branch is up to date:
+2. Before you start coding on a new feature/bug-fix, make sure your **local** `dev` branch is up to date (`dev` is the development branch; `main` holds the released versions):
 
     ```bash
-    git pull origin master
+    git checkout dev
+    git pull origin dev
     ```
 
 3. Create a branch to work on and make sure the name can be easily mappable to the work you intend to do:
@@ -258,7 +318,7 @@ For those willing to contribute by coding, there are some steps to streamline th
     git push
     ```
 
-7. If you consider your feature is ready to be merged to the `master` branch, you can create a new [pull request at Github](https://github.com/sdss/lvmdrp/pulls).
+7. If you consider your feature is ready, create a [pull request](https://github.com/sdss/lvmdrp/pulls) to `dev`. Every pull request needs an approving review by someone other than its author. Describe the change in the pull request; `CHANGELOG.rst` is written when a version is released, not in pull requests. Run the tests (`pytest`) and the linter (`ruff check .`) first.
 
 8. Finally, it might useful to have different versions of the DRP outputs in separated directories. To achieve this, you can set the environment variable `LVMDRP_VERSION` in your `.bashrc` (or equivalent) to a string representing the version of the DRP you are working on. For example:
 
@@ -272,7 +332,7 @@ For those willing to contribute by coding, there are some steps to streamline th
     $SAS_BASE_DIR/sdsswork/lvm/spectro/redux/my_tests/<tilegrp>/<tileid>/<mjd>/
     ```
 
-Regarding commits, I'm trying to go for an *atomic* approach, where each commit has a single purpose. So please try to avoid as much as possible pushing lots of unrelated changes in one commit.
+Regarding commits, we aim for an *atomic* approach, where each commit has a single purpose. So please try to avoid as much as possible pushing lots of unrelated changes in one commit.
 
 ## Troubleshooting
 
