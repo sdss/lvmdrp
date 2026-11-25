@@ -151,8 +151,12 @@ class DrpGroup(click.Group):
 def cli(ctx):
     # a calibration directory named in lvmdrp.yaml replaces $LVM_MASTER_DIR, unless --calib-dir is given
     from lvmdrp import log
-    from lvmdrp.core.constants import apply_configured_calib_dir, calib_dir_in_args, get_masters_dir
-    explicit = calib_dir_in_args(ctx.meta.get('drp_args', []))
+    from lvmdrp.core.constants import (apply_configured_calib_dir, calib_dir_in_args, get_masters_dir,
+                                       help_requested)
+    args = ctx.meta.get('drp_args', [])
+    if ctx.resilient_parsing or help_requested(ctx.command, ctx, args):
+        return
+    explicit = calib_dir_in_args(args)
     try:
         configured = apply_configured_calib_dir(explicit=explicit)
     except FileNotFoundError as err:

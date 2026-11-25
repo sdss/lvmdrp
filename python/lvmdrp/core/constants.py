@@ -131,6 +131,34 @@ def calib_dir_in_args(args):
     return any(a == "--calib-dir" or a.startswith("--calib-dir=") for a in args)
 
 
+def help_requested(group, ctx, args):
+    """Whether a ``drp`` command line only asks for help.
+
+    Help needs no calibrations, so the ``drp`` group does not check the calibration
+    directory for it: ``drp run --help`` works on a computer without the directory
+    named in lvmdrp.yaml (sdss/lvmdrp#272).
+
+    Args:
+        group: the ``drp`` click group.
+        ctx: its click context.
+        args: the arguments after ``drp``.
+
+    Returns:
+        True if the arguments include a help option, or end with a group (such as
+        ``drp calibrations``), which then prints its help.
+    """
+    import click
+    if any(a in ctx.help_option_names for a in args):
+        return True
+    cmd = group
+    while isinstance(cmd, click.Group):
+        if not args:
+            return True
+        cmd = cmd.get_command(ctx, args[0])
+        args = args[1:]
+    return False
+
+
 def apply_configured_calib_dir(config=None, explicit=False):
     """Uses the calibration directory of lvmdrp.yaml for the run, if it names one.
 
