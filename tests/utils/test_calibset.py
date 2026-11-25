@@ -150,3 +150,70 @@ def test_check_finds_changes_underneath(source_set, tmp_path):
 
 def test_check_without_manifest(source_set, tmp_path):
     assert calibset.check_calibration_set(str(source_set)) is None
+
+
+def _reduction_masters(drpver, epoch, kinds=calibset.EPOCH_MASTERS, skip=()):
+    """ write masters of an epoch into the reduction tree, as drp calibrations long-term / fiberflats -e do """
+    calib = calibset.stage1_calib_dir(drpver, epoch)
+    os.makedirs(calib, exist_ok=True)
+    for kind in kinds:
+        units = 'brz' if kind in calibset.PER_CHANNEL else calibset.CAMERAS
+        for u in units:
+            name = f'lvm-m{kind}-{u}.fits'
+            if name not in skip:
+                with open(os.path.join(calib, name), 'w') as f:
+                    f.write(f'rebuilt {kind} {u}')
+    return calib
+
+
+def test_build_calibration_set_every_master(source_set, tmp_path):
+    calib = _reduction_masters('cstest7', 60465)
+    # an input linked in from a calibration set (as stage 1 does) is not a master of the reduction
+    os.symlink(str(source_set / '60465' / 'lvm-mbias-b1.fits'), os.path.join(calib, 'lvm-mextra-b1.fits'))
+    assert calibset.reduction_epochs('cstest7') == [60465]
+    out = tmp_path / 'calib_all'
+    res = calibset.build_calibration_set(str(out), source_dir=str(source_set), masters_from='cstest7')
+    assert res['kinds'] == {60465: sorted(calibset.EPOCH_MASTERS)}
+    assert len(res['copied']) == 7 * 9 + 3
+    for name in ('lvm-mbias-b1.fits', 'lvm-mwave-z3.fits', 'lvm-mcounts-r2.fits', 'lvm-mfiberflat_twilight-b.fits'):
+        copied = out / '60465' / name
+        assert not os.path.islink(copied) and copied.read_text().startswith('rebuilt')
+    assert not any('lvm-mextra' in p for p in res['copied'])
+    # the other epoch stays links to the source set, which is unchanged
+    assert os.path.islink(out / '60511' / 'lvm-mwave-z3.fits')
+    assert (source_set / '60465' / 'lvm-mwave-z3.fits').read_text() == 'master'
+    readme = (out / 'README.txt').read_text()
+    assert 'epoch 60465: copied from cstest7: bias, centroids, counts' in readme
+    assert calibset.read_manifest(str(out))[os.path.join('60465', 'lvm-mwave-z3.fits')]['type'] == 'file'
+
+
+def test_build_calibration_set_some_kinds(source_set, tmp_path):
+    # the reduction remade only the wavelength solutions: the rest stays linked
+    _reduction_masters('cstest8', 60511, kinds=('wave', 'lsf', 'bias'))
+    out = tmp_path / 'calib_wave'
+    res = calibset.build_calibration_set(str(out), source_dir=str(source_set), masters_from='cstest8',
+                                         kinds=['wave', 'lsf'])
+    assert res['kinds'] == {60511: ['lsf', 'wave']}
+    assert not os.path.islink(out / '60511' / 'lvm-mwave-b1.fits')
+    assert os.path.islink(out / '60511' / 'lvm-mbias-b1.fits')       # not asked for
+    assert os.path.islink(out / '60511' / 'lvm-mcentroids-b1.fits')  # not remade
+
+
+def test_build_calibration_set_incomplete_masters(source_set, tmp_path):
+    _reduction_masters('cstest9', 60465, kinds=('wave', 'lsf'), skip=('lvm-mlsf-z3.fits',))
+    out = tmp_path / 'calib_bad'
+    with pytest.raises(ValueError, match='epoch 60465: lsf 8 files'):
+        calibset.build_calibration_set(str(out), source_dir=str(source_set), masters_from='cstest9')
+    assert not out.exists()
+
+
+def test_build_calibration_set_argument_checks(source_set, tmp_path):
+    with pytest.raises(ValueError, match='not both'):
+        calibset.build_calibration_set(str(tmp_path / 'a'), source_dir=str(source_set),
+                                       masters_from='x', flats_from='y')
+    with pytest.raises(ValueError, match='unknown kinds'):
+        calibset.build_calibration_set(str(tmp_path / 'b'), source_dir=str(source_set),
+                                       masters_from='x', kinds=['pixflat'])
+    res = calibset.build_calibration_set(str(tmp_path / 'c'), source_dir=str(source_set),
+                                         masters_from='cstest10', epochs=[60465], dry_run=True)
+    assert res['missing'] == [60465]
