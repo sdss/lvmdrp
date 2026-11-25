@@ -342,6 +342,9 @@ factors only, and are undone accordingly). This is exposed via the
 Running the Calibration Pipeline
 ---------------------------------
 
+Most users download the masters instead of making them (``drp get-calibs``; see the
+end of this section). Making them needs the raw calibration exposures of the epoch.
+
 The masters are made per calibration epoch. ``--from-epochs`` takes the nights
 of each calibration from ``calibration-epochs.yaml``; without it the twilight
 nights default to the ``-m`` date::

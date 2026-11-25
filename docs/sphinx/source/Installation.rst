@@ -177,7 +177,7 @@ Optional environment variables:
 
    * - Variable
      - Description
-   * - ``LVM_DRPVER``
+   * - ``LVMDRP_VERSION``
      - DRP version string for output directory naming (useful for testing)
    * - ``LVM_ESOSKY_DIR``
      - Path to ESO sky routines (only needed for sky module)
@@ -224,11 +224,13 @@ For those contributing code, follow these steps:
 
        pip install -e '.[dev]'
 
-2. Before coding a new feature or bug fix, ensure your local ``master`` branch is up to date:
+2. Before coding a new feature or bug fix, make sure your local ``dev`` branch is up to
+   date (``dev`` is the development branch; ``main`` holds the released versions):
 
    .. code-block:: bash
 
-       git pull origin master
+       git checkout dev
+       git pull origin dev
 
 3. Create a branch with a descriptive name:
 
@@ -250,13 +252,17 @@ For those contributing code, follow these steps:
 
        git push
 
-6. Create a `pull request on Github <https://github.com/sdss/lvmdrp/pulls>`_ when ready to merge.
+6. Run the tests (``pytest``) and the linter (``ruff check .``), then create a
+   `pull request on Github <https://github.com/sdss/lvmdrp/pulls>`_ to ``dev``. Every pull
+   request needs an approving review by someone other than its author. Describe the change
+   in the pull request; ``CHANGELOG.rst`` is written when a version is released, not in
+   pull requests.
 
 7. To keep different DRP output versions in separate directories, set:
 
    .. code-block:: bash
 
-       export LVM_DRPVER="my_tests"
+       export LVMDRP_VERSION="my_tests"
 
    This will store outputs in:
 
