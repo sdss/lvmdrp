@@ -545,37 +545,44 @@ def fit_fiberflat_gradient(drpall, drpver, channels, ffactor_epochs_file, out_di
                        epoch_terms=terms)
 
 
-@cli.command('build-calib-set', short_help='Build a calibration set: links to an existing set, with new stage-1 twilight flats', context_settings=dict(show_default=True))
+@cli.command('build-calib-set', short_help='Build a calibration set: links to an existing set, with the masters a reduction rebuilt', context_settings=dict(show_default=True))
 @click.option('--out', 'out_dir', type=str, required=True, help='the calibration set to build or update (e.g. $SAS_BASE_DIR/sdsswork/lvm/sandbox/calib_2.0.0dev)')
 @click.option('--from', 'source_dir', type=str, default=None, help='the set to link from; default: $SAS_BASE_DIR/sdsswork/lvm/sandbox/calib')
-@click.option('--flats-from', type=str, default=None, help='version label of the reduction whose stage-1 twilight flats are copied in (drp calibrations fiberflats -e)')
-@click.option('-e', '--epoch', type=IntListType(), default=None, help='epochs whose flats are copied; default: all with flats in --flats-from')
+@click.option('--masters-from', type=str, default=None, help='version label of the reduction whose masters of each epoch are copied in (drp calibrations long-term, fiberflats -e)')
+@click.option('--flats-from', type=str, default=None, help='like --masters-from, but copies only the stage-1 twilight flats (drp calibrations fiberflats -e)')
+@click.option('-e', '--epoch', type=IntListType(), default=None, help='epochs whose masters are copied; default: all with masters in --masters-from')
 @click.option('--dry-run', is_flag=True, default=False, help='report what would be done, change nothing')
 @click.option('--checksum', is_flag=True, default=False, help='record the MD5 checksum of every file in MANIFEST.csv (reads every file once)')
 @click.option('--accept-changes', is_flag=True, default=False, help='go ahead although the set differs from its MANIFEST.csv (something changed underneath it), and record the new state')
-def build_calib_set(out_dir, source_dir, flats_from, epoch, dry_run, checksum, accept_changes):
-    """Build or update a calibration set (sdss/lvmdrp#268, #272)
+def build_calib_set(out_dir, source_dir, masters_from, flats_from, epoch, dry_run, checksum, accept_changes):
+    """Build or update a calibration set (sdss/lvmdrp#268, #272, #280)
 
     Every file of the source set gets a symbolic link in the new set, except entries the new set already
-    has (so copies made earlier stay), and the Gaia cache is shared. With --flats-from, the stage-1 master
-    twilight flats of that reduction are copied in place of their links. The source set is never changed;
-    each run is recorded in README.txt in the new set. Reductions use the set with drp run --calib-dir, or
-    calib_dir in lvmdrp.yaml. Every build writes MANIFEST.csv (what each link points to, size, time); a
-    later build stops if the set differs from it (drp calibrations check-calib-set), unless --accept-changes.
+    has (so copies made earlier stay), and the Gaia cache is shared. With --masters-from, the masters that
+    reduction made for each epoch (in redux/<label>/0011XX/11111/<epoch>/calib: bias, traces, wavelength
+    and LSF, twilight flats) are copied in place of their links; kinds it didn't remake stay links, and a
+    kind that lacks some cameras is an error. The source set is never changed, and nothing is written into
+    it (unlike create-tag); each run is recorded in README.txt in the new set. Reductions use the set with
+    drp run --calib-dir, or calib_dir in lvmdrp.yaml. Every build writes MANIFEST.csv (what each link
+    points to, size, time); a later build stops if the set differs from it (drp calibrations
+    check-calib-set), unless --accept-changes.
     """
     from lvmdrp.utils.calibset import CalibrationSetChanged, build_calibration_set
-    if epoch and not flats_from:
-        raise click.UsageError('--epoch needs --flats-from')
+    if masters_from and flats_from:
+        raise click.UsageError('give --masters-from or --flats-from, not both')
+    if epoch and not (masters_from or flats_from):
+        raise click.UsageError('--epoch needs --masters-from (or --flats-from)')
     try:
-        result = build_calibration_set(out_dir, source_dir=source_dir, flats_from=flats_from, epochs=epoch,
-                                       dry_run=dry_run, checksum=checksum, accept_changes=accept_changes)
+        result = build_calibration_set(out_dir, source_dir=source_dir, masters_from=masters_from,
+                                       flats_from=flats_from, epochs=epoch, dry_run=dry_run,
+                                       checksum=checksum, accept_changes=accept_changes)
     except CalibrationSetChanged as err:
         raise click.ClickException(f'{err}. Check with drp calibrations check-calib-set; '
                                    'give --accept-changes to go ahead') from err
     except (ValueError, FileNotFoundError) as err:
         raise click.ClickException(str(err)) from err
     if result['missing']:
-        raise click.ClickException(f'no stage-1 twilight flats in {flats_from} for epochs {result["missing"]}')
+        raise click.ClickException(f'no masters in {masters_from or flats_from} for epochs {result["missing"]}')
 
 
 @cli.command('check-calib-set', short_help='Check a calibration set against its MANIFEST.csv', context_settings=dict(show_default=True))

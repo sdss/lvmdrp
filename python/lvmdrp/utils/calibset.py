@@ -6,7 +6,7 @@ an epoch's stage 1 needs linked into a reduction tree (sdss/lvmdrp#268, #272).
 
 A calibration set is a directory laid out like $LVM_MASTER_DIR (``<epoch>/lvm-m*.fits``,
 ``pixelmasks/``, ``gaia_cache/``, ...). A new set is made of symbolic links to every file of
-an existing one, with copies of the new files (the stage-1 twilight flats, the flat-field
+an existing one, with copies of the new files (masters rebuilt by a reduction, the flat-field
 models) in place of their links, so that the existing set is never changed.
 """
 
@@ -22,6 +22,11 @@ from lvmdrp import log
 # the masters that stage 1 (the twilight flats) of a calibration epoch reads, per camera
 STAGE1_MASTERS = ('bias', 'centroids', 'sigmas', 'model', 'wave', 'lsf')
 CAMERAS = tuple(f'{c}{s}' for c in 'brz' for s in (1, 2, 3))
+# the masters of an epoch that a reduction makes and a calibration set holds per epoch: the products
+# that create-tag copies (run_calseq.tag_longterm_calibrations), per camera or, for the twilight
+# flats, per channel. Pixel masks and pixel flats are not per epoch and are not copied.
+EPOCH_MASTERS = ('bias', 'centroids', 'sigmas', 'counts', 'model', 'wave', 'lsf', 'fiberflat_twilight')
+PER_CHANNEL = ('fiberflat_twilight',)
 README = 'README.txt'
 # the record of every file of a set (what each link points to, size, time, optional checksum),
 # so that a change underneath the set (a master replaced in the source) can be found (sdss/lvmdrp#280)
@@ -207,6 +212,48 @@ def stage1_epochs(drpver: str) -> List[int]:
                   if d.isdigit() and all(os.path.isfile(stage1_flat(drpver, int(d), ch)) for ch in 'brz'))
 
 
+def epoch_masters(drpver: str, epoch: int, kinds: Sequence[str] = EPOCH_MASTERS) -> Dict[str, List[str]]:
+    """The masters a reduction made for an epoch, by kind.
+
+    They are the files ``lvm-m<kind>-<camera>.fits`` in ``redux/<drpver>/0011XX/11111/<epoch>/calib``
+    (``drp calibrations long-term``, ``fiberflats -e``). Symbolic links there are inputs linked in
+    from a calibration set (e.g. by stage 1, :func:`link_epoch_masters`), not masters the
+    reduction made, so they are left out.
+
+    Args:
+        drpver: the version label of the reduction tree.
+        epoch: the calibration epoch.
+        kinds: the kinds of master to look for.
+
+    Returns:
+        {kind: sorted paths of its masters}, only for kinds with at least one master.
+    """
+    calib = stage1_calib_dir(drpver, epoch)
+    found = {}
+    for kind in kinds:
+        units = 'brz' if kind in PER_CHANNEL else CAMERAS
+        paths = [os.path.join(calib, f'lvm-m{kind}-{u}.fits') for u in units]
+        paths = [p for p in paths if os.path.isfile(p) and not os.path.islink(p)]
+        if paths:
+            found[kind] = paths
+    return found
+
+
+def incomplete_masters(masters: Dict[str, List[str]]) -> Dict[str, int]:
+    """The kinds in `masters` (from :func:`epoch_masters`) that lack some cameras or channels:
+    {kind: number found}. A set mixing new and old masters of one kind would be inconsistent."""
+    return {kind: len(paths) for kind, paths in masters.items()
+            if len(paths) != (3 if kind in PER_CHANNEL else len(CAMERAS))}
+
+
+def reduction_epochs(drpver: str, kinds: Sequence[str] = EPOCH_MASTERS) -> List[int]:
+    """The epochs of the `drpver` tree with at least one master of `kinds` (see :func:`epoch_masters`)."""
+    root = os.path.dirname(os.path.dirname(stage1_calib_dir(drpver, 0)))
+    if not os.path.isdir(root):
+        return []
+    return sorted(int(d) for d in os.listdir(root) if d.isdigit() and epoch_masters(drpver, int(d), kinds))
+
+
 class CalibrationSetChanged(RuntimeError):
     """A calibration set differs from its manifest: something changed underneath it."""
 
@@ -216,35 +263,43 @@ class CalibrationSetChanged(RuntimeError):
         super().__init__(f'calibration set {set_dir} differs from its manifest; ' + '; '.join(lines))
 
 
-def build_calibration_set(out_dir: str, source_dir: Optional[str] = None, flats_from: Optional[str] = None,
-                          epochs: Optional[Sequence[int]] = None, dry_run: bool = False,
-                          checksum: bool = False, accept_changes: bool = False) -> Dict:
-    """Builds (or updates) a calibration set from an existing one, with new twilight flats.
+def build_calibration_set(out_dir: str, source_dir: Optional[str] = None, masters_from: Optional[str] = None,
+                          epochs: Optional[Sequence[int]] = None, kinds: Optional[Sequence[str]] = None,
+                          dry_run: bool = False, checksum: bool = False, accept_changes: bool = False,
+                          flats_from: Optional[str] = None) -> Dict:
+    """Builds (or updates) a calibration set from an existing one, with the masters a reduction rebuilt.
 
     Every file of `source_dir` gets a symbolic link at the same place in `out_dir`, except
     for entries `out_dir` already has, which are kept (so copies made earlier stay); the
-    Gaia cache is linked as one directory, so that both sets share it. With `flats_from`,
-    the stage-1 twilight flats of that reduction (``redux/<flats_from>/0011XX/11111/
-    <epoch>/calib``) are copied into `out_dir` in place of their links. `source_dir` is
-    never changed. Each run is recorded in ``README.txt`` in `out_dir`.
+    Gaia cache is linked as one directory, so that both sets share it. With `masters_from`,
+    the masters that reduction made for each epoch (:func:`epoch_masters`: bias, traces,
+    wavelength and LSF, twilight flats, ... in ``redux/<masters_from>/0011XX/11111/<epoch>/calib``)
+    are copied into ``out_dir/<epoch>/`` in place of their links; kinds the reduction didn't
+    remake stay links to `source_dir`. `source_dir` is never changed. Each run is recorded in
+    ``README.txt`` in `out_dir`, with the kinds copied for each epoch.
 
     Args:
         out_dir: the calibration set to build; created if needed.
         source_dir: the set to link from; default: ``$SAS_BASE_DIR/sdsswork/lvm/sandbox/calib``.
-        flats_from: version label of the reduction whose stage-1 twilight flats are copied in.
-        epochs: the epochs whose flats are copied; default: all with flats in `flats_from`.
+        masters_from: version label of the reduction whose masters are copied in.
+        epochs: the epochs whose masters are copied; default: all with masters in `masters_from`.
+        kinds: the kinds of master to copy; default: all of :data:`EPOCH_MASTERS`.
         dry_run: report what would be done, change nothing.
         checksum: record the MD5 checksum of every file in the manifest (reads every file once).
         accept_changes: go ahead although the set differs from its manifest (and record the
             new state); otherwise that is an error.
+        flats_from: the same as `masters_from` with `kinds` the twilight flats only (the
+            stage-1 flats of ``drp calibrations fiberflats -e``).
 
     Returns:
-        A dict with 'links' (number made), 'copied' (paths of the flats copied), 'missing'
-        (epochs asked for without the three flats) and 'check' (the comparison with the
-        manifest before the build, None for a new set).
+        A dict with 'links' (number made), 'copied' (paths of the masters copied), 'kinds'
+        ({epoch: kinds copied}), 'missing' (epochs asked for without any of the masters) and
+        'check' (the comparison with the manifest before the build, None for a new set).
 
     Raises:
-        ValueError: if `out_dir` is `source_dir` or inside it.
+        ValueError: if `out_dir` is `source_dir` or inside it; if both `masters_from` and
+            `flats_from` are given, or an unknown kind; if a kind lacks some cameras or channels
+            in an epoch (nothing is changed then).
         FileNotFoundError: if `source_dir` doesn't exist.
         CalibrationSetChanged: if the set differs from its manifest and not `accept_changes`.
 
@@ -255,6 +310,15 @@ def build_calibration_set(out_dir: str, source_dir: Optional[str] = None, flats_
     from lvmdrp.core.constants import get_lvmcore_version, get_lvmdrp_version
     from lvmdrp.functions.flatgradient import link_calibration_tree
 
+    if flats_from:
+        if masters_from:
+            raise ValueError('give masters_from or flats_from, not both')
+        masters_from, kinds = flats_from, ('fiberflat_twilight',)
+    kinds = tuple(kinds) if kinds else EPOCH_MASTERS
+    unknown = sorted(set(kinds) - set(EPOCH_MASTERS))
+    if unknown:
+        raise ValueError(f'unknown kinds of master {unknown}; known: {", ".join(EPOCH_MASTERS)}')
+
     source_dir = os.path.abspath(source_dir or default_source_dir())
     out_dir = os.path.abspath(out_dir)
     if not os.path.isdir(source_dir):
@@ -263,7 +327,22 @@ def build_calibration_set(out_dir: str, source_dir: Optional[str] = None, flats_
     if real_out == real_src or real_out.startswith(real_src + os.sep):
         raise ValueError(f'the new calibration set {out_dir} must not be {source_dir} or inside it')
 
-    result = {'links': 0, 'copied': [], 'missing': [], 'check': None}
+    result = {'links': 0, 'copied': [], 'kinds': {}, 'missing': [], 'check': None}
+    todo = {}
+    if masters_from:
+        wanted = sorted(int(e) for e in epochs) if epochs else reduction_epochs(masters_from, kinds)
+        for e in wanted:
+            found = epoch_masters(masters_from, e, kinds)
+            if found:
+                todo[e] = found
+            else:
+                result['missing'].append(e)
+        bad = {e: incomplete_masters(found) for e, found in todo.items() if incomplete_masters(found)}
+        if bad:
+            raise ValueError('masters incomplete in ' + masters_from + ': '
+                             + '; '.join(f'epoch {e}: ' + ', '.join(f'{k} {n} files' for k, n in b.items())
+                                         for e, b in bad.items())
+                             + ' (each kind needs all 9 cameras, or b, r, z for the twilight flats)')
     if os.path.isdir(out_dir):
         result['check'] = check_calibration_set(out_dir, checksum=checksum)
         if result['check'] and any(result['check'].values()):
@@ -271,21 +350,16 @@ def build_calibration_set(out_dir: str, source_dir: Optional[str] = None, flats_
             if not accept_changes:
                 raise err
             log.warning(f'{err}; going ahead (accept_changes)')
-    if flats_from:
-        available = stage1_epochs(flats_from)
-        wanted = sorted(int(e) for e in epochs) if epochs else available
-        result['missing'] = [e for e in wanted if e not in available]
-        todo = [e for e in wanted if e in available]
-    else:
-        todo = []
+    result['kinds'] = {e: sorted(found) for e, found in todo.items()}
 
     log.info(f'calibration set {out_dir}: links to {source_dir}'
-             + (f'; stage-1 twilight flats of {flats_from} for {len(todo)} epochs' if flats_from else ''))
+             + (f'; masters of {masters_from} for {len(todo)} epochs' if masters_from else ''))
+    for e, ks in result['kinds'].items():
+        log.info(f'epoch {e}: {"would copy" if dry_run else "copying"} {", ".join(ks)} '
+                 f'from {stage1_calib_dir(masters_from, e)}')
     if result['missing']:
-        log.warning(f'no stage-1 twilight flats in {flats_from} for epochs {result["missing"]}')
+        log.warning(f'no masters of {", ".join(kinds)} in {masters_from} for epochs {result["missing"]}')
     if dry_run:
-        for e in todo:
-            log.info(f'would copy the twilight flats of epoch {e} from {stage1_calib_dir(flats_from, e)}')
         return result
 
     os.makedirs(out_dir, exist_ok=True)
@@ -293,16 +367,15 @@ def build_calibration_set(out_dir: str, source_dir: Optional[str] = None, flats_
     if os.path.isdir(cache) and not os.path.lexists(os.path.join(out_dir, 'gaia_cache')):
         os.symlink(cache, os.path.join(out_dir, 'gaia_cache'))
     result['links'] = link_calibration_tree(source_dir, out_dir)
-    for e in todo:
+    for e, found in todo.items():
         os.makedirs(os.path.join(out_dir, str(e)), exist_ok=True)
-        for ch in 'brz':
-            src = stage1_flat(flats_from, e, ch)
+        for src in (p for paths in found.values() for p in paths):
             dst = os.path.join(out_dir, str(e), os.path.basename(src))
             if os.path.islink(dst):
                 os.remove(dst)
             shutil.copy2(src, dst)
             result['copied'].append(dst)
-    log.info(f'{result["links"]} links made, {len(result["copied"])} twilight flats copied into {out_dir}')
+    log.info(f'{result["links"]} links made, {len(result["copied"])} masters copied into {out_dir}')
 
     stamp = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
     new = not os.path.exists(os.path.join(out_dir, README))
@@ -313,11 +386,11 @@ def build_calibration_set(out_dir: str, source_dir: Optional[str] = None, flats_
                     'The source set is never changed.\n')
         f.write(f'\n{stamp}  lvmdrp {get_lvmdrp_version()}  lvmcore {get_lvmcore_version()}\n'
                 f'  source: {source_dir} ({result["links"]} new links)\n')
-        if todo:
-            f.write(f'  stage-1 twilight flats copied from {flats_from} for epochs: '
-                    f'{" ".join(map(str, todo))}\n')
+        for e, ks in result['kinds'].items():
+            f.write(f'  epoch {e}: copied from {masters_from}: {", ".join(ks)}\n')
         if result['missing']:
-            f.write(f'  epochs asked for without stage-1 flats: {" ".join(map(str, result["missing"]))}\n')
+            f.write(f'  epochs asked for without masters in {masters_from}: '
+                    f'{" ".join(map(str, result["missing"]))}\n')
         if result['check'] and any(result['check'].values()):
             f.write('  accepted changes underneath the set: '
                     + '; '.join(f'{k} {len(v)}' for k, v in result['check'].items() if v) + '\n')
