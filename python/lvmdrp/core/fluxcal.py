@@ -19,7 +19,6 @@ from tqdm import tqdm
 
 import pyvo as vo
 import gaiaxpy
-from astroquery.gaia import Gaia
 
 from astropy.time import Time
 from astropy.io import fits
@@ -329,6 +328,8 @@ class GaiaXPSpectra(object):
         if not ignore_cache and cache_path.exists():
             gaia_table = Table.read(cache_path, format="ascii.ecsv")
         else:
+            # imported here: importing astroquery.gaia prints the archive's status messages
+            from astroquery.gaia import Gaia
             job = Gaia.launch_job(TILE_GAIA_QUERY)
             gaia_table = job.get_results()
             gaia_table.write(cache_path, format="ascii.ecsv", serialize_method="data_mask", overwrite=True)
@@ -513,6 +514,7 @@ def get_stellar_params(source_ids):
         log.warning(e.args[0])
         # If entry not found in local table, then call external Gaia service
         try:
+            from astroquery.gaia import Gaia
             job = Gaia.launch_job(f"SELECT source_id, teff_gspspec, logg_gspspec, mh_gspspec FROM gaiadr3.astrophysical_parameters WHERE source_id IN ({SOURCE_IDS})")
             stellar_params = job.get_results().to_pandas().set_index("source_id")
             stellar_params = stellar_params.loc[source_ids]
