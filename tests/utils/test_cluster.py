@@ -191,3 +191,13 @@ def test_run_drp_exposure_list_visits_each_night_once(fake_night, monkeypatch):
     assert outcomes == {1: 'done', 4: 'done'}
     groups, code = run_outcomes(outcomes, requested=[1, 4, 99])
     assert groups['failed'] == [99] and code == RUN_EXIT_CODES['failed']
+
+
+def test_ancillary_dir_of(monkeypatch, tmp_path):
+    """ --clean-ancillary finds the ancillary directory from the metadata, also when -1d/--from-frame skip extraction """
+    monkeypatch.setenv('LVM_SPECTRO_REDUX', str(tmp_path))
+    meta = pd.DataFrame([{'tileid': 1054275, 'mjd': 60478, 'expnum': 19475, 'camera': cam, 'imagetyp': 'object'}
+                         for cam in ('b1', 'r1')])
+    out = main.ancillary_dir_of(meta, drpver='test')
+    assert out.startswith(str(tmp_path / 'test'))
+    assert out.endswith(os.path.join('1054275', '60478', 'ancillary'))

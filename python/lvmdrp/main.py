@@ -1630,7 +1630,6 @@ def science_reduction(expnum: int,
             # define science camera
             sci_camera = sci["camera"]
 
-            dsci_path = path.full("lvm_anc", drpver=drpver, kind="d", imagetype=sci["imagetyp"], **sci)
             xsci_path = path.full("lvm_anc", drpver=drpver, kind="x", imagetype=sci["imagetyp"], **sci)
             wsci_path = path.full("lvm_anc", drpver=drpver, kind="w", imagetype=sci["imagetyp"], **sci)
             ssci_path = path.full("lvm_anc", drpver=drpver, kind="s", imagetype=sci["imagetyp"], **sci)
@@ -1764,7 +1763,7 @@ def science_reduction(expnum: int,
 
     # clean ancillary folder
     if clean_ancillary:
-        ancillary_dir = os.path.dirname(dsci_path)
+        ancillary_dir = ancillary_dir_of(sci_metadata, drpver=drpver)
         log.info(f"removing ancillary files for expnum={sci_expnum} from {ancillary_dir}")
 
         if os.path.isdir(ancillary_dir):
@@ -1788,6 +1787,28 @@ def science_reduction(expnum: int,
                 log.warning(f"error while removing {ancillary_dir}: {e}")
 
     return True
+
+
+def ancillary_dir_of(sci_metadata, drpver: str = drpver) -> str:
+    """Returns the ancillary directory of a science exposure (``.../<tileid>/<mjd>/ancillary``)
+
+    Worked out from the metadata of the exposure, so that ``--clean-ancillary`` finds the
+    directory also when the 1D steps are skipped (``-1d``, ``--from-frame``).
+
+    Parameters
+    ----------
+    sci_metadata : pandas.DataFrame
+        the metadata of the exposure's frames (one row per camera)
+    drpver : str, optional
+        the version label of the reduction, by default the current one
+
+    Returns
+    -------
+    str
+        the directory of the exposure's ancillary files
+    """
+    sci = sci_metadata.iloc[0].to_dict()
+    return os.path.dirname(path.full("lvm_anc", drpver=drpver, kind="d", imagetype=sci["imagetyp"], **sci))
 
 
 def run_drp(mjd: Union[int, str, list], expnum: Union[int, str, list] = None,
