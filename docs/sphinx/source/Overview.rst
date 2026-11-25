@@ -248,26 +248,68 @@ The pipeline produces several intermediate and final data products:
 - ``lvmCFrame-{expnum}.fits`` - Channel combined (full wavelength coverage)
 - ``lvmSFrame-{expnum}.fits`` - Sky subtracted (final science product)
 
+.. _running-the-pipeline:
+
 Running the Pipeline
 --------------------
 
-The pipeline is run from the command line; ``README.md`` at the top of the repository
-describes the options in more detail::
+Running the DRP needs the environment set up as described in :doc:`Installation`, and
+the master calibrations of the epochs to be reduced (``drp get-calibs``; see
+:doc:`Calibration`).
 
-    # Reduce all exposures of a night
+To reduce all the science exposures of a night, one exposure, or several::
+
     drp run -m <mjd>
-
-    # Reduce one exposure, or several
     drp run -e <expnum>
-    drp run -F <file with one exposure number per line>
+    drp run -el <expnum> -el <expnum>          # a list
+    drp run -er <first>-<last>                 # a range
+    drp run -F <expnum_file>                   # a file with one exposure number per line
 
-    # Redo only the steps after the wavelength calibration of an exposure already reduced
-    drp run -e <expnum> -2d -1d -wc
+Steps already done can be skipped with the flags in the table under `Pipeline Stages`_.
+For example, to redo only the flux calibration, sky subtraction and summary of an
+exposure already reduced::
 
-    # See all options
-    drp run --help
+    drp run -e <expnum> -2d -1d -wc -wr
 
-At Utah, ``drp cluster`` runs many exposures or nights as a Slurm job.
+Other useful options:
+
+- ``-f <method>``: the flux calibration applied to the science fibers: ``MOD`` (default;
+  standard stars matched to model spectra), ``STD`` (standard stars), ``SCI`` (field stars
+  in the science IFU) or ``NONE``
+- ``-c``, ``--clean-ancillary``: remove the intermediate products (the ``ancillary``
+  folder) once the exposure is done
+- ``--force-run``: also reduce exposures flagged BAD by the raw-data QA
+- ``--force-excluded``: also reduce exposures listed in
+  ``$LVMCORE_DIR/etc/exclude-exposures.yaml``
+
+``drp run --help`` lists all the options.
+
+The products are written to
+``$SAS_BASE_DIR/sdsswork/lvm/spectro/redux/<drpver>/<tilegrp>/<tileid>/<mjd>/`` (see
+`Output Data Products`_ and :doc:`DirectoryStructure`). ``<drpver>`` is
+``$LVMDRP_VERSION`` if it is set, otherwise the version of the installed package, so
+setting it keeps test reductions apart::
+
+    export LVMDRP_VERSION="my_tests"
+
+Batch Runs at Utah
+^^^^^^^^^^^^^^^^^^
+
+At Utah, ``drp cluster`` writes and submits a Slurm job that runs ``drp run`` for each
+night or exposure given; ``--drp-options`` passes options on to ``drp run``::
+
+    drp cluster -F <expnum_file> --drp-options "<options for drp run>"
+    drp cluster -r <first_mjd>-<last_mjd> -n <nodes> -p <cores_per_node> -w <walltime>
+
+``--dry-run`` shows what would be run. Each job runs with ``--skip-drpall``, so that the
+jobs don't write the summary file at the same time. Once the jobs are done, make the
+summary file in one go::
+
+    drp summary --drp-version <drpver>
+
+``--output-dir`` writes it elsewhere, e.g. without write access to the redux directory.
+The master calibrations of several epochs can be made as one Slurm job in the same way
+(``drp calibrations cluster``; see :doc:`Calibration`).
 
 Checking a Reduction
 --------------------
