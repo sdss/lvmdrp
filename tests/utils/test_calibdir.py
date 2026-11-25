@@ -99,6 +99,34 @@ def test_calib_dir_in_args():
     assert not constants.calib_dir_in_args(['run', '-e', '1'])
 
 
+def test_help_requested():
+    """ help needs no calibration directory, so the drp group skips its check for it """
+    import click
+
+    @click.group()
+    def grp():
+        pass
+
+    @grp.command()
+    def run():
+        pass
+
+    @grp.group()
+    def calibrations():
+        pass
+
+    @calibrations.command()
+    def nightly():
+        pass
+
+    ctx = click.Context(grp)
+    assert constants.help_requested(grp, ctx, ['run', '--help'])
+    assert constants.help_requested(grp, ctx, ['calibrations', 'nightly', '--help'])
+    assert constants.help_requested(grp, ctx, ['calibrations'])
+    assert not constants.help_requested(grp, ctx, ['run'])
+    assert not constants.help_requested(grp, ctx, ['calibrations', 'nightly'])
+
+
 def test_version_label():
     """ $LVMDRP_VERSION, else drpver in lvmdrp.yaml, else the package version """
     from lvmdrp import version_label
