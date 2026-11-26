@@ -70,6 +70,17 @@ To install the DRP along with its dependencies, you need to run the following st
     pip install .
     ```
 
+## Additional documentation
+
+More detailed help, including the options of `drp run`, batch runs at Utah and how the master calibrations are made, is in the Sphinx documentation in `docs/sphinx`. It must be compiled before it can be read as web pages. This needs Sphinx and the `sphinx_rtd_theme` theme (included in the developer install, `pip install -e '.[dev]'`, or `pip install sphinx sphinx_rtd_theme`):
+
+```bash
+cd docs/sphinx
+make html
+```
+
+and then open `docs/sphinx/html/index.html` in a browser. The source pages in [`docs/sphinx/source`](docs/sphinx/source) can also be read on GitHub without compiling them.
+
 ## Testing the installation
 
 There is a tool to quickly verify that all the needed environment variables are in place. You can run it like this:
