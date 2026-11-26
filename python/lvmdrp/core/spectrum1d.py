@@ -738,20 +738,14 @@ def convolution_matrix(kernel, normalize=True):
 
     kernelLength = kernel.shape[1]
 
-    rowIdxFirst = numpy.floor(kernelLength / 2)
-    rowIdxLast  = rowIdxFirst + nrows
-
-    vI = []
-    vJ = []
-    vV = []
-    for jj in range(nrows):
-        kernel_row = kernel[jj] / numpy.sum(kernel[jj])
-        for ii in range(kernelLength):
-            if (ii + jj >= rowIdxFirst) and (ii + jj < rowIdxLast):
-                # Valid otuput matrix row index
-                vI.append(int(ii + jj - rowIdxFirst))
-                vJ.append(int(jj))
-                vV.append(kernel_row[ii])
+    # entry (jj, ii) of the kernel goes to row jj and column jj + ii - kernelLength // 2,
+    # keeping only the columns inside the matrix
+    rowIdxFirst = kernelLength // 2
+    vJ = numpy.repeat(numpy.arange(nrows), kernelLength)
+    vI = (numpy.arange(nrows)[:, None] + numpy.arange(kernelLength)[None, :] - rowIdxFirst).ravel()
+    vV = (kernel / numpy.sum(kernel, axis=1, keepdims=True)).ravel()
+    valid = (vI >= 0) & (vI < nrows)
+    vI, vJ, vV = vI[valid], vJ[valid], vV[valid]
 
     # vI, vJ = numpy.where(kernel>1e-5)
     # vV = kernel[vI, vJ]
@@ -781,16 +775,17 @@ class FiberProfileCache(object):
     def __call__(self, centroids, sigmas):
         lines = numpy.clip((numpy.round(self.nprofiles/(self.sigma_max - self.sigma_min)*(sigmas-self.sigma_min))).astype(int),
                             a_min=0, a_max=self.nprofiles-1)
-        cumsums = self.profile_cumsum[:,lines]
         # calculate the shift relative to the given fractional centroid
         cen_fracs = centroids - numpy.trunc(centroids) + 0.5 # account for pixel boundaries [0...1]
 
-        centers = self.x_os[:,lines]+cen_fracs
+        # only the first oversampled position of each profile is needed
+        centers0 = self.x_os[0, lines] + cen_fracs
         bins = self.x[:,lines]
-        bin_starts =  numpy.clip(((bins - centers[0,:]) * self.oversampling_factor).astype(int), a_min=0, a_max=None)
-        bin_ends = numpy.clip(bin_starts + self.oversampling_factor, a_min=None, a_max=len(cumsums[:,0])-1)
-        cols = numpy.arange(bin_starts.shape[1])[None, :]  # shape (1, M), will broadcast to (N, M)
-        return cumsums[bin_ends, cols] - cumsums[bin_starts, cols]
+        bin_starts =  numpy.clip(((bins - centers0) * self.oversampling_factor).astype(int), a_min=0, a_max=None)
+        bin_ends = numpy.clip(bin_starts + self.oversampling_factor, a_min=None, a_max=self.profile_cumsum.shape[0]-1)
+        # read the two cumulative sums of each pixel directly from the cache, rather than copying
+        # every oversampled row of the selected profiles first (most of the time of an extraction)
+        return self.profile_cumsum[bin_ends, lines[None, :]] - self.profile_cumsum[bin_starts, lines[None, :]]
 
     def _gen_mexhat_basis(self, x, centroids, sigmas, fiber_radius, oversampling_factor):
         dx = x[1, 0] - x[0, 0]
@@ -2820,7 +2815,7 @@ class Spectrum1D(Header):
         # setup kernel
         pixels = numpy.ceil(3 * max(sigmas))
         pixels = numpy.arange(-pixels, pixels)
-        kernel = numpy.asarray([numpy.exp(-0.5 * (pixels / sigmas[iw]) ** 2) for iw in range(wave.size)])
+        kernel = numpy.exp(-0.5 * (pixels[None, :] / sigmas[:, None]) ** 2)
         kernel = convolution_matrix(kernel)
         new_data = kernel @ data
 

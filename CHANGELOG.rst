@@ -11,6 +11,10 @@ This document records the main changes to the drp code.
 
 - Bumped ``skycalc_cli`` to 1.5, which no longer imports the deprecated ``pkg_resources``; removes the setuptools warning on every ``drp`` call and the ``ModuleNotFoundError`` with setuptools>=81 (#257)
 - Replaced lvmdrp's own ``pkg_resources.parse_version`` with ``packaging.version.parse``
+- Optimal extraction is about 5x faster with identical results: ``FiberProfileCache`` now reads the two cumulative sums each pixel needs directly from the profile cache, instead of copying every oversampled row of the selected profiles for each column, which took about 80% of the extraction time (about 40% of a science reduction, and most of the arc and twilight extraction in the calibration sequence)
+- Cosmic-ray rejection (``Image.reject_cosmics``) is 10-20% faster with identical results: the Laplacian of the input image, which does not change between iterations, is computed once instead of in each of the 5 iterations
+- Stray-light subtraction is about 2.5x faster with identical results: its QA figure (``fit_straylight``), which took about 80% of the time, now draws about 400 rows and columns of the smooth model instead of all of them, and the per-pixel error bars of the fitted strips as one band per column
+- LSF matching of the twilight and dome flats (``match_resolution``) is about 20x faster with identical results: ``convolution_matrix`` builds the sparse convolution matrix with array operations instead of a Python loop over every matrix entry, and ``flatten_lsf`` builds its Gaussian kernels in one array operation; this step took about 6 minutes of each twilight exposure in the calibration sequence
 
 
 1.3.2 (02-09-2026)
