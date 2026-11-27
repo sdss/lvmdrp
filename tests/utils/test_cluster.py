@@ -208,7 +208,15 @@ def test_finish_slurm_main_all_done(tmp_path, monkeypatch):
     array_script, _ = cluster.write_slurm_scripts([('a', 'exit 0'), ('b', 'exit 0')], log_dir=str(tmp_path))
     _run_tasks(array_script, 2)
     monkeypatch.setattr(main, 'create_drpall', lambda: pytest.fail('drpall made without --drpall'))
-    assert cluster.main(['finish', str(tmp_path)]) == RUN_EXIT_CODES['done']
+    assert cluster.main(['finish', str(tmp_path)]) == 0
+
+
+def test_finish_slurm_main_exits_0_when_jobs_failed(tmp_path):
+    """The final job succeeds when it has done its work, even if some jobs failed"""
+    array_script, _ = cluster.write_slurm_scripts([('a', 'exit 0'), ('b', 'exit 1')], log_dir=str(tmp_path))
+    _run_tasks(array_script, 2)
+    assert cluster.main(['finish', str(tmp_path)]) == 0
+    assert [line.split()[3] for line in open(tmp_path / 'summary.txt')] == ['done', 'failed']
 
 
 class _FakeSbatch:

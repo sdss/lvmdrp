@@ -533,14 +533,20 @@ def run_cluster_cals(mjds: list = None, from_epochs: bool = True, nodes: int = 2
 
 
 def main(argv: List[str] = None) -> int:
-    """Entry point of the final job of a Slurm batch run: ``python -m lvmdrp.utils.cluster finish <log dir>``"""
+    """Entry point of the final job of a Slurm batch run: ``python -m lvmdrp.utils.cluster finish <log dir>``
+
+    Exits with 0 once summary.txt is written (and the drpall made, if asked), whatever the jobs'
+    outcomes, so that Slurm shows the final job as failed only if it could not do its own work;
+    the outcomes are in summary.txt and its log.
+    """
     parser = argparse.ArgumentParser(prog='python -m lvmdrp.utils.cluster')
     sub = parser.add_subparsers(dest='action', required=True)
     finish = sub.add_parser('finish', help='collect the outcomes of a Slurm batch run (see finish_slurm)')
     finish.add_argument('log_dir', help='the log directory of the run')
     finish.add_argument('--drpall', action='store_true', help='make the drpall if any job is done')
     args = parser.parse_args(argv)
-    return finish_slurm(args.log_dir, drpall=args.drpall)
+    finish_slurm(args.log_dir, drpall=args.drpall)
+    return 0
 
 
 if __name__ == '__main__':
