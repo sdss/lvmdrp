@@ -47,6 +47,26 @@ def _writable(directory: str) -> str:
     return f'does not exist, and {parent} is NOT writable'
 
 
+def calibration_dir() -> tuple:
+    """Returns the calibration directory ``drp`` uses without --calib-dir, and where it comes from
+
+    Where lvmdrp names a calibration directory in lvmdrp.yaml (``calib_dir``, sdss/lvmdrp#272), it
+    replaces $LVM_MASTER_DIR; otherwise $LVM_MASTER_DIR is used.
+
+    Returns
+    -------
+    tuple[str, str]
+        the directory (None if neither is set) and its source
+    """
+    import lvmdrp
+    from lvmdrp.core import constants
+    configured = getattr(constants, 'configured_calib_dir', None)
+    calib_dir = configured(getattr(lvmdrp, 'config', None)) if configured else None
+    if calib_dir:
+        return calib_dir, 'calib_dir in lvmdrp.yaml, replacing LVM_MASTER_DIR; drp run --calib-dir overrides it'
+    return os.getenv('LVM_MASTER_DIR'), 'LVM_MASTER_DIR'
+
+
 def check_environment() -> list:
     """Reports the environment of the DRP and returns the problems found
 
@@ -71,7 +91,6 @@ def check_environment() -> list:
     # the code
     package_dir = os.path.dirname(lvmdrp.__file__)
     log.info('lvmdrp')
-    report('  package version', get_package_version(path=lvmdrp.__file__, package_name='lvmdrp'))
     report('  imported from', package_dir)
     branch = _git(package_dir, 'rev-parse', '--abbrev-ref', 'HEAD')
     if branch:
@@ -95,8 +114,16 @@ def check_environment() -> list:
     # outputs
     log.info('outputs')
     label = lvmdrp.__version__
-    source = 'from LVMDRP_VERSION' if os.getenv('LVMDRP_VERSION') else 'the package version; LVMDRP_VERSION not set'
-    report('  version label', f'{label}  ({source})')
+    code_version = get_package_version(path=lvmdrp.__file__, package_name='lvmdrp')
+    drpver = (getattr(lvmdrp, 'config', None) or {}).get('drpver')
+    if os.getenv('LVMDRP_VERSION'):
+        source = 'from LVMDRP_VERSION'
+    elif drpver and label == str(drpver):
+        source = 'from drpver in lvmdrp.yaml; LVMDRP_VERSION not set'
+    else:
+        source = 'the code version; LVMDRP_VERSION not set'
+    report('  version label', f'{label}  ({source}; names the redux directory)')
+    report('  code version', f'{code_version}  (setup.cfg; the label only when nothing else sets it)')
     redux = os.getenv('LVM_SPECTRO_REDUX')
     if redux:
         out_dir = os.path.join(redux, label)
@@ -112,10 +139,11 @@ def check_environment() -> list:
         report('  raw data (LVM_DATA_S)', raw)
     else:
         report('  raw data (LVM_DATA_S)', raw or 'NOT SET', 'no raw data directory')
-    master = os.getenv('LVM_MASTER_DIR')
-    if master:
-        report('  calibrations', master)
-        cache = os.path.join(master, 'gaia_cache')
+    calib_dir, calib_source = calibration_dir()
+    if calib_dir:
+        problem = None if os.path.isdir(calib_dir) else f'calibration directory {calib_dir} not found'
+        report('  calibrations', f'{calib_dir}  ({calib_source})', problem)
+        cache = os.path.join(calib_dir, 'gaia_cache')
         report('  Gaia XP cache', f'{cache}  ({_writable(cache)})')
     core = os.getenv('LVMCORE_DIR')
     if core:

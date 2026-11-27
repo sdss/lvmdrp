@@ -35,6 +35,16 @@ def test_check_environment_missing_and_unwritable(fake_env, monkeypatch):
     assert 'no exclude list in LVMCORE_DIR' in problems
 
 
+def test_calibration_dir(fake_env, monkeypatch):
+    from lvmdrp.core import constants
+    monkeypatch.setattr(constants, 'configured_calib_dir', lambda config: None, raising=False)
+    assert envcheck.calibration_dir() == (str(fake_env / 'LVM_MASTER_DIR'), 'LVM_MASTER_DIR')
+    monkeypatch.setattr(constants, 'configured_calib_dir', lambda config: str(fake_env / 'calib_set'), raising=False)
+    calib_dir, source = envcheck.calibration_dir()
+    assert calib_dir == str(fake_env / 'calib_set') and source.startswith('calib_dir in lvmdrp.yaml')
+    assert f'calibration directory {fake_env / "calib_set"} not found' in envcheck.check_environment()
+
+
 def test_writable(tmp_path):
     assert envcheck._writable(str(tmp_path)) == 'exists, writable'
     assert envcheck._writable(str(tmp_path / 'a' / 'b')) == 'does not exist yet, can be created'
