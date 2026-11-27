@@ -223,8 +223,8 @@ them, so the choice only changes which one is applied.
 - Includes quality metrics and observation parameters
 - See :doc:`SummaryFile` for a full description of the drpall file structure
   and a table mapping each column to its source ``lvmSFrame`` header keyword
-- Batch runs (``drp cluster``) skip this step in every job; the summary is then made
-  once with ``drp summary``
+- Batch runs (``drp cluster``) skip this step in every job and make the summary once, after
+  all the jobs have ended (see `Batch Runs`_); ``drp summary`` makes it by hand
 
 Output Data Products
 --------------------
@@ -292,24 +292,60 @@ setting it keeps test reductions apart::
 
     export LVMDRP_VERSION="my_tests"
 
-Batch Runs at Utah
-^^^^^^^^^^^^^^^^^^
+Batch Runs
+^^^^^^^^^^
 
-At Utah, ``drp cluster`` writes and submits a Slurm job that runs ``drp run`` for each
-night or exposure given; ``--drp-options`` passes options on to ``drp run``::
+``drp cluster`` runs ``drp run`` for many exposures or nights, one job each, on the current
+machine with ``--local``::
 
-    drp cluster -F <expnum_file> --drp-options "<options for drp run>"
-    drp cluster -r <first_mjd>-<last_mjd> -n <nodes> -p <cores_per_node> -w <walltime>
+    drp cluster -F <expnum_file> --local --np 8 --drp-options "<options for drp run>"
 
-``--dry-run`` shows what would be run. Each job runs with ``--skip-drpall``, so that the
-jobs don't write the summary file at the same time. Once the jobs are done, make the
-summary file in one go::
+Without ``--local`` the jobs are submitted to Slurm instead, as at Utah: see
+:doc:`RunningAtUtah`.
 
-    drp summary --drp-version <drpver>
+Exposures (``-e``, ``-el``, ``-er``, ``-F``) give one job per exposure, nights (``-l``,
+``-r``) one job per night. ``--drp-options`` is passed to every ``drp run``, and
+``--skip-drpall`` is added to each, so that the jobs don't write the drpall file at the same
+time; it is made once, after all the jobs have ended (``--skip-summary`` leaves it out).
+With exposures, the metadata of their nights is regenerated first, one night at a time
+(``--skip-metadata`` leaves this out). ``--dry-run`` lists the jobs without running anything.
 
-``--output-dir`` writes it elsewhere, e.g. without write access to the redux directory.
-The master calibrations of several epochs can be made as one Slurm job in the same way
-(``drp calibrations cluster``; see :doc:`Calibration`).
+``--np`` jobs run at once (30 by default); the first ``--np`` start ``--stagger`` seconds
+apart (20 by default), so that they don't all read the same calibration files at the same
+moment. Each job is single-threaded (``OMP_NUM_THREADS``, ``OPENBLAS_NUM_THREADS`` and
+``MKL_NUM_THREADS`` are set to 1 unless already set). ``drp cluster`` waits for all the jobs,
+makes the drpall, and exits as ``drp run`` does (`Outcomes and Exit Codes`_).
+
+``--log-dir`` (``logs`` in the current directory by default) receives ``<name>.log``, the
+output of each job (``<name>`` is the exposure number or the MJD), starting with the command
+it ran, and ``summary.txt``, one line per job: name, exit code, outcome, minutes and time.
+Use a new log directory for each run, so that the files of different runs don't mix.
+
+``envcheck --batch`` checks this machinery with three dummy jobs that end as done, skipped
+and failed, without running the DRP (see :doc:`Installation`). A small real run is then a
+good test: a few exposures in a file, plus an exposure number that does not exist (it should
+end as failed)::
+
+    drp cluster -F <expnum_file> --local --np 4 --log-dir logs_test --dry-run
+    drp cluster -F <expnum_file> --local --np 4 --log-dir logs_test
+    cat logs_test/summary.txt
+
+Outcomes and Exit Codes
+^^^^^^^^^^^^^^^^^^^^^^^
+
+``drp run`` ends with one line counting the exposures done, skipped and failed, and exits
+with:
+
+=========  ===============================================================================
+Exit code  Meaning
+=========  ===============================================================================
+0          every exposure was reduced
+3          some exposures were skipped on purpose (listed in the exclude list, or flagged
+           BAD by the raw-data QA; see ``--force-excluded`` and ``--force-run``), none failed
+1          at least one exposure failed (an error, or the exposure was not found)
+=========  ===============================================================================
+
+A local ``drp cluster`` exits in the same way over all its jobs.
 
 Checking a Reduction
 --------------------
