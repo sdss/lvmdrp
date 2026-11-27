@@ -265,8 +265,12 @@ def check_environment_variables(argv: list = None) -> None:
 
     ok = True
     if args.batch:
+        print(file=sys.stderr)          # a blank line, on the log's stream
+        log.info('now running the local batch check')
         ok &= check_batch_local(args.log_dir)
     if args.slurm:
+        print(file=sys.stderr)          # a blank line, on the log's stream
+        log.info('now running the Slurm check')
         ok &= check_batch_slurm(args.log_dir, alloc=args.alloc, walltime=args.walltime, mem=args.mem,
                                 timeout=args.timeout)
     sys.exit(0 if ok else 1)
