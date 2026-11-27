@@ -27,6 +27,7 @@ guide to installing and running the DRP. The pages below describe it in more dep
    Calibration
    RunningAtUtah
    CHANGELOG
+   Developers
    api
 
 
