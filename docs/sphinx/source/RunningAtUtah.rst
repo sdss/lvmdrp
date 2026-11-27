@@ -83,7 +83,11 @@ has gone from the list, the run is over::
 
 The final job writes ``summary.txt`` (one line per job: name, exit code, outcome, minutes,
 time), logs the number of jobs done, skipped and failed, and makes the drpall (unless
-``--skip-summary``).
+``--skip-summary``). It ends with exit code 0 once it has done this, whatever the outcomes of
+the jobs, so ``sacct`` shows it as failed only if it could not write ``summary.txt`` or make
+the drpall. In ``sacct`` the tasks of skipped (exit 3) and failed (exit 1) jobs show as
+``FAILED``, since Slurm counts every non-zero exit code as a failure; ``summary.txt`` tells them
+apart.
 
 The log directory holds, besides ``<name>.log`` for each job and ``summary.txt``:
 
