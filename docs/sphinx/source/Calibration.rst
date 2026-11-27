@@ -391,9 +391,14 @@ reductions read::
 then snapshots that epoch into ``sandbox/calib_<version>/<epoch>/``. Science
 reductions read ``$LVM_MASTER_DIR``, not the snapshot.
 
-At Utah, several epochs can be run as one Slurm job::
+Several epochs can be run as a batch, one job per epoch, through Slurm at Utah or on the
+current machine with ``--local`` (see :doc:`RunningAtUtah` and Batch Runs in :doc:`Overview`)::
 
     drp calibrations cluster --routine long-term --from-epochs -r <first>-<last>
+    drp calibrations cluster --routine long-term --from-epochs -r <first>-<last> --local --np 4
+
+Each job has its log in ``--log-dir``, with one line per job in ``summary.txt``; no drpall is
+made. A local run exits with 1 if any job failed.
 
 The calibrations have their own QA commands (``drp calibrations qa-wavelengths``,
 ``qa-arc-sky``, ``qa-twilights``, ``qa-domes``, ``qa-fiberflats``,

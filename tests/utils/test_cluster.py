@@ -150,9 +150,118 @@ def test_run_cluster_local(tmp_path, monkeypatch):
 
 
 def test_run_cluster_slurm_unavailable(monkeypatch):
-    monkeypatch.setattr(cluster, 'queue', None)
+    monkeypatch.setattr(cluster, 'slurm_available', lambda: False)
     monkeypatch.setattr(cluster, 'nights_of', lambda expnums: [])
+    monkeypatch.setattr(cluster, 'regenerate_metadata', lambda mjds: pytest.fail('metadata regenerated'))
     assert cluster.run_cluster(expnums=[19475]) == 1
+
+
+# --- Slurm runs (sbatch job array) ---------------------------------------------------------------
+
+def test_write_slurm_scripts(tmp_path):
+    jobs = [('19475', 'umask 002 && drp run -e 19475 --from-frame --skip-drpall'), ('19476', 'exit 3')]
+    array_script, finish_script = cluster.write_slurm_scripts(jobs, log_dir=str(tmp_path), alloc='sdss-np',
+                                                              walltime='01:00:00', mem='16G', max_running=10,
+                                                              drpall=True)
+    text = open(array_script).read()
+    for line in ('#SBATCH --account=sdss-np', '#SBATCH --partition=sdss-np', '#SBATCH --qos=sdss-np',
+                 '#SBATCH --time=01:00:00', '#SBATCH --mem=16G', '#SBATCH --ntasks=1', '#SBATCH --array=1-2%10'):
+        assert line in text.splitlines()
+    assert open(tmp_path / 'jobs.txt').read().splitlines()[0] == f'19475\t{jobs[0][1]}'
+    finish = open(finish_script).read()
+    assert f"python -m lvmdrp.utils.cluster finish '{tmp_path}' --drpall" in finish
+
+
+def _run_tasks(array_script, ntasks, env_extra=None):
+    """Runs the tasks of an array script with bash, as Slurm would (the #SBATCH lines are comments)"""
+    import subprocess
+    codes = []
+    for task in range(1, ntasks + 1):
+        env = dict(os.environ, SLURM_ARRAY_TASK_ID=str(task), **(env_extra or {}))
+        codes.append(subprocess.run(['bash', array_script], env=env).returncode)
+    return codes
+
+
+def test_slurm_tasks_and_finish(tmp_path, monkeypatch):
+    jobs = [('a', 'echo "hello world"; exit 0'), ('b', 'exit 3'), ('c', 'echo $OMP_NUM_THREADS; exit 1'),
+            ('d', 'exit 0')]
+    array_script, _ = cluster.write_slurm_scripts(jobs, log_dir=str(tmp_path))
+    codes = _run_tasks(array_script, 3)                       # task 4 never runs (killed)
+    assert codes == [0, 3, 1]
+    assert open(tmp_path / 'a.log').read().splitlines() == ['# echo "hello world"; exit 0', 'hello world']
+    if 'OMP_NUM_THREADS' not in os.environ:
+        assert open(tmp_path / 'c.log').read().splitlines()[-1] == '1'
+    assert open(tmp_path / 'status' / 'b').read().split()[:4] == ['b', 'exit', '3', 'skipped']
+
+    drpall = []
+    monkeypatch.setattr(main, 'create_drpall', lambda: drpall.append(True))
+    code = cluster.finish_slurm(str(tmp_path), drpall=True)
+    assert code == RUN_EXIT_CODES['failed']
+    summary = open(tmp_path / 'summary.txt').read().splitlines()
+    assert [line.split()[0] for line in summary] == ['a', 'b', 'c', 'd']
+    assert [line.split()[3] for line in summary[:3]] == ['done', 'skipped', 'failed']
+    assert summary[3].startswith('d exit none failed') and 'slurm-*_4.out' in summary[3]
+    assert drpall == [True]
+
+
+def test_finish_slurm_main_all_done(tmp_path, monkeypatch):
+    array_script, _ = cluster.write_slurm_scripts([('a', 'exit 0'), ('b', 'exit 0')], log_dir=str(tmp_path))
+    _run_tasks(array_script, 2)
+    monkeypatch.setattr(main, 'create_drpall', lambda: pytest.fail('drpall made without --drpall'))
+    assert cluster.main(['finish', str(tmp_path)]) == RUN_EXIT_CODES['done']
+
+
+class _FakeSbatch:
+    """Stands in for subprocess.run of sbatch: returns job ids, or fails on the n-th call"""
+    def __init__(self, fail_on=None):
+        self.calls, self.fail_on = [], fail_on
+
+    def __call__(self, args, **kwargs):
+        import subprocess
+        self.calls.append(args)
+        if self.fail_on == len(self.calls):
+            return subprocess.CompletedProcess(args, 1, stdout='', stderr='sbatch: error: Invalid account')
+        return subprocess.CompletedProcess(args, 0, stdout=f'{1000 + len(self.calls)};notchpeak\n', stderr='')
+
+
+def test_submit_slurm_array_then_finish(tmp_path, monkeypatch):
+    fake = _FakeSbatch()
+    monkeypatch.setattr(cluster, 'slurm_available', lambda: True)
+    monkeypatch.setattr(cluster.subprocess, 'run', fake)
+    assert cluster.submit_slurm([('a', 'exit 0')], log_dir=str(tmp_path), drpall=True) is True
+    assert fake.calls[0][:2] == ['sbatch', '--parsable'] and fake.calls[0][2].endswith('lvm_cluster_run.sbatch')
+    assert fake.calls[1][2] == '--dependency=afterany:1001'
+    assert fake.calls[1][3].endswith('lvm_cluster_run-finish.sbatch')
+
+
+def test_submit_slurm_not_submitted(tmp_path, monkeypatch):
+    monkeypatch.setattr(cluster, 'slurm_available', lambda: True)
+    monkeypatch.setattr(cluster.subprocess, 'run', lambda *a, **k: pytest.fail('sbatch called'))
+    assert cluster.submit_slurm([('a', 'exit 0')], log_dir=str(tmp_path), submit=False) is True
+    assert (tmp_path / 'lvm_cluster_run.sbatch').is_file()
+
+
+def test_run_cluster_sbatch_failure_exits_1(tmp_path, monkeypatch):
+    monkeypatch.setattr(cluster, 'slurm_available', lambda: True)
+    monkeypatch.setattr(cluster, 'nights_of', lambda expnums: [60478])
+    monkeypatch.setattr(cluster, 'regenerate_metadata', lambda mjds: None)
+    monkeypatch.setattr(cluster.subprocess, 'run', _FakeSbatch(fail_on=1))
+    assert cluster.run_cluster(expnums=[19475], log_dir=str(tmp_path)) == 1
+    fake = _FakeSbatch(fail_on=2)                              # array submitted, final job not
+    monkeypatch.setattr(cluster.subprocess, 'run', fake)
+    assert cluster.run_cluster(expnums=[19475], log_dir=str(tmp_path)) == 1
+    assert len(fake.calls) == 2
+
+
+def test_run_cluster_slurm_options(tmp_path, monkeypatch):
+    seen = {}
+    monkeypatch.setattr(cluster, 'slurm_available', lambda: True)
+    monkeypatch.setattr(cluster, 'nights_of', lambda expnums: [])
+    monkeypatch.setattr(cluster, 'submit_slurm', lambda jobs, **kw: seen.update(kw) or True)
+    assert cluster.run_cluster(expnums=[19475], nodes=1, ppn=4, walltime='01:00:00', mem='8G',
+                               log_dir=str(tmp_path)) == 0
+    assert seen['max_running'] == 4 and seen['walltime'] == '01:00:00' and seen['mem'] == '8G'
+    assert seen['drpall'] is True and seen['alloc'] == 'sdss-np'
 
 
 def test_run_cluster_dry_run_runs_nothing(monkeypatch):
@@ -174,6 +283,8 @@ def test_cluster_cli_local(monkeypatch):
                                       '--drp-options', '--from-frame'])
     assert result.exit_code == 3
     assert seen['local'] is True and seen['np'] == 4 and seen['expnums'] == (19475, 19476)
+    result = CliRunner().invoke(cli, ['cluster', '-e', '19475', '--mem', '8G'])
+    assert seen['mem'] == '8G' and seen['local'] is False
 
 
 def test_run_drp_exposure_list_visits_each_night_once(fake_night, monkeypatch):
