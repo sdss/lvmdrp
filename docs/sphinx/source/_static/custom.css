@@ -39,7 +39,8 @@ footer a{
 
     color: #4c72b0 !important;
 }
-a.reference {
+/* links in the page only: in the sidebar the theme's light links stay readable on the dark background */
+.rst-content a.reference {
     color: #4c72b0 !important;
 }
 

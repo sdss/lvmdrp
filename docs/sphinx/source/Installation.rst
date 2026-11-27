@@ -100,14 +100,27 @@ If you are installing on a system other than Ubuntu (e.g., macOS), please read t
 Testing the Installation
 ------------------------
 
-Use the ``envcheck`` tool to verify that all required environment variables are set:
+Use the ``envcheck`` tool to check the environment before reducing anything:
 
 .. code-block:: bash
 
     envcheck
 
-If the variables are correctly set, you should see the values of each variable and a
-success message.
+It changes nothing and works on any machine. It reports:
+
+- which lvmdrp is used: its version, where it is imported from (with the git branch and
+  commit of a checkout) and the Python environment;
+- the required environment variables (``LVMCORE_DIR``, ``SAS_BASE_DIR``,
+  ``LVM_MASTER_DIR``); if one is missing it says so and exits with 1;
+- where the reductions will be written: the version label (``$LVMDRP_VERSION``, or the
+  package version) and the directory ``redux/<label>``, and whether it can be written;
+- where the DRP reads: the raw data (``$LVM_DATA_S``), the calibrations and their Gaia XP
+  cache, the exclude list in ``$LVMCORE_DIR`` and the optional ``$LVM_ESOSKY_DIR``;
+- whether Slurm is available for batch runs.
+
+Anything that looks wrong is marked with ``<--`` and counted at the end. ``envcheck --batch``
+and ``envcheck --slurm`` also check batch runs with three dummy jobs (see Batch Runs in
+:doc:`Overview` and :doc:`RunningAtUtah`).
 
 Setting Up Calibration Files
 ----------------------------
