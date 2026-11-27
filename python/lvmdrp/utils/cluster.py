@@ -1,18 +1,24 @@
 #!/usr/bin/env python
 # encoding: utf-8
-"""Batch runs of the DRP: through the Utah Slurm queue, or locally, N processes at a time
+"""Batch runs of the DRP: through Slurm (``sbatch``), or locally, N processes at a time
 
 Both kinds of run execute the same list of ``drp`` commands (one per exposure, night or
 calibration epoch), built by :func:`science_jobs` or :func:`calibration_jobs`:
 
-- :func:`submit_slurm` puts them in a Slurm queue (the ``slurm`` package and module
-  ``slurm/notchpeak-pipelines`` at Utah);
-- :func:`run_local` runs them on the current machine, ``np`` at a time, with one log per job
-  and one line per finished job in a summary file.
+- :func:`submit_slurm` submits them with ``sbatch`` as a Slurm job array, one task per command,
+  followed by a job that collects the outcomes (:func:`finish_slurm`); nothing Slurm-related
+  is needed in the Python environment (sdss/lvmdrp#285);
+- :func:`run_local` runs them on the current machine, ``np`` at a time.
+
+Either way each job has its log in the log directory, and ``summary.txt`` there gets one line
+per job (name, exit code, outcome, minutes, time).
 """
 
+import argparse
 import os
+import shutil
 import subprocess
+import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -21,17 +27,8 @@ from typing import List, Tuple, Union
 from lvmdrp import log
 from lvmdrp.main import read_expfile, parse_expnums, RUN_EXIT_CODES
 
-# set temporary slurm envvars for non-utah runs
-os.environ["SLURM_SCRATCH_DIR"] = os.getenv("SLURM_SCRATCH_DIR", "~")
-os.environ["SLURM_LOGS_DIR"] = os.getenv("SLURM_LOGS_DIR", "~")
 
-try:
-    from slurm import queue # type: ignore
-except ImportError:
-    queue = None
-
-
-#: thread limits for each local job: the DRP steps are single-process, and many run at once
+#: thread limits for each job: the DRP steps are single-process, and many run at once
 LOCAL_THREAD_ENV = ('OMP_NUM_THREADS', 'OPENBLAS_NUM_THREADS', 'MKL_NUM_THREADS')
 
 #: calibration routines of ``drp calibrations`` that take --from-epochs
@@ -154,30 +151,171 @@ def regenerate_metadata(mjds: list) -> None:
         get_frames_metadata(mjd=int(mjd), overwrite=True)
 
 
-def submit_slurm(jobs: List[Tuple[str, str]], label: str = 'lvm_cluster_run', nodes: int = 2, ppn: int = 64,
-                 walltime: str = '24:00:00', alloc: str = 'sdss-np', submit: bool = True) -> bool:
-    """Puts the commands of a batch run in a Slurm queue
+def slurm_available() -> bool:
+    """True if ``sbatch`` can be found, i.e. jobs can be submitted to Slurm from here"""
+    return shutil.which('sbatch') is not None
 
-    The job is created at $SLURM_SCRATCH_DIR, e.g /scratch/general/nfs1/[unid]/pbs, in a
-    sub-directory named by `label` and the job id; logs are at $SLURM_LOGS_DIR. The cluster
-    adopts the environment from which the job was submitted. This requires the module
-    "slurm/notchpeak-pipelines" and the ``slurm`` package.
+
+def _sbatch_header(label: str, alloc: str, walltime: str, mem: str, output: str) -> List[str]:
+    """Returns the #SBATCH lines of a one-core job; `alloc` names the account, partition and qos"""
+    return ['#!/bin/bash',
+            f'#SBATCH --job-name={label}',
+            f'#SBATCH --account={alloc}',
+            f'#SBATCH --partition={alloc}',
+            f'#SBATCH --qos={alloc}',
+            f'#SBATCH --time={walltime}',
+            '#SBATCH --nodes=1',
+            '#SBATCH --ntasks=1',
+            f'#SBATCH --mem={mem}',
+            f'#SBATCH --output={output}']
+
+
+#: body of each task of the job array: runs line $SLURM_ARRAY_TASK_ID of the job list, with its
+#: output in <log dir>/<name>.log, and writes its summary line to <log dir>/status/<name>
+_TASK_BODY = r"""
+for var in @THREADS@; do export "$var=${!var:-1}"; done
+line=$(sed -n "${SLURM_ARRAY_TASK_ID}p" '@JOBS@')
+name=${line%%$'\t'*}
+command=${line#*$'\t'}
+log='@LOGDIR@'/"$name.log"
+start=$(date +%s)
+echo "# $command" > "$log"
+bash -c "$command" >> "$log" 2>&1
+code=$?
+case $code in
+    @DONE@) outcome=done ;;
+    @SKIPPED@) outcome=skipped ;;
+    *) outcome=failed ;;
+esac
+minutes=$(awk -v s="$start" -v e="$(date +%s)" 'BEGIN { printf "%.1f", (e - s) / 60 }')
+echo "$name exit $code $outcome $minutes min $(date '+%Y-%m-%d %H:%M:%S')" > '@LOGDIR@'/status/"$name"
+exit $code
+"""
+
+
+def write_slurm_scripts(jobs: List[Tuple[str, str]], log_dir: str = 'logs', label: str = 'lvm_cluster_run',
+                        alloc: str = 'sdss-np', walltime: str = '24:00:00', mem: str = '16G',
+                        max_running: int = 128, drpall: bool = False) -> Tuple[str, str]:
+    """Writes the job list, the Slurm job-array script and the script of the final job, in `log_dir`
+
+    - ``jobs.txt``: one line per job, name and command separated by a tab;
+    - ``<label>.sbatch``: a job array with one one-core task per line of ``jobs.txt``, at most
+      `max_running` at a time, each with the `walltime` and `mem` given;
+    - ``<label>-finish.sbatch``: run after the array has ended (:func:`finish_slurm`): writes
+      ``summary.txt``, reports the outcomes and, with `drpall`, makes the drpall.
+
+    Jobs run in the environment ``sbatch`` was called from, so the scripts need no setup.
+
+    Returns
+    -------
+    tuple[str, str]
+        the paths of the array script and of the final script
+    """
+    log_dir = os.path.abspath(log_dir)
+    os.makedirs(os.path.join(log_dir, 'status'), exist_ok=True)
+    jobs_file = os.path.join(log_dir, 'jobs.txt')
+    with open(jobs_file, 'w') as f:
+        for name, command in jobs:
+            f.write(f'{name}\t{command}\n')
+
+    array_script = os.path.join(log_dir, f'{label}.sbatch')
+    lines = _sbatch_header(label, alloc, walltime, mem, os.path.join(log_dir, 'slurm-%A_%a.out'))
+    lines.append(f'#SBATCH --array=1-{len(jobs)}%{max(1, int(max_running))}')
+    body = (_TASK_BODY.replace('@THREADS@', ' '.join(LOCAL_THREAD_ENV)).replace('@JOBS@', jobs_file)
+            .replace('@LOGDIR@', log_dir).replace('@DONE@', str(RUN_EXIT_CODES['done']))
+            .replace('@SKIPPED@', str(RUN_EXIT_CODES['skipped'])))
+    with open(array_script, 'w') as f:
+        f.write('\n'.join(lines) + '\n' + body)
+
+    finish_script = os.path.join(log_dir, f'{label}-finish.sbatch')
+    lines = _sbatch_header(f'{label}-finish', alloc, walltime, mem, os.path.join(log_dir, 'slurm-finish-%j.out'))
+    command = f"python -m lvmdrp.utils.cluster finish '{log_dir}'" + (' --drpall' if drpall else '')
+    with open(finish_script, 'w') as f:
+        f.write('\n'.join(lines) + '\n\n' + command + '\n')
+    return array_script, finish_script
+
+
+def _sbatch(args: List[str]) -> Union[str, None]:
+    """Runs ``sbatch --parsable <args>`` and returns the job id, or None (logged) if it failed"""
+    result = subprocess.run(['sbatch', '--parsable'] + args, capture_output=True, text=True)
+    if result.returncode != 0:
+        log.error(f"sbatch {' '.join(args)} failed: {(result.stderr or result.stdout).strip()}")
+        return None
+    return result.stdout.strip().split(';')[0]
+
+
+def submit_slurm(jobs: List[Tuple[str, str]], log_dir: str = 'logs', label: str = 'lvm_cluster_run',
+                 alloc: str = 'sdss-np', walltime: str = '24:00:00', mem: str = '16G', max_running: int = 128,
+                 drpall: bool = False, submit: bool = True) -> bool:
+    """Submits the commands of a batch run to Slurm with ``sbatch``, as a job array
+
+    Writes the scripts (:func:`write_slurm_scripts`), submits the array, then the final job with
+    ``--dependency=afterany`` on it, so that it runs once every task has ended, however it ended.
 
     Returns
     -------
     bool
-        False if no Slurm queue is available
+        False if ``sbatch`` is not available or a submission failed
     """
-    if not queue:
-        log.error('No slurm queue module available. Cannot submit cluster run.')
+    if not slurm_available():
+        log.error('sbatch not found: Slurm is not available here (use --local to run on this machine)')
         return False
-    q = queue()
-    q.verbose = True
-    q.create(label=label, nodes=nodes, ppn=ppn, walltime=walltime, alloc=alloc, shared=True)
-    for _, command in jobs:
-        q.append(command)
-    q.commit(hard=True, submit=submit)
+    array_script, finish_script = write_slurm_scripts(jobs, log_dir=log_dir, label=label, alloc=alloc,
+                                                      walltime=walltime, mem=mem, max_running=max_running,
+                                                      drpall=drpall)
+    if not submit:
+        log.info(f"scripts written, not submitted: sbatch {array_script}, then "
+                 f"sbatch --dependency=afterany:<job id> {finish_script}")
+        return True
+    array_id = _sbatch([array_script])
+    if array_id is None:
+        return False
+    finish_id = _sbatch([f'--dependency=afterany:{array_id}', finish_script])
+    if finish_id is None:
+        log.error(f"job array {array_id} was submitted, but not the final job; when the array has ended, "
+                  f"run: python -m lvmdrp.utils.cluster finish {os.path.abspath(log_dir)}" + (' --drpall' if drpall else ''))
+        return False
+    log.info(f"submitted job array {array_id}: {len(jobs)} jobs, at most {max_running} at a time, "
+             f"logs in {os.path.abspath(log_dir)}; then job {finish_id} writes summary.txt"
+             + (" and makes the drpall" if drpall else ""))
+    log.info(f"follow with: squeue --me; when job {finish_id} has ended, see {os.path.abspath(log_dir)}/summary.txt")
     return True
+
+
+def finish_slurm(log_dir: str, drpall: bool = False) -> int:
+    """Collects the outcomes of a Slurm batch run, after its job array has ended
+
+    Reads the job list and the status line of each task (``status/<name>``), writes them to
+    ``summary.txt`` in the order of the job list, reports them and, with `drpall`, makes the
+    drpall if any job is done. A task without a status line (killed, e.g. at its time or memory
+    limit) counts as failed; its Slurm output is ``slurm-<array id>_<task>.out``.
+
+    Returns
+    -------
+    int
+        exit code as ``drp run``: 0 all done, 3 some skipped, 1 any failed
+    """
+    with open(os.path.join(log_dir, 'jobs.txt')) as f:
+        names = [line.split('\t', 1)[0] for line in f if line.strip()]
+    results, lines = [], []
+    for index, name in enumerate(names, start=1):
+        status = os.path.join(log_dir, 'status', name)
+        if os.path.isfile(status):
+            line = open(status).read().strip()
+            exit_code = int(line.split()[2])
+            results.append({'name': name, 'exit': exit_code, 'outcome': outcome(exit_code)})
+        else:
+            line = f'{name} exit none failed (no status: killed? see slurm-*_{index}.out)'
+            results.append({'name': name, 'exit': None, 'outcome': 'failed'})
+        lines.append(line)
+    with open(os.path.join(log_dir, 'summary.txt'), 'w') as f:
+        f.write('\n'.join(lines) + '\n')
+    code = report(results)
+    if drpall and any(r['outcome'] == 'done' for r in results):
+        from lvmdrp.main import create_drpall
+        log.info("making the drpall summary file")
+        create_drpall()
+    return code
 
 
 def outcome(exit_code: int) -> str:
@@ -253,7 +391,7 @@ def run_local(jobs: List[Tuple[str, str]], np: int = 30, log_dir: str = 'logs', 
 
 
 def report(results: List[dict]) -> int:
-    """Logs the outcome of a local batch run and returns its exit code (as ``drp run``)"""
+    """Logs the outcome of a batch run and returns its exit code (as ``drp run``)"""
     groups = {kind: [r['name'] for r in results if r['outcome'] == kind] for kind in ('done', 'skipped', 'failed')}
     parts = [f'{len(groups[k])} {k}' + (f' ({", ".join(groups[k])})' if k != 'done' and groups[k] else '')
              for k in ('done', 'skipped', 'failed')]
@@ -268,13 +406,15 @@ def report(results: List[dict]) -> int:
 def run_cluster(mjds: list = None, expnums: Union[list, str] = None, nodes: int = 2, ppn: int = 64, walltime: str = '24:00:00',
                 alloc: str = 'sdss-np', submit: bool = True, drp_options: str = None, dry_run: bool = False,
                 local: bool = False, np: int = 30, log_dir: str = 'logs', stagger: float = 20.0,
-                metadata: bool = True, summary: bool = True) -> int:
+                metadata: bool = True, summary: bool = True, mem: str = '16G') -> int:
     """ Batch run of the DRP science reduction, through Slurm or locally
 
     Builds one ``drp run`` per exposure (or per night, without `expnums`), always with
     ``--skip-drpall``. With exposures, the metadata of their nights is regenerated first, one
-    night at a time (#235). Then the jobs go to a Slurm queue, or, with `local`, run on this
-    machine `np` at a time (:func:`run_local`), after which the drpall is made once (``drp summary``).
+    night at a time (#235). Then the jobs are submitted to Slurm as a job array
+    (:func:`submit_slurm`), or, with `local`, run on this machine `np` at a time
+    (:func:`run_local`). Once all jobs have ended the drpall is made once: at the end of a local
+    run, or by the final Slurm job.
 
     Parameters
     ----------
@@ -283,15 +423,15 @@ def run_cluster(mjds: list = None, expnums: Union[list, str] = None, nodes: int 
     expnums : list|str, optional
         a single exposure number, a range or a file of exposure numbers
     nodes : int, optional
-        Slurm: the number of nodes to use, by default 2
+        Slurm: with `ppn`, at most `nodes` x `ppn` jobs run at once, by default 2
     ppn : int, optional
-        Slurm: the number of CPU cores per node, by default 64
+        Slurm: see `nodes`, by default 64
     walltime : str, optional
-        Slurm: the time of which the job is allowed to run, by default '24:00:00'
+        Slurm: the time each job (exposure or night) is allowed to run, by default '24:00:00'
     alloc : str, optional
-        Slurm: which partition to use, by default 'sdss-np'
+        Slurm: the account, partition and qos, by default 'sdss-np'
     submit : bool, optional
-        Slurm: flag to submit the job or not, by default True
+        Slurm: submit the scripts, or only write them, by default True
     drp_options : str, optional
         Pass options to 'drp run' command. See drp run help to see available options
     dry_run : bool, optional
@@ -301,13 +441,15 @@ def run_cluster(mjds: list = None, expnums: Union[list, str] = None, nodes: int 
     np : int, optional
         local: the number of jobs at once, by default 30
     log_dir : str, optional
-        local: directory of the job logs and summary, by default 'logs'
+        directory of the job logs and summary.txt (and of the Slurm scripts), by default 'logs'
     stagger : float, optional
         local: seconds between the starts of the first `np` jobs, by default 20
     metadata : bool, optional
         regenerate the metadata of the exposures' nights first, by default True
     summary : bool, optional
-        local: make the drpall once the jobs have ended, by default True
+        make the drpall once the jobs have ended, by default True
+    mem : str, optional
+        Slurm: the memory of each job, by default '16G'
 
     Returns
     -------
@@ -319,7 +461,9 @@ def run_cluster(mjds: list = None, expnums: Union[list, str] = None, nodes: int 
     if not jobs:
         log.error("no jobs to run")
         return 1
-    mode = f"locally, {np} at a time" if local else f"through Slurm ({nodes} nodes x {ppn} cores, {alloc})"
+    max_running = nodes * ppn
+    mode = (f"locally, {np} at a time" if local
+            else f"through Slurm ({alloc}, at most {max_running} at a time, {walltime} and {mem} each)")
     nights = nights_of([name for name, _ in jobs]) if expnums is not None and metadata else []
 
     if dry_run:
@@ -328,19 +472,19 @@ def run_cluster(mjds: list = None, expnums: Union[list, str] = None, nodes: int 
             log.info(f"   {command}")
         if nights:
             log.info(f"after regenerating the metadata of MJDs {nights}")
-        if local and summary:
-            log.info("and then make the drpall (drp summary)")
+        if summary:
+            log.info("and then make the drpall")
         return 0
 
-    if not local and not queue:
-        log.error('No slurm queue module available. Cannot submit cluster run (use --local to run here).')
+    if not local and not slurm_available():
+        log.error('sbatch not found: Slurm is not available here (use --local to run on this machine)')
         return 1
     regenerate_metadata(nights)
 
     if not local:
-        submit_slurm(jobs, label='lvm_cluster_run', nodes=nodes, ppn=ppn, walltime=walltime, alloc=alloc, submit=submit)
-        log.info("when the jobs have ended, make the drpall with: drp summary")
-        return 0
+        ok = submit_slurm(jobs, log_dir=log_dir, label='lvm_cluster_run', alloc=alloc, walltime=walltime,
+                          mem=mem, max_running=max_running, drpall=summary, submit=submit)
+        return 0 if ok else 1
 
     results = run_local(jobs, np=np, log_dir=log_dir, stagger=stagger)
     code = report(results)
@@ -354,10 +498,10 @@ def run_cluster(mjds: list = None, expnums: Union[list, str] = None, nodes: int 
 def run_cluster_cals(mjds: list = None, from_epochs: bool = True, nodes: int = 2, ppn: int = 64, walltime: str = '24:00:00',
                      alloc: str = 'sdss-np', submit: bool = True, routine: str = "long-term", drp_options: str = None,
                      dry_run: bool = False, local: bool = False, np: int = 30, log_dir: str = 'logs',
-                     stagger: float = 20.0) -> int:
+                     stagger: float = 20.0, mem: str = '16G') -> int:
     """ Batch run of a calibration routine, one job per MJD, through Slurm or locally
 
-    See :func:`run_cluster` for the Slurm and local options.
+    See :func:`run_cluster` for the Slurm and local options; no drpall is made.
 
     Returns
     -------
@@ -369,7 +513,9 @@ def run_cluster_cals(mjds: list = None, from_epochs: bool = True, nodes: int = 2
     if not jobs:
         log.error("no jobs to run")
         return 1
-    mode = f"locally, {np} at a time" if local else f"through Slurm ({nodes} nodes x {ppn} cores, {alloc})"
+    max_running = nodes * ppn
+    mode = (f"locally, {np} at a time" if local
+            else f"through Slurm ({alloc}, at most {max_running} at a time, {walltime} and {mem} each)")
 
     if dry_run:
         log.info(f"would run {len(jobs)} calibration jobs {mode}:")
@@ -378,9 +524,24 @@ def run_cluster_cals(mjds: list = None, from_epochs: bool = True, nodes: int = 2
         return 0
 
     if not local:
-        return 0 if submit_slurm(jobs, label='lvm_cals', nodes=nodes, ppn=ppn, walltime=walltime, alloc=alloc,
-                                 submit=submit) else 1
+        return 0 if submit_slurm(jobs, log_dir=log_dir, label='lvm_cals', alloc=alloc, walltime=walltime, mem=mem,
+                                 max_running=max_running, drpall=False, submit=submit) else 1
 
     results = run_local(jobs, np=np, log_dir=log_dir, stagger=stagger)
     report(results)
     return 0 if all(r['exit'] == 0 for r in results) else 1
+
+
+def main(argv: List[str] = None) -> int:
+    """Entry point of the final job of a Slurm batch run: ``python -m lvmdrp.utils.cluster finish <log dir>``"""
+    parser = argparse.ArgumentParser(prog='python -m lvmdrp.utils.cluster')
+    sub = parser.add_subparsers(dest='action', required=True)
+    finish = sub.add_parser('finish', help='collect the outcomes of a Slurm batch run (see finish_slurm)')
+    finish.add_argument('log_dir', help='the log directory of the run')
+    finish.add_argument('--drpall', action='store_true', help='make the drpall if any job is done')
+    args = parser.parse_args(argv)
+    return finish_slurm(args.log_dir, drpall=args.drpall)
+
+
+if __name__ == '__main__':
+    sys.exit(main())
